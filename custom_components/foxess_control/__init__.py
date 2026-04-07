@@ -131,6 +131,32 @@ def _groups_overlap(a: ScheduleGroup, b: ScheduleGroup) -> bool:
     return a_start < b_end and b_start < a_end
 
 
+_SCHEDULE_GROUP_KEYS = {
+    "enable",
+    "startHour",
+    "startMinute",
+    "endHour",
+    "endMinute",
+    "workMode",
+    "minSocOnGrid",
+    "fdSoc",
+    "fdPwr",
+}
+
+
+def _sanitize_group(raw: dict[str, Any]) -> ScheduleGroup:
+    """Strip unknown fields from an API-returned group."""
+    return {k: raw[k] for k in _SCHEDULE_GROUP_KEYS if k in raw}  # type: ignore[return-value]
+
+
+def _is_expired(group: ScheduleGroup) -> bool:
+    """Check if a group's end time has already passed today."""
+    now = dt_util.now()
+    group_end = _to_minutes(group["endHour"], group["endMinute"])
+    current = _to_minutes(now.hour, now.minute)
+    return group_end <= current
+
+
 def _merge_with_existing(
     inverter: Inverter,
     new_group: ScheduleGroup,
@@ -138,17 +164,21 @@ def _merge_with_existing(
 ) -> list[ScheduleGroup]:
     """Fetch the current schedule, remove same-mode groups, and merge.
 
-    Raises ServiceValidationError if any retained group of a *different*
+    Disabled, expired, and same-mode groups are removed. Raises
+    ServiceValidationError if any retained group of a *different*
     mode overlaps with the new time window.
     """
     schedule = inverter.get_schedule()
-    existing: list[ScheduleGroup] = schedule.get("groups", [])
+    existing: list[dict[str, Any]] = schedule.get("groups", [])
 
     kept: list[ScheduleGroup] = []
-    for group in existing:
-        if not group.get("enable"):
+    for raw_group in existing:
+        if not raw_group.get("enable"):
             continue
+        group = _sanitize_group(raw_group)
         if group.get("workMode") == work_mode.value:
+            continue
+        if _is_expired(group):
             continue
         if _groups_overlap(group, new_group):
             raise ServiceValidationError(

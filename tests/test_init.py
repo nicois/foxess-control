@@ -1,6 +1,7 @@
 """Tests for FoxESS Control integration setup and service handlers."""
 
 import datetime
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,8 +10,10 @@ from homeassistant.exceptions import ServiceValidationError
 from custom_components.foxess_control import (
     _build_override_group,
     _groups_overlap,
+    _is_expired,
     _merge_with_existing,
     _resolve_start_end,
+    _sanitize_group,
 )
 from custom_components.foxess_control.foxess.inverter import (
     Inverter,
@@ -315,3 +318,115 @@ class TestMergeWithExisting:
         modes = [g["workMode"] for g in result]
         assert "ForceDischarge" in modes
         assert "ForceCharge" in modes
+
+    def test_expired_groups_removed(self) -> None:
+        inverter = MagicMock(spec=Inverter)
+        inverter.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [
+                self._make_group("ForceCharge", 8, 0, 10, 0),
+            ],
+        }
+
+        new_group = self._make_group("ForceDischarge", 14, 0, 16, 0)
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 14, 0, 0),
+        ):
+            result = _merge_with_existing(
+                inverter,
+                new_group,
+                WorkMode.FORCE_DISCHARGE,
+            )
+
+        assert len(result) == 1
+        assert result[0]["workMode"] == "ForceDischarge"
+
+    def test_extra_fields_stripped(self) -> None:
+        inverter = MagicMock(spec=Inverter)
+        inverter.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [
+                {
+                    **self._make_group("ForceDischarge", 17, 0, 20, 0),
+                    "extraField": "unexpected",
+                },
+            ],
+        }
+
+        new_group = self._make_group("ForceCharge", 10, 0, 12, 0)
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
+        ):
+            result = _merge_with_existing(
+                inverter,
+                new_group,
+                WorkMode.FORCE_CHARGE,
+            )
+
+        retained = result[0]
+        assert "extraField" not in retained
+
+
+class TestSanitizeGroup:
+    """Tests for _sanitize_group."""
+
+    def test_strips_unknown_keys(self) -> None:
+        raw: dict[str, Any] = {
+            "enable": 1,
+            "startHour": 10,
+            "startMinute": 0,
+            "endHour": 12,
+            "endMinute": 0,
+            "workMode": "ForceCharge",
+            "minSocOnGrid": 15,
+            "fdSoc": 100,
+            "fdPwr": 10500,
+            "id": 12345,
+            "properties": {},
+        }
+        result = _sanitize_group(raw)
+        assert "id" not in result
+        assert "properties" not in result
+        assert result["workMode"] == "ForceCharge"
+
+
+class TestIsExpired:
+    """Tests for _is_expired."""
+
+    def test_expired(self) -> None:
+        group: ScheduleGroup = {
+            "enable": 1,
+            "startHour": 8,
+            "startMinute": 0,
+            "endHour": 10,
+            "endMinute": 0,
+            "workMode": "ForceCharge",
+            "minSocOnGrid": 10,
+            "fdSoc": 100,
+            "fdPwr": 10500,
+        }
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 14, 0, 0),
+        ):
+            assert _is_expired(group)
+
+    def test_not_expired(self) -> None:
+        group: ScheduleGroup = {
+            "enable": 1,
+            "startHour": 14,
+            "startMinute": 0,
+            "endHour": 16,
+            "endMinute": 0,
+            "workMode": "ForceCharge",
+            "minSocOnGrid": 10,
+            "fdSoc": 100,
+            "fdPwr": 10500,
+        }
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 14, 0, 0),
+        ):
+            assert not _is_expired(group)
