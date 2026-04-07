@@ -1,0 +1,9 @@
+{
+  "domain": "foxess_control",
+  "name": "FoxESS Control",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/nicois/foxess-control",
+  "iot_class": "cloud_polling",
+  "version": "0.1.0"
+}

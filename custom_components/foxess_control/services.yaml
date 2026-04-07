@@ -1,0 +1,39 @@
+clear_overrides:
+  name: Clear overrides
+  description: >-
+    Clear any active force-charge or force-discharge override and return the
+    inverter to self-use mode.
+
+force_charge:
+  name: Force charge
+  description: >-
+    Force the inverter to charge the battery for the specified duration.
+  fields:
+    duration:
+      name: Duration
+      description: How long to force charge (max 4 hours, must not cross midnight).
+      required: true
+      selector:
+        duration:
+
+force_discharge:
+  name: Force discharge
+  description: >-
+    Force the inverter to discharge the battery for the specified duration.
+  fields:
+    duration:
+      name: Duration
+      description: How long to force discharge (max 4 hours, must not cross midnight).
+      required: true
+      selector:
+        duration:
+    min_soc:
+      name: Minimum SoC
+      description: >-
+        Stop discharging when the battery reaches this state of charge (%).
+      default: 10
+      selector:
+        number:
+          min: 5
+          max: 100
+          unit_of_measurement: "%"

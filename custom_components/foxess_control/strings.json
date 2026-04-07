@@ -1,0 +1,27 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "FoxESS Control",
+        "description": "Enter your FoxESS Cloud API credentials.",
+        "data": {
+          "api_key": "API Key",
+          "device_serial": "Device Serial Number"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to FoxESS Cloud API. Check your API key and serial number."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "FoxESS Control Options",
+        "data": {
+          "min_soc_on_grid": "Minimum SoC on Grid (%)"
+        }
+      }
+    }
+  }
+}

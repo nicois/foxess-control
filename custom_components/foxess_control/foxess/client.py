@@ -1,0 +1,100 @@
+"""Low-level FoxESS Cloud API client with authentication."""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import random
+import time
+from typing import Any
+
+import requests
+
+
+class FoxESSApiError(Exception):
+    """Error returned by the FoxESS Cloud API."""
+
+    def __init__(self, errno: int, msg: str) -> None:
+        self.errno = errno
+        super().__init__(f"FoxESS API error {errno}: {msg}")
+
+
+class FoxESSClient:
+    """Handles authentication and HTTP requests to the FoxESS Cloud API."""
+
+    BASE_URL = "https://www.foxesscloud.com"
+    MIN_REQUEST_INTERVAL = 5.0
+    RATE_LIMIT_RETRIES = 10
+    RATE_LIMIT_MAX_DELAY = 30.0
+    RATE_LIMIT_ERRNO = 40400
+
+    def __init__(self, api_key: str) -> None:
+        self.api_key = api_key
+        self.session = requests.Session()
+        self.session.headers.update({"Content-Type": "application/json", "lang": "en"})
+        self._last_request_time = 0.0
+        self._log = logging.getLogger(__name__)
+
+    def _throttle(self) -> None:
+        elapsed = time.time() - self._last_request_time
+        if elapsed < self.MIN_REQUEST_INTERVAL:
+            time.sleep(self.MIN_REQUEST_INTERVAL - elapsed)
+        self._last_request_time = time.time()
+
+    def _sign(self, path: str) -> dict[str, str]:
+        timestamp = str(int(time.time() * 1000))
+        # NOTE: The separator is the four literal characters \r\n, NOT actual
+        # CRLF bytes. The raw f-string (fr'') preserves them as literals.
+        signature = hashlib.md5(
+            rf"{path}\r\n{self.api_key}\r\n{timestamp}".encode()
+        ).hexdigest()
+        return {"token": self.api_key, "timestamp": timestamp, "signature": signature}
+
+    def _check_response(self, data: dict[str, Any]) -> Any:
+        errno = data.get("errno")
+        if errno != 0:
+            raise FoxESSApiError(
+                errno if isinstance(errno, int) else -1,
+                data.get("msg", "Unknown error"),
+            )
+        return data.get("result")
+
+    def _backoff_delay(self, attempt: int) -> float:
+        """Exponential backoff with jitter: base * 2^attempt + random jitter."""
+        base = self.MIN_REQUEST_INTERVAL
+        delay: float = base * (2**attempt) + random.uniform(0, base)
+        return min(delay, self.RATE_LIMIT_MAX_DELAY)
+
+    def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        """Make an authenticated GET request with rate-limit retry."""
+        for attempt in range(self.RATE_LIMIT_RETRIES + 1):
+            self._throttle()
+            url = f"{self.BASE_URL}{path}"
+            headers = self._sign(path)
+            resp = self.session.get(url, params=params, headers=headers, timeout=30)
+            resp.raise_for_status()
+            data: dict[str, Any] = resp.json()
+            if data.get("errno") != self.RATE_LIMIT_ERRNO:
+                return self._check_response(data)
+            if attempt < self.RATE_LIMIT_RETRIES:
+                delay = self._backoff_delay(attempt)
+                self._log.warning("Rate limited, retrying in %.1fs", delay)
+                time.sleep(delay)
+        return self._check_response(data)
+
+    def post(self, path: str, body: dict[str, Any] | None = None) -> Any:
+        """Make an authenticated POST request with rate-limit retry."""
+        for attempt in range(self.RATE_LIMIT_RETRIES + 1):
+            self._throttle()
+            url = f"{self.BASE_URL}{path}"
+            headers = self._sign(path)
+            resp = self.session.post(url, json=body or {}, headers=headers, timeout=30)
+            resp.raise_for_status()
+            data: dict[str, Any] = resp.json()
+            if data.get("errno") != self.RATE_LIMIT_ERRNO:
+                return self._check_response(data)
+            if attempt < self.RATE_LIMIT_RETRIES:
+                delay = self._backoff_delay(attempt)
+                self._log.warning("Rate limited, retrying in %.1fs", delay)
+                time.sleep(delay)
+        return self._check_response(data)

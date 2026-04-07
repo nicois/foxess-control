@@ -1,0 +1,1 @@
+- [Keep API_DEVIATIONS.md updated](feedback_api_deviations.md) — update when API parsing or auth logic changes
