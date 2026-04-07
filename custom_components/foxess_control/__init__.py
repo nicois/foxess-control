@@ -180,6 +180,9 @@ def _merge_with_existing(
         if group.get("workMode") == work_mode.value:
             _LOGGER.debug("Removing existing %s group", work_mode.value)
             continue
+        if group.get("workMode") == WorkMode.SELF_USE.value:
+            _LOGGER.debug("Dropping SelfUse baseline group")
+            continue
         if _is_expired(group):
             _LOGGER.debug("Removing expired %s group", group.get("workMode"))
             continue

@@ -398,6 +398,26 @@ class TestMergeWithExisting:
         retained = result[0]
         assert "extraField" not in retained
 
+    def test_self_use_baseline_dropped(self) -> None:
+        """A full-day SelfUse group should not block force actions."""
+        inverter = MagicMock(spec=Inverter)
+        inverter.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [
+                self._make_group("SelfUse", 0, 0, 23, 59),
+            ],
+        }
+
+        new_group = self._make_group("ForceCharge", 14, 0, 16, 0)
+        result = _merge_with_existing(
+            inverter,
+            new_group,
+            WorkMode.FORCE_CHARGE,
+        )
+
+        assert len(result) == 1
+        assert result[0]["workMode"] == "ForceCharge"
+
 
 class TestSanitizeGroup:
     """Tests for _sanitize_group."""
