@@ -23,6 +23,12 @@ force_charge:
         number:
           min: 100
           unit_of_measurement: W
+    start_time:
+      name: Start time
+      description: >-
+        Time of day to start the override. Defaults to now if not set.
+      selector:
+        time:
 
 force_discharge:
   name: Force discharge
@@ -53,3 +59,9 @@ force_discharge:
         number:
           min: 100
           unit_of_measurement: W
+    start_time:
+      name: Start time
+      description: >-
+        Time of day to start the override. Defaults to now if not set.
+      selector:
+        time:

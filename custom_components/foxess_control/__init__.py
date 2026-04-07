@@ -37,6 +37,7 @@ SCHEMA_FORCE_CHARGE = vol.Schema(
     {
         vol.Required("duration"): cv.time_period,
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
+        vol.Optional("start_time"): cv.time,
     }
 )
 
@@ -45,6 +46,7 @@ SCHEMA_FORCE_DISCHARGE = vol.Schema(
         vol.Required("duration"): cv.time_period,
         vol.Optional("min_soc", default=10): vol.All(int, vol.Range(min=5, max=100)),
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
+        vol.Optional("start_time"): cv.time,
     }
 )
 
@@ -68,11 +70,17 @@ def _get_min_soc_on_grid(hass: HomeAssistant) -> int:
     return soc
 
 
-def _validate_duration(duration: datetime.timedelta) -> datetime.datetime:
-    """Validate override duration and return the end time.
+def _resolve_start_end(
+    duration: datetime.timedelta,
+    start_time: datetime.time | None = None,
+) -> tuple[datetime.datetime, datetime.datetime]:
+    """Validate duration and resolve start/end datetimes.
+
+    If *start_time* is ``None`` the override begins now, otherwise it
+    begins at *start_time* today.
 
     Raises ServiceValidationError if duration exceeds MAX_OVERRIDE_HOURS
-    or would extend past midnight.
+    or the window would extend past midnight.
     """
     max_delta = datetime.timedelta(hours=MAX_OVERRIDE_HOURS)
     if duration <= datetime.timedelta(0):
@@ -83,12 +91,23 @@ def _validate_duration(duration: datetime.timedelta) -> datetime.datetime:
         )
 
     now = dt_util.now()
-    end = now + duration
 
-    if end.date() != now.date():
+    if start_time is not None:
+        start = now.replace(
+            hour=start_time.hour,
+            minute=start_time.minute,
+            second=0,
+            microsecond=0,
+        )
+    else:
+        start = now
+
+    end = start + duration
+
+    if end.date() != start.date():
         raise ServiceValidationError("Override must not extend past midnight")
 
-    return end
+    return start, end
 
 
 def _build_override_group(
@@ -157,14 +176,14 @@ def _register_services(hass: HomeAssistant) -> None:
     async def handle_force_charge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
         power: int | None = call.data.get("power")
-        end = _validate_duration(duration)
-        now = dt_util.now()
+        start_time: datetime.time | None = call.data.get("start_time")
+        start, end = _resolve_start_end(duration, start_time)
 
         inverter = _get_inverter(hass)
         min_soc_on_grid = _get_min_soc_on_grid(hass)
 
         group = _build_override_group(
-            now,
+            start,
             end,
             WorkMode.FORCE_CHARGE,
             inverter,
@@ -175,8 +194,8 @@ def _register_services(hass: HomeAssistant) -> None:
 
         _LOGGER.info(
             "Force charge %02d:%02d - %02d:%02d (power=%s)",
-            now.hour,
-            now.minute,
+            start.hour,
+            start.minute,
             end.hour,
             end.minute,
             f"{power}W" if power else "max",
@@ -187,14 +206,14 @@ def _register_services(hass: HomeAssistant) -> None:
         duration: datetime.timedelta = call.data["duration"]
         min_soc: int = call.data["min_soc"]
         power: int | None = call.data.get("power")
-        end = _validate_duration(duration)
-        now = dt_util.now()
+        start_time: datetime.time | None = call.data.get("start_time")
+        start, end = _resolve_start_end(duration, start_time)
 
         inverter = _get_inverter(hass)
         min_soc_on_grid = _get_min_soc_on_grid(hass)
 
         group = _build_override_group(
-            now,
+            start,
             end,
             WorkMode.FORCE_DISCHARGE,
             inverter,
@@ -205,8 +224,8 @@ def _register_services(hass: HomeAssistant) -> None:
 
         _LOGGER.info(
             "Force discharge %02d:%02d - %02d:%02d (min_soc=%d%%, power=%s)",
-            now.hour,
-            now.minute,
+            start.hour,
+            start.minute,
             end.hour,
             end.minute,
             min_soc,

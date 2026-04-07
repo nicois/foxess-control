@@ -8,40 +8,52 @@ from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.foxess_control import (
     _build_override_group,
-    _validate_duration,
+    _resolve_start_end,
 )
 from custom_components.foxess_control.foxess.inverter import Inverter, WorkMode
 
 
-class TestValidateDuration:
-    """Tests for _validate_duration."""
+class TestResolveStartEnd:
+    """Tests for _resolve_start_end."""
 
-    def test_positive_duration(self) -> None:
+    def test_defaults_to_now(self) -> None:
         with patch(
             "custom_components.foxess_control.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
         ):
-            end = _validate_duration(datetime.timedelta(hours=1))
+            start, end = _resolve_start_end(datetime.timedelta(hours=1))
+            assert start == datetime.datetime(2026, 4, 7, 10, 0, 0)
             assert end == datetime.datetime(2026, 4, 7, 11, 0, 0)
+
+    def test_explicit_start_time(self) -> None:
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
+        ):
+            start, end = _resolve_start_end(
+                datetime.timedelta(hours=2), datetime.time(14, 30)
+            )
+            assert start == datetime.datetime(2026, 4, 7, 14, 30, 0)
+            assert end == datetime.datetime(2026, 4, 7, 16, 30, 0)
 
     def test_zero_duration_rejected(self) -> None:
         with pytest.raises(ServiceValidationError, match="positive"):
-            _validate_duration(datetime.timedelta(0))
+            _resolve_start_end(datetime.timedelta(0))
 
     def test_negative_duration_rejected(self) -> None:
         with pytest.raises(ServiceValidationError, match="positive"):
-            _validate_duration(datetime.timedelta(hours=-1))
+            _resolve_start_end(datetime.timedelta(hours=-1))
 
     def test_exceeds_max_hours(self) -> None:
         with pytest.raises(ServiceValidationError, match="4 hours"):
-            _validate_duration(datetime.timedelta(hours=5))
+            _resolve_start_end(datetime.timedelta(hours=5))
 
     def test_exactly_max_hours(self) -> None:
         with patch(
             "custom_components.foxess_control.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
         ):
-            end = _validate_duration(datetime.timedelta(hours=4))
+            start, end = _resolve_start_end(datetime.timedelta(hours=4))
             assert end == datetime.datetime(2026, 4, 7, 14, 0, 0)
 
     def test_crosses_midnight_rejected(self) -> None:
@@ -52,14 +64,24 @@ class TestValidateDuration:
             ),
             pytest.raises(ServiceValidationError, match="midnight"),
         ):
-            _validate_duration(datetime.timedelta(hours=2))
+            _resolve_start_end(datetime.timedelta(hours=2))
+
+    def test_explicit_start_crosses_midnight_rejected(self) -> None:
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
+            ),
+            pytest.raises(ServiceValidationError, match="midnight"),
+        ):
+            _resolve_start_end(datetime.timedelta(hours=2), datetime.time(23, 0))
 
     def test_just_before_midnight_ok(self) -> None:
         with patch(
             "custom_components.foxess_control.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 23, 0, 0),
         ):
-            end = _validate_duration(datetime.timedelta(minutes=59))
+            _, end = _resolve_start_end(datetime.timedelta(minutes=59))
             assert end.date() == datetime.date(2026, 4, 7)
 
 
