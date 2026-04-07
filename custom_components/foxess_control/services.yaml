@@ -15,6 +15,14 @@ force_charge:
       required: true
       selector:
         duration:
+    power:
+      name: Power limit
+      description: >-
+        Charge power limit in watts. Defaults to inverter rated power if not set.
+      selector:
+        number:
+          min: 100
+          unit_of_measurement: W
 
 force_discharge:
   name: Force discharge
@@ -37,3 +45,11 @@ force_discharge:
           min: 5
           max: 100
           unit_of_measurement: "%"
+    power:
+      name: Power limit
+      description: >-
+        Discharge power limit in watts. Defaults to inverter rated power if not set.
+      selector:
+        number:
+          min: 100
+          unit_of_measurement: W

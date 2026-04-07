@@ -104,3 +104,40 @@ class TestBuildOverrideGroup:
         assert group["fdSoc"] == 20
         assert group["fdPwr"] == 8400
         assert group["minSocOnGrid"] == 10
+
+    def test_custom_power(self) -> None:
+        inverter = MagicMock(spec=Inverter)
+        inverter.max_power_w = 10500
+
+        now = datetime.datetime(2026, 4, 7, 14, 0, 0)
+        end = datetime.datetime(2026, 4, 7, 15, 0, 0)
+
+        group = _build_override_group(
+            now,
+            end,
+            WorkMode.FORCE_CHARGE,
+            inverter,
+            min_soc_on_grid=15,
+            fd_soc=100,
+            fd_pwr=6000,
+        )
+
+        assert group["fdPwr"] == 6000
+
+    def test_default_power_uses_inverter_max(self) -> None:
+        inverter = MagicMock(spec=Inverter)
+        inverter.max_power_w = 10500
+
+        now = datetime.datetime(2026, 4, 7, 14, 0, 0)
+        end = datetime.datetime(2026, 4, 7, 15, 0, 0)
+
+        group = _build_override_group(
+            now,
+            end,
+            WorkMode.FORCE_CHARGE,
+            inverter,
+            min_soc_on_grid=15,
+            fd_soc=100,
+        )
+
+        assert group["fdPwr"] == 10500

@@ -36,6 +36,7 @@ SERVICE_FORCE_DISCHARGE = "force_discharge"
 SCHEMA_FORCE_CHARGE = vol.Schema(
     {
         vol.Required("duration"): cv.time_period,
+        vol.Optional("power"): vol.All(int, vol.Range(min=100)),
     }
 )
 
@@ -43,6 +44,7 @@ SCHEMA_FORCE_DISCHARGE = vol.Schema(
     {
         vol.Required("duration"): cv.time_period,
         vol.Optional("min_soc", default=10): vol.All(int, vol.Range(min=5, max=100)),
+        vol.Optional("power"): vol.All(int, vol.Range(min=100)),
     }
 )
 
@@ -96,6 +98,7 @@ def _build_override_group(
     inverter: Inverter,
     min_soc_on_grid: int,
     fd_soc: int,
+    fd_pwr: int | None = None,
 ) -> ScheduleGroup:
     """Build a single ScheduleGroup for a timed override."""
     return {
@@ -107,7 +110,7 @@ def _build_override_group(
         "workMode": work_mode.value,
         "minSocOnGrid": min_soc_on_grid,
         "fdSoc": fd_soc,
-        "fdPwr": inverter.max_power_w,
+        "fdPwr": fd_pwr if fd_pwr is not None else inverter.max_power_w,
     }
 
 
@@ -153,6 +156,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def handle_force_charge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
+        power: int | None = call.data.get("power")
         end = _validate_duration(duration)
         now = dt_util.now()
 
@@ -160,21 +164,29 @@ def _register_services(hass: HomeAssistant) -> None:
         min_soc_on_grid = _get_min_soc_on_grid(hass)
 
         group = _build_override_group(
-            now, end, WorkMode.FORCE_CHARGE, inverter, min_soc_on_grid, fd_soc=100
+            now,
+            end,
+            WorkMode.FORCE_CHARGE,
+            inverter,
+            min_soc_on_grid,
+            fd_soc=100,
+            fd_pwr=power,
         )
 
         _LOGGER.info(
-            "Force charge %02d:%02d - %02d:%02d",
+            "Force charge %02d:%02d - %02d:%02d (power=%s)",
             now.hour,
             now.minute,
             end.hour,
             end.minute,
+            f"{power}W" if power else "max",
         )
         await hass.async_add_executor_job(inverter.set_schedule, [group])
 
     async def handle_force_discharge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
         min_soc: int = call.data["min_soc"]
+        power: int | None = call.data.get("power")
         end = _validate_duration(duration)
         now = dt_util.now()
 
@@ -188,15 +200,17 @@ def _register_services(hass: HomeAssistant) -> None:
             inverter,
             min_soc_on_grid,
             fd_soc=min_soc,
+            fd_pwr=power,
         )
 
         _LOGGER.info(
-            "Force discharge %02d:%02d - %02d:%02d (min_soc=%d%%)",
+            "Force discharge %02d:%02d - %02d:%02d (min_soc=%d%%, power=%s)",
             now.hour,
             now.minute,
             end.hour,
             end.minute,
             min_soc,
+            f"{power}W" if power else "max",
         )
         await hass.async_add_executor_job(inverter.set_schedule, [group])
 

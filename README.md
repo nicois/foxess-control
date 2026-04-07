@@ -60,14 +60,16 @@ action: foxess_control.clear_overrides
 
 Forces the inverter to charge the battery for a specified duration.
 
-| Parameter | Required | Description |
-|---|---|---|
-| `duration` | Yes | How long to force charge. Maximum 4 hours. Must not extend past midnight. |
+| Parameter | Required | Default | Description |
+|---|---|---|---|
+| `duration` | Yes | | How long to force charge. Maximum 4 hours. Must not extend past midnight. |
+| `power` | No | Inverter max | Charge power limit in watts. |
 
 ```yaml
 action: foxess_control.force_charge
 data:
   duration: "01:30:00"
+  power: 6000
 ```
 
 ### `foxess_control.force_discharge`
@@ -78,6 +80,7 @@ Forces the inverter to discharge the battery for a specified duration.
 |---|---|---|---|
 | `duration` | Yes | | How long to force discharge. Maximum 4 hours. Must not extend past midnight. |
 | `min_soc` | No | 10 | Stop discharging when the battery reaches this SoC (%). Range: 5-100. |
+| `power` | No | Inverter max | Discharge power limit in watts. |
 
 ```yaml
 action: foxess_control.force_discharge
