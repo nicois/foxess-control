@@ -202,7 +202,12 @@ def _build_override_group(
     fd_soc: int,
     fd_pwr: int | None = None,
 ) -> ScheduleGroup:
-    """Build a single ScheduleGroup for a timed override."""
+    """Build a single ScheduleGroup for a timed override.
+
+    The FoxESS API requires ``fdSoc >= 11`` and ``minSocOnGrid <= fdSoc``.
+    """
+    fd_soc = max(fd_soc, 11)
+    min_soc_on_grid = min(min_soc_on_grid, fd_soc)
     return {
         "enable": 1,
         "startHour": now.hour,
@@ -322,7 +327,7 @@ def _register_services(hass: HomeAssistant) -> None:
             WorkMode.FORCE_DISCHARGE,
             inverter,
             min_soc_on_grid,
-            fd_soc=10,
+            fd_soc=11,
             fd_pwr=power,
         )
 

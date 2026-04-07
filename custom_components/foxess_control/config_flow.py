@@ -102,7 +102,7 @@ class FoxessControlOptionsFlow(OptionsFlow):
             data_schema=vol.Schema(
                 {
                     vol.Optional(CONF_MIN_SOC_ON_GRID, default=current): vol.All(
-                        int, vol.Range(min=5, max=100)
+                        int, vol.Range(min=11, max=100)
                     ),
                 }
             ),

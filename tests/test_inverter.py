@@ -216,6 +216,35 @@ def test_get_current_mode() -> None:
 
 
 @responses.activate
+def test_get_schedule_null_result() -> None:
+    """API returns null when no scheduler is configured (mode set via app)."""
+    inv = Inverter(_make_client(), "INV001")
+
+    responses.add(
+        responses.POST,
+        "https://www.foxesscloud.com/op/v0/device/scheduler/get",
+        json={"errno": 0, "result": None},
+    )
+
+    schedule = inv.get_schedule()
+    assert schedule == {"enable": 0, "groups": []}
+
+
+@responses.activate
+def test_get_current_mode_null_schedule() -> None:
+    """get_current_mode handles null schedule gracefully."""
+    inv = Inverter(_make_client(), "INV001")
+
+    responses.add(
+        responses.POST,
+        "https://www.foxesscloud.com/op/v0/device/scheduler/get",
+        json={"errno": 0, "result": None},
+    )
+
+    assert inv.get_current_mode() is None
+
+
+@responses.activate
 def test_get_current_mode_none_enabled() -> None:
     inv = Inverter(_make_client(), "INV001")
 

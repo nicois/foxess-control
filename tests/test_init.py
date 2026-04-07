@@ -155,6 +155,36 @@ class TestBuildOverrideGroup:
 
         assert group["fdPwr"] == 6000
 
+    def test_fd_soc_clamped_to_minimum(self) -> None:
+        """fdSoc below 11 is clamped to 11 (API minimum)."""
+        inverter = MagicMock(spec=Inverter)
+        inverter.max_power_w = 10500
+
+        now = datetime.datetime(2026, 4, 7, 18, 0, 0)
+        end = datetime.datetime(2026, 4, 7, 20, 0, 0)
+
+        group = _build_override_group(
+            now, end, WorkMode.FORCE_DISCHARGE, inverter, min_soc_on_grid=15, fd_soc=10
+        )
+
+        assert group["fdSoc"] == 11
+        assert group["minSocOnGrid"] == 11  # clamped to <= fdSoc
+
+    def test_min_soc_on_grid_clamped_to_fd_soc(self) -> None:
+        """minSocOnGrid exceeding fdSoc is clamped down."""
+        inverter = MagicMock(spec=Inverter)
+        inverter.max_power_w = 10500
+
+        now = datetime.datetime(2026, 4, 7, 18, 0, 0)
+        end = datetime.datetime(2026, 4, 7, 20, 0, 0)
+
+        group = _build_override_group(
+            now, end, WorkMode.FORCE_DISCHARGE, inverter, min_soc_on_grid=30, fd_soc=20
+        )
+
+        assert group["fdSoc"] == 20
+        assert group["minSocOnGrid"] == 20
+
     def test_default_power_uses_inverter_max(self) -> None:
         inverter = MagicMock(spec=Inverter)
         inverter.max_power_w = 10500

@@ -137,17 +137,22 @@ class Inverter:
         """Get the current scheduler configuration.
 
         Returns a dict with 'enable' (int) and 'groups' (list of ScheduleGroup).
+        When no scheduler is configured (e.g. mode set via app), the API
+        returns ``null``; this method normalises that to an empty schedule.
         """
-        result: dict[str, Any] = self.client.post(
+        result: Any = self.client.post(
             "/op/v0/device/scheduler/get", {"deviceSN": self.sn}
         )
-        return result
+        if result is None:
+            return {"enable": 0, "groups": []}
+        sched: dict[str, Any] = result
+        return sched
 
     def set_work_mode(
         self,
         mode: WorkMode,
-        min_soc_on_grid: int = 10,
-        fd_soc: int = 10,
+        min_soc_on_grid: int = 11,
+        fd_soc: int = 11,
         fd_pwr: int | None = None,
     ) -> None:
         """Set the inverter to a single work mode for the entire day.
@@ -157,13 +162,19 @@ class Inverter:
             min_soc_on_grid: Minimum SoC to maintain while on-grid (%).
             fd_soc: Target SoC for force discharge, stop at this level (%).
             fd_pwr: Power limit (watts). None uses inverter rated power.
+
+        The FoxESS API requires ``fdSoc >= 11`` and
+        ``minSocOnGrid <= fdSoc``.
         """
         if fd_pwr is None:
             fd_pwr = self.max_power_w
 
         # ForceCharge typically wants a high target SoC
-        if mode == WorkMode.FORCE_CHARGE and fd_soc == 10:
+        if mode == WorkMode.FORCE_CHARGE and fd_soc <= 11:
             fd_soc = 100
+
+        fd_soc = max(fd_soc, 11)
+        min_soc_on_grid = min(min_soc_on_grid, fd_soc)
 
         group: ScheduleGroup = {
             "enable": 1,
@@ -194,11 +205,11 @@ class Inverter:
 
     # --- Convenience methods ---
 
-    def self_use(self, min_soc_on_grid: int = 10) -> None:
+    def self_use(self, min_soc_on_grid: int = 11) -> None:
         """Switch to self-use mode (default operating mode)."""
         self.set_work_mode(WorkMode.SELF_USE, min_soc_on_grid=min_soc_on_grid)
 
-    def force_charge(self, min_soc_on_grid: int = 10, target_soc: int = 100) -> None:
+    def force_charge(self, min_soc_on_grid: int = 11, target_soc: int = 100) -> None:
         """Force charge the battery from grid + PV.
 
         Args:
@@ -213,9 +224,9 @@ class Inverter:
 
     def force_discharge(
         self,
-        min_soc: int = 10,
+        min_soc: int = 11,
         power: int | None = None,
-        min_soc_on_grid: int = 10,
+        min_soc_on_grid: int = 11,
     ) -> None:
         """Force discharge the battery.
 

@@ -40,7 +40,7 @@ After setup, click **Configure** on the integration entry to adjust:
 
 | Option | Default | Range | Description |
 |---|---|---|---|
-| Minimum SoC on Grid | 15% | 5-100% | The minimum battery state of charge to maintain when on grid. Applied to all schedule operations. |
+| Minimum SoC on Grid | 15% | 11-100% | The minimum battery state of charge to maintain when on grid. Applied to all schedule operations. |
 
 ## Actions
 
