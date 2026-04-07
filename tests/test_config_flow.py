@@ -32,9 +32,9 @@ class TestConfigFlow:
     async def test_successful_setup(self) -> None:
         flow = FoxessControlConfigFlow()
         flow.hass = _make_hass()
-        flow.async_set_unique_id = AsyncMock()  # type: ignore[method-assign]
-        flow._abort_if_unique_id_configured = MagicMock()  # type: ignore[method-assign]
-        flow.async_create_entry = MagicMock(  # type: ignore[method-assign]
+        flow.async_set_unique_id = AsyncMock()
+        flow._abort_if_unique_id_configured = MagicMock()
+        flow.async_create_entry = MagicMock(
             return_value={"type": "create_entry"},
         )
 
@@ -54,7 +54,7 @@ class TestConfigFlow:
     async def test_api_error_shows_invalid_auth(self) -> None:
         flow = FoxessControlConfigFlow()
         flow.hass = _make_hass()
-        flow.async_show_form = MagicMock(  # type: ignore[method-assign]
+        flow.async_show_form = MagicMock(
             return_value={"type": "form"},
         )
 
@@ -74,7 +74,7 @@ class TestConfigFlow:
     async def test_network_error_shows_cannot_connect(self) -> None:
         flow = FoxessControlConfigFlow()
         flow.hass = _make_hass()
-        flow.async_show_form = MagicMock(  # type: ignore[method-assign]
+        flow.async_show_form = MagicMock(
             return_value={"type": "form"},
         )
 
@@ -111,7 +111,7 @@ class TestConfigFlow:
     async def test_show_form_when_no_input(self) -> None:
         flow = FoxessControlConfigFlow()
         flow.hass = _make_hass()
-        flow.async_show_form = MagicMock(  # type: ignore[method-assign]
+        flow.async_show_form = MagicMock(
             return_value={"type": "form"},
         )
 
@@ -130,7 +130,7 @@ class TestOptionsFlow:
         config_entry.options = {CONF_MIN_SOC_ON_GRID: 20}
 
         flow = FoxessControlOptionsFlow(config_entry)
-        flow.async_create_entry = MagicMock(  # type: ignore[method-assign]
+        flow.async_create_entry = MagicMock(
             return_value={"type": "create_entry"},
         )
 
@@ -144,7 +144,7 @@ class TestOptionsFlow:
         config_entry.options = {CONF_MIN_SOC_ON_GRID: 30}
 
         flow = FoxessControlOptionsFlow(config_entry)
-        flow.async_show_form = MagicMock(  # type: ignore[method-assign]
+        flow.async_show_form = MagicMock(
             return_value={"type": "form"},
         )
 
@@ -158,7 +158,7 @@ class TestOptionsFlow:
         config_entry.options = {}
 
         flow = FoxessControlOptionsFlow(config_entry)
-        flow.async_show_form = MagicMock(  # type: ignore[method-assign]
+        flow.async_show_form = MagicMock(
             return_value={"type": "form"},
         )
 

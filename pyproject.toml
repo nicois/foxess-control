@@ -33,6 +33,17 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 
+[[tool.mypy.overrides]]
+module = "custom_components.foxess_control.config_flow"
+# HA types resolve as Any in pre-commit's isolated mypy env (Python 3.12),
+# causing false positives on ConfigFlow/OptionsFlow subclassing.
+disable_error_code = ["misc", "call-arg"]
+
+[[tool.mypy.overrides]]
+module = "tests.test_config_flow"
+# Assigning MagicMock to HA flow methods for testing.
+disable_error_code = ["method-assign"]
+
 [tool.ruff]
 extend-exclude = ["*.json", "*.md"]
 
