@@ -42,9 +42,11 @@ After setup, click **Configure** on the integration entry to adjust:
 |---|---|---|---|
 | Minimum SoC on Grid | 15% | 11-100% | The minimum battery state of charge to maintain when on grid. Applied to all schedule operations. |
 
+> **Warning:** The inverter's behaviour when it reaches this SoC level during force discharge or feed-in is unintuitive. Consider using an automation to cancel the override before the battery reaches this level. See [Known limitations](#known-limitations).
+
 ## Actions
 
-The integration registers three actions (services) under the `foxess_control` domain. These are intended to be called from automations.
+The integration registers four actions (services) under the `foxess_control` domain. These are intended to be called from automations.
 
 ### `foxess_control.clear_overrides`
 
