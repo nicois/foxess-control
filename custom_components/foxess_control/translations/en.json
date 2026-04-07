@@ -12,7 +12,7 @@
     },
     "feedin": {
       "name": "Feed-in",
-      "description": "Export battery power to the grid for a set duration, optionally at a specific time and power limit.",
+      "description": "Prioritise feeding excess solar to the grid for a set duration, optionally at a specific time and power limit.",
       "fields": {
         "duration": {
           "name": "Duration",

@@ -68,7 +68,7 @@ data:
 
 ### `foxess_control.feedin`
 
-Exports battery power to the grid for a specified duration.
+Prioritises feeding excess solar to the grid for a specified duration, similar to self-use but with grid export priority.
 
 | Parameter | Required | Default | Description |
 |---|---|---|---|
