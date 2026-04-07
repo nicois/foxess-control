@@ -1,8 +1,21 @@
 clear_overrides:
   name: Clear overrides
   description: >-
-    Clear any active force-charge or force-discharge override and return the
-    inverter to self-use mode.
+    Clear overrides and return to self-use mode. If mode is specified,
+    only overrides of that mode are removed; other overrides are retained.
+  fields:
+    mode:
+      name: Mode
+      description: >-
+        Only clear overrides of this mode. If not set, all overrides are cleared.
+      selector:
+        select:
+          options:
+            - SelfUse
+            - ForceCharge
+            - ForceDischarge
+            - Backup
+            - Feedin
 
 force_charge:
   name: Force charge

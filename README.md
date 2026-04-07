@@ -48,12 +48,22 @@ The integration registers three actions (services) under the `foxess_control` do
 
 ### `foxess_control.clear_overrides`
 
-Clears any active override and returns the inverter to self-use mode.
+Clears overrides and returns the inverter to self-use mode. If `mode` is specified, only overrides of that mode are removed; other overrides are retained.
 
-No parameters.
+| Parameter | Required | Default | Description |
+|---|---|---|---|
+| `mode` | No | All | Only clear overrides of this mode (`ForceCharge`, `ForceDischarge`, etc.). |
 
 ```yaml
+# Clear all overrides
 action: foxess_control.clear_overrides
+```
+
+```yaml
+# Clear only force-charge overrides, keeping others
+action: foxess_control.clear_overrides
+data:
+  mode: ForceCharge
 ```
 
 ### `foxess_control.force_charge`

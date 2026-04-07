@@ -33,6 +33,14 @@ SERVICE_CLEAR_OVERRIDES = "clear_overrides"
 SERVICE_FORCE_CHARGE = "force_charge"
 SERVICE_FORCE_DISCHARGE = "force_discharge"
 
+VALID_MODES = [m.value for m in WorkMode]
+
+SCHEMA_CLEAR_OVERRIDES = vol.Schema(
+    {
+        vol.Optional("mode"): vol.In(VALID_MODES),
+    }
+)
+
 SCHEMA_FORCE_CHARGE = vol.Schema(
     {
         vol.Required("duration"): cv.time_period,
@@ -216,8 +224,23 @@ def _register_services(hass: HomeAssistant) -> None:
     async def handle_clear_overrides(call: ServiceCall) -> None:
         inverter = _get_inverter(hass)
         min_soc_on_grid = _get_min_soc_on_grid(hass)
-        _LOGGER.info("Clearing overrides, setting SelfUse")
-        await hass.async_add_executor_job(inverter.self_use, min_soc_on_grid)
+        mode_filter: str | None = call.data.get("mode")
+
+        if mode_filter is None:
+            _LOGGER.info("Clearing all overrides, setting SelfUse")
+            await hass.async_add_executor_job(inverter.self_use, min_soc_on_grid)
+        else:
+            _LOGGER.info("Clearing %s overrides", mode_filter)
+            schedule = await hass.async_add_executor_job(inverter.get_schedule)
+            kept: list[ScheduleGroup] = [
+                g
+                for g in schedule.get("groups", [])
+                if g.get("enable") and g.get("workMode") != mode_filter
+            ]
+            if kept:
+                await hass.async_add_executor_job(inverter.set_schedule, kept)
+            else:
+                await hass.async_add_executor_job(inverter.self_use, min_soc_on_grid)
 
     async def handle_force_charge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
@@ -294,7 +317,10 @@ def _register_services(hass: HomeAssistant) -> None:
         await hass.async_add_executor_job(inverter.set_schedule, groups)
 
     hass.services.async_register(
-        DOMAIN, SERVICE_CLEAR_OVERRIDES, handle_clear_overrides
+        DOMAIN,
+        SERVICE_CLEAR_OVERRIDES,
+        handle_clear_overrides,
+        schema=SCHEMA_CLEAR_OVERRIDES,
     )
     hass.services.async_register(
         DOMAIN, SERVICE_FORCE_CHARGE, handle_force_charge, schema=SCHEMA_FORCE_CHARGE
