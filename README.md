@@ -158,6 +158,8 @@ automation:
 
 ## Known limitations
 
+- **Minimum SoC behaviour is unintuitive**: When the battery reaches the minimum SoC during force discharge or feed-in, the inverter's behaviour may not match expectations. It is recommended to define an automation that cancels the mode override (via `foxess_control.clear_overrides`) before the battery reaches this level, rather than relying on the inverter's built-in minimum SoC handling.
+
 - **Schedule race condition**: Force charge/discharge actions read the current schedule, modify it, then write it back. If the schedule is changed between the read and write (e.g. via the FoxESS app), those changes will be overwritten. Enable debug logging for `foxess_control` to see before/after state if schedules change unexpectedly.
 - **FoxESS Cloud API latency**: All commands go through the FoxESS Cloud API, which throttles requests to one every 5 seconds. Actions are not instantaneous. For faster local control, consider modbus-based integrations.
 - **FoxESS mode scheduler bugs**: The FoxESS Cloud API has known issues with schedule validation (e.g. rejecting its own saved schedules due to overlap detection on disabled groups). This integration works around known issues, but the API may introduce new ones.
