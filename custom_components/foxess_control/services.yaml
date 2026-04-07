@@ -1,8 +1,7 @@
 clear_overrides:
   name: Clear overrides
   description: >-
-    Clear overrides and return to self-use mode. If mode is specified,
-    only overrides of that mode are removed; other overrides are retained.
+    Return the inverter to self-use mode, clearing all or selected overrides.
   fields:
     mode:
       name: Mode
@@ -20,9 +19,7 @@ clear_overrides:
 force_charge:
   name: Force charge
   description: >-
-    Force the inverter to charge the battery for the specified duration,
-    replacing any existing force-charge overrides while retaining others.
-    Aborts if the new window conflicts with a different mode.
+    Charge the battery for a set duration, optionally at a specific time and power limit.
   fields:
     duration:
       name: Duration
@@ -48,9 +45,7 @@ force_charge:
 force_discharge:
   name: Force discharge
   description: >-
-    Force the inverter to discharge the battery for the specified duration,
-    replacing any existing force-discharge overrides while retaining others.
-    Aborts if the new window conflicts with a different mode.
+    Discharge the battery for a set duration, optionally at a specific time and power limit.
   fields:
     duration:
       name: Duration
