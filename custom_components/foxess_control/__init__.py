@@ -284,7 +284,7 @@ def _register_services(hass: HomeAssistant) -> None:
             _LOGGER.info("Clearing %s overrides", mode_filter)
             schedule = await hass.async_add_executor_job(inverter.get_schedule)
             kept: list[ScheduleGroup] = [
-                g
+                _sanitize_group(g)
                 for g in schedule.get("groups", [])
                 if g.get("enable") and g.get("workMode") != mode_filter
             ]
