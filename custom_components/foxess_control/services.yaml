@@ -8,6 +8,8 @@ force_charge:
   name: Force charge
   description: >-
     Force the inverter to charge the battery for the specified duration.
+    Replaces any existing force-charge overrides. Other overrides are
+    retained. Aborts if the new window conflicts with a different mode.
   fields:
     duration:
       name: Duration
@@ -34,6 +36,8 @@ force_discharge:
   name: Force discharge
   description: >-
     Force the inverter to discharge the battery for the specified duration.
+    Replaces any existing force-discharge overrides. Other overrides are
+    retained. Aborts if the new window conflicts with a different mode.
   fields:
     duration:
       name: Duration

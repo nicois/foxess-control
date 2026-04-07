@@ -110,6 +110,52 @@ def _resolve_start_end(
     return start, end
 
 
+def _to_minutes(hour: int, minute: int) -> int:
+    """Convert hour:minute to minutes since midnight."""
+    return hour * 60 + minute
+
+
+def _groups_overlap(a: ScheduleGroup, b: ScheduleGroup) -> bool:
+    """Check whether two schedule groups have overlapping time windows."""
+    a_start = _to_minutes(a["startHour"], a["startMinute"])
+    a_end = _to_minutes(a["endHour"], a["endMinute"])
+    b_start = _to_minutes(b["startHour"], b["startMinute"])
+    b_end = _to_minutes(b["endHour"], b["endMinute"])
+    return a_start < b_end and b_start < a_end
+
+
+def _merge_with_existing(
+    inverter: Inverter,
+    new_group: ScheduleGroup,
+    work_mode: WorkMode,
+) -> list[ScheduleGroup]:
+    """Fetch the current schedule, remove same-mode groups, and merge.
+
+    Raises ServiceValidationError if any retained group of a *different*
+    mode overlaps with the new time window.
+    """
+    schedule = inverter.get_schedule()
+    existing: list[ScheduleGroup] = schedule.get("groups", [])
+
+    kept: list[ScheduleGroup] = []
+    for group in existing:
+        if not group.get("enable"):
+            continue
+        if group.get("workMode") == work_mode.value:
+            continue
+        if _groups_overlap(group, new_group):
+            raise ServiceValidationError(
+                f"New {work_mode.value} window conflicts with an existing "
+                f"{group.get('workMode')} override "
+                f"({group['startHour']:02d}:{group['startMinute']:02d}"
+                f"-{group['endHour']:02d}:{group['endMinute']:02d})"
+            )
+        kept.append(group)
+
+    kept.append(new_group)
+    return kept
+
+
 def _build_override_group(
     now: datetime.datetime,
     end: datetime.datetime,
@@ -192,6 +238,13 @@ def _register_services(hass: HomeAssistant) -> None:
             fd_pwr=power,
         )
 
+        groups = await hass.async_add_executor_job(
+            _merge_with_existing,
+            inverter,
+            group,
+            WorkMode.FORCE_CHARGE,
+        )
+
         _LOGGER.info(
             "Force charge %02d:%02d - %02d:%02d (power=%s)",
             start.hour,
@@ -200,7 +253,7 @@ def _register_services(hass: HomeAssistant) -> None:
             end.minute,
             f"{power}W" if power else "max",
         )
-        await hass.async_add_executor_job(inverter.set_schedule, [group])
+        await hass.async_add_executor_job(inverter.set_schedule, groups)
 
     async def handle_force_discharge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
@@ -222,6 +275,13 @@ def _register_services(hass: HomeAssistant) -> None:
             fd_pwr=power,
         )
 
+        groups = await hass.async_add_executor_job(
+            _merge_with_existing,
+            inverter,
+            group,
+            WorkMode.FORCE_DISCHARGE,
+        )
+
         _LOGGER.info(
             "Force discharge %02d:%02d - %02d:%02d (min_soc=%d%%, power=%s)",
             start.hour,
@@ -231,7 +291,7 @@ def _register_services(hass: HomeAssistant) -> None:
             min_soc,
             f"{power}W" if power else "max",
         )
-        await hass.async_add_executor_job(inverter.set_schedule, [group])
+        await hass.async_add_executor_job(inverter.set_schedule, groups)
 
     hass.services.async_register(
         DOMAIN, SERVICE_CLEAR_OVERRIDES, handle_clear_overrides

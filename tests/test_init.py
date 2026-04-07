@@ -8,9 +8,15 @@ from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.foxess_control import (
     _build_override_group,
+    _groups_overlap,
+    _merge_with_existing,
     _resolve_start_end,
 )
-from custom_components.foxess_control.foxess.inverter import Inverter, WorkMode
+from custom_components.foxess_control.foxess.inverter import (
+    Inverter,
+    ScheduleGroup,
+    WorkMode,
+)
 
 
 class TestResolveStartEnd:
@@ -163,3 +169,149 @@ class TestBuildOverrideGroup:
         )
 
         assert group["fdPwr"] == 10500
+
+
+class TestGroupsOverlap:
+    """Tests for _groups_overlap."""
+
+    @staticmethod
+    def _g(sh: int, sm: int, eh: int, em: int) -> ScheduleGroup:
+        return {
+            "enable": 1,
+            "startHour": sh,
+            "startMinute": sm,
+            "endHour": eh,
+            "endMinute": em,
+            "workMode": "SelfUse",
+            "minSocOnGrid": 10,
+            "fdSoc": 10,
+            "fdPwr": 10500,
+        }
+
+    def test_no_overlap(self) -> None:
+        assert not _groups_overlap(self._g(10, 0, 11, 0), self._g(12, 0, 13, 0))
+
+    def test_adjacent_no_overlap(self) -> None:
+        assert not _groups_overlap(self._g(10, 0, 11, 0), self._g(11, 0, 12, 0))
+
+    def test_overlap(self) -> None:
+        assert _groups_overlap(self._g(10, 0, 12, 0), self._g(11, 0, 13, 0))
+
+    def test_contained(self) -> None:
+        assert _groups_overlap(self._g(10, 0, 14, 0), self._g(11, 0, 12, 0))
+
+
+class TestMergeWithExisting:
+    """Tests for _merge_with_existing."""
+
+    def _make_group(
+        self,
+        mode: str,
+        start_h: int,
+        start_m: int,
+        end_h: int,
+        end_m: int,
+        enable: int = 1,
+    ) -> ScheduleGroup:
+        return {
+            "enable": enable,
+            "startHour": start_h,
+            "startMinute": start_m,
+            "endHour": end_h,
+            "endMinute": end_m,
+            "workMode": mode,
+            "minSocOnGrid": 10,
+            "fdSoc": 100,
+            "fdPwr": 10500,
+        }
+
+    def test_removes_same_mode_keeps_other(self) -> None:
+        inverter = MagicMock(spec=Inverter)
+        inverter.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [
+                self._make_group("ForceCharge", 8, 0, 10, 0),
+                self._make_group("ForceDischarge", 17, 0, 20, 0),
+            ],
+        }
+
+        new_group = self._make_group("ForceCharge", 12, 0, 14, 0)
+        result = _merge_with_existing(
+            inverter,
+            new_group,
+            WorkMode.FORCE_CHARGE,
+        )
+
+        modes = [g["workMode"] for g in result]
+        assert modes == ["ForceDischarge", "ForceCharge"]
+        assert result[-1]["startHour"] == 12
+
+    def test_conflict_with_different_mode_aborts(self) -> None:
+        inverter = MagicMock(spec=Inverter)
+        inverter.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [
+                self._make_group("ForceDischarge", 13, 0, 15, 0),
+            ],
+        }
+
+        new_group = self._make_group("ForceCharge", 14, 0, 16, 0)
+        with pytest.raises(ServiceValidationError, match="conflicts"):
+            _merge_with_existing(
+                inverter,
+                new_group,
+                WorkMode.FORCE_CHARGE,
+            )
+
+    def test_disabled_groups_ignored(self) -> None:
+        inverter = MagicMock(spec=Inverter)
+        inverter.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [
+                self._make_group("ForceDischarge", 14, 0, 16, 0, enable=0),
+            ],
+        }
+
+        new_group = self._make_group("ForceCharge", 14, 0, 16, 0)
+        result = _merge_with_existing(
+            inverter,
+            new_group,
+            WorkMode.FORCE_CHARGE,
+        )
+
+        assert len(result) == 1
+        assert result[0]["workMode"] == "ForceCharge"
+
+    def test_empty_schedule(self) -> None:
+        inverter = MagicMock(spec=Inverter)
+        inverter.get_schedule.return_value = {"enable": 0, "groups": []}
+
+        new_group = self._make_group("ForceCharge", 10, 0, 12, 0)
+        result = _merge_with_existing(
+            inverter,
+            new_group,
+            WorkMode.FORCE_CHARGE,
+        )
+
+        assert len(result) == 1
+
+    def test_non_overlapping_different_mode_retained(self) -> None:
+        inverter = MagicMock(spec=Inverter)
+        inverter.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [
+                self._make_group("ForceDischarge", 17, 0, 20, 0),
+            ],
+        }
+
+        new_group = self._make_group("ForceCharge", 10, 0, 12, 0)
+        result = _merge_with_existing(
+            inverter,
+            new_group,
+            WorkMode.FORCE_CHARGE,
+        )
+
+        assert len(result) == 2
+        modes = [g["workMode"] for g in result]
+        assert "ForceDischarge" in modes
+        assert "ForceCharge" in modes

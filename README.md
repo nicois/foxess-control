@@ -127,8 +127,9 @@ automation:
 
 ## How it works
 
-- Force charge/discharge actions write a single time-windowed override to the inverter's scheduler via the FoxESS Cloud API. Outside the scheduled window, the inverter defaults to self-use mode.
-- Calling an action while an override is already active replaces the existing override.
+- Force charge/discharge actions write a time-windowed override to the inverter's scheduler via the FoxESS Cloud API. Outside scheduled windows, the inverter defaults to self-use mode.
+- Each force action only replaces existing overrides of the **same mode** (e.g. force charge replaces previous force charge windows, but leaves force discharge windows intact).
+- If the new window would overlap with an existing override of a **different** mode, the action aborts with an error to prevent conflicts.
 - The API client throttles requests (minimum 5 seconds between calls) and retries with exponential backoff on rate limits.
 
 ## Compatibility with foxess-ha
