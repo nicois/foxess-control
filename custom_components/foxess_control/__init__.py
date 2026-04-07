@@ -152,6 +152,14 @@ _SCHEDULE_GROUP_KEYS = {
     "fdPwr",
 }
 
+# Work modes that represent API placeholders, not real schedule entries.
+_PLACEHOLDER_MODES = {"Invalid", ""}
+
+
+def _is_placeholder(group: dict[str, Any]) -> bool:
+    """Check if a group is an API placeholder (not a real schedule entry)."""
+    return group.get("workMode", "") in _PLACEHOLDER_MODES
+
 
 def _sanitize_group(raw: dict[str, Any]) -> ScheduleGroup:
     """Strip unknown fields from an API-returned group."""
@@ -173,9 +181,10 @@ def _merge_with_existing(
 ) -> list[ScheduleGroup]:
     """Fetch the current schedule, remove same-mode groups, and merge.
 
-    Disabled and same-mode groups are removed. Past groups are kept
-    because they may represent recurring daily schedules (e.g. a
-    standing force-charge window for free-electricity hours).
+    Placeholder, same-mode, and SelfUse groups are removed.  Other
+    groups are kept and re-enabled — even if the API auto-disabled
+    them after their time window — because they may represent
+    recurring daily schedules.
 
     Raises ServiceValidationError if any retained group of a
     *different* mode overlaps with the new time window.
@@ -186,7 +195,7 @@ def _merge_with_existing(
 
     kept: list[ScheduleGroup] = []
     for raw_group in existing:
-        if not raw_group.get("enable"):
+        if _is_placeholder(raw_group):
             continue
         group = _sanitize_group(raw_group)
         if group.get("workMode") == work_mode.value:
@@ -195,6 +204,7 @@ def _merge_with_existing(
         if group.get("workMode") == WorkMode.SELF_USE.value:
             _LOGGER.debug("Dropping SelfUse baseline group")
             continue
+        group["enable"] = 1
         if _groups_overlap(group, new_group):
             raise ServiceValidationError(
                 f"New {work_mode.value} window conflicts with an existing "
@@ -283,11 +293,15 @@ def _register_services(hass: HomeAssistant) -> None:
         else:
             _LOGGER.info("Clearing %s overrides", mode_filter)
             schedule = await hass.async_add_executor_job(inverter.get_schedule)
-            kept: list[ScheduleGroup] = [
-                _sanitize_group(g)
-                for g in schedule.get("groups", [])
-                if g.get("enable") and g.get("workMode") != mode_filter
-            ]
+            kept: list[ScheduleGroup] = []
+            for g in schedule.get("groups", []):
+                if _is_placeholder(g):
+                    continue
+                if g.get("workMode") == mode_filter:
+                    continue
+                group = _sanitize_group(g)
+                group["enable"] = 1
+                kept.append(group)
             if kept:
                 await hass.async_add_executor_job(inverter.set_schedule, kept)
             else:

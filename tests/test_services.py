@@ -265,6 +265,52 @@ class TestHandleClearOverrides:
         inv.self_use.assert_called_once()
         inv.set_schedule.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_clear_mode_preserves_auto_disabled_groups(self) -> None:
+        """Groups disabled by the API after their window are kept and re-enabled."""
+        inv = MagicMock(spec=Inverter)
+        inv.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [
+                {
+                    "enable": 0,
+                    "workMode": "ForceCharge",
+                    "startHour": 11,
+                    "startMinute": 0,
+                    "endHour": 14,
+                    "endMinute": 0,
+                    "minSocOnGrid": 15,
+                    "fdSoc": 100,
+                    "fdPwr": 10500,
+                },
+                {
+                    "enable": 1,
+                    "workMode": "ForceDischarge",
+                    "startHour": 17,
+                    "startMinute": 0,
+                    "endHour": 20,
+                    "endMinute": 0,
+                    "minSocOnGrid": 15,
+                    "fdSoc": 11,
+                    "fdPwr": 10500,
+                },
+            ],
+        }
+        hass = _make_hass(inverter=inv)
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[0].args[2]
+
+        await handler(_make_call({"mode": "ForceDischarge"}))
+
+        inv.set_schedule.assert_called_once()
+        groups = inv.set_schedule.call_args.args[0]
+        assert len(groups) == 1
+        assert groups[0]["workMode"] == "ForceCharge"
+        assert groups[0]["enable"] == 1
+
 
 class TestHandleFeedin:
     """Tests for handle_feedin service handler."""

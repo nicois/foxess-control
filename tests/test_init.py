@@ -11,6 +11,7 @@ from custom_components.foxess_control import (
     _build_override_group,
     _groups_overlap,
     _is_expired,
+    _is_placeholder,
     _merge_with_existing,
     _resolve_start_end,
     _sanitize_group,
@@ -296,12 +297,13 @@ class TestMergeWithExisting:
                 WorkMode.FORCE_CHARGE,
             )
 
-    def test_disabled_groups_ignored(self) -> None:
+    def test_placeholder_groups_ignored(self) -> None:
+        """API placeholder groups (workMode 'Invalid') are dropped."""
         inverter = MagicMock(spec=Inverter)
         inverter.get_schedule.return_value = {
             "enable": 1,
             "groups": [
-                self._make_group("ForceDischarge", 14, 0, 16, 0, enable=0),
+                self._make_group("Invalid", 0, 0, 0, 0, enable=0),
             ],
         }
 
@@ -314,6 +316,27 @@ class TestMergeWithExisting:
 
         assert len(result) == 1
         assert result[0]["workMode"] == "ForceCharge"
+
+    def test_auto_disabled_group_re_enabled(self) -> None:
+        """Groups disabled by the API after their window are re-enabled."""
+        inverter = MagicMock(spec=Inverter)
+        inverter.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [
+                self._make_group("ForceCharge", 11, 0, 14, 0, enable=0),
+            ],
+        }
+
+        new_group = self._make_group("ForceDischarge", 17, 0, 20, 0)
+        result = _merge_with_existing(
+            inverter,
+            new_group,
+            WorkMode.FORCE_DISCHARGE,
+        )
+
+        assert len(result) == 2
+        fc = [g for g in result if g["workMode"] == "ForceCharge"][0]
+        assert fc["enable"] == 1
 
     def test_empty_schedule(self) -> None:
         inverter = MagicMock(spec=Inverter)
@@ -439,6 +462,25 @@ class TestSanitizeGroup:
         assert "id" not in result
         assert "properties" not in result
         assert result["workMode"] == "ForceCharge"
+
+
+class TestIsPlaceholder:
+    """Tests for _is_placeholder."""
+
+    def test_invalid_mode_is_placeholder(self) -> None:
+        assert _is_placeholder({"workMode": "Invalid", "enable": 0})
+
+    def test_empty_mode_is_placeholder(self) -> None:
+        assert _is_placeholder({"workMode": "", "enable": 0})
+
+    def test_missing_mode_is_placeholder(self) -> None:
+        assert _is_placeholder({"enable": 0})
+
+    def test_real_mode_is_not_placeholder(self) -> None:
+        assert not _is_placeholder({"workMode": "ForceCharge", "enable": 1})
+
+    def test_disabled_real_mode_is_not_placeholder(self) -> None:
+        assert not _is_placeholder({"workMode": "ForceCharge", "enable": 0})
 
 
 class TestIsExpired:
