@@ -132,6 +132,12 @@ automation:
 
 This integration uses its own config entry and does not read configuration from the foxess-ha sensor integration. You will need to enter your API key and serial number separately. Both integrations can run side-by-side without conflict.
 
+## Support
+
+If you find this integration useful, consider buying me a coffee:
+
+[![Donate](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://www.paypal.com/donate/?hosted_button_id=3NEP4LZAHLH6W)
+
 ## License
 
 MIT
