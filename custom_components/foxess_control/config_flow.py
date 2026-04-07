@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import requests
 import voluptuous as vol
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -22,6 +23,7 @@ from .const import (
     DOMAIN,
 )
 from .foxess import FoxESSClient, Inverter
+from .foxess.client import FoxESSApiError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,8 +53,11 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
                     user_input[CONF_API_KEY],
                     user_input[CONF_DEVICE_SERIAL],
                 )
-            except Exception:
-                _LOGGER.exception("Failed to connect to FoxESS Cloud API")
+            except FoxESSApiError as err:
+                _LOGGER.warning("FoxESS API rejected credentials: %s", err)
+                errors["base"] = "invalid_auth"
+            except requests.RequestException as err:
+                _LOGGER.warning("Could not reach FoxESS Cloud API: %s", err)
                 errors["base"] = "cannot_connect"
             else:
                 await self.async_set_unique_id(user_input[CONF_DEVICE_SERIAL])

@@ -170,6 +170,7 @@ def _merge_with_existing(
     """
     schedule = inverter.get_schedule()
     existing: list[dict[str, Any]] = schedule.get("groups", [])
+    _LOGGER.debug("Current schedule has %d groups", len(existing))
 
     kept: list[ScheduleGroup] = []
     for raw_group in existing:
@@ -177,8 +178,10 @@ def _merge_with_existing(
             continue
         group = _sanitize_group(raw_group)
         if group.get("workMode") == work_mode.value:
+            _LOGGER.debug("Removing existing %s group", work_mode.value)
             continue
         if _is_expired(group):
+            _LOGGER.debug("Removing expired %s group", group.get("workMode"))
             continue
         if _groups_overlap(group, new_group):
             raise ServiceValidationError(
@@ -190,6 +193,7 @@ def _merge_with_existing(
         kept.append(group)
 
     kept.append(new_group)
+    _LOGGER.debug("Setting schedule with %d groups", len(kept))
     return kept
 
 
