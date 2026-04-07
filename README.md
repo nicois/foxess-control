@@ -66,6 +66,23 @@ data:
   mode: ForceCharge
 ```
 
+### `foxess_control.feedin`
+
+Exports battery power to the grid for a specified duration.
+
+| Parameter | Required | Default | Description |
+|---|---|---|---|
+| `duration` | Yes | | How long to feed in. Maximum 4 hours. Must not extend past midnight. |
+| `power` | No | Inverter max | Feed-in power limit in watts (min 100). |
+| `start_time` | No | Now | Time of day to start the override (e.g. `"14:00:00"`). |
+
+```yaml
+action: foxess_control.feedin
+data:
+  duration: "02:00:00"
+  power: 5000
+```
+
 ### `foxess_control.force_charge`
 
 Forces the inverter to charge the battery for a specified duration.

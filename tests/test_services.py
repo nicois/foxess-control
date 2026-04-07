@@ -109,7 +109,7 @@ class TestSetupEntry:
             assert await async_setup_entry(hass, entry) is True
 
         assert DOMAIN in hass.data
-        assert hass.services.async_register.call_count == 3
+        assert hass.services.async_register.call_count == 4
 
     @pytest.mark.asyncio
     async def test_second_entry_does_not_reregister_services(self) -> None:
@@ -150,7 +150,7 @@ class TestUnloadEntry:
 
         assert result is True
         assert DOMAIN not in hass.data
-        assert hass.services.async_remove.call_count == 3
+        assert hass.services.async_remove.call_count == 4
 
     @pytest.mark.asyncio
     async def test_unload_non_last_entry_keeps_services(self) -> None:
@@ -266,6 +266,64 @@ class TestHandleClearOverrides:
         inv.set_schedule.assert_not_called()
 
 
+class TestHandleFeedin:
+    """Tests for handle_feedin service handler."""
+
+    @pytest.mark.asyncio
+    async def test_feedin_calls_set_schedule(self) -> None:
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(inverter=inv)
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[1].args[2]
+
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 14, 0, 0),
+        ):
+            await handler(_make_call({"duration": datetime.timedelta(hours=2)}))
+
+        inv.set_schedule.assert_called_once()
+        groups = inv.set_schedule.call_args.args[0]
+        assert len(groups) == 1
+        assert groups[0]["workMode"] == "Feedin"
+        assert groups[0]["startHour"] == 14
+        assert groups[0]["endHour"] == 16
+        assert groups[0]["fdSoc"] == 11
+
+    @pytest.mark.asyncio
+    async def test_feedin_with_power(self) -> None:
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(inverter=inv)
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[1].args[2]
+
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 14, 0, 0),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "duration": datetime.timedelta(hours=1),
+                        "power": 5000,
+                    }
+                )
+            )
+
+        groups = inv.set_schedule.call_args.args[0]
+        assert groups[0]["fdPwr"] == 5000
+
+
 class TestHandleForceCharge:
     """Tests for handle_force_charge service handler."""
 
@@ -279,7 +337,7 @@ class TestHandleForceCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[1].args[2]
+        handler = hass.services.async_register.call_args_list[2].args[2]
 
         with patch(
             "custom_components.foxess_control.dt_util.now",
@@ -305,7 +363,7 @@ class TestHandleForceCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[1].args[2]
+        handler = hass.services.async_register.call_args_list[2].args[2]
 
         with patch(
             "custom_components.foxess_control.dt_util.now",
@@ -337,7 +395,7 @@ class TestHandleForceDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[2].args[2]
+        handler = hass.services.async_register.call_args_list[3].args[2]
 
         with patch(
             "custom_components.foxess_control.dt_util.now",
@@ -363,7 +421,7 @@ class TestHandleForceDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[2].args[2]
+        handler = hass.services.async_register.call_args_list[3].args[2]
 
         with patch(
             "custom_components.foxess_control.dt_util.now",

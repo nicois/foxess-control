@@ -16,6 +16,32 @@ clear_overrides:
             - Backup
             - Feedin
 
+feedin:
+  name: Feed-in
+  description: >-
+    Export battery power to the grid for a set duration, optionally at a specific time and power limit.
+  fields:
+    duration:
+      name: Duration
+      description: How long to feed in (max 4 hours, must not cross midnight).
+      required: true
+      selector:
+        duration:
+    power:
+      name: Power limit
+      description: >-
+        Feed-in power limit in watts. Defaults to inverter rated power if not set.
+      selector:
+        number:
+          min: 100
+          unit_of_measurement: W
+    start_time:
+      name: Start time
+      description: >-
+        Time of day to start the override. Defaults to now if not set.
+      selector:
+        time:
+
 force_charge:
   name: Force charge
   description: >-

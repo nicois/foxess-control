@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_CLEAR_OVERRIDES = "clear_overrides"
+SERVICE_FEEDIN = "feedin"
 SERVICE_FORCE_CHARGE = "force_charge"
 SERVICE_FORCE_DISCHARGE = "force_discharge"
 
@@ -50,6 +51,14 @@ SCHEMA_FORCE_CHARGE = vol.Schema(
 )
 
 SCHEMA_FORCE_DISCHARGE = vol.Schema(
+    {
+        vol.Required("duration"): cv.time_period,
+        vol.Optional("power"): vol.All(int, vol.Range(min=100)),
+        vol.Optional("start_time"): cv.time,
+    }
+)
+
+SCHEMA_FEEDIN = vol.Schema(
     {
         vol.Required("duration"): cv.time_period,
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
@@ -253,6 +262,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not hass.data[DOMAIN]:
         hass.data.pop(DOMAIN)
         hass.services.async_remove(DOMAIN, SERVICE_CLEAR_OVERRIDES)
+        hass.services.async_remove(DOMAIN, SERVICE_FEEDIN)
         hass.services.async_remove(DOMAIN, SERVICE_FORCE_CHARGE)
         hass.services.async_remove(DOMAIN, SERVICE_FORCE_DISCHARGE)
 
@@ -260,7 +270,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 def _register_services(hass: HomeAssistant) -> None:
-    """Register the three inverter control services."""
+    """Register inverter control services."""
 
     async def handle_clear_overrides(call: ServiceCall) -> None:
         inverter = _get_inverter(hass)
@@ -355,11 +365,50 @@ def _register_services(hass: HomeAssistant) -> None:
         )
         await hass.async_add_executor_job(inverter.set_schedule, groups)
 
+    async def handle_feedin(call: ServiceCall) -> None:
+        duration: datetime.timedelta = call.data["duration"]
+        power: int | None = call.data.get("power")
+        start_time: datetime.time | None = call.data.get("start_time")
+        start, end = _resolve_start_end(duration, start_time)
+
+        inverter = _get_inverter(hass)
+        min_soc_on_grid = _get_min_soc_on_grid(hass)
+
+        group = _build_override_group(
+            start,
+            end,
+            WorkMode.FEEDIN,
+            inverter,
+            min_soc_on_grid,
+            fd_soc=11,
+            fd_pwr=power,
+        )
+
+        groups = await hass.async_add_executor_job(
+            _merge_with_existing,
+            inverter,
+            group,
+            WorkMode.FEEDIN,
+        )
+
+        _LOGGER.info(
+            "Feed-in %02d:%02d - %02d:%02d (power=%s)",
+            start.hour,
+            start.minute,
+            end.hour,
+            end.minute,
+            f"{power}W" if power else "max",
+        )
+        await hass.async_add_executor_job(inverter.set_schedule, groups)
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_CLEAR_OVERRIDES,
         handle_clear_overrides,
         schema=SCHEMA_CLEAR_OVERRIDES,
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_FEEDIN, handle_feedin, schema=SCHEMA_FEEDIN
     )
     hass.services.async_register(
         DOMAIN, SERVICE_FORCE_CHARGE, handle_force_charge, schema=SCHEMA_FORCE_CHARGE
