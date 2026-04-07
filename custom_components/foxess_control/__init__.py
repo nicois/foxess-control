@@ -164,9 +164,12 @@ def _merge_with_existing(
 ) -> list[ScheduleGroup]:
     """Fetch the current schedule, remove same-mode groups, and merge.
 
-    Disabled, expired, and same-mode groups are removed. Raises
-    ServiceValidationError if any retained group of a *different*
-    mode overlaps with the new time window.
+    Disabled and same-mode groups are removed. Past groups are kept
+    because they may represent recurring daily schedules (e.g. a
+    standing force-charge window for free-electricity hours).
+
+    Raises ServiceValidationError if any retained group of a
+    *different* mode overlaps with the new time window.
     """
     schedule = inverter.get_schedule()
     existing: list[dict[str, Any]] = schedule.get("groups", [])
@@ -182,9 +185,6 @@ def _merge_with_existing(
             continue
         if group.get("workMode") == WorkMode.SELF_USE.value:
             _LOGGER.debug("Dropping SelfUse baseline group")
-            continue
-        if _is_expired(group):
-            _LOGGER.debug("Removing expired %s group", group.get("workMode"))
             continue
         if _groups_overlap(group, new_group):
             raise ServiceValidationError(

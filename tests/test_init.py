@@ -349,7 +349,8 @@ class TestMergeWithExisting:
         assert "ForceDischarge" in modes
         assert "ForceCharge" in modes
 
-    def test_expired_groups_removed(self) -> None:
+    def test_past_groups_retained(self) -> None:
+        """Past groups may be recurring daily schedules and must be kept."""
         inverter = MagicMock(spec=Inverter)
         inverter.get_schedule.return_value = {
             "enable": 1,
@@ -359,18 +360,16 @@ class TestMergeWithExisting:
         }
 
         new_group = self._make_group("ForceDischarge", 14, 0, 16, 0)
-        with patch(
-            "custom_components.foxess_control.dt_util.now",
-            return_value=datetime.datetime(2026, 4, 7, 14, 0, 0),
-        ):
-            result = _merge_with_existing(
-                inverter,
-                new_group,
-                WorkMode.FORCE_DISCHARGE,
-            )
+        result = _merge_with_existing(
+            inverter,
+            new_group,
+            WorkMode.FORCE_DISCHARGE,
+        )
 
-        assert len(result) == 1
-        assert result[0]["workMode"] == "ForceDischarge"
+        assert len(result) == 2
+        modes = [g["workMode"] for g in result]
+        assert "ForceCharge" in modes
+        assert "ForceDischarge" in modes
 
     def test_extra_fields_stripped(self) -> None:
         inverter = MagicMock(spec=Inverter)
