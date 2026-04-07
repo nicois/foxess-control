@@ -1,4 +1,56 @@
 {
+  "services": {
+    "clear_overrides": {
+      "name": "Clear overrides",
+      "description": "Clear overrides and return to self-use mode. If mode is specified, only overrides of that mode are removed.",
+      "fields": {
+        "mode": {
+          "name": "Mode",
+          "description": "Only clear overrides of this mode. If not set, all overrides are cleared."
+        }
+      }
+    },
+    "force_charge": {
+      "name": "Force charge",
+      "description": "Force the inverter to charge the battery for the specified duration, replacing any existing force-charge overrides while retaining others. Aborts if the new window conflicts with a different mode.",
+      "fields": {
+        "duration": {
+          "name": "Duration",
+          "description": "How long to force charge (max 4 hours, must not cross midnight)."
+        },
+        "power": {
+          "name": "Power limit",
+          "description": "Charge power limit in watts. Defaults to inverter rated power if not set."
+        },
+        "start_time": {
+          "name": "Start time",
+          "description": "Time of day to start the override. Defaults to now if not set."
+        }
+      }
+    },
+    "force_discharge": {
+      "name": "Force discharge",
+      "description": "Force the inverter to discharge the battery for the specified duration, replacing any existing force-discharge overrides while retaining others. Aborts if the new window conflicts with a different mode.",
+      "fields": {
+        "duration": {
+          "name": "Duration",
+          "description": "How long to force discharge (max 4 hours, must not cross midnight)."
+        },
+        "min_soc": {
+          "name": "Minimum SoC",
+          "description": "Stop discharging when the battery reaches this state of charge (%)."
+        },
+        "power": {
+          "name": "Power limit",
+          "description": "Discharge power limit in watts. Defaults to inverter rated power if not set."
+        },
+        "start_time": {
+          "name": "Start time",
+          "description": "Time of day to start the override. Defaults to now if not set."
+        }
+      }
+    }
+  },
   "config": {
     "step": {
       "user": {
