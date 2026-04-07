@@ -99,3 +99,41 @@ detail on first use and caches the result as `Inverter.max_power_w`.
 ("Time overlap, please reselect time"). All groups must have non-overlapping time windows.
 A "catch-all" SelfUse slot (e.g. `00:00–23:59`) cannot coexist with a narrower slot —
 the SelfUse window must start after the preceding slot ends.
+
+## Scheduler Enable — `fdSoc` minimum is 11
+
+**Documentation does not mention** a minimum value for `fdSoc`.
+
+**Actual behaviour:** Sending `fdSoc` below `11` causes errno `40257`. Additionally,
+`minSocOnGrid` must be less than or equal to `fdSoc`, otherwise the same error occurs.
+This module clamps values accordingly: `fdSoc = max(fdSoc, 11)` and
+`minSocOnGrid = min(minSocOnGrid, fdSoc)`.
+
+## Scheduler Enable — extra fields are rejected
+
+**Documentation implies:** Only the documented group fields are relevant.
+
+**Actual behaviour:** Groups returned by `scheduler/get` include extra fields (e.g. `id`,
+`properties`) that are not accepted by `scheduler/enable`. Sending them back verbatim
+causes errno `40257`. All groups must be sanitized to include only the known fields
+(`enable`, `startHour`, `startMinute`, `endHour`, `endMinute`, `workMode`,
+`minSocOnGrid`, `fdSoc`, `fdPwr`) before writing.
+
+## Scheduler Get — null response when mode set via app
+
+**Documentation implies:** `scheduler/get` always returns a schedule object.
+
+**Actual behaviour:** When the work mode has been set via the FoxESS mobile app (rather
+than the scheduler API), `scheduler/get` returns `null` in the `result` field instead of
+a schedule object. This module normalises `null` to `{"enable": 0, "groups": []}`.
+
+## Scheduler — groups may be auto-disabled after their time window
+
+**Documentation does not mention** any automatic state changes to schedule groups.
+
+**Observed behaviour:** Groups appear to be auto-disabled (`enable` set to `0`) by the
+system after their scheduled time window passes for the day. However, they remain in the
+schedule and are re-activated the following day. This means filtering on `enable` to
+identify "active" groups will incorrectly drop recurring daily schedules that have already
+run today. This module filters on `workMode` instead, treating only `"Invalid"` groups as
+API placeholders.
