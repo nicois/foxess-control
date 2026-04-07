@@ -52,7 +52,6 @@ SCHEMA_FORCE_CHARGE = vol.Schema(
 SCHEMA_FORCE_DISCHARGE = vol.Schema(
     {
         vol.Required("duration"): cv.time_period,
-        vol.Optional("min_soc", default=10): vol.All(int, vol.Range(min=5, max=100)),
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
         vol.Optional("start_time"): cv.time,
     }
@@ -280,7 +279,6 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def handle_force_discharge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
-        min_soc: int = call.data["min_soc"]
         power: int | None = call.data.get("power")
         start_time: datetime.time | None = call.data.get("start_time")
         start, end = _resolve_start_end(duration, start_time)
@@ -294,7 +292,7 @@ def _register_services(hass: HomeAssistant) -> None:
             WorkMode.FORCE_DISCHARGE,
             inverter,
             min_soc_on_grid,
-            fd_soc=min_soc,
+            fd_soc=10,
             fd_pwr=power,
         )
 
@@ -306,12 +304,11 @@ def _register_services(hass: HomeAssistant) -> None:
         )
 
         _LOGGER.info(
-            "Force discharge %02d:%02d - %02d:%02d (min_soc=%d%%, power=%s)",
+            "Force discharge %02d:%02d - %02d:%02d (power=%s)",
             start.hour,
             start.minute,
             end.hour,
             end.minute,
-            min_soc,
             f"{power}W" if power else "max",
         )
         await hass.async_add_executor_job(inverter.set_schedule, groups)

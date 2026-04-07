@@ -90,7 +90,6 @@ Forces the inverter to discharge the battery for a specified duration.
 | Parameter | Required | Default | Description |
 |---|---|---|---|
 | `duration` | Yes | | How long to force discharge. Maximum 4 hours. Must not extend past midnight. |
-| `min_soc` | No | 10 | Stop discharging when the battery reaches this SoC (%). Range: 5-100. |
 | `power` | No | Inverter max | Discharge power limit in watts (min 100). |
 | `start_time` | No | Now | Time of day to start the override (e.g. `"17:00:00"`). |
 
@@ -98,7 +97,6 @@ Forces the inverter to discharge the battery for a specified duration.
 action: foxess_control.force_discharge
 data:
   duration: "02:00:00"
-  min_soc: 20
   power: 5000
 ```
 
@@ -125,7 +123,6 @@ automation:
       - action: foxess_control.force_discharge
         data:
           duration: "03:00:00"
-          min_soc: 15
 
   - alias: "Clear overrides at end of peak"
     trigger:

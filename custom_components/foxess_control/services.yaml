@@ -20,9 +20,9 @@ clear_overrides:
 force_charge:
   name: Force charge
   description: >-
-    Force the inverter to charge the battery for the specified duration.
-    Replaces any existing force-charge overrides. Other overrides are
-    retained. Aborts if the new window conflicts with a different mode.
+    Force the inverter to charge the battery for the specified duration,
+    replacing any existing force-charge overrides while retaining others.
+    Aborts if the new window conflicts with a different mode.
   fields:
     duration:
       name: Duration
@@ -48,9 +48,9 @@ force_charge:
 force_discharge:
   name: Force discharge
   description: >-
-    Force the inverter to discharge the battery for the specified duration.
-    Replaces any existing force-discharge overrides. Other overrides are
-    retained. Aborts if the new window conflicts with a different mode.
+    Force the inverter to discharge the battery for the specified duration,
+    replacing any existing force-discharge overrides while retaining others.
+    Aborts if the new window conflicts with a different mode.
   fields:
     duration:
       name: Duration
@@ -58,16 +58,6 @@ force_discharge:
       required: true
       selector:
         duration:
-    min_soc:
-      name: Minimum SoC
-      description: >-
-        Stop discharging when the battery reaches this state of charge (%).
-      default: 10
-      selector:
-        number:
-          min: 5
-          max: 100
-          unit_of_measurement: "%"
     power:
       name: Power limit
       description: >-
