@@ -61,7 +61,7 @@ class TestSmartChargeActiveSensor:
         sensor = SmartChargeActiveSensor(hass, _make_entry())
         assert sensor.is_on is True
 
-    def test_attributes_when_active(self) -> None:
+    def test_attributes_when_active_charging(self) -> None:
         end = datetime.datetime(2026, 4, 7, 6, 0, 0)
         hass = _make_hass(
             smart_charge_state={
@@ -70,16 +70,36 @@ class TestSmartChargeActiveSensor:
                 "max_power_w": 10500,
                 "end": end,
                 "soc_entity": "sensor.battery_soc",
+                "charging_started": True,
             }
         )
         sensor = SmartChargeActiveSensor(hass, _make_entry())
         attrs = sensor.extra_state_attributes
         assert attrs is not None
         assert attrs["target_soc"] == 80
+        assert attrs["phase"] == "charging"
         assert attrs["current_power_w"] == 1500
         assert attrs["max_power_w"] == 10500
         assert attrs["end_time"] == end.isoformat()
         assert attrs["soc_entity"] == "sensor.battery_soc"
+
+    def test_attributes_when_deferred(self) -> None:
+        end = datetime.datetime(2026, 4, 7, 6, 0, 0)
+        hass = _make_hass(
+            smart_charge_state={
+                "target_soc": 80,
+                "last_power_w": 0,
+                "max_power_w": 10500,
+                "end": end,
+                "soc_entity": "sensor.battery_soc",
+                "charging_started": False,
+            }
+        )
+        sensor = SmartChargeActiveSensor(hass, _make_entry())
+        attrs = sensor.extra_state_attributes
+        assert attrs is not None
+        assert attrs["phase"] == "deferred"
+        assert attrs["current_power_w"] == 0
 
     def test_attributes_none_when_off(self) -> None:
         hass = _make_hass()

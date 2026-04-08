@@ -1741,3 +1741,269 @@ class TestHandleSmartCharge:
             await captured_interval_callback(datetime.datetime(2026, 4, 7, 3, 0, 0))
 
         inv.set_schedule.assert_not_called()
+        # Session should still be active (not yet at threshold)
+        assert "_smart_charge_state" in hass.data[DOMAIN]
+
+    @pytest.mark.asyncio
+    async def test_soc_unavailable_aborts_after_threshold(self) -> None:
+        """Smart charge aborts after MAX_SOC_UNAVAILABLE_COUNT consecutive misses."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_soc_entity="sensor.battery_soc",
+            battery_capacity_kwh=60.0,
+        )
+
+        soc_state = MagicMock()
+        soc_state.state = "20"
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        captured_interval_callback = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval_callback
+            captured_interval_callback = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import (
+            MAX_SOC_UNAVAILABLE_COUNT,
+            _register_services,
+        )
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_state_change_event",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(2, 0),
+                        "end_time": datetime.time(6, 0),
+                        "target_soc": 80,
+                    }
+                )
+            )
+
+        assert captured_interval_callback is not None
+        inv.set_schedule.reset_mock()
+
+        unavail_state = MagicMock()
+        unavail_state.state = "unavailable"
+        hass.states.get = MagicMock(return_value=unavail_state)
+
+        # Fire unavailable checks up to threshold
+        for i in range(MAX_SOC_UNAVAILABLE_COUNT):
+            with patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 5 * (i + 1), 0),
+            ):
+                await captured_interval_callback(
+                    datetime.datetime(2026, 4, 7, 2, 5 * (i + 1), 0)
+                )
+
+        # Session should be cancelled and override removed
+        assert "_smart_charge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN]["_smart_charge_unsubs"] == []
+
+    @pytest.mark.asyncio
+    async def test_soc_available_resets_unavailable_count(self) -> None:
+        """An available SoC reading resets the unavailable counter."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_soc_entity="sensor.battery_soc",
+            battery_capacity_kwh=60.0,
+            min_power_change=100,
+        )
+
+        soc_state = MagicMock()
+        soc_state.state = "20"
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        captured_interval_callback = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval_callback
+            captured_interval_callback = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_state_change_event",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(2, 0),
+                        "end_time": datetime.time(6, 0),
+                        "target_soc": 80,
+                    }
+                )
+            )
+
+        assert captured_interval_callback is not None
+
+        # Two unavailable readings
+        unavail_state = MagicMock()
+        unavail_state.state = "unavailable"
+        hass.states.get = MagicMock(return_value=unavail_state)
+
+        for t in [5, 10]:
+            with patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, t, 0),
+            ):
+                await captured_interval_callback(datetime.datetime(2026, 4, 7, 2, t, 0))
+
+        state = hass.data[DOMAIN]["_smart_charge_state"]
+        assert state["soc_unavailable_count"] == 2
+
+        # One available reading resets the counter
+        avail_state = MagicMock()
+        avail_state.state = "60"
+        hass.states.get = MagicMock(return_value=avail_state)
+
+        inv.set_schedule.reset_mock()
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 4, 0, 0),
+        ):
+            await captured_interval_callback(datetime.datetime(2026, 4, 7, 4, 0, 0))
+
+        assert state["soc_unavailable_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_deferred_charge_aborts_on_conflict(self) -> None:
+        """Deferred charge aborts if a conflict exists when starting."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_soc_entity="sensor.battery_soc",
+            battery_capacity_kwh=10.0,
+            min_power_change=100,
+        )
+
+        soc_state = MagicMock()
+        soc_state.state = "20"
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        captured_interval_callback = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval_callback
+            captured_interval_callback = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_state_change_event",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(2, 0),
+                        "end_time": datetime.time(6, 0),
+                        "target_soc": 80,
+                    }
+                )
+            )
+
+        assert captured_interval_callback is not None
+        state = hass.data[DOMAIN]["_smart_charge_state"]
+        assert state["charging_started"] is False
+
+        # Someone added a conflicting ForceDischarge while we were deferred
+        inv.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [
+                {
+                    "enable": 1,
+                    "workMode": "ForceDischarge",
+                    "startHour": 5,
+                    "startMinute": 0,
+                    "endHour": 6,
+                    "endMinute": 0,
+                    "minSocOnGrid": 15,
+                    "fdSoc": 11,
+                    "fdPwr": 10500,
+                },
+            ],
+        }
+
+        # At 05:50, deferred start has passed → tries to start charging
+        soc_late = MagicMock()
+        soc_late.state = "20"
+        hass.states.get = MagicMock(return_value=soc_late)
+
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 5, 50, 0),
+        ):
+            await captured_interval_callback(datetime.datetime(2026, 4, 7, 5, 50, 0))
+
+        # Should abort — conflict detected, session cancelled
+        assert "_smart_charge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN]["_smart_charge_unsubs"] == []
+        # Should NOT have set a schedule
+        inv.set_schedule.assert_not_called()

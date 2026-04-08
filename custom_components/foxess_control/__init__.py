@@ -51,6 +51,10 @@ SERVICE_SMART_DISCHARGE = "smart_discharge"
 
 SMART_CHARGE_ADJUST_INTERVAL = datetime.timedelta(minutes=5)
 
+# Cancel a smart session if the SoC entity is unavailable for this many
+# consecutive periodic checks (3 × 5 min = 15 minutes).
+MAX_SOC_UNAVAILABLE_COUNT = 3
+
 VALID_MODES = [m.value for m in WorkMode]
 
 SCHEMA_CLEAR_OVERRIDES = vol.Schema(
@@ -916,6 +920,7 @@ def _register_services(hass: HomeAssistant) -> None:
             "min_power_change": min_power_change,
             "charging_started": not should_defer,
             "force": force,
+            "soc_unavailable_count": 0,
         }
 
         end_utc = dt_util.as_utc(end)
@@ -976,12 +981,26 @@ def _register_services(hass: HomeAssistant) -> None:
 
             soc_st = hass.states.get(state["soc_entity"])
             if soc_st is None or soc_st.state in ("unknown", "unavailable"):
+                state["soc_unavailable_count"] = (
+                    state.get("soc_unavailable_count", 0) + 1
+                )
+                if state["soc_unavailable_count"] >= MAX_SOC_UNAVAILABLE_COUNT:
+                    _LOGGER.warning(
+                        "Smart charge: SoC unavailable for %d checks, aborting",
+                        state["soc_unavailable_count"],
+                    )
+                    charging_started = state["charging_started"]
+                    _cancel_smart_charge(hass)
+                    if charging_started:
+                        await _remove_charge_override()
+                    return
                 _LOGGER.debug("Smart charge: SoC unavailable, skipping adjustment")
                 return
             try:
                 cur_soc = float(soc_st.state)
             except (ValueError, TypeError):
                 return
+            state["soc_unavailable_count"] = 0
 
             if cur_soc >= state["target_soc"]:
                 _LOGGER.info(
@@ -1035,13 +1054,22 @@ def _register_services(hass: HomeAssistant) -> None:
                     fd_soc=100,
                     fd_pwr=new_power,
                 )
-                groups = await hass.async_add_executor_job(
-                    _merge_with_existing,
-                    inverter,
-                    group,
-                    WorkMode.FORCE_CHARGE,
-                    state.get("force", False),
-                )
+                try:
+                    groups = await hass.async_add_executor_job(
+                        _merge_with_existing,
+                        inverter,
+                        group,
+                        WorkMode.FORCE_CHARGE,
+                        state.get("force", False),
+                    )
+                except ServiceValidationError as exc:
+                    _LOGGER.warning(
+                        "Smart charge: conflict detected when starting "
+                        "deferred charge, aborting: %s",
+                        exc,
+                    )
+                    _cancel_smart_charge(hass)
+                    return
                 await hass.async_add_executor_job(inverter.set_schedule, groups)
 
                 state["groups"] = groups

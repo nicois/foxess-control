@@ -3,6 +3,7 @@
 import hashlib
 
 import pytest
+import requests
 import responses
 
 from custom_components.foxess_control.foxess.client import FoxESSApiError, FoxESSClient
@@ -89,6 +90,85 @@ def test_rate_limit_retry_succeeds() -> None:
     result = client.get("/op/v0/device/detail", {"sn": "ABC123"})
     assert result == {"deviceSN": "ABC123"}
     assert len(responses.calls) == 2
+
+
+@responses.activate
+def test_transient_502_retries_and_succeeds() -> None:
+    """A 502 response should be retried and succeed on next attempt."""
+    client = FoxESSClient("test-api-key")
+
+    # First call: 502
+    responses.add(
+        responses.GET,
+        "https://www.foxesscloud.com/op/v0/device/detail",
+        status=502,
+    )
+    # Second call: success
+    responses.add(
+        responses.GET,
+        "https://www.foxesscloud.com/op/v0/device/detail",
+        json={"errno": 0, "result": {"deviceSN": "ABC123"}},
+    )
+
+    result = client.get("/op/v0/device/detail", {"sn": "ABC123"})
+    assert result == {"deviceSN": "ABC123"}
+    assert len(responses.calls) == 2
+
+
+@responses.activate
+def test_transient_post_retries_and_succeeds() -> None:
+    """A 503 POST response should be retried."""
+    client = FoxESSClient("test-api-key")
+
+    responses.add(
+        responses.POST,
+        "https://www.foxesscloud.com/op/v0/device/list",
+        status=503,
+    )
+    responses.add(
+        responses.POST,
+        "https://www.foxesscloud.com/op/v0/device/list",
+        json={"errno": 0, "result": {"data": []}},
+    )
+
+    result = client.post("/op/v0/device/list", {"currentPage": 1, "pageSize": 10})
+    assert result == {"data": []}
+    assert len(responses.calls) == 2
+
+
+@responses.activate
+def test_transient_retries_exhaust_raises() -> None:
+    """After TRANSIENT_RETRIES, the error is raised."""
+    client = FoxESSClient("test-api-key")
+
+    for _ in range(FoxESSClient.TRANSIENT_RETRIES + 1):
+        responses.add(
+            responses.GET,
+            "https://www.foxesscloud.com/op/v0/device/detail",
+            status=500,
+        )
+
+    with pytest.raises(requests.HTTPError):
+        client.get("/op/v0/device/detail", {"sn": "ABC123"})
+
+    assert len(responses.calls) == FoxESSClient.TRANSIENT_RETRIES + 1
+
+
+@responses.activate
+def test_non_retryable_status_raises_immediately() -> None:
+    """A 400 error should not be retried."""
+    client = FoxESSClient("test-api-key")
+
+    responses.add(
+        responses.GET,
+        "https://www.foxesscloud.com/op/v0/device/detail",
+        status=400,
+    )
+
+    with pytest.raises(requests.HTTPError):
+        client.get("/op/v0/device/detail", {"sn": "ABC123"})
+
+    assert len(responses.calls) == 1
 
 
 @responses.activate

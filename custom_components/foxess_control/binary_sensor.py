@@ -63,8 +63,10 @@ class SmartChargeActiveSensor(BinarySensorEntity):
         state = domain_data.get("_smart_charge_state")
         if state is None:
             return None
+        phase = "charging" if state.get("charging_started", True) else "deferred"
         return {
             "target_soc": state["target_soc"],
+            "phase": phase,
             "current_power_w": state["last_power_w"],
             "max_power_w": state["max_power_w"],
             "end_time": state["end"].isoformat(),
