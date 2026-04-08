@@ -10,4 +10,4 @@ CONF_MIN_SOC_ON_GRID = "min_soc_on_grid"
 DEFAULT_MIN_POWER_CHANGE = 500
 DEFAULT_MIN_SOC_ON_GRID = 15
 MAX_OVERRIDE_HOURS = 4
-PLATFORMS: list[str] = ["binary_sensor"]
+PLATFORMS: list[str] = ["binary_sensor", "sensor"]
