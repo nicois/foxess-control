@@ -517,6 +517,7 @@ def _register_services(hass: HomeAssistant) -> None:
             f"{power}W" if power else "max",
         )
         await hass.async_add_executor_job(inverter.set_schedule, groups)
+        _cancel_smart_charge(hass)
 
     async def handle_force_discharge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
@@ -555,6 +556,7 @@ def _register_services(hass: HomeAssistant) -> None:
             f"{power}W" if power else "max",
         )
         await hass.async_add_executor_job(inverter.set_schedule, groups)
+        _cancel_smart_discharge(hass)
 
     async def handle_feedin(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]

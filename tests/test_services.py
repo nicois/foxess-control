@@ -556,6 +556,32 @@ class TestHandleForceCharge:
         groups = inv.set_schedule.call_args.args[0]
         assert groups[0]["fdPwr"] == 6000
 
+    @pytest.mark.asyncio
+    async def test_force_charge_cancels_smart_charge(self) -> None:
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(inverter=inv)
+
+        unsub = MagicMock()
+        hass.data[DOMAIN]["_smart_charge_unsubs"] = [unsub]
+        hass.data[DOMAIN]["_smart_charge_state"] = {"target_soc": 80}
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[2].args[2]
+
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 14, 0, 0),
+        ):
+            await handler(_make_call({"duration": datetime.timedelta(hours=1)}))
+
+        unsub.assert_called_once()
+        assert hass.data[DOMAIN]["_smart_charge_unsubs"] == []
+        assert "_smart_charge_state" not in hass.data[DOMAIN]
+
 
 class TestHandleForceDischarge:
     """Tests for handle_force_discharge service handler."""
@@ -614,6 +640,32 @@ class TestHandleForceDischarge:
         groups = inv.set_schedule.call_args.args[0]
         assert groups[0]["startHour"] == 18
         assert groups[0]["endHour"] == 20
+
+    @pytest.mark.asyncio
+    async def test_force_discharge_cancels_smart_discharge(self) -> None:
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(inverter=inv)
+
+        unsub = MagicMock()
+        hass.data[DOMAIN]["_smart_discharge_unsubs"] = [unsub]
+        hass.data[DOMAIN]["_smart_discharge_state"] = {"min_soc": 30}
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[3].args[2]
+
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+        ):
+            await handler(_make_call({"duration": datetime.timedelta(hours=2)}))
+
+        unsub.assert_called_once()
+        assert hass.data[DOMAIN]["_smart_discharge_unsubs"] == []
+        assert "_smart_discharge_state" not in hass.data[DOMAIN]
 
 
 class TestHandleSmartDischarge:

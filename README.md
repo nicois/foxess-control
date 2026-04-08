@@ -136,7 +136,9 @@ Charges the battery within a time window, periodically adjusting the charge rate
 4. When the SoC reaches the target, the session ends: the schedule reverts to self-use and all listeners are cancelled.
 5. When the time window ends, listeners are cancelled (the schedule entry itself expires naturally).
 
-**Stopping a running smart charge:** Call `foxess_control.clear_overrides` (with no mode, or with `mode: ForceCharge`). This removes the schedule **and** cancels the background listeners. Starting a new `smart_charge` also cancels any previous session.
+Only one smart charge session can be active at a time. Starting a new `smart_charge` cancels any previous session. A `force_charge` action also cancels any running smart charge, since it replaces the underlying `ForceCharge` schedule.
+
+**Stopping a running smart charge:** Call `foxess_control.clear_overrides` (with no mode, or with `mode: ForceCharge`). This removes the schedule **and** cancels the background listeners.
 
 **Requires** the Battery SoC Entity and Battery Capacity to be configured in the integration options.
 
@@ -167,7 +169,9 @@ Discharges the battery within a time window and automatically reverts to self-us
 2. Monitors the Battery SoC Entity in real time. When the SoC drops to the `min_soc` threshold, the session ends: the schedule reverts to self-use and all listeners are cancelled.
 3. When the time window ends, listeners are cancelled.
 
-**Stopping a running smart discharge:** Call `foxess_control.clear_overrides` (with no mode, or with `mode: ForceDischarge`). This removes the schedule **and** cancels the background listeners. Starting a new `smart_discharge` also cancels any previous session.
+Only one smart discharge session can be active at a time. Starting a new `smart_discharge` cancels any previous session. A `force_discharge` action also cancels any running smart discharge, since it replaces the underlying `ForceDischarge` schedule.
+
+**Stopping a running smart discharge:** Call `foxess_control.clear_overrides` (with no mode, or with `mode: ForceDischarge`). This removes the schedule **and** cancels the background listeners.
 
 **Requires** the Battery SoC Entity to be configured in the integration options.
 
