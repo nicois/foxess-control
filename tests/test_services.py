@@ -893,10 +893,10 @@ class TestHandleSmartDischarge:
         new_state.state = "30"
         event.data = {"new_state": new_state}
 
-        captured_callback(event)
+        await captured_callback(event)
 
-        # The callback schedules self_use via async_create_task
-        hass.async_create_task.assert_called_once()
+        # The callback removes the override directly
+        inv.self_use.assert_called_once()
         # Listeners should be cancelled
         assert hass.data[DOMAIN]["_smart_discharge_unsubs"] == []
 
@@ -953,7 +953,7 @@ class TestHandleSmartDischarge:
         new_state.state = "50"
         event.data = {"new_state": new_state}
 
-        captured_callback(event)
+        await captured_callback(event)
 
         inv.self_use.assert_not_called()
 
@@ -1355,9 +1355,12 @@ class TestHandleSmartCharge:
         new_state.state = "80"
         event.data = {"new_state": new_state}
 
-        captured_callback(event)
+        await captured_callback(event)
 
-        hass.async_create_task.assert_called_once()
+        # Charging was deferred (10kWh, small battery), so no override to remove
+        inv.self_use.assert_not_called()
+        inv.set_schedule.assert_not_called()
+        # Listeners should be cancelled
         assert hass.data[DOMAIN]["_smart_charge_unsubs"] == []
 
     @pytest.mark.asyncio

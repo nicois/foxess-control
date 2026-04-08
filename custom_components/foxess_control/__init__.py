@@ -736,7 +736,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 min_soc_on_grid,
             )
 
-        def _on_soc_change(
+        async def _on_soc_change(
             event: HAEvent[EventStateChangedData],
         ) -> None:
             new_state = event.data.get("new_state")
@@ -753,13 +753,13 @@ def _register_services(hass: HomeAssistant) -> None:
                     soc_value,
                     min_soc,
                 )
-                hass.async_create_task(_remove_discharge_override())
                 _cancel_smart_discharge(hass)
+                await _remove_discharge_override()
 
-        def _on_timer_expire(_now: datetime.datetime) -> None:
+        async def _on_timer_expire(_now: datetime.datetime) -> None:
             _LOGGER.info("Smart discharge: window ended, removing override")
-            hass.async_create_task(_remove_discharge_override())
             _cancel_smart_discharge(hass)
+            await _remove_discharge_override()
 
         unsub_state = async_track_state_change_event(hass, [soc_entity], _on_soc_change)
         unsub_timer = async_track_point_in_time(hass, _on_timer_expire, end_utc)
@@ -928,7 +928,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 min_soc_on_grid,
             )
 
-        def _on_charge_soc_change(
+        async def _on_charge_soc_change(
             event: HAEvent[EventStateChangedData],
         ) -> None:
             new_state = event.data.get("new_state")
@@ -947,13 +947,25 @@ def _register_services(hass: HomeAssistant) -> None:
                     soc_value,
                     target_soc,
                 )
-                hass.async_create_task(_remove_charge_override())
+                charging_started = (
+                    hass.data[DOMAIN]
+                    .get("_smart_charge_state", {})
+                    .get("charging_started", False)
+                )
                 _cancel_smart_charge(hass)
+                if charging_started:
+                    await _remove_charge_override()
 
-        def _on_charge_timer_expire(_now: datetime.datetime) -> None:
+        async def _on_charge_timer_expire(_now: datetime.datetime) -> None:
             _LOGGER.info("Smart charge: window ended, removing override")
-            hass.async_create_task(_remove_charge_override())
+            charging_started = (
+                hass.data[DOMAIN]
+                .get("_smart_charge_state", {})
+                .get("charging_started", False)
+            )
             _cancel_smart_charge(hass)
+            if charging_started:
+                await _remove_charge_override()
 
         async def _adjust_charge_power(
             _now: datetime.datetime,
