@@ -64,8 +64,8 @@ SCHEMA_FORCE_CHARGE = vol.Schema(
         vol.Required("duration"): cv.time_period,
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
         vol.Optional("start_time"): cv.time,
-        vol.Optional("replace_conflicts"): cv.boolean,
-    }
+    },
+    extra=vol.ALLOW_EXTRA,
 )
 
 SCHEMA_FORCE_DISCHARGE = vol.Schema(
@@ -73,8 +73,8 @@ SCHEMA_FORCE_DISCHARGE = vol.Schema(
         vol.Required("duration"): cv.time_period,
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
         vol.Optional("start_time"): cv.time,
-        vol.Optional("replace_conflicts"): cv.boolean,
-    }
+    },
+    extra=vol.ALLOW_EXTRA,
 )
 
 SCHEMA_FEEDIN = vol.Schema(
@@ -82,8 +82,8 @@ SCHEMA_FEEDIN = vol.Schema(
         vol.Required("duration"): cv.time_period,
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
         vol.Optional("start_time"): cv.time,
-        vol.Optional("replace_conflicts"): cv.boolean,
-    }
+    },
+    extra=vol.ALLOW_EXTRA,
 )
 
 SCHEMA_SMART_DISCHARGE = vol.Schema(
@@ -92,8 +92,8 @@ SCHEMA_SMART_DISCHARGE = vol.Schema(
         vol.Required("end_time"): cv.time,
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
         vol.Required("min_soc"): vol.All(int, vol.Range(min=11, max=100)),
-        vol.Optional("replace_conflicts"): cv.boolean,
-    }
+    },
+    extra=vol.ALLOW_EXTRA,
 )
 
 SCHEMA_SMART_CHARGE = vol.Schema(
@@ -102,8 +102,8 @@ SCHEMA_SMART_CHARGE = vol.Schema(
         vol.Required("end_time"): cv.time,
         vol.Required("target_soc"): vol.All(int, vol.Range(min=11, max=100)),
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
-        vol.Optional("replace_conflicts"): cv.boolean,
-    }
+    },
+    extra=vol.ALLOW_EXTRA,
 )
 
 
