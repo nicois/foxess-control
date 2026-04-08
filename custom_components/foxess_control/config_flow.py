@@ -14,9 +14,11 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.core import callback
+from homeassistant.helpers.selector import EntitySelector, EntitySelectorConfig
 
 from .const import (
     CONF_API_KEY,
+    CONF_BATTERY_SOC_ENTITY,
     CONF_DEVICE_SERIAL,
     CONF_MIN_SOC_ON_GRID,
     DEFAULT_MIN_SOC_ON_GRID,
@@ -101,6 +103,7 @@ class FoxessControlOptionsFlow(OptionsFlow):
         current = self._config_entry.options.get(
             CONF_MIN_SOC_ON_GRID, DEFAULT_MIN_SOC_ON_GRID
         )
+        current_entity = self._config_entry.options.get(CONF_BATTERY_SOC_ENTITY, "")
 
         return self.async_show_form(
             step_id="init",
@@ -109,6 +112,9 @@ class FoxessControlOptionsFlow(OptionsFlow):
                     vol.Optional(CONF_MIN_SOC_ON_GRID, default=current): vol.All(
                         int, vol.Range(min=11, max=100)
                     ),
+                    vol.Optional(
+                        CONF_BATTERY_SOC_ENTITY, default=current_entity
+                    ): EntitySelector(EntitySelectorConfig(domain="sensor")),
                 }
             ),
         )

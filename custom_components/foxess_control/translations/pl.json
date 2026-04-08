@@ -75,6 +75,32 @@
           "description": "Jeśli włączone, istniejące nakładające się nadpisania zostaną usunięte zamiast przerywania operacji."
         }
       }
+    },
+    "smart_discharge": {
+      "name": "Inteligentne rozładowanie",
+      "description": "Rozładowywać baterię w oknie czasowym, automatycznie wracając do autokonsumpcji po osiągnięciu minimalnego SoC.",
+      "fields": {
+        "start_time": {
+          "name": "Godzina rozpoczęcia",
+          "description": "Godzina rozpoczęcia rozładowania."
+        },
+        "end_time": {
+          "name": "Godzina zakończenia",
+          "description": "Godzina zakończenia rozładowania. Musi być po godzinie rozpoczęcia, w ciągu 4 godzin."
+        },
+        "power": {
+          "name": "Limit mocy",
+          "description": "Limit mocy rozładowania w watach. Domyślnie moc znamionowa falownika."
+        },
+        "min_soc": {
+          "name": "Minimalny SoC do zatrzymania rozładowania",
+          "description": "Zatrzymać rozładowanie i wrócić do autokonsumpcji, gdy bateria osiągnie ten poziom."
+        },
+        "replace_conflicts": {
+          "name": "Usuń konfliktujące nadpisania zamiast przerywać",
+          "description": "Jeśli włączone, istniejące nakładające się nadpisania zostaną usunięte zamiast przerywania operacji."
+        }
+      }
     }
   },
   "config": {
@@ -98,7 +124,8 @@
       "init": {
         "title": "Opcje FoxESS Control",
         "data": {
-          "min_soc_on_grid": "Minimalny SoC w sieci (%)"
+          "min_soc_on_grid": "Minimalny SoC w sieci (%)",
+          "battery_soc_entity": "Encja SoC baterii"
         }
       }
     }

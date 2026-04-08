@@ -75,6 +75,32 @@
           "description": "Si activé, supprime silencieusement les forçages existants qui se chevauchent au lieu d'abandonner."
         }
       }
+    },
+    "smart_discharge": {
+      "name": "Décharge intelligente",
+      "description": "Décharger la batterie dans une fenêtre horaire, en revenant automatiquement à l'autoconsommation lorsqu'un SoC minimum est atteint.",
+      "fields": {
+        "start_time": {
+          "name": "Heure de début",
+          "description": "Heure de début de la décharge."
+        },
+        "end_time": {
+          "name": "Heure de fin",
+          "description": "Heure de fin de la décharge. Doit être après l'heure de début, dans un délai de 4 heures."
+        },
+        "power": {
+          "name": "Limite de puissance",
+          "description": "Limite de puissance de décharge en watts. Par défaut : puissance nominale de l'onduleur."
+        },
+        "min_soc": {
+          "name": "SoC minimum pour arrêter la décharge",
+          "description": "Arrêter la décharge et revenir à l'autoconsommation lorsque la batterie atteint ce niveau."
+        },
+        "replace_conflicts": {
+          "name": "Supprimer les forçages en conflit au lieu d'abandonner",
+          "description": "Si activé, supprime silencieusement les forçages existants qui se chevauchent au lieu d'abandonner."
+        }
+      }
     }
   },
   "config": {
@@ -98,7 +124,8 @@
       "init": {
         "title": "Options FoxESS Control",
         "data": {
-          "min_soc_on_grid": "SoC minimum sur le réseau (%)"
+          "min_soc_on_grid": "SoC minimum sur le réseau (%)",
+          "battery_soc_entity": "Entité SoC de la batterie"
         }
       }
     }

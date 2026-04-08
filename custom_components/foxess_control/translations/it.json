@@ -75,6 +75,32 @@
           "description": "Se abilitato, rimuove silenziosamente le forzature esistenti sovrapposte anziché interrompere."
         }
       }
+    },
+    "smart_discharge": {
+      "name": "Scarica intelligente",
+      "description": "Scaricare la batteria entro una finestra temporale, tornando automaticamente all'autoconsumo quando viene raggiunto un SoC minimo.",
+      "fields": {
+        "start_time": {
+          "name": "Ora di inizio",
+          "description": "Ora del giorno per iniziare la scarica."
+        },
+        "end_time": {
+          "name": "Ora di fine",
+          "description": "Ora del giorno per terminare la scarica. Deve essere dopo l'ora di inizio, entro 4 ore."
+        },
+        "power": {
+          "name": "Limite di potenza",
+          "description": "Limite di potenza di scarica in watt. Predefinito: potenza nominale dell'inverter."
+        },
+        "min_soc": {
+          "name": "SoC minimo per interrompere la scarica",
+          "description": "Interrompere la scarica e tornare all'autoconsumo quando la batteria raggiunge questo livello."
+        },
+        "replace_conflicts": {
+          "name": "Rimuovi forzature in conflitto anziché interrompere",
+          "description": "Se abilitato, rimuove silenziosamente le forzature esistenti sovrapposte anziché interrompere."
+        }
+      }
     }
   },
   "config": {
@@ -98,7 +124,8 @@
       "init": {
         "title": "Opzioni FoxESS Control",
         "data": {
-          "min_soc_on_grid": "SoC minimo in rete (%)"
+          "min_soc_on_grid": "SoC minimo in rete (%)",
+          "battery_soc_entity": "Entità SoC della batteria"
         }
       }
     }

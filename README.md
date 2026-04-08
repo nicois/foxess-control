@@ -41,12 +41,13 @@ After setup, click **Configure** on the integration entry to adjust:
 | Option | Default | Range | Description |
 |---|---|---|---|
 | Minimum SoC on Grid | 15% | 11-100% | The minimum battery state of charge to maintain when on grid. Applied to all schedule operations. |
+| Battery SoC Entity | _(none)_ | | A Home Assistant sensor entity that reports the battery state of charge. Required for `smart_discharge`. |
 
 > **Warning:** The inverter's behaviour when it reaches this SoC level during force discharge or feed-in is unintuitive. Consider using an automation to cancel the override before the battery reaches this level. See [Known limitations](#known-limitations).
 
 ## Actions
 
-The integration registers four actions (services) under the `foxess_control` domain. These are intended to be called from automations.
+The integration registers five actions (services) under the `foxess_control` domain. These are intended to be called from automations.
 
 ### `foxess_control.clear_overrides`
 
@@ -116,6 +117,29 @@ Forces the inverter to discharge the battery for a specified duration.
 action: foxess_control.force_discharge
 data:
   duration: "02:00:00"
+  power: 5000
+```
+
+### `foxess_control.smart_discharge`
+
+Discharges the battery within a time window and automatically reverts to self-use when the battery reaches a minimum SoC. This replaces the need for a separate automation to monitor SoC and cancel the discharge.
+
+**Requires** the Battery SoC Entity to be configured in the integration options.
+
+| Parameter | Required | Default | Description |
+|---|---|---|---|
+| `start_time` | Yes | | Time of day to start discharging (e.g. `"17:00:00"`). |
+| `end_time` | Yes | | Time of day to stop discharging (e.g. `"20:00:00"`). Must be after start time, within 4 hours. |
+| `power` | No | Inverter max | Discharge power limit in watts (min 100). |
+| `min_soc` | Yes | | Stop discharging and revert to self-use when the battery reaches this SoC level (11-100%). |
+| `replace_conflicts` | No | false | Remove conflicting overrides instead of aborting. |
+
+```yaml
+action: foxess_control.smart_discharge
+data:
+  start_time: "17:00:00"
+  end_time: "20:00:00"
+  min_soc: 30
   power: 5000
 ```
 

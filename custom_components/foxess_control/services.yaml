@@ -111,3 +111,45 @@ force_discharge:
         If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting.
       selector:
         boolean:
+
+smart_discharge:
+  name: Smart discharge
+  description: >-
+    Discharge the battery within a time window, automatically reverting to self-use when a minimum SoC is reached.
+  fields:
+    start_time:
+      name: Start time
+      description: Time of day to start discharging.
+      required: true
+      selector:
+        time:
+    end_time:
+      name: End time
+      description: Time of day to stop discharging. Must be after start time, within 4 hours.
+      required: true
+      selector:
+        time:
+    power:
+      name: Power limit
+      description: >-
+        Discharge power limit in watts. Defaults to inverter rated power if not set.
+      selector:
+        number:
+          min: 100
+          unit_of_measurement: W
+    min_soc:
+      name: Minimum SoC to stop discharge
+      description: >-
+        Stop discharging and revert to self-use when the battery reaches this level.
+      required: true
+      selector:
+        number:
+          min: 11
+          max: 100
+          unit_of_measurement: "%"
+    replace_conflicts:
+      name: Remove conflicting overrides instead of aborting
+      description: >-
+        If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting.
+      selector:
+        boolean:

@@ -9,10 +9,15 @@ from typing import TYPE_CHECKING, Any
 import voluptuous as vol
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.event import (
+    async_track_point_in_time,
+    async_track_state_change_event,
+)
 from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_API_KEY,
+    CONF_BATTERY_SOC_ENTITY,
     CONF_DEVICE_SERIAL,
     CONF_MIN_SOC_ON_GRID,
     DEFAULT_MIN_SOC_ON_GRID,
@@ -22,8 +27,11 @@ from .const import (
 from .foxess import FoxESSClient, Inverter, WorkMode
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from homeassistant.config_entries import ConfigEntry
-    from homeassistant.core import HomeAssistant, ServiceCall
+    from homeassistant.core import Event as HAEvent
+    from homeassistant.core import EventStateChangedData, HomeAssistant, ServiceCall
 
     from .foxess.inverter import ScheduleGroup
 
@@ -33,6 +41,7 @@ SERVICE_CLEAR_OVERRIDES = "clear_overrides"
 SERVICE_FEEDIN = "feedin"
 SERVICE_FORCE_CHARGE = "force_charge"
 SERVICE_FORCE_DISCHARGE = "force_discharge"
+SERVICE_SMART_DISCHARGE = "smart_discharge"
 
 VALID_MODES = [m.value for m in WorkMode]
 
@@ -65,6 +74,16 @@ SCHEMA_FEEDIN = vol.Schema(
         vol.Required("duration"): cv.time_period,
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
         vol.Optional("start_time"): cv.time,
+        vol.Optional("replace_conflicts"): cv.boolean,
+    }
+)
+
+SCHEMA_SMART_DISCHARGE = vol.Schema(
+    {
+        vol.Required("start_time"): cv.time,
+        vol.Required("end_time"): cv.time,
+        vol.Optional("power"): vol.All(int, vol.Range(min=100)),
+        vol.Required("min_soc"): vol.All(int, vol.Range(min=11, max=100)),
         vol.Optional("replace_conflicts"): cv.boolean,
     }
 )
@@ -127,6 +146,61 @@ def _resolve_start_end(
         raise ServiceValidationError("Override must not extend past midnight")
 
     return start, end
+
+
+def _resolve_start_end_explicit(
+    start_time: datetime.time,
+    end_time: datetime.time,
+) -> tuple[datetime.datetime, datetime.datetime]:
+    """Validate and resolve explicit start/end times to datetimes (today).
+
+    Raises ServiceValidationError if end <= start, window exceeds
+    MAX_OVERRIDE_HOURS, or the window would cross midnight.
+    """
+    now = dt_util.now()
+    start = now.replace(
+        hour=start_time.hour,
+        minute=start_time.minute,
+        second=0,
+        microsecond=0,
+    )
+    end = now.replace(
+        hour=end_time.hour,
+        minute=end_time.minute,
+        second=0,
+        microsecond=0,
+    )
+
+    if end <= start:
+        raise ServiceValidationError("End time must be after start time")
+
+    max_delta = datetime.timedelta(hours=MAX_OVERRIDE_HOURS)
+    if (end - start) > max_delta:
+        raise ServiceValidationError(
+            f"Window must not exceed {MAX_OVERRIDE_HOURS} hours"
+        )
+
+    return start, end
+
+
+def _get_battery_soc_entity(hass: HomeAssistant) -> str:
+    """Get battery_soc_entity from the first config entry's options."""
+    entry_id = next(iter(hass.data[DOMAIN]))
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None:
+        return ""
+    entity: str = entry.options.get(CONF_BATTERY_SOC_ENTITY, "")
+    return entity
+
+
+def _cancel_smart_discharge(hass: HomeAssistant) -> None:
+    """Cancel any active smart discharge listeners."""
+    unsubs: list[Callable[[], None]] = hass.data[DOMAIN].get(
+        "_smart_discharge_unsubs", []
+    )
+    for unsub in unsubs:
+        unsub()
+    hass.data[DOMAIN]["_smart_discharge_unsubs"] = []
 
 
 def _to_minutes(hour: int, minute: int) -> int:
@@ -269,10 +343,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.async_add_executor_job(lambda: inverter.max_power_w)
 
     hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN].setdefault("_smart_discharge_unsubs", [])
     hass.data[DOMAIN][entry.entry_id] = {"inverter": inverter}
 
-    # Register services once (first entry)
-    if len(hass.data[DOMAIN]) == 1:
+    # Register services once (first real entry)
+    real_entries = {k for k in hass.data[DOMAIN] if not k.startswith("_")}
+    if len(real_entries) == 1:
         _register_services(hass)
 
     return True
@@ -282,12 +358,16 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     hass.data[DOMAIN].pop(entry.entry_id)
 
-    if not hass.data[DOMAIN]:
+    # Only "_smart_discharge_unsubs" key remains → last real entry was removed
+    remaining = {k for k in hass.data[DOMAIN] if not k.startswith("_")}
+    if not remaining:
+        _cancel_smart_discharge(hass)
         hass.data.pop(DOMAIN)
         hass.services.async_remove(DOMAIN, SERVICE_CLEAR_OVERRIDES)
         hass.services.async_remove(DOMAIN, SERVICE_FEEDIN)
         hass.services.async_remove(DOMAIN, SERVICE_FORCE_CHARGE)
         hass.services.async_remove(DOMAIN, SERVICE_FORCE_DISCHARGE)
+        hass.services.async_remove(DOMAIN, SERVICE_SMART_DISCHARGE)
 
     return True
 
@@ -434,6 +514,91 @@ def _register_services(hass: HomeAssistant) -> None:
         )
         await hass.async_add_executor_job(inverter.set_schedule, groups)
 
+    async def handle_smart_discharge(call: ServiceCall) -> None:
+        start_time: datetime.time = call.data["start_time"]
+        end_time: datetime.time = call.data["end_time"]
+        power: int | None = call.data.get("power")
+        min_soc: int = call.data["min_soc"]
+        force: bool = call.data.get("replace_conflicts", False)
+
+        start, end = _resolve_start_end_explicit(start_time, end_time)
+
+        soc_entity = _get_battery_soc_entity(hass)
+        if not soc_entity:
+            raise ServiceValidationError(
+                "Battery SoC entity not configured. Set it in the "
+                "integration options before using smart discharge."
+            )
+
+        inverter = _get_inverter(hass)
+        min_soc_on_grid = _get_min_soc_on_grid(hass)
+
+        group = _build_override_group(
+            start,
+            end,
+            WorkMode.FORCE_DISCHARGE,
+            inverter,
+            min_soc_on_grid,
+            fd_soc=min_soc,
+            fd_pwr=power,
+        )
+
+        groups = await hass.async_add_executor_job(
+            _merge_with_existing,
+            inverter,
+            group,
+            WorkMode.FORCE_DISCHARGE,
+            force,
+        )
+
+        _LOGGER.info(
+            "Smart discharge %02d:%02d - %02d:%02d (power=%s, min_soc=%d%%)",
+            start.hour,
+            start.minute,
+            end.hour,
+            end.minute,
+            f"{power}W" if power else "max",
+            min_soc,
+        )
+        await hass.async_add_executor_job(inverter.set_schedule, groups)
+
+        # Cancel any previous smart discharge listeners
+        _cancel_smart_discharge(hass)
+
+        end_utc = dt_util.as_utc(end)
+
+        async def _revert_to_self_use() -> None:
+            await hass.async_add_executor_job(inverter.self_use, min_soc_on_grid)
+
+        def _on_soc_change(
+            event: HAEvent[EventStateChangedData],
+        ) -> None:
+            new_state = event.data.get("new_state")
+            if new_state is None or new_state.state in ("unknown", "unavailable"):
+                return
+            try:
+                soc_value = float(new_state.state)
+            except (ValueError, TypeError):
+                return
+            if soc_value <= min_soc:
+                _LOGGER.info(
+                    "Smart discharge: SoC %.1f%% reached threshold %d%%, "
+                    "reverting to self-use",
+                    soc_value,
+                    min_soc,
+                )
+                hass.async_create_task(_revert_to_self_use())
+                _cancel_smart_discharge(hass)
+
+        def _on_timer_expire(_now: datetime.datetime) -> None:
+            _LOGGER.info("Smart discharge: window ended, cancelling listeners")
+            _cancel_smart_discharge(hass)
+
+        unsub_state = async_track_state_change_event(hass, [soc_entity], _on_soc_change)
+        unsub_timer = async_track_point_in_time(hass, _on_timer_expire, end_utc)
+
+        hass.data[DOMAIN]["_smart_discharge_unsubs"] = [unsub_state, unsub_timer]
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_CLEAR_OVERRIDES,
@@ -451,4 +616,10 @@ def _register_services(hass: HomeAssistant) -> None:
         SERVICE_FORCE_DISCHARGE,
         handle_force_discharge,
         schema=SCHEMA_FORCE_DISCHARGE,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SMART_DISCHARGE,
+        handle_smart_discharge,
+        schema=SCHEMA_SMART_DISCHARGE,
     )

@@ -75,6 +75,32 @@
           "description": "Wenn aktiviert, werden bestehende überlappende Übersteuerungen stillschweigend entfernt, anstatt abzubrechen."
         }
       }
+    },
+    "smart_discharge": {
+      "name": "Intelligentes Entladen",
+      "description": "Batterie innerhalb eines Zeitfensters entladen und automatisch zum Eigenverbrauch zurückkehren, wenn ein minimaler SoC erreicht wird.",
+      "fields": {
+        "start_time": {
+          "name": "Startzeit",
+          "description": "Tageszeit für den Beginn des Entladens."
+        },
+        "end_time": {
+          "name": "Endzeit",
+          "description": "Tageszeit für das Ende des Entladens. Muss nach der Startzeit liegen, innerhalb von 4 Stunden."
+        },
+        "power": {
+          "name": "Leistungsgrenze",
+          "description": "Entladeleistung in Watt. Standardmäßig die Nennleistung des Wechselrichters."
+        },
+        "min_soc": {
+          "name": "Minimaler SoC zum Stoppen",
+          "description": "Entladen stoppen und zum Eigenverbrauch zurückkehren, wenn die Batterie dieses Niveau erreicht."
+        },
+        "replace_conflicts": {
+          "name": "Konfliktende Übersteuerungen entfernen statt abbrechen",
+          "description": "Wenn aktiviert, werden bestehende überlappende Übersteuerungen stillschweigend entfernt, anstatt abzubrechen."
+        }
+      }
     }
   },
   "config": {
@@ -98,7 +124,8 @@
       "init": {
         "title": "FoxESS Control Optionen",
         "data": {
-          "min_soc_on_grid": "Minimaler SoC am Netz (%)"
+          "min_soc_on_grid": "Minimaler SoC am Netz (%)",
+          "battery_soc_entity": "Batterie-SoC-Entität"
         }
       }
     }

@@ -14,6 +14,7 @@ from custom_components.foxess_control import (
     _is_placeholder,
     _merge_with_existing,
     _resolve_start_end,
+    _resolve_start_end_explicit,
     _sanitize_group,
 )
 from custom_components.foxess_control.foxess.inverter import (
@@ -542,3 +543,48 @@ class TestIsExpired:
             return_value=datetime.datetime(2026, 4, 7, 14, 0, 0),
         ):
             assert not _is_expired(group)
+
+
+class TestResolveStartEndExplicit:
+    """Tests for _resolve_start_end_explicit."""
+
+    def test_valid_window(self) -> None:
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
+        ):
+            start, end = _resolve_start_end_explicit(
+                datetime.time(17, 0), datetime.time(20, 0)
+            )
+            assert start == datetime.datetime(2026, 4, 7, 17, 0, 0)
+            assert end == datetime.datetime(2026, 4, 7, 20, 0, 0)
+
+    def test_end_before_start_rejected(self) -> None:
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
+            ),
+            pytest.raises(ServiceValidationError, match="after start"),
+        ):
+            _resolve_start_end_explicit(datetime.time(20, 0), datetime.time(17, 0))
+
+    def test_equal_times_rejected(self) -> None:
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
+            ),
+            pytest.raises(ServiceValidationError, match="after start"),
+        ):
+            _resolve_start_end_explicit(datetime.time(17, 0), datetime.time(17, 0))
+
+    def test_exceeds_max_hours(self) -> None:
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
+            ),
+            pytest.raises(ServiceValidationError, match="4 hours"),
+        ):
+            _resolve_start_end_explicit(datetime.time(10, 0), datetime.time(15, 0))

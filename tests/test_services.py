@@ -17,6 +17,7 @@ from custom_components.foxess_control import (
 )
 from custom_components.foxess_control.const import (
     CONF_API_KEY,
+    CONF_BATTERY_SOC_ENTITY,
     CONF_DEVICE_SERIAL,
     CONF_MIN_SOC_ON_GRID,
     DEFAULT_MIN_SOC_ON_GRID,
@@ -29,6 +30,7 @@ def _make_hass(
     entry_id: str = "entry1",
     inverter: Inverter | None = None,
     min_soc_on_grid: int = DEFAULT_MIN_SOC_ON_GRID,
+    battery_soc_entity: str = "",
 ) -> MagicMock:
     """Create a mock hass with DOMAIN data populated."""
     hass = MagicMock()
@@ -38,11 +40,19 @@ def _make_hass(
         inverter = MagicMock(spec=Inverter)
         inverter.max_power_w = 10500
 
-    hass.data = {DOMAIN: {entry_id: {"inverter": inverter}}}
+    hass.data = {
+        DOMAIN: {
+            entry_id: {"inverter": inverter},
+            "_smart_discharge_unsubs": [],
+        }
+    }
 
     # Mock config entry for options lookup
     mock_entry = MagicMock()
-    mock_entry.options = {CONF_MIN_SOC_ON_GRID: min_soc_on_grid}
+    mock_entry.options = {
+        CONF_MIN_SOC_ON_GRID: min_soc_on_grid,
+        CONF_BATTERY_SOC_ENTITY: battery_soc_entity,
+    }
     hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
 
     return hass
@@ -109,7 +119,7 @@ class TestSetupEntry:
             assert await async_setup_entry(hass, entry) is True
 
         assert DOMAIN in hass.data
-        assert hass.services.async_register.call_count == 4
+        assert hass.services.async_register.call_count == 5
 
     @pytest.mark.asyncio
     async def test_second_entry_does_not_reregister_services(self) -> None:
@@ -150,7 +160,7 @@ class TestUnloadEntry:
 
         assert result is True
         assert DOMAIN not in hass.data
-        assert hass.services.async_remove.call_count == 4
+        assert hass.services.async_remove.call_count == 5
 
     @pytest.mark.asyncio
     async def test_unload_non_last_entry_keeps_services(self) -> None:
@@ -485,3 +495,286 @@ class TestHandleForceDischarge:
         groups = inv.set_schedule.call_args.args[0]
         assert groups[0]["startHour"] == 18
         assert groups[0]["endHour"] == 20
+
+
+class TestHandleSmartDischarge:
+    """Tests for handle_smart_discharge service handler."""
+
+    @pytest.mark.asyncio
+    async def test_smart_discharge_sets_schedule(self) -> None:
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(inverter=inv, battery_soc_entity="sensor.battery_soc")
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_state_change_event",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 30,
+                    }
+                )
+            )
+
+        inv.set_schedule.assert_called_once()
+        groups = inv.set_schedule.call_args.args[0]
+        assert len(groups) == 1
+        assert groups[0]["workMode"] == "ForceDischarge"
+        assert groups[0]["startHour"] == 17
+        assert groups[0]["endHour"] == 20
+        assert groups[0]["fdSoc"] == 30
+
+    @pytest.mark.asyncio
+    async def test_smart_discharge_registers_listeners(self) -> None:
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(inverter=inv, battery_soc_entity="sensor.battery_soc")
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        mock_state_unsub = MagicMock()
+        mock_timer_unsub = MagicMock()
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_state_change_event",
+                return_value=mock_state_unsub,
+            ) as mock_track_state,
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=mock_timer_unsub,
+            ) as mock_track_time,
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 30,
+                    }
+                )
+            )
+
+        mock_track_state.assert_called_once()
+        assert mock_track_state.call_args.args[1] == ["sensor.battery_soc"]
+
+        mock_track_time.assert_called_once()
+
+        unsubs = hass.data[DOMAIN]["_smart_discharge_unsubs"]
+        assert len(unsubs) == 2
+
+    @pytest.mark.asyncio
+    async def test_smart_discharge_missing_entity_raises(self) -> None:
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        hass = _make_hass(inverter=inv, battery_soc_entity="")
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
+            ),
+            pytest.raises(ServiceValidationError, match="Battery SoC entity"),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 30,
+                    }
+                )
+            )
+
+    @pytest.mark.asyncio
+    async def test_smart_discharge_cancels_previous(self) -> None:
+        """A new smart discharge cancels any existing one."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(inverter=inv, battery_soc_entity="sensor.battery_soc")
+
+        prev_unsub = MagicMock()
+        hass.data[DOMAIN]["_smart_discharge_unsubs"] = [prev_unsub]
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_state_change_event",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 30,
+                    }
+                )
+            )
+
+        prev_unsub.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_soc_threshold_triggers_self_use(self) -> None:
+        """SoC at threshold schedules self_use and cancels listeners."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(inverter=inv, battery_soc_entity="sensor.battery_soc")
+
+        captured_callback = None
+
+        def capture_state_callback(
+            _hass: Any, _entities: Any, callback: Any
+        ) -> MagicMock:
+            nonlocal captured_callback
+            captured_callback = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_state_change_event",
+                side_effect=capture_state_callback,
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 30,
+                    }
+                )
+            )
+
+        assert captured_callback is not None
+
+        # Simulate SoC dropping to threshold
+        event = MagicMock()
+        new_state = MagicMock()
+        new_state.state = "30"
+        event.data = {"new_state": new_state}
+
+        captured_callback(event)
+
+        # The callback schedules self_use via async_create_task
+        hass.async_create_task.assert_called_once()
+        # Listeners should be cancelled
+        assert hass.data[DOMAIN]["_smart_discharge_unsubs"] == []
+
+    @pytest.mark.asyncio
+    async def test_soc_above_threshold_no_op(self) -> None:
+        """When SoC is above threshold, nothing happens."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(inverter=inv, battery_soc_entity="sensor.battery_soc")
+
+        captured_callback = None
+
+        def capture_state_callback(
+            _hass: Any, _entities: Any, callback: Any
+        ) -> MagicMock:
+            nonlocal captured_callback
+            captured_callback = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_state_change_event",
+                side_effect=capture_state_callback,
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 30,
+                    }
+                )
+            )
+
+        assert captured_callback is not None
+
+        event = MagicMock()
+        new_state = MagicMock()
+        new_state.state = "50"
+        event.data = {"new_state": new_state}
+
+        captured_callback(event)
+
+        inv.self_use.assert_not_called()
