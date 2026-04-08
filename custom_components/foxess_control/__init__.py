@@ -47,7 +47,7 @@ SCHEMA_FORCE_CHARGE = vol.Schema(
         vol.Required("duration"): cv.time_period,
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
         vol.Optional("start_time"): cv.time,
-        vol.Optional("replace_conflicts", default=False): cv.boolean,
+        vol.Optional("replace_conflicts"): cv.boolean,
     }
 )
 
@@ -56,7 +56,7 @@ SCHEMA_FORCE_DISCHARGE = vol.Schema(
         vol.Required("duration"): cv.time_period,
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
         vol.Optional("start_time"): cv.time,
-        vol.Optional("replace_conflicts", default=False): cv.boolean,
+        vol.Optional("replace_conflicts"): cv.boolean,
     }
 )
 
@@ -65,7 +65,7 @@ SCHEMA_FEEDIN = vol.Schema(
         vol.Required("duration"): cv.time_period,
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
         vol.Optional("start_time"): cv.time,
-        vol.Optional("replace_conflicts", default=False): cv.boolean,
+        vol.Optional("replace_conflicts"): cv.boolean,
     }
 )
 
