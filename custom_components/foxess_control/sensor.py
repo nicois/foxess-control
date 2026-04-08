@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
+from .const import CONF_BATTERY_CAPACITY_KWH, DOMAIN
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -20,11 +20,15 @@ SCAN_INTERVAL = datetime.timedelta(seconds=30)
 _ICON_CHARGING = "mdi:battery-charging"
 _ICON_DEFERRED = "mdi:battery-clock"
 _ICON_DISCHARGING = "mdi:battery-arrow-down"
+_ICON_FORECAST = "mdi:chart-timeline-variant"
 _ICON_IDLE = "mdi:home-battery"
 _ICON_POWER = "mdi:flash"
 _ICON_CLOCK = "mdi:clock-outline"
 _ICON_TIMER = "mdi:timer-sand"
 _STATE_UNAVAILABLE = None
+
+# Resolution for forecast data points (5 minutes).
+_FORECAST_STEP = datetime.timedelta(minutes=5)
 
 
 async def async_setup_entry(
@@ -43,6 +47,7 @@ async def async_setup_entry(
             DischargePowerSensor(hass, entry),
             DischargeWindowSensor(hass, entry),
             DischargeRemainingSensor(hass, entry),
+            BatteryForecastSensor(hass, entry),
         ]
     )
 
@@ -88,6 +93,230 @@ def _get_soc_value(hass: Any, soc_entity: str) -> float | None:
         return float(soc_state.state)
     except (ValueError, TypeError):
         return None
+
+
+def _get_battery_capacity_kwh(hass: HomeAssistant) -> float:
+    """Read battery capacity from the first config entry's options."""
+    domain_data = hass.data.get(DOMAIN)
+    if domain_data is None:
+        return 0.0
+    for key in domain_data:
+        if not str(key).startswith("_"):
+            entry = hass.config_entries.async_get_entry(str(key))
+            if entry is not None:
+                cap: float = entry.options.get(CONF_BATTERY_CAPACITY_KWH, 0.0)
+                return cap
+    return 0.0
+
+
+def _estimate_discharge_remaining(
+    hass: HomeAssistant,
+    ds: dict[str, Any],
+) -> str:
+    """Estimate time until discharge ends or min_soc is reached.
+
+    Returns the shorter of: time remaining in the window, or time
+    to reach min_soc at current discharge power.  Falls back to
+    the window remaining when SoC or capacity aren't available.
+    """
+    now = dt_util.now()
+    end: datetime.datetime = ds["end"]
+    if end.tzinfo is None and now.tzinfo is not None:
+        now = now.replace(tzinfo=None)
+
+    window_remaining = end - now
+    if window_remaining.total_seconds() <= 0:
+        return "ending"
+
+    # Try to estimate time to reach min_soc
+    soc = _get_soc_value(hass, ds.get("soc_entity", ""))
+    capacity_kwh = _get_battery_capacity_kwh(hass)
+    power_w = ds.get("last_power_w", 0)
+    min_soc = ds.get("min_soc", 0)
+
+    if soc is not None and capacity_kwh > 0 and power_w > 0 and soc > min_soc:
+        energy_kwh = (soc - min_soc) / 100.0 * capacity_kwh
+        hours = energy_kwh / (power_w / 1000.0)
+        soc_remaining = datetime.timedelta(hours=hours)
+        remaining = min(window_remaining, soc_remaining)
+    else:
+        remaining = window_remaining
+
+    return _format_duration(remaining)
+
+
+# Fraction of max power used to plan deferred start (mirrors __init__.py).
+_DEFERRED_POWER_FRACTION = 0.8
+
+
+def _format_duration(td: datetime.timedelta) -> str:
+    """Format a timedelta as a compact human-readable string."""
+    total_minutes = int(td.total_seconds() / 60)
+    if total_minutes <= 0:
+        return "0m"
+    hours, minutes = divmod(total_minutes, 60)
+    if hours > 0:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+def _estimate_charge_remaining(
+    hass: HomeAssistant,
+    cs: dict[str, Any],
+) -> str:
+    """Estimate time until charge completes, or starts if deferred.
+
+    - **Deferred**: returns "starts in Xh Ym" — time until charging begins.
+    - **Charging**: returns the shorter of window remaining or time to
+      reach target_soc at current power.
+    - **Fallback**: window remaining when SoC/capacity unavailable.
+    """
+    now = dt_util.now()
+    end: datetime.datetime = cs["end"]
+    if end.tzinfo is None and now.tzinfo is not None:
+        now = now.replace(tzinfo=None)
+
+    window_remaining = end - now
+    if window_remaining.total_seconds() <= 0:
+        return "ending"
+
+    soc = _get_soc_value(hass, cs.get("soc_entity", ""))
+    capacity_kwh = _get_battery_capacity_kwh(hass)
+    target_soc: int = cs.get("target_soc", 100)
+    max_power_w: int = cs.get("max_power_w", 0)
+
+    if not cs.get("charging_started", True):
+        # Deferred — estimate when charging will begin
+        if (
+            soc is not None
+            and capacity_kwh > 0
+            and max_power_w > 0
+            and soc < target_soc
+        ):
+            energy_kwh = (target_soc - soc) / 100.0 * capacity_kwh
+            charge_kw = max_power_w * _DEFERRED_POWER_FRACTION / 1000.0
+            charge_hours = energy_kwh / charge_kw
+            deferred_start = end - datetime.timedelta(hours=charge_hours)
+            wait = deferred_start - now
+            if wait.total_seconds() <= 0:
+                return "starting"
+            return f"starts in {_format_duration(wait)}"
+        return _format_remaining(end)
+
+    # Actively charging — estimate time to target SoC
+    power_w: int = cs.get("last_power_w", 0)
+    if soc is not None and capacity_kwh > 0 and power_w > 0 and soc < target_soc:
+        energy_kwh = (target_soc - soc) / 100.0 * capacity_kwh
+        hours = energy_kwh / (power_w / 1000.0)
+        soc_remaining = datetime.timedelta(hours=hours)
+        remaining = min(window_remaining, soc_remaining)
+    else:
+        remaining = window_remaining
+
+    return _format_duration(remaining)
+
+
+def _build_forecast(
+    hass: HomeAssistant,
+    cs: dict[str, Any] | None,
+    ds: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Build a SoC forecast series for active smart operations.
+
+    Returns a list of ``{"time": epoch_ms, "soc": float}`` dicts
+    suitable for ApexCharts ``data_generator``.
+    """
+    now = dt_util.now()
+    capacity_kwh = _get_battery_capacity_kwh(hass)
+    points: list[dict[str, Any]] = []
+
+    if cs is not None:
+        soc_entity = cs.get("soc_entity", "")
+        soc = _get_soc_value(hass, soc_entity)
+        if soc is None or capacity_kwh <= 0:
+            return []
+
+        end: datetime.datetime = cs["end"]
+        target_soc: int = cs.get("target_soc", 100)
+        max_power_w: int = cs.get("max_power_w", 0)
+        power_w: int = cs.get("last_power_w", 0)
+        charging_started: bool = cs.get("charging_started", True)
+
+        # Rate of SoC change per second while charging
+        charge_rate = 0.0
+        if power_w > 0 and capacity_kwh > 0:
+            charge_rate = (power_w / 1000.0) / capacity_kwh * 100.0 / 3600.0
+
+        # Deferred: compute when charging will start
+        deferred_start = now
+        if not charging_started and max_power_w > 0:
+            energy_kwh = (target_soc - soc) / 100.0 * capacity_kwh
+            charge_kw = max_power_w * _DEFERRED_POWER_FRACTION / 1000.0
+            if charge_kw > 0:
+                charge_hours = energy_kwh / charge_kw
+                deferred_start = end - datetime.timedelta(hours=charge_hours)
+                if deferred_start < now:
+                    deferred_start = now
+            # Use planned power rate for projection after deferred start
+            if capacity_kwh > 0:
+                planned_power = max_power_w * _DEFERRED_POWER_FRACTION
+                charge_rate = (planned_power / 1000.0) / capacity_kwh * 100.0 / 3600.0
+
+        t = now
+        cur_soc = soc
+        while t <= end:
+            epoch_ms = int(t.timestamp() * 1000)
+            points.append({"time": epoch_ms, "soc": round(cur_soc, 1)})
+            t += _FORECAST_STEP
+            if not charging_started and t < deferred_start:
+                # Still waiting — SoC stays flat
+                continue
+            step_secs = _FORECAST_STEP.total_seconds()
+            cur_soc = min(cur_soc + charge_rate * step_secs, target_soc)
+
+        # Final point at end
+        if points and points[-1]["time"] < int(end.timestamp() * 1000):
+            points.append(
+                {
+                    "time": int(end.timestamp() * 1000),
+                    "soc": round(cur_soc, 1),
+                }
+            )
+        return points
+
+    if ds is not None:
+        soc_entity = ds.get("soc_entity", "")
+        soc = _get_soc_value(hass, soc_entity)
+        if soc is None or capacity_kwh <= 0:
+            return []
+
+        end = ds["end"]
+        min_soc: int = ds.get("min_soc", 0)
+        power_w = ds.get("last_power_w", 0)
+
+        discharge_rate = 0.0
+        if power_w > 0 and capacity_kwh > 0:
+            discharge_rate = (power_w / 1000.0) / capacity_kwh * 100.0 / 3600.0
+
+        t = now
+        cur_soc = soc
+        while t <= end:
+            epoch_ms = int(t.timestamp() * 1000)
+            points.append({"time": epoch_ms, "soc": round(cur_soc, 1)})
+            t += _FORECAST_STEP
+            step_secs = _FORECAST_STEP.total_seconds()
+            cur_soc = max(cur_soc - discharge_rate * step_secs, min_soc)
+
+        if points and points[-1]["time"] < int(end.timestamp() * 1000):
+            points.append(
+                {
+                    "time": int(end.timestamp() * 1000),
+                    "soc": round(cur_soc, 1),
+                }
+            )
+        return points
+
+    return []
 
 
 def _get_charge_state(hass: HomeAssistant) -> dict[str, Any] | None:
@@ -359,7 +588,7 @@ class ChargeRemainingSensor(SensorEntity):
         cs = _get_charge_state(self.hass)
         if cs is None:
             return _STATE_UNAVAILABLE
-        return _format_remaining(cs["end"])
+        return _estimate_charge_remaining(self.hass, cs)
 
 
 class DischargePowerSensor(SensorEntity):
@@ -428,4 +657,51 @@ class DischargeRemainingSensor(SensorEntity):
         ds = _get_discharge_state(self.hass)
         if ds is None:
             return _STATE_UNAVAILABLE
-        return _format_remaining(ds["end"])
+        return _estimate_discharge_remaining(self.hass, ds)
+
+
+class BatteryForecastSensor(SensorEntity):
+    """Projected battery SoC over time for ApexCharts display.
+
+    Provides a ``forecast`` attribute containing a list of
+    ``{"time": epoch_ms, "soc": float}`` points that ApexCharts
+    can consume via ``data_generator``::
+
+        data_generator: |
+          return entity.attributes.forecast.map(
+            p => [p.time, p.soc]
+          );
+    """
+
+    _attr_should_poll = True
+    _attr_icon = _ICON_FORECAST
+    _attr_native_unit_of_measurement = "%"
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_battery_forecast"
+        self._attr_name = "FoxESS Battery Forecast"
+        self.hass = hass
+
+    @property
+    def native_value(self) -> float | None:
+        cs = _get_charge_state(self.hass)
+        ds = _get_discharge_state(self.hass)
+        if cs is None and ds is None:
+            return _STATE_UNAVAILABLE
+        soc_entity = ""
+        if cs is not None:
+            soc_entity = cs.get("soc_entity", "")
+        elif ds is not None:
+            soc_entity = ds.get("soc_entity", "")
+        soc = _get_soc_value(self.hass, soc_entity)
+        return soc
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        cs = _get_charge_state(self.hass)
+        ds = _get_discharge_state(self.hass)
+        if cs is None and ds is None:
+            return None
+        forecast = _build_forecast(self.hass, cs, ds)
+        return {"forecast": forecast}

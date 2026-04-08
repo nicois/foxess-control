@@ -10,6 +10,7 @@ import pytest
 
 from custom_components.foxess_control.const import DOMAIN
 from custom_components.foxess_control.sensor import (
+    BatteryForecastSensor,
     ChargePowerSensor,
     ChargeRemainingSensor,
     ChargeWindowSensor,
@@ -304,7 +305,8 @@ class TestChargeWindowSensor:
 
 
 class TestChargeRemainingSensor:
-    def test_value_when_active(self) -> None:
+    def test_value_when_active_no_capacity(self) -> None:
+        """Without battery capacity, falls back to window remaining."""
         hass = _make_hass(smart_charge_state=_charge_state())
         sensor = ChargeRemainingSensor(hass, _make_entry())
         with patch(
@@ -312,6 +314,93 @@ class TestChargeRemainingSensor:
             return_value=datetime.datetime(2026, 4, 8, 5, 0, 0),
         ):
             assert sensor.native_value == "1h 0m"
+
+    def test_soc_estimate_shorter_than_window(self) -> None:
+        """When target SoC will be reached before window ends, show that."""
+        # 10kWh battery, SoC=70%, target=80%, power=5000W
+        # Energy = 10% * 10kWh = 1kWh; time = 1kWh / 5kW = 0.2h = 12min
+        # Window remaining at 02:30 with end 06:00 = 3h30m
+        hass = _make_hass(
+            smart_charge_state=_charge_state(
+                last_power_w=5000, target_soc=80, charging_started=True
+            )
+        )
+        hass.data[DOMAIN]["entry1"] = {"inverter": MagicMock()}
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        soc_state = MagicMock()
+        soc_state.state = "70"
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        sensor = ChargeRemainingSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 2, 30, 0),
+        ):
+            assert sensor.native_value == "12m"
+
+    def test_deferred_shows_starts_in(self) -> None:
+        """When deferred, show time until charging begins."""
+        # 10kWh battery, SoC=20%, target=80%, max_power=10500W
+        # Energy = 60% * 10kWh = 6kWh
+        # Charge at 80% of 10500W = 8400W = 8.4kW
+        # Hours = 6 / 8.4 = 0.714h ≈ 42.9min
+        # Deferred start = 06:00 - 42.9min ≈ 05:17
+        # At 02:00, wait = ~3h 17m
+        hass = _make_hass(
+            smart_charge_state=_charge_state(
+                last_power_w=0,
+                charging_started=False,
+                max_power_w=10500,
+                target_soc=80,
+            )
+        )
+        hass.data[DOMAIN]["entry1"] = {"inverter": MagicMock()}
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        soc_state = MagicMock()
+        soc_state.state = "20"
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        sensor = ChargeRemainingSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 2, 0, 0),
+        ):
+            result = sensor.native_value
+            assert result is not None
+            assert result.startswith("starts in 3h")
+
+    def test_deferred_about_to_start(self) -> None:
+        """When deferred start time has passed, show 'starting'."""
+        hass = _make_hass(
+            smart_charge_state=_charge_state(
+                last_power_w=0,
+                charging_started=False,
+                max_power_w=10500,
+                target_soc=80,
+            )
+        )
+        hass.data[DOMAIN]["entry1"] = {"inverter": MagicMock()}
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        soc_state = MagicMock()
+        soc_state.state = "20"
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        sensor = ChargeRemainingSensor(hass, _make_entry())
+        # At 05:50, deferred start (~05:17) has passed
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 5, 50, 0),
+        ):
+            assert sensor.native_value == "starting"
 
     def test_none_when_idle(self) -> None:
         sensor = ChargeRemainingSensor(_make_hass(), _make_entry())
@@ -352,7 +441,8 @@ class TestDischargeWindowSensor:
 
 
 class TestDischargeRemainingSensor:
-    def test_value_when_active(self) -> None:
+    def test_value_when_active_no_capacity(self) -> None:
+        """Without battery capacity, falls back to window remaining."""
         hass = _make_hass(smart_discharge_state=_discharge_state())
         sensor = DischargeRemainingSensor(hass, _make_entry())
         with patch(
@@ -361,9 +451,214 @@ class TestDischargeRemainingSensor:
         ):
             assert sensor.native_value == "45m"
 
+    def test_soc_estimate_shorter_than_window(self) -> None:
+        """When SoC will reach min_soc before window ends, show that."""
+        # 10kWh battery, SoC=40%, min_soc=30%, power=5000W
+        # Energy = 10% * 10kWh = 1kWh; time = 1kWh / 5kW = 0.2h = 12min
+        # Window remaining at 17:30 with end 20:00 = 2h30m
+        # So SoC estimate (12m) is shorter
+        hass = _make_hass(
+            smart_discharge_state=_discharge_state(last_power_w=5000, min_soc=30)
+        )
+        # Add a real entry_id so _get_battery_capacity_kwh finds it
+        hass.data[DOMAIN]["entry1"] = {"inverter": MagicMock()}
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        soc_state = MagicMock()
+        soc_state.state = "40"
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        sensor = DischargeRemainingSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 17, 30, 0),
+        ):
+            assert sensor.native_value == "12m"
+
+    def test_window_shorter_than_soc_estimate(self) -> None:
+        """When window ends before min_soc would be reached, show window."""
+        # 10kWh battery, SoC=80%, min_soc=30%, power=1000W
+        # Energy = 50% * 10kWh = 5kWh; time = 5kWh / 1kW = 5h
+        # Window remaining at 19:30 with end 20:00 = 30m
+        # Window (30m) is shorter
+        hass = _make_hass(
+            smart_discharge_state=_discharge_state(last_power_w=1000, min_soc=30)
+        )
+        hass.data[DOMAIN]["entry1"] = {"inverter": MagicMock()}
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        soc_state = MagicMock()
+        soc_state.state = "80"
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        sensor = DischargeRemainingSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 19, 30, 0),
+        ):
+            assert sensor.native_value == "30m"
+
     def test_none_when_idle(self) -> None:
         sensor = DischargeRemainingSensor(_make_hass(), _make_entry())
         assert sensor.native_value is None
+
+
+# ---------------------------------------------------------------------------
+# Battery Forecast sensor
+# ---------------------------------------------------------------------------
+
+
+class TestBatteryForecastSensor:
+    def test_idle_returns_none(self) -> None:
+        sensor = BatteryForecastSensor(_make_hass(), _make_entry())
+        assert sensor.native_value is None
+        assert sensor.extra_state_attributes is None
+
+    def test_charging_forecast_rises_to_target(self) -> None:
+        """Forecast SoC rises from current to target during charge."""
+        hass = _make_hass(
+            smart_charge_state=_charge_state(
+                last_power_w=5000,
+                target_soc=80,
+                charging_started=True,
+            )
+        )
+        hass.data[DOMAIN]["entry1"] = {"inverter": MagicMock()}
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        soc_state = MagicMock()
+        soc_state.state = "40"
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        sensor = BatteryForecastSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 4, 0, 0),
+        ):
+            assert sensor.native_value == 40.0
+            attrs = sensor.extra_state_attributes
+            assert attrs is not None
+            forecast = attrs["forecast"]
+            assert len(forecast) > 0
+            # First point is current SoC
+            assert forecast[0]["soc"] == 40.0
+            # SoC should rise over time
+            assert forecast[-1]["soc"] > forecast[0]["soc"]
+            # Should not exceed target
+            assert all(p["soc"] <= 80.0 for p in forecast)
+
+    def test_discharging_forecast_drops_to_min(self) -> None:
+        """Forecast SoC drops from current toward min_soc."""
+        hass = _make_hass(
+            smart_discharge_state=_discharge_state(last_power_w=5000, min_soc=30)
+        )
+        hass.data[DOMAIN]["entry1"] = {"inverter": MagicMock()}
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        soc_state = MagicMock()
+        soc_state.state = "70"
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        sensor = BatteryForecastSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 17, 30, 0),
+        ):
+            assert sensor.native_value == 70.0
+            attrs = sensor.extra_state_attributes
+            assert attrs is not None
+            forecast = attrs["forecast"]
+            assert len(forecast) > 0
+            assert forecast[0]["soc"] == 70.0
+            # SoC should drop over time
+            assert forecast[-1]["soc"] < forecast[0]["soc"]
+            # Should not go below min_soc
+            assert all(p["soc"] >= 30.0 for p in forecast)
+
+    def test_deferred_charge_shows_flat_then_rise(self) -> None:
+        """Deferred charge: SoC stays flat, then rises after start."""
+        hass = _make_hass(
+            smart_charge_state=_charge_state(
+                last_power_w=0,
+                charging_started=False,
+                max_power_w=10500,
+                target_soc=80,
+            )
+        )
+        hass.data[DOMAIN]["entry1"] = {"inverter": MagicMock()}
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        soc_state = MagicMock()
+        soc_state.state = "20"
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        sensor = BatteryForecastSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 2, 0, 0),
+        ):
+            attrs = sensor.extra_state_attributes
+            assert attrs is not None
+            forecast = attrs["forecast"]
+            assert len(forecast) > 2
+            # Early points should be flat (deferred)
+            assert forecast[0]["soc"] == 20.0
+            assert forecast[1]["soc"] == 20.0
+            # Last point should be higher
+            assert forecast[-1]["soc"] > 20.0
+
+    def test_no_forecast_without_capacity(self) -> None:
+        """Without battery capacity configured, forecast is empty."""
+        hass = _make_hass(smart_charge_state=_charge_state())
+
+        soc_state = MagicMock()
+        soc_state.state = "40"
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        sensor = BatteryForecastSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 4, 0, 0),
+        ):
+            attrs = sensor.extra_state_attributes
+            assert attrs is not None
+            assert attrs["forecast"] == []
+
+    def test_forecast_points_have_time_and_soc(self) -> None:
+        """Each forecast point has 'time' (epoch ms) and 'soc' keys."""
+        hass = _make_hass(smart_discharge_state=_discharge_state(last_power_w=5000))
+        hass.data[DOMAIN]["entry1"] = {"inverter": MagicMock()}
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        soc_state = MagicMock()
+        soc_state.state = "60"
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        sensor = BatteryForecastSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 18, 0, 0),
+        ):
+            attrs = sensor.extra_state_attributes
+            assert attrs is not None
+            forecast = attrs["forecast"]
+            for point in forecast:
+                assert "time" in point
+                assert "soc" in point
+                assert isinstance(point["time"], int)
+                assert isinstance(point["soc"], int | float)
 
 
 # ---------------------------------------------------------------------------
@@ -383,7 +678,7 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(hass, entry, mock_add)  # type: ignore[arg-type]
 
-        assert len(added) == 8
+        assert len(added) == 9
         assert isinstance(added[0], InverterOverrideStatusSensor)
         assert isinstance(added[1], SmartOperationsOverviewSensor)
         assert isinstance(added[2], ChargePowerSensor)
@@ -392,3 +687,4 @@ class TestAsyncSetupEntry:
         assert isinstance(added[5], DischargePowerSensor)
         assert isinstance(added[6], DischargeWindowSensor)
         assert isinstance(added[7], DischargeRemainingSensor)
+        assert isinstance(added[8], BatteryForecastSensor)
