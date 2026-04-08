@@ -724,6 +724,7 @@ def _register_services(hass: HomeAssistant) -> None:
         # Store state for binary sensor and diagnostics
         hass.data[DOMAIN]["_smart_discharge_state"] = {
             "groups": groups,
+            "start": start,
             "end": end,
             "min_soc": min_soc,
             "last_power_w": effective_power,
@@ -910,6 +911,7 @@ def _register_services(hass: HomeAssistant) -> None:
         # Store state for periodic adjustments
         hass.data[DOMAIN]["_smart_charge_state"] = {
             "groups": initial_groups,
+            "start": start,
             "end": end,
             "target_soc": target_soc,
             "battery_capacity_kwh": battery_capacity_kwh,
