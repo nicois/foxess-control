@@ -989,9 +989,10 @@ def _register_services(hass: HomeAssistant) -> None:
                     cur_soc,
                     state["target_soc"],
                 )
-                if state["charging_started"]:
-                    await _remove_charge_override()
+                charging_started = state["charging_started"]
                 _cancel_smart_charge(hass)
+                if charging_started:
+                    await _remove_charge_override()
                 return
 
             now_dt = dt_util.now()
