@@ -27,7 +27,7 @@
           "description": "Godzina rozpoczęcia nadpisania. Domyślnie teraz."
         },
         "replace_conflicts": {
-          "name": "Zastąp konflikty",
+          "name": "Usuń konfliktujące nadpisania zamiast przerywać",
           "description": "Jeśli włączone, istniejące nakładające się nadpisania zostaną usunięte zamiast przerywania operacji."
         }
       }
@@ -49,7 +49,7 @@
           "description": "Godzina rozpoczęcia nadpisania. Domyślnie teraz."
         },
         "replace_conflicts": {
-          "name": "Zastąp konflikty",
+          "name": "Usuń konfliktujące nadpisania zamiast przerywać",
           "description": "Jeśli włączone, istniejące nakładające się nadpisania zostaną usunięte zamiast przerywania operacji."
         }
       }
@@ -71,7 +71,7 @@
           "description": "Godzina rozpoczęcia nadpisania. Domyślnie teraz."
         },
         "replace_conflicts": {
-          "name": "Zastąp konflikty",
+          "name": "Usuń konfliktujące nadpisania zamiast przerywać",
           "description": "Jeśli włączone, istniejące nakładające się nadpisania zostaną usunięte zamiast przerywania operacji."
         }
       }

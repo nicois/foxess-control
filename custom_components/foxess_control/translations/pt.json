@@ -27,7 +27,7 @@
           "description": "Hora do dia para iniciar a substituição. Padrão: agora."
         },
         "replace_conflicts": {
-          "name": "Substituir conflitos",
+          "name": "Remover substituições em conflito em vez de abortar",
           "description": "Se ativado, remove silenciosamente as substituições existentes sobrepostas em vez de abortar."
         }
       }
@@ -49,7 +49,7 @@
           "description": "Hora do dia para iniciar a substituição. Padrão: agora."
         },
         "replace_conflicts": {
-          "name": "Substituir conflitos",
+          "name": "Remover substituições em conflito em vez de abortar",
           "description": "Se ativado, remove silenciosamente as substituições existentes sobrepostas em vez de abortar."
         }
       }
@@ -71,7 +71,7 @@
           "description": "Hora do dia para iniciar a substituição. Padrão: agora."
         },
         "replace_conflicts": {
-          "name": "Substituir conflitos",
+          "name": "Remover substituições em conflito em vez de abortar",
           "description": "Se ativado, remove silenciosamente as substituições existentes sobrepostas em vez de abortar."
         }
       }

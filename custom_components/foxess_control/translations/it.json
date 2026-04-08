@@ -27,7 +27,7 @@
           "description": "Ora del giorno per avviare la forzatura. Predefinito: adesso."
         },
         "replace_conflicts": {
-          "name": "Sostituisci conflitti",
+          "name": "Rimuovi forzature in conflitto anziché interrompere",
           "description": "Se abilitato, rimuove silenziosamente le forzature esistenti sovrapposte anziché interrompere."
         }
       }
@@ -49,7 +49,7 @@
           "description": "Ora del giorno per avviare la forzatura. Predefinito: adesso."
         },
         "replace_conflicts": {
-          "name": "Sostituisci conflitti",
+          "name": "Rimuovi forzature in conflitto anziché interrompere",
           "description": "Se abilitato, rimuove silenziosamente le forzature esistenti sovrapposte anziché interrompere."
         }
       }
@@ -71,7 +71,7 @@
           "description": "Ora del giorno per avviare la forzatura. Predefinito: adesso."
         },
         "replace_conflicts": {
-          "name": "Sostituisci conflitti",
+          "name": "Rimuovi forzature in conflitto anziché interrompere",
           "description": "Se abilitato, rimuove silenziosamente le forzature esistenti sovrapposte anziché interrompere."
         }
       }

@@ -27,7 +27,7 @@
           "description": "Tageszeit für den Start der Übersteuerung. Standardmäßig jetzt."
         },
         "replace_conflicts": {
-          "name": "Konflikte ersetzen",
+          "name": "Konfliktende Übersteuerungen entfernen statt abbrechen",
           "description": "Wenn aktiviert, werden bestehende überlappende Übersteuerungen stillschweigend entfernt, anstatt abzubrechen."
         }
       }
@@ -49,7 +49,7 @@
           "description": "Tageszeit für den Start der Übersteuerung. Standardmäßig jetzt."
         },
         "replace_conflicts": {
-          "name": "Konflikte ersetzen",
+          "name": "Konfliktende Übersteuerungen entfernen statt abbrechen",
           "description": "Wenn aktiviert, werden bestehende überlappende Übersteuerungen stillschweigend entfernt, anstatt abzubrechen."
         }
       }
@@ -71,7 +71,7 @@
           "description": "Tageszeit für den Start der Übersteuerung. Standardmäßig jetzt."
         },
         "replace_conflicts": {
-          "name": "Konflikte ersetzen",
+          "name": "Konfliktende Übersteuerungen entfernen statt abbrechen",
           "description": "Wenn aktiviert, werden bestehende überlappende Übersteuerungen stillschweigend entfernt, anstatt abzubrechen."
         }
       }

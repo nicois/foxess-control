@@ -27,7 +27,7 @@
           "description": "Time of day to start the override. Defaults to now if not set."
         },
         "replace_conflicts": {
-          "name": "Replace conflicts",
+          "name": "Remove conflicting overrides instead of aborting",
           "description": "If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting."
         }
       }
@@ -49,7 +49,7 @@
           "description": "Time of day to start the override. Defaults to now if not set."
         },
         "replace_conflicts": {
-          "name": "Replace conflicts",
+          "name": "Remove conflicting overrides instead of aborting",
           "description": "If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting."
         }
       }
@@ -71,7 +71,7 @@
           "description": "Time of day to start the override. Defaults to now if not set."
         },
         "replace_conflicts": {
-          "name": "Replace conflicts",
+          "name": "Remove conflicting overrides instead of aborting",
           "description": "If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting."
         }
       }

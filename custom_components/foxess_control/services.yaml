@@ -42,7 +42,7 @@ feedin:
       selector:
         time:
     replace_conflicts:
-      name: Replace conflicts
+      name: Remove conflicting overrides instead of aborting
       description: >-
         If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting.
       selector:
@@ -74,7 +74,7 @@ force_charge:
       selector:
         time:
     replace_conflicts:
-      name: Replace conflicts
+      name: Remove conflicting overrides instead of aborting
       description: >-
         If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting.
       selector:
@@ -106,7 +106,7 @@ force_discharge:
       selector:
         time:
     replace_conflicts:
-      name: Replace conflicts
+      name: Remove conflicting overrides instead of aborting
       description: >-
         If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting.
       selector:
