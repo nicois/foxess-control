@@ -24,4 +24,13 @@ POLLED_VARIABLES = [
     "pvPower",
     "ResidualEnergy",
     "batTemperature",
+    "gridConsumptionPower",
+    "feedinPower",
+    "generationPower",
+    "batVolt",
+    "batCurrent",
+    "pv1Power",
+    "pv2Power",
+    "ambientTemperation",
+    "invTemperation",
 ]

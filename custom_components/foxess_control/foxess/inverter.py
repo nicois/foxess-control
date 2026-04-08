@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, TypedDict
 
@@ -252,22 +253,39 @@ class Inverter:
 
     # --- Query current mode ---
 
-    def get_current_mode(self) -> WorkMode | None:
-        """Get the currently active work mode from the schedule.
+    def get_current_mode(self, now: datetime.datetime | None = None) -> WorkMode | None:
+        """Get the work mode that is active right now.
 
-        Finds the first enabled schedule group and returns its work mode,
-        or None if no groups are enabled.
+        Checks enabled schedule groups against the current time and returns
+        the mode of the group whose window contains *now*.  Falls back to
+        the first enabled group if no group matches the current time (e.g.
+        a full-day 00:00-23:59 window).  Returns ``None`` when no groups
+        are enabled.
         """
         schedule = self.get_schedule()
         groups: list[dict[str, Any]] = schedule.get("groups", [])
-        for group in groups:
-            if group.get("enable") == 1:
-                mode_str = group.get("workMode", "")
+        enabled = [g for g in groups if g.get("enable") == 1]
+        if not enabled:
+            return None
+
+        if now is None:
+            now = datetime.datetime.now()
+        cur_minutes = now.hour * 60 + now.minute
+
+        for group in enabled:
+            start = group.get("startHour", 0) * 60 + group.get("startMinute", 0)
+            end = group.get("endHour", 0) * 60 + group.get("endMinute", 0)
+            if start <= cur_minutes < end:
                 try:
-                    return WorkMode(mode_str)
+                    return WorkMode(group.get("workMode", ""))
                 except ValueError:
                     return None
-        return None
+
+        # No group covers the current time — fall back to first enabled
+        try:
+            return WorkMode(enabled[0].get("workMode", ""))
+        except ValueError:
+            return None
 
     def get_status_summary(self) -> dict[str, Any]:
         """Get a combined summary of current mode, SoC, and battery state."""

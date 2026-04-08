@@ -14,7 +14,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .const import CONF_BATTERY_CAPACITY_KWH, DOMAIN
-from .coordinator import FoxESSDataCoordinator
+from .coordinator import FoxESSDataCoordinator, get_coordinator_soc
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -63,6 +63,7 @@ async def async_setup_entry(
             FoxESSPolledSensor(coordinator, entry, desc)
             for desc in POLLED_SENSOR_DESCRIPTIONS
         )
+        entities.append(FoxESSWorkModeSensor(coordinator, entry))
 
     async_add_entities(entities)
 
@@ -100,14 +101,17 @@ def _format_remaining(end: datetime.datetime) -> str:
 
 
 def _get_soc_value(hass: Any, soc_entity: str) -> float | None:
-    """Read the current SoC from a HA entity, or None if unavailable."""
-    soc_state = hass.states.get(soc_entity)
-    if soc_state is None or soc_state.state in ("unknown", "unavailable"):
-        return None
-    try:
-        return float(soc_state.state)
-    except (ValueError, TypeError):
-        return None
+    """Read the current SoC, preferring external entity, falling back to coordinator."""
+    if soc_entity:
+        soc_state = hass.states.get(soc_entity)
+        if soc_state is not None and soc_state.state not in ("unknown", "unavailable"):
+            try:
+                return float(soc_state.state)
+            except (ValueError, TypeError):
+                pass
+
+    # Fall back to coordinator data
+    return get_coordinator_soc(hass)
 
 
 def _get_battery_capacity_kwh(hass: HomeAssistant) -> float:
@@ -823,6 +827,87 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         SensorStateClass.MEASUREMENT,
         "mdi:thermometer",
     ),
+    _PolledSensorDescription(
+        "gridConsumptionPower",
+        "FoxESS Grid Consumption",
+        "grid_consumption",
+        SensorDeviceClass.POWER,
+        "kW",
+        SensorStateClass.MEASUREMENT,
+        "mdi:transmission-tower-import",
+    ),
+    _PolledSensorDescription(
+        "feedinPower",
+        "FoxESS Grid Feed-in",
+        "feedin_power",
+        SensorDeviceClass.POWER,
+        "kW",
+        SensorStateClass.MEASUREMENT,
+        "mdi:transmission-tower-export",
+    ),
+    _PolledSensorDescription(
+        "generationPower",
+        "FoxESS Generation",
+        "generation_power",
+        SensorDeviceClass.POWER,
+        "kW",
+        SensorStateClass.MEASUREMENT,
+        "mdi:solar-power-variant",
+    ),
+    _PolledSensorDescription(
+        "batVolt",
+        "FoxESS Battery Voltage",
+        "bat_volt",
+        SensorDeviceClass.VOLTAGE,
+        "V",
+        SensorStateClass.MEASUREMENT,
+        "mdi:flash-triangle",
+    ),
+    _PolledSensorDescription(
+        "batCurrent",
+        "FoxESS Battery Current",
+        "bat_current",
+        SensorDeviceClass.CURRENT,
+        "A",
+        SensorStateClass.MEASUREMENT,
+        "mdi:current-dc",
+    ),
+    _PolledSensorDescription(
+        "pv1Power",
+        "FoxESS PV1 Power",
+        "pv1_power",
+        SensorDeviceClass.POWER,
+        "kW",
+        SensorStateClass.MEASUREMENT,
+        "mdi:solar-panel",
+    ),
+    _PolledSensorDescription(
+        "pv2Power",
+        "FoxESS PV2 Power",
+        "pv2_power",
+        SensorDeviceClass.POWER,
+        "kW",
+        SensorStateClass.MEASUREMENT,
+        "mdi:solar-panel",
+    ),
+    _PolledSensorDescription(
+        "ambientTemperation",
+        "FoxESS Ambient Temperature",
+        "ambient_temp",
+        SensorDeviceClass.TEMPERATURE,
+        "°C",
+        SensorStateClass.MEASUREMENT,
+        "mdi:thermometer",
+    ),
+    _PolledSensorDescription(
+        "invTemperation",
+        "FoxESS Inverter Temperature",
+        "inverter_temp",
+        SensorDeviceClass.TEMPERATURE,
+        "°C",
+        SensorStateClass.MEASUREMENT,
+        "mdi:thermometer-alert",
+    ),
 ]
 
 
@@ -857,3 +942,25 @@ class FoxESSPolledSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity)
             return float(val)
         except (ValueError, TypeError):
             return None
+
+
+class FoxESSWorkModeSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity):
+    """Sensor showing the inverter's current work mode."""
+
+    _attr_has_entity_name = False
+    _attr_icon = "mdi:state-machine"
+
+    def __init__(
+        self,
+        coordinator: FoxESSDataCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_work_mode"
+        self._attr_name = "FoxESS Work Mode"
+
+    @property
+    def native_value(self) -> str | None:
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.get("_work_mode")

@@ -35,7 +35,7 @@ from .const import (
     MAX_OVERRIDE_HOURS,
     PLATFORMS,
 )
-from .coordinator import FoxESSDataCoordinator
+from .coordinator import FoxESSDataCoordinator, get_coordinator_soc
 from .foxess import FoxESSClient, Inverter, WorkMode
 
 if TYPE_CHECKING:
@@ -257,15 +257,7 @@ def _get_current_soc(hass: HomeAssistant) -> float | None:
                 return float(soc_state.state)
 
     # Fall back to coordinator data
-    entry_id = _first_entry_id(hass)
-    coordinator: FoxESSDataCoordinator | None = (
-        hass.data[DOMAIN].get(entry_id, {}).get("coordinator")
-    )
-    if coordinator is not None and coordinator.data:
-        with contextlib.suppress(ValueError, TypeError):
-            return float(coordinator.data["SoC"])
-
-    return None
+    return get_coordinator_soc(hass)
 
 
 def _cancel_smart_discharge(hass: HomeAssistant) -> None:

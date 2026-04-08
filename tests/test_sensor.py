@@ -19,8 +19,10 @@ from custom_components.foxess_control.sensor import (
     DischargeRemainingSensor,
     DischargeWindowSensor,
     FoxESSPolledSensor,
+    FoxESSWorkModeSensor,
     InverterOverrideStatusSensor,
     SmartOperationsOverviewSensor,
+    _get_soc_value,
     async_setup_entry,
 )
 
@@ -719,6 +721,15 @@ class TestFoxESSPolledSensor:
                 "pvPower": 4.1,
                 "ResidualEnergy": 8.0,
                 "batTemperature": 25.0,
+                "gridConsumptionPower": 2.1,
+                "feedinPower": 0.3,
+                "generationPower": 4.5,
+                "batVolt": 52.1,
+                "batCurrent": 23.0,
+                "pv1Power": 2.5,
+                "pv2Power": 2.0,
+                "ambientTemperation": 18.0,
+                "invTemperation": 35.0,
             }
         )
         entry = _make_entry()
@@ -726,10 +737,101 @@ class TestFoxESSPolledSensor:
             FoxESSPolledSensor(coordinator, entry, desc)
             for desc in POLLED_SENSOR_DESCRIPTIONS
         ]
-        assert len(sensors) == 7
+        assert len(sensors) == 16
         # All should have a non-None value
         for s in sensors:
             assert s.native_value is not None
+
+
+# ---------------------------------------------------------------------------
+# FoxESSWorkModeSensor
+# ---------------------------------------------------------------------------
+
+
+class TestFoxESSWorkModeSensor:
+    """Tests for the work mode sensor."""
+
+    def _make_coordinator(self, data: dict[str, Any] | None = None) -> MagicMock:
+        coordinator = MagicMock()
+        coordinator.data = data
+        return coordinator
+
+    def test_returns_mode_string(self) -> None:
+        coordinator = self._make_coordinator({"_work_mode": "SelfUse"})
+        sensor = FoxESSWorkModeSensor(coordinator, _make_entry())
+        assert sensor.native_value == "SelfUse"
+
+    def test_returns_none_when_data_is_none(self) -> None:
+        coordinator = self._make_coordinator(None)
+        sensor = FoxESSWorkModeSensor(coordinator, _make_entry())
+        assert sensor.native_value is None
+
+    def test_returns_none_when_mode_is_none(self) -> None:
+        coordinator = self._make_coordinator({"_work_mode": None})
+        sensor = FoxESSWorkModeSensor(coordinator, _make_entry())
+        assert sensor.native_value is None
+
+    def test_unique_id(self) -> None:
+        coordinator = self._make_coordinator({})
+        sensor = FoxESSWorkModeSensor(coordinator, _make_entry("abc"))
+        assert sensor.unique_id == "abc_work_mode"
+
+    def test_name(self) -> None:
+        coordinator = self._make_coordinator({})
+        sensor = FoxESSWorkModeSensor(coordinator, _make_entry())
+        assert sensor.name == "FoxESS Work Mode"
+
+
+# ---------------------------------------------------------------------------
+# _get_soc_value coordinator fallback
+# ---------------------------------------------------------------------------
+
+
+class TestGetSocValue:
+    """Tests for _get_soc_value with coordinator fallback."""
+
+    def test_prefers_external_entity(self) -> None:
+        hass = _make_hass()
+        soc_state = MagicMock()
+        soc_state.state = "65.0"
+        hass.states.get = MagicMock(return_value=soc_state)
+        # Also provide coordinator data — should be ignored
+        coordinator = MagicMock()
+        coordinator.data = {"SoC": 50.0}
+        hass.data[DOMAIN]["entry1"] = {"coordinator": coordinator}
+
+        assert _get_soc_value(hass, "sensor.battery_soc") == 65.0
+
+    def test_falls_back_to_coordinator_when_entity_empty(self) -> None:
+        hass = _make_hass()
+        coordinator = MagicMock()
+        coordinator.data = {"SoC": 72.0}
+        hass.data[DOMAIN]["entry1"] = {"coordinator": coordinator}
+
+        assert _get_soc_value(hass, "") == 72.0
+
+    def test_falls_back_to_coordinator_when_entity_unavailable(self) -> None:
+        hass = _make_hass()
+        soc_state = MagicMock()
+        soc_state.state = "unavailable"
+        hass.states.get = MagicMock(return_value=soc_state)
+        coordinator = MagicMock()
+        coordinator.data = {"SoC": 45.0}
+        hass.data[DOMAIN]["entry1"] = {"coordinator": coordinator}
+
+        assert _get_soc_value(hass, "sensor.battery_soc") == 45.0
+
+    def test_returns_none_when_both_unavailable(self) -> None:
+        hass = _make_hass()
+        hass.states.get = MagicMock(return_value=None)
+
+        assert _get_soc_value(hass, "") is None
+
+    def test_returns_none_when_no_domain_data(self) -> None:
+        hass = MagicMock()
+        hass.data = {}
+
+        assert _get_soc_value(hass, "") is None
 
 
 # ---------------------------------------------------------------------------
@@ -776,6 +878,8 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(hass, entry, mock_add)  # type: ignore[arg-type]
 
-        assert len(added) == 16  # 9 existing + 7 polled
+        assert len(added) == 26  # 9 existing + 16 polled + 1 work mode
         polled = [e for e in added if isinstance(e, FoxESSPolledSensor)]
-        assert len(polled) == 7
+        assert len(polled) == 16
+        work_mode = [e for e in added if isinstance(e, FoxESSWorkModeSensor)]
+        assert len(work_mode) == 1

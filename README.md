@@ -212,8 +212,18 @@ The integration polls the FoxESS Cloud API at a configurable interval (default: 
 | `sensor.foxess_solar_power` | Current solar generation | kW |
 | `sensor.foxess_residual_energy` | Residual energy in battery | kWh |
 | `sensor.foxess_battery_temperature` | Battery temperature | °C |
+| `sensor.foxess_grid_consumption` | Power drawn from grid | kW |
+| `sensor.foxess_feedin_power` | Power fed to grid | kW |
+| `sensor.foxess_generation_power` | Total generation power | kW |
+| `sensor.foxess_battery_voltage` | Battery voltage | V |
+| `sensor.foxess_battery_current` | Battery current | A |
+| `sensor.foxess_pv1_power` | PV string 1 power | kW |
+| `sensor.foxess_pv2_power` | PV string 2 power | kW |
+| `sensor.foxess_ambient_temperature` | Ambient temperature | °C |
+| `sensor.foxess_inverter_temperature` | Inverter temperature | °C |
+| `sensor.foxess_work_mode` | Current inverter work mode (SelfUse, ForceCharge, etc.) | — |
 
-These sensors update automatically and are always available (not dependent on an active smart operation). They are backed by Home Assistant's `DataUpdateCoordinator`, so all entities update atomically from a single API call.
+These sensors update automatically and are always available (not dependent on an active smart operation). They are backed by Home Assistant's `DataUpdateCoordinator`, so all entities update atomically from a single API call. The work mode sensor makes an additional API call per poll cycle to read the active schedule.
 
 ### Smart operation sensors
 
@@ -322,11 +332,14 @@ All sensors work directly with the standard **Entities** card — no Jinja templ
 type: entities
 title: Inverter
 entities:
+  - entity: sensor.foxess_work_mode
   - entity: sensor.foxess_battery_soc
   - entity: sensor.foxess_solar_power
   - entity: sensor.foxess_house_load
   - entity: sensor.foxess_charge_rate
   - entity: sensor.foxess_discharge_rate
+  - entity: sensor.foxess_grid_consumption
+  - entity: sensor.foxess_feedin_power
   - entity: sensor.foxess_residual_energy
   - entity: sensor.foxess_battery_temperature
 ```
