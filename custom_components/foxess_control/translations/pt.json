@@ -1,0 +1,106 @@
+{
+  "services": {
+    "clear_overrides": {
+      "name": "Limpar substituições",
+      "description": "Retornar o inversor ao modo de autoconsumo, limpando todas ou as substituições selecionadas.",
+      "fields": {
+        "mode": {
+          "name": "Modo",
+          "description": "Limpar apenas as substituições deste modo. Se não definido, todas serão limpas."
+        }
+      }
+    },
+    "feedin": {
+      "name": "Injeção na rede",
+      "description": "Injetar o excedente solar na rede por um período definido, opcionalmente num horário e limite de potência específicos.",
+      "fields": {
+        "duration": {
+          "name": "Duração",
+          "description": "Quanto tempo injetar na rede (máx. 4 horas, não pode ultrapassar a meia-noite)."
+        },
+        "power": {
+          "name": "Limite de potência",
+          "description": "Limite de potência de injeção em watts. Padrão: potência nominal do inversor."
+        },
+        "start_time": {
+          "name": "Hora de início",
+          "description": "Hora do dia para iniciar a substituição. Padrão: agora."
+        },
+        "replace_conflicts": {
+          "name": "Substituir conflitos",
+          "description": "Se ativado, remove silenciosamente as substituições existentes sobrepostas em vez de abortar."
+        }
+      }
+    },
+    "force_charge": {
+      "name": "Carga forçada",
+      "description": "Carregar a bateria por um período definido, opcionalmente num horário e limite de potência específicos.",
+      "fields": {
+        "duration": {
+          "name": "Duração",
+          "description": "Quanto tempo carregar (máx. 4 horas, não pode ultrapassar a meia-noite)."
+        },
+        "power": {
+          "name": "Limite de potência",
+          "description": "Limite de potência de carga em watts. Padrão: potência nominal do inversor."
+        },
+        "start_time": {
+          "name": "Hora de início",
+          "description": "Hora do dia para iniciar a substituição. Padrão: agora."
+        },
+        "replace_conflicts": {
+          "name": "Substituir conflitos",
+          "description": "Se ativado, remove silenciosamente as substituições existentes sobrepostas em vez de abortar."
+        }
+      }
+    },
+    "force_discharge": {
+      "name": "Descarga forçada",
+      "description": "Descarregar a bateria por um período definido, opcionalmente num horário e limite de potência específicos.",
+      "fields": {
+        "duration": {
+          "name": "Duração",
+          "description": "Quanto tempo descarregar (máx. 4 horas, não pode ultrapassar a meia-noite)."
+        },
+        "power": {
+          "name": "Limite de potência",
+          "description": "Limite de potência de descarga em watts. Padrão: potência nominal do inversor."
+        },
+        "start_time": {
+          "name": "Hora de início",
+          "description": "Hora do dia para iniciar a substituição. Padrão: agora."
+        },
+        "replace_conflicts": {
+          "name": "Substituir conflitos",
+          "description": "Se ativado, remove silenciosamente as substituições existentes sobrepostas em vez de abortar."
+        }
+      }
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "FoxESS Control",
+        "description": "Introduza as credenciais da API FoxESS Cloud.",
+        "data": {
+          "api_key": "Chave API",
+          "device_serial": "Número de série do dispositivo"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Não é possível ligar à API FoxESS Cloud. Verifique a sua ligação de rede.",
+      "invalid_auth": "Autenticação falhou. Verifique a chave API e o número de série do dispositivo."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opções FoxESS Control",
+        "data": {
+          "min_soc_on_grid": "SoC mínimo na rede (%)"
+        }
+      }
+    }
+  }
+}

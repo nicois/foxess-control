@@ -1,0 +1,106 @@
+{
+  "services": {
+    "clear_overrides": {
+      "name": "Cancella forzature",
+      "description": "Riportare l'inverter in modalità autoconsumo, cancellando tutte o le forzature selezionate.",
+      "fields": {
+        "mode": {
+          "name": "Modalità",
+          "description": "Cancella solo le forzature di questa modalità. Se non impostato, vengono cancellate tutte."
+        }
+      }
+    },
+    "feedin": {
+      "name": "Immissione in rete",
+      "description": "Immettere l'energia solare in eccesso nella rete per una durata prestabilita, opzionalmente a un orario e limite di potenza specifici.",
+      "fields": {
+        "duration": {
+          "name": "Durata",
+          "description": "Per quanto tempo immettere in rete (max 4 ore, non deve superare la mezzanotte)."
+        },
+        "power": {
+          "name": "Limite di potenza",
+          "description": "Limite di potenza di immissione in watt. Predefinito: potenza nominale dell'inverter."
+        },
+        "start_time": {
+          "name": "Ora di inizio",
+          "description": "Ora del giorno per avviare la forzatura. Predefinito: adesso."
+        },
+        "replace_conflicts": {
+          "name": "Sostituisci conflitti",
+          "description": "Se abilitato, rimuove silenziosamente le forzature esistenti sovrapposte anziché interrompere."
+        }
+      }
+    },
+    "force_charge": {
+      "name": "Carica forzata",
+      "description": "Caricare la batteria per una durata prestabilita, opzionalmente a un orario e limite di potenza specifici.",
+      "fields": {
+        "duration": {
+          "name": "Durata",
+          "description": "Per quanto tempo caricare (max 4 ore, non deve superare la mezzanotte)."
+        },
+        "power": {
+          "name": "Limite di potenza",
+          "description": "Limite di potenza di carica in watt. Predefinito: potenza nominale dell'inverter."
+        },
+        "start_time": {
+          "name": "Ora di inizio",
+          "description": "Ora del giorno per avviare la forzatura. Predefinito: adesso."
+        },
+        "replace_conflicts": {
+          "name": "Sostituisci conflitti",
+          "description": "Se abilitato, rimuove silenziosamente le forzature esistenti sovrapposte anziché interrompere."
+        }
+      }
+    },
+    "force_discharge": {
+      "name": "Scarica forzata",
+      "description": "Scaricare la batteria per una durata prestabilita, opzionalmente a un orario e limite di potenza specifici.",
+      "fields": {
+        "duration": {
+          "name": "Durata",
+          "description": "Per quanto tempo scaricare (max 4 ore, non deve superare la mezzanotte)."
+        },
+        "power": {
+          "name": "Limite di potenza",
+          "description": "Limite di potenza di scarica in watt. Predefinito: potenza nominale dell'inverter."
+        },
+        "start_time": {
+          "name": "Ora di inizio",
+          "description": "Ora del giorno per avviare la forzatura. Predefinito: adesso."
+        },
+        "replace_conflicts": {
+          "name": "Sostituisci conflitti",
+          "description": "Se abilitato, rimuove silenziosamente le forzature esistenti sovrapposte anziché interrompere."
+        }
+      }
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "FoxESS Control",
+        "description": "Inserire le credenziali dell'API FoxESS Cloud.",
+        "data": {
+          "api_key": "Chiave API",
+          "device_serial": "Numero di serie del dispositivo"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Impossibile connettersi all'API FoxESS Cloud. Verificare la connessione di rete.",
+      "invalid_auth": "Autenticazione fallita. Verificare la chiave API e il numero di serie del dispositivo."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opzioni FoxESS Control",
+        "data": {
+          "min_soc_on_grid": "SoC minimo in rete (%)"
+        }
+      }
+    }
+  }
+}

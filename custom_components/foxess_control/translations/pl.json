@@ -1,0 +1,106 @@
+{
+  "services": {
+    "clear_overrides": {
+      "name": "Wyczyść nadpisania",
+      "description": "Przywróć falownik do trybu autokonsumpcji, usuwając wszystkie lub wybrane nadpisania.",
+      "fields": {
+        "mode": {
+          "name": "Tryb",
+          "description": "Usuń tylko nadpisania tego trybu. Jeśli nie ustawiono, usuwane są wszystkie."
+        }
+      }
+    },
+    "feedin": {
+      "name": "Oddawanie do sieci",
+      "description": "Oddawać nadwyżkę energii słonecznej do sieci przez określony czas, opcjonalnie o określonej godzinie i limicie mocy.",
+      "fields": {
+        "duration": {
+          "name": "Czas trwania",
+          "description": "Jak długo oddawać do sieci (maks. 4 godziny, nie może przekroczyć północy)."
+        },
+        "power": {
+          "name": "Limit mocy",
+          "description": "Limit mocy oddawania w watach. Domyślnie moc znamionowa falownika."
+        },
+        "start_time": {
+          "name": "Godzina rozpoczęcia",
+          "description": "Godzina rozpoczęcia nadpisania. Domyślnie teraz."
+        },
+        "replace_conflicts": {
+          "name": "Zastąp konflikty",
+          "description": "Jeśli włączone, istniejące nakładające się nadpisania zostaną usunięte zamiast przerywania operacji."
+        }
+      }
+    },
+    "force_charge": {
+      "name": "Wymuś ładowanie",
+      "description": "Ładować baterię przez określony czas, opcjonalnie o określonej godzinie i limicie mocy.",
+      "fields": {
+        "duration": {
+          "name": "Czas trwania",
+          "description": "Jak długo ładować (maks. 4 godziny, nie może przekroczyć północy)."
+        },
+        "power": {
+          "name": "Limit mocy",
+          "description": "Limit mocy ładowania w watach. Domyślnie moc znamionowa falownika."
+        },
+        "start_time": {
+          "name": "Godzina rozpoczęcia",
+          "description": "Godzina rozpoczęcia nadpisania. Domyślnie teraz."
+        },
+        "replace_conflicts": {
+          "name": "Zastąp konflikty",
+          "description": "Jeśli włączone, istniejące nakładające się nadpisania zostaną usunięte zamiast przerywania operacji."
+        }
+      }
+    },
+    "force_discharge": {
+      "name": "Wymuś rozładowanie",
+      "description": "Rozładowywać baterię przez określony czas, opcjonalnie o określonej godzinie i limicie mocy.",
+      "fields": {
+        "duration": {
+          "name": "Czas trwania",
+          "description": "Jak długo rozładowywać (maks. 4 godziny, nie może przekroczyć północy)."
+        },
+        "power": {
+          "name": "Limit mocy",
+          "description": "Limit mocy rozładowania w watach. Domyślnie moc znamionowa falownika."
+        },
+        "start_time": {
+          "name": "Godzina rozpoczęcia",
+          "description": "Godzina rozpoczęcia nadpisania. Domyślnie teraz."
+        },
+        "replace_conflicts": {
+          "name": "Zastąp konflikty",
+          "description": "Jeśli włączone, istniejące nakładające się nadpisania zostaną usunięte zamiast przerywania operacji."
+        }
+      }
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "FoxESS Control",
+        "description": "Wprowadź dane uwierzytelniające API FoxESS Cloud.",
+        "data": {
+          "api_key": "Klucz API",
+          "device_serial": "Numer seryjny urządzenia"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Nie można połączyć się z API FoxESS Cloud. Sprawdź połączenie sieciowe.",
+      "invalid_auth": "Uwierzytelnianie nie powiodło się. Sprawdź klucz API i numer seryjny urządzenia."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opcje FoxESS Control",
+        "data": {
+          "min_soc_on_grid": "Minimalny SoC w sieci (%)"
+        }
+      }
+    }
+  }
+}

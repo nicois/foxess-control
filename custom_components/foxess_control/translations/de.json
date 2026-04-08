@@ -1,0 +1,106 @@
+{
+  "services": {
+    "clear_overrides": {
+      "name": "Übersteuerungen löschen",
+      "description": "Wechselrichter in den Eigenverbrauchsmodus zurücksetzen und alle oder ausgewählte Übersteuerungen löschen.",
+      "fields": {
+        "mode": {
+          "name": "Modus",
+          "description": "Nur Übersteuerungen dieses Modus löschen. Wenn nicht gesetzt, werden alle gelöscht."
+        }
+      }
+    },
+    "feedin": {
+      "name": "Einspeisung",
+      "description": "Überschüssige Solarenergie für eine bestimmte Dauer ins Netz einspeisen, optional zu einer bestimmten Zeit und Leistungsgrenze.",
+      "fields": {
+        "duration": {
+          "name": "Dauer",
+          "description": "Wie lange eingespeist werden soll (max. 4 Stunden, darf nicht über Mitternacht hinausgehen)."
+        },
+        "power": {
+          "name": "Leistungsgrenze",
+          "description": "Einspeiseleistung in Watt. Standardmäßig die Nennleistung des Wechselrichters."
+        },
+        "start_time": {
+          "name": "Startzeit",
+          "description": "Tageszeit für den Start der Übersteuerung. Standardmäßig jetzt."
+        },
+        "replace_conflicts": {
+          "name": "Konflikte ersetzen",
+          "description": "Wenn aktiviert, werden bestehende überlappende Übersteuerungen stillschweigend entfernt, anstatt abzubrechen."
+        }
+      }
+    },
+    "force_charge": {
+      "name": "Zwangsladen",
+      "description": "Batterie für eine bestimmte Dauer laden, optional zu einer bestimmten Zeit und Leistungsgrenze.",
+      "fields": {
+        "duration": {
+          "name": "Dauer",
+          "description": "Wie lange geladen werden soll (max. 4 Stunden, darf nicht über Mitternacht hinausgehen)."
+        },
+        "power": {
+          "name": "Leistungsgrenze",
+          "description": "Ladeleistung in Watt. Standardmäßig die Nennleistung des Wechselrichters."
+        },
+        "start_time": {
+          "name": "Startzeit",
+          "description": "Tageszeit für den Start der Übersteuerung. Standardmäßig jetzt."
+        },
+        "replace_conflicts": {
+          "name": "Konflikte ersetzen",
+          "description": "Wenn aktiviert, werden bestehende überlappende Übersteuerungen stillschweigend entfernt, anstatt abzubrechen."
+        }
+      }
+    },
+    "force_discharge": {
+      "name": "Zwangsentladen",
+      "description": "Batterie für eine bestimmte Dauer entladen, optional zu einer bestimmten Zeit und Leistungsgrenze.",
+      "fields": {
+        "duration": {
+          "name": "Dauer",
+          "description": "Wie lange entladen werden soll (max. 4 Stunden, darf nicht über Mitternacht hinausgehen)."
+        },
+        "power": {
+          "name": "Leistungsgrenze",
+          "description": "Entladeleistung in Watt. Standardmäßig die Nennleistung des Wechselrichters."
+        },
+        "start_time": {
+          "name": "Startzeit",
+          "description": "Tageszeit für den Start der Übersteuerung. Standardmäßig jetzt."
+        },
+        "replace_conflicts": {
+          "name": "Konflikte ersetzen",
+          "description": "Wenn aktiviert, werden bestehende überlappende Übersteuerungen stillschweigend entfernt, anstatt abzubrechen."
+        }
+      }
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "FoxESS Control",
+        "description": "Geben Sie Ihre FoxESS Cloud API-Anmeldedaten ein.",
+        "data": {
+          "api_key": "API-Schlüssel",
+          "device_serial": "Geräte-Seriennummer"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zur FoxESS Cloud API nicht möglich. Überprüfen Sie Ihre Netzwerkverbindung.",
+      "invalid_auth": "Authentifizierung fehlgeschlagen. Überprüfen Sie Ihren API-Schlüssel und die Geräte-Seriennummer."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "FoxESS Control Optionen",
+        "data": {
+          "min_soc_on_grid": "Minimaler SoC am Netz (%)"
+        }
+      }
+    }
+  }
+}

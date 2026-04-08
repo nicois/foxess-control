@@ -1,0 +1,106 @@
+{
+  "services": {
+    "clear_overrides": {
+      "name": "Effacer les forçages",
+      "description": "Remettre l'onduleur en mode autoconsommation en effaçant tous les forçages ou ceux sélectionnés.",
+      "fields": {
+        "mode": {
+          "name": "Mode",
+          "description": "Effacer uniquement les forçages de ce mode. Si non défini, tous les forçages sont effacés."
+        }
+      }
+    },
+    "feedin": {
+      "name": "Injection réseau",
+      "description": "Injecter l'excédent solaire dans le réseau pendant une durée définie, éventuellement à une heure et une limite de puissance spécifiques.",
+      "fields": {
+        "duration": {
+          "name": "Durée",
+          "description": "Durée d'injection dans le réseau (max 4 heures, ne doit pas dépasser minuit)."
+        },
+        "power": {
+          "name": "Limite de puissance",
+          "description": "Limite de puissance d'injection en watts. Par défaut : puissance nominale de l'onduleur."
+        },
+        "start_time": {
+          "name": "Heure de début",
+          "description": "Heure de début du forçage. Par défaut : maintenant."
+        },
+        "replace_conflicts": {
+          "name": "Remplacer les conflits",
+          "description": "Si activé, supprime silencieusement les forçages existants qui se chevauchent au lieu d'abandonner."
+        }
+      }
+    },
+    "force_charge": {
+      "name": "Charge forcée",
+      "description": "Charger la batterie pendant une durée définie, éventuellement à une heure et une limite de puissance spécifiques.",
+      "fields": {
+        "duration": {
+          "name": "Durée",
+          "description": "Durée de charge (max 4 heures, ne doit pas dépasser minuit)."
+        },
+        "power": {
+          "name": "Limite de puissance",
+          "description": "Limite de puissance de charge en watts. Par défaut : puissance nominale de l'onduleur."
+        },
+        "start_time": {
+          "name": "Heure de début",
+          "description": "Heure de début du forçage. Par défaut : maintenant."
+        },
+        "replace_conflicts": {
+          "name": "Remplacer les conflits",
+          "description": "Si activé, supprime silencieusement les forçages existants qui se chevauchent au lieu d'abandonner."
+        }
+      }
+    },
+    "force_discharge": {
+      "name": "Décharge forcée",
+      "description": "Décharger la batterie pendant une durée définie, éventuellement à une heure et une limite de puissance spécifiques.",
+      "fields": {
+        "duration": {
+          "name": "Durée",
+          "description": "Durée de décharge (max 4 heures, ne doit pas dépasser minuit)."
+        },
+        "power": {
+          "name": "Limite de puissance",
+          "description": "Limite de puissance de décharge en watts. Par défaut : puissance nominale de l'onduleur."
+        },
+        "start_time": {
+          "name": "Heure de début",
+          "description": "Heure de début du forçage. Par défaut : maintenant."
+        },
+        "replace_conflicts": {
+          "name": "Remplacer les conflits",
+          "description": "Si activé, supprime silencieusement les forçages existants qui se chevauchent au lieu d'abandonner."
+        }
+      }
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "FoxESS Control",
+        "description": "Entrez vos identifiants de l'API FoxESS Cloud.",
+        "data": {
+          "api_key": "Clé API",
+          "device_serial": "Numéro de série de l'appareil"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Impossible de se connecter à l'API FoxESS Cloud. Vérifiez votre connexion réseau.",
+      "invalid_auth": "Échec de l'authentification. Vérifiez votre clé API et le numéro de série de l'appareil."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options FoxESS Control",
+        "data": {
+          "min_soc_on_grid": "SoC minimum sur le réseau (%)"
+        }
+      }
+    }
+  }
+}
