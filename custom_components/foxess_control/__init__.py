@@ -690,7 +690,8 @@ def _register_services(hass: HomeAssistant) -> None:
                 _cancel_smart_discharge(hass)
 
         def _on_timer_expire(_now: datetime.datetime) -> None:
-            _LOGGER.info("Smart discharge: window ended, cancelling listeners")
+            _LOGGER.info("Smart discharge: window ended, reverting to self-use")
+            hass.async_create_task(_revert_to_self_use())
             _cancel_smart_discharge(hass)
 
         unsub_state = async_track_state_change_event(hass, [soc_entity], _on_soc_change)
@@ -830,7 +831,8 @@ def _register_services(hass: HomeAssistant) -> None:
                 _cancel_smart_charge(hass)
 
         def _on_charge_timer_expire(_now: datetime.datetime) -> None:
-            _LOGGER.info("Smart charge: window ended, cancelling listeners")
+            _LOGGER.info("Smart charge: window ended, reverting to self-use")
+            hass.async_create_task(_revert_charge_to_self_use())
             _cancel_smart_charge(hass)
 
         async def _adjust_charge_power(
