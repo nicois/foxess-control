@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -40,16 +41,24 @@ def _make_hass(
     """Create a mock hass with DOMAIN data populated."""
     hass = MagicMock()
     hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
+    hass.async_create_task = MagicMock(
+        side_effect=lambda coro: asyncio.ensure_future(coro)
+    )
 
     if inverter is None:
         inverter = MagicMock(spec=Inverter)
         inverter.max_power_w = 10500
+
+    mock_store = MagicMock()
+    mock_store.async_load = AsyncMock(return_value={})
+    mock_store.async_save = AsyncMock()
 
     hass.data = {
         DOMAIN: {
             entry_id: {"inverter": inverter},
             "_smart_discharge_unsubs": [],
             "_smart_charge_unsubs": [],
+            "_store": mock_store,
         }
     }
 
@@ -120,6 +129,10 @@ class TestSetupEntry:
         with (
             patch("custom_components.foxess_control.FoxESSClient"),
             patch("custom_components.foxess_control.Inverter") as mock_inv_cls,
+            patch(
+                "custom_components.foxess_control._recover_sessions",
+                new_callable=AsyncMock,
+            ),
         ):
             mock_inv = MagicMock()
             mock_inv.max_power_w = 10500
@@ -145,6 +158,10 @@ class TestSetupEntry:
         with (
             patch("custom_components.foxess_control.FoxESSClient"),
             patch("custom_components.foxess_control.Inverter") as mock_inv_cls,
+            patch(
+                "custom_components.foxess_control._recover_sessions",
+                new_callable=AsyncMock,
+            ),
         ):
             mock_inv = MagicMock()
             mock_inv.max_power_w = 10500
@@ -2007,3 +2024,485 @@ class TestHandleSmartCharge:
         assert hass.data[DOMAIN]["_smart_charge_unsubs"] == []
         # Should NOT have set a schedule
         inv.set_schedule.assert_not_called()
+
+
+class TestSessionPersistence:
+    """Tests for saving and clearing sessions in persistent storage."""
+
+    @pytest.mark.asyncio
+    async def test_smart_charge_saves_session(self) -> None:
+        """Starting a smart charge persists session data to store."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_soc_entity="sensor.battery_soc",
+            battery_capacity_kwh=10.0,
+        )
+
+        soc_state = MagicMock()
+        soc_state.state = "20"
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 8, 2, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_state_change_event",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(2, 0),
+                        "end_time": datetime.time(6, 0),
+                        "target_soc": 80,
+                    }
+                )
+            )
+
+        store = hass.data[DOMAIN]["_store"]
+        store.async_save.assert_called()
+        saved = store.async_save.call_args.args[0]
+        assert "smart_charge" in saved
+        sc = saved["smart_charge"]
+        assert sc["date"] == "2026-04-08"
+        assert sc["start_hour"] == 2
+        assert sc["end_hour"] == 6
+        assert sc["target_soc"] == 80
+
+    @pytest.mark.asyncio
+    async def test_smart_discharge_saves_session(self) -> None:
+        """Starting a smart discharge persists session data to store."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_soc_entity="sensor.battery_soc",
+        )
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 8, 10, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_state_change_event",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 30,
+                    }
+                )
+            )
+
+        store = hass.data[DOMAIN]["_store"]
+        store.async_save.assert_called()
+        saved = store.async_save.call_args.args[0]
+        assert "smart_discharge" in saved
+        sd = saved["smart_discharge"]
+        assert sd["date"] == "2026-04-08"
+        assert sd["min_soc"] == 30
+        assert sd["end_hour"] == 20
+
+    @pytest.mark.asyncio
+    async def test_cancel_smart_charge_clears_store(self) -> None:
+        """Cancelling a smart charge clears it from the store."""
+        inv = MagicMock(spec=Inverter)
+        hass = _make_hass(inverter=inv)
+
+        # Pre-populate store with a session
+        store = hass.data[DOMAIN]["_store"]
+        store.async_load = AsyncMock(
+            return_value={"smart_charge": {"date": "2026-04-08"}}
+        )
+
+        hass.data[DOMAIN]["_smart_charge_state"] = {"target_soc": 80}
+
+        from custom_components.foxess_control import _cancel_smart_charge
+
+        _cancel_smart_charge(hass)
+
+        # Let the async_create_task run
+        await asyncio.sleep(0)
+
+        store.async_save.assert_called()
+        saved = store.async_save.call_args.args[0]
+        assert "smart_charge" not in saved
+
+
+class TestRecoverSessions:
+    """Tests for _recover_sessions on startup."""
+
+    @pytest.mark.asyncio
+    async def test_stale_session_cleaned_up(self) -> None:
+        """Sessions from a different day are discarded."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        hass = _make_hass(inverter=inv)
+        store = hass.data[DOMAIN]["_store"]
+        store.async_load = AsyncMock(
+            return_value={
+                "smart_charge": {
+                    "date": "2026-04-07",
+                    "start_hour": 2,
+                    "start_minute": 0,
+                    "end_hour": 6,
+                    "end_minute": 0,
+                    "target_soc": 80,
+                    "max_power_w": 10500,
+                    "battery_capacity_kwh": 10.0,
+                    "soc_entity": "sensor.battery_soc",
+                    "min_soc_on_grid": 15,
+                    "min_power_change": 500,
+                    "force": False,
+                    "charging_started": True,
+                }
+            }
+        )
+
+        from custom_components.foxess_control import _recover_sessions
+
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 3, 0, 0),
+        ):
+            await _recover_sessions(hass, inv)
+
+        # Session should be cleared
+        assert "_smart_charge_state" not in hass.data[DOMAIN]
+        store.async_save.assert_called()
+        saved = store.async_save.call_args.args[0]
+        assert "smart_charge" not in saved
+
+    @pytest.mark.asyncio
+    async def test_expired_session_cleaned_up(self) -> None:
+        """Sessions whose window has passed are cleaned up."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(inverter=inv)
+        store = hass.data[DOMAIN]["_store"]
+        store.async_load = AsyncMock(
+            return_value={
+                "smart_charge": {
+                    "date": "2026-04-08",
+                    "start_hour": 2,
+                    "start_minute": 0,
+                    "end_hour": 6,
+                    "end_minute": 0,
+                    "target_soc": 80,
+                    "max_power_w": 10500,
+                    "battery_capacity_kwh": 10.0,
+                    "soc_entity": "sensor.battery_soc",
+                    "min_soc_on_grid": 15,
+                    "min_power_change": 500,
+                    "force": False,
+                    "charging_started": True,
+                }
+            }
+        )
+
+        from custom_components.foxess_control import _recover_sessions
+
+        # Time is after the end window
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 7, 0, 0),
+        ):
+            await _recover_sessions(hass, inv)
+
+        # Should clean up the ForceCharge from schedule
+        assert "_smart_charge_state" not in hass.data[DOMAIN]
+        store.async_save.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_active_charge_session_resumed(self) -> None:
+        """An active smart charge session is resumed with listeners."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [
+                {
+                    "enable": 1,
+                    "workMode": "ForceCharge",
+                    "startHour": 2,
+                    "startMinute": 0,
+                    "endHour": 6,
+                    "endMinute": 0,
+                    "minSocOnGrid": 15,
+                    "fdSoc": 100,
+                    "fdPwr": 5000,
+                }
+            ],
+        }
+        hass = _make_hass(
+            inverter=inv,
+            battery_soc_entity="sensor.battery_soc",
+        )
+        store = hass.data[DOMAIN]["_store"]
+        store.async_load = AsyncMock(
+            return_value={
+                "smart_charge": {
+                    "date": "2026-04-08",
+                    "start_hour": 2,
+                    "start_minute": 0,
+                    "end_hour": 6,
+                    "end_minute": 0,
+                    "target_soc": 80,
+                    "max_power_w": 10500,
+                    "battery_capacity_kwh": 10.0,
+                    "soc_entity": "sensor.battery_soc",
+                    "min_soc_on_grid": 15,
+                    "min_power_change": 500,
+                    "force": False,
+                    "charging_started": True,
+                }
+            }
+        )
+
+        soc_state = MagicMock()
+        soc_state.state = "50"
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        from custom_components.foxess_control import _recover_sessions
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 8, 4, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_state_change_event",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            await _recover_sessions(hass, inv)
+
+        # State should be rebuilt
+        state = hass.data[DOMAIN]["_smart_charge_state"]
+        assert state["target_soc"] == 80
+        assert state["charging_started"] is True
+        assert state["soc_unavailable_count"] == 0
+
+        # Listeners should be registered
+        unsubs = hass.data[DOMAIN]["_smart_charge_unsubs"]
+        assert len(unsubs) == 3
+
+    @pytest.mark.asyncio
+    async def test_no_matching_group_discards_session(self) -> None:
+        """If the inverter has no matching group, the session is discarded."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(inverter=inv)
+        store = hass.data[DOMAIN]["_store"]
+        store.async_load = AsyncMock(
+            return_value={
+                "smart_charge": {
+                    "date": "2026-04-08",
+                    "start_hour": 2,
+                    "start_minute": 0,
+                    "end_hour": 6,
+                    "end_minute": 0,
+                    "target_soc": 80,
+                    "max_power_w": 10500,
+                    "battery_capacity_kwh": 10.0,
+                    "soc_entity": "sensor.battery_soc",
+                    "min_soc_on_grid": 15,
+                    "min_power_change": 500,
+                    "force": False,
+                    "charging_started": True,
+                }
+            }
+        )
+
+        from custom_components.foxess_control import _recover_sessions
+
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 4, 0, 0),
+        ):
+            await _recover_sessions(hass, inv)
+
+        assert "_smart_charge_state" not in hass.data[DOMAIN]
+        store.async_save.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_deferred_charge_session_resumed(self) -> None:
+        """A deferred (not yet charging) session resumes correctly."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_soc_entity="sensor.battery_soc",
+        )
+        store = hass.data[DOMAIN]["_store"]
+        store.async_load = AsyncMock(
+            return_value={
+                "smart_charge": {
+                    "date": "2026-04-08",
+                    "start_hour": 2,
+                    "start_minute": 0,
+                    "end_hour": 6,
+                    "end_minute": 0,
+                    "target_soc": 80,
+                    "max_power_w": 10500,
+                    "battery_capacity_kwh": 10.0,
+                    "soc_entity": "sensor.battery_soc",
+                    "min_soc_on_grid": 15,
+                    "min_power_change": 500,
+                    "force": False,
+                    "charging_started": False,
+                }
+            }
+        )
+
+        from custom_components.foxess_control import _recover_sessions
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 8, 3, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_state_change_event",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            await _recover_sessions(hass, inv)
+
+        # Deferred session resumes (no group needed)
+        state = hass.data[DOMAIN]["_smart_charge_state"]
+        assert state["charging_started"] is False
+        assert len(hass.data[DOMAIN]["_smart_charge_unsubs"]) == 3
+
+    @pytest.mark.asyncio
+    async def test_active_discharge_session_resumed(self) -> None:
+        """An active smart discharge session is resumed."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [
+                {
+                    "enable": 1,
+                    "workMode": "ForceDischarge",
+                    "startHour": 17,
+                    "startMinute": 0,
+                    "endHour": 20,
+                    "endMinute": 0,
+                    "minSocOnGrid": 15,
+                    "fdSoc": 11,
+                    "fdPwr": 5000,
+                }
+            ],
+        }
+        hass = _make_hass(
+            inverter=inv,
+            battery_soc_entity="sensor.battery_soc",
+        )
+        store = hass.data[DOMAIN]["_store"]
+        store.async_load = AsyncMock(
+            return_value={
+                "smart_discharge": {
+                    "date": "2026-04-08",
+                    "start_hour": 17,
+                    "start_minute": 0,
+                    "end_hour": 20,
+                    "end_minute": 0,
+                    "min_soc": 30,
+                    "last_power_w": 5000,
+                    "soc_entity": "sensor.battery_soc",
+                }
+            }
+        )
+
+        from custom_components.foxess_control import _recover_sessions
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 8, 18, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_state_change_event",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+        ):
+            await _recover_sessions(hass, inv)
+
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state["min_soc"] == 30
+        unsubs = hass.data[DOMAIN]["_smart_discharge_unsubs"]
+        assert len(unsubs) == 2
+
+    @pytest.mark.asyncio
+    async def test_empty_store_no_op(self) -> None:
+        """No stored sessions means nothing to recover."""
+        inv = MagicMock(spec=Inverter)
+        hass = _make_hass(inverter=inv)
+        store = hass.data[DOMAIN]["_store"]
+        store.async_load = AsyncMock(return_value=None)
+
+        from custom_components.foxess_control import _recover_sessions
+
+        await _recover_sessions(hass, inv)
+
+        assert "_smart_charge_state" not in hass.data[DOMAIN]
+        assert "_smart_discharge_state" not in hass.data[DOMAIN]
+        store.async_save.assert_not_called()
