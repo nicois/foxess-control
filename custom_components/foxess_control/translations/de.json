@@ -138,7 +138,9 @@
           "min_soc_on_grid": "Minimaler SoC am Netz (%)",
           "battery_soc_entity": "Batterie-SoC-Entität",
           "battery_capacity_kwh": "Batteriekapazität (kWh)",
-          "min_power_change": "Minimale Leistungsänderung für intelligentes Laden (W)"
+          "min_power_change": "Minimale Leistungsänderung für intelligentes Laden (W)",
+          "api_min_soc": "Minimaler API-fdSoc (%) — ⚠️ Werte unter 11 funktionieren möglicherweise nicht mit allen Firmware-Versionen",
+          "polling_interval": "API-Abfrageintervall (Sekunden)"
         }
       }
     }

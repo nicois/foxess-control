@@ -138,7 +138,9 @@
           "min_soc_on_grid": "SoC minimo in rete (%)",
           "battery_soc_entity": "Entità SoC della batteria",
           "battery_capacity_kwh": "Capacità della batteria (kWh)",
-          "min_power_change": "Variazione minima di potenza per la carica intelligente (W)"
+          "min_power_change": "Variazione minima di potenza per la carica intelligente (W)",
+          "api_min_soc": "fdSoc API minimo (%) — ⚠️ Valori inferiori a 11 potrebbero non funzionare con tutte le versioni del firmware",
+          "polling_interval": "Intervallo di polling API (secondi)"
         }
       }
     }

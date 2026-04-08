@@ -11,6 +11,7 @@ from custom_components.foxess_control import (
     _build_override_group,
     _calculate_charge_power,
     _calculate_deferred_start,
+    _get_current_soc,
     _groups_overlap,
     _is_expired,
     _is_placeholder,
@@ -20,6 +21,7 @@ from custom_components.foxess_control import (
     _resolve_start_end_explicit,
     _sanitize_group,
 )
+from custom_components.foxess_control.const import DOMAIN
 from custom_components.foxess_control.foxess.inverter import (
     Inverter,
     ScheduleGroup,
@@ -161,7 +163,7 @@ class TestBuildOverrideGroup:
         assert group["fdPwr"] == 6000
 
     def test_fd_soc_clamped_to_minimum(self) -> None:
-        """fdSoc below 11 is clamped to 11 (API minimum)."""
+        """fdSoc below default api_min_soc (11) is clamped."""
         inverter = MagicMock(spec=Inverter)
         inverter.max_power_w = 10500
 
@@ -174,6 +176,27 @@ class TestBuildOverrideGroup:
 
         assert group["fdSoc"] == 11
         assert group["minSocOnGrid"] == 11  # clamped to <= fdSoc
+
+    def test_fd_soc_clamped_to_custom_api_min_soc(self) -> None:
+        """fdSoc is clamped to the custom api_min_soc value."""
+        inverter = MagicMock(spec=Inverter)
+        inverter.max_power_w = 10500
+
+        now = datetime.datetime(2026, 4, 7, 18, 0, 0)
+        end = datetime.datetime(2026, 4, 7, 20, 0, 0)
+
+        group = _build_override_group(
+            now,
+            end,
+            WorkMode.FORCE_DISCHARGE,
+            inverter,
+            min_soc_on_grid=15,
+            fd_soc=5,
+            api_min_soc=8,
+        )
+
+        assert group["fdSoc"] == 8
+        assert group["minSocOnGrid"] == 8  # clamped to <= fdSoc
 
     def test_min_soc_on_grid_clamped_to_fd_soc(self) -> None:
         """minSocOnGrid exceeding fdSoc is clamped down."""
@@ -742,3 +765,73 @@ class TestRemoveModeFromSchedule:
 
         groups = inv.set_schedule.call_args.args[0]
         assert groups[0]["enable"] == 1
+
+
+class TestGetCurrentSoc:
+    """Tests for _get_current_soc helper."""
+
+    def _make_hass(
+        self,
+        soc_entity: str = "",
+        soc_state: str | None = None,
+        coordinator_soc: float | None = None,
+    ) -> MagicMock:
+        hass = MagicMock()
+
+        # Config entry options
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_soc_entity": soc_entity}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        # External entity state
+        if soc_entity and soc_state is not None:
+            state_obj = MagicMock()
+            state_obj.state = soc_state
+            hass.states.get = MagicMock(return_value=state_obj)
+        else:
+            hass.states.get = MagicMock(return_value=None)
+
+        # Coordinator
+        mock_coordinator = MagicMock()
+        if coordinator_soc is not None:
+            mock_coordinator.data = {"SoC": coordinator_soc}
+        else:
+            mock_coordinator.data = None
+
+        hass.data = {
+            DOMAIN: {
+                "entry1": {
+                    "inverter": MagicMock(),
+                    "coordinator": mock_coordinator,
+                },
+            }
+        }
+        return hass
+
+    def test_prefers_external_entity(self) -> None:
+        hass = self._make_hass(
+            soc_entity="sensor.bat_soc",
+            soc_state="75.5",
+            coordinator_soc=50.0,
+        )
+        assert _get_current_soc(hass) == 75.5
+
+    def test_falls_back_to_coordinator(self) -> None:
+        hass = self._make_hass(
+            soc_entity="",
+            coordinator_soc=60.0,
+        )
+        assert _get_current_soc(hass) == 60.0
+
+    def test_returns_none_when_both_unavailable(self) -> None:
+        hass = self._make_hass(soc_entity="", coordinator_soc=None)
+        assert _get_current_soc(hass) is None
+
+    def test_falls_back_when_entity_unavailable(self) -> None:
+        hass = self._make_hass(
+            soc_entity="sensor.bat_soc",
+            soc_state=None,
+            coordinator_soc=45.0,
+        )
+        # Entity configured but returns None state → fall back
+        assert _get_current_soc(hass) == 45.0

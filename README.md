@@ -40,10 +40,12 @@ After setup, click **Configure** on the integration entry to adjust:
 
 | Option | Default | Range | Description |
 |---|---|---|---|
-| Minimum SoC on Grid | 15% | 11-100% | The minimum battery state of charge to maintain when on grid. Applied to all schedule operations. |
-| Battery SoC Entity | _(none)_ | | A Home Assistant sensor entity that reports the battery state of charge. Required for `smart_charge` and `smart_discharge`. |
+| Minimum SoC on Grid | 15% | 5-100% | The minimum battery state of charge to maintain when on grid. Applied to all schedule operations. |
+| Battery SoC Entity | _(none)_ | | Optional. A Home Assistant sensor entity that reports the battery state of charge. If not set, the integration uses its own polled SoC from the FoxESS API. When set, the external entity is preferred. |
+| API Polling Interval | 300 s | 60-600 s | How often to poll the FoxESS Cloud API for real-time data (SoC, power, temperature). Default 5 minutes to coexist with foxess-ha without exceeding API quota. Lower for standalone use. |
 | Battery Capacity | 0.0 kWh | 0-100 kWh | Total usable battery capacity in kWh. Required for `smart_charge` power calculations. |
 | Min Power Change | 500 W | 0-5000 W | Minimum watt change before updating the charge schedule during `smart_charge`. Lower values improve SoC tracking, higher values reduce API calls. |
+| Minimum API fdSoc | 11% | 5-11% | The minimum `fdSoc` value sent to the FoxESS API. The API normally rejects values below 11 (errno 40257). Only lower this if you know your firmware supports it. |
 
 > **Warning:** The inverter's behaviour when it reaches this SoC level during force discharge or feed-in is unintuitive. Consider using an automation to cancel the override before the battery reaches this level. See [Known limitations](#known-limitations).
 
@@ -143,7 +145,7 @@ Only one smart charge session can be active at a time. Starting a new `smart_cha
 
 **Stopping a running smart charge:** Call `foxess_control.clear_overrides` (with no mode, or with `mode: ForceCharge`). This removes the schedule **and** cancels the background listeners.
 
-**Requires** the Battery SoC Entity and Battery Capacity to be configured in the integration options.
+**Requires** Battery Capacity to be configured in the integration options. Battery SoC is read from the configured Battery SoC Entity if set, otherwise from the integration's own polled data.
 
 | Parameter | Required | Default | Description |
 |---|---|---|---|
@@ -176,7 +178,7 @@ Only one smart discharge session can be active at a time. Starting a new `smart_
 
 **Stopping a running smart discharge:** Call `foxess_control.clear_overrides` (with no mode, or with `mode: ForceDischarge`). This removes the schedule **and** cancels the background listeners.
 
-**Requires** the Battery SoC Entity to be configured in the integration options.
+Battery SoC is read from the configured Battery SoC Entity if set, otherwise from the integration's own polled data.
 
 | Parameter | Required | Default | Description |
 |---|---|---|---|
@@ -193,6 +195,140 @@ data:
   end_time: "20:00:00"
   min_soc: 30
   power: 5000
+```
+
+## Sensors
+
+### Polled sensors
+
+The integration polls the FoxESS Cloud API at a configurable interval (default: 5 minutes) and creates the following sensor entities:
+
+| Entity | Description | Unit |
+|---|---|---|
+| `sensor.foxess_battery_soc` | Battery state of charge | % |
+| `sensor.foxess_charge_rate` | Battery charge power | kW |
+| `sensor.foxess_discharge_rate` | Battery discharge power | kW |
+| `sensor.foxess_house_load` | Current house load | kW |
+| `sensor.foxess_solar_power` | Current solar generation | kW |
+| `sensor.foxess_residual_energy` | Residual energy in battery | kWh |
+| `sensor.foxess_battery_temperature` | Battery temperature | °C |
+
+These sensors update automatically and are always available (not dependent on an active smart operation). They are backed by Home Assistant's `DataUpdateCoordinator`, so all entities update atomically from a single API call.
+
+### Smart operation sensors
+
+The following sensors track active smart charge/discharge sessions. They are unavailable when no smart operation is active.
+
+#### Overview sensors
+
+| Entity | Description | Example value |
+|---|---|---|
+| `sensor.foxess_status` | Compact status for Android Auto. Dynamic icon reflects current state. | `Chg 6kW→80%`, `Wait→80%`, `Dchg 5kW→30%`, `Idle` |
+| `sensor.foxess_smart_operations` | Dashboard overview with rich attributes for templating. | `Charging to 80%`, `Deferred charge to 80%`, `Discharging to 30%`, `Idle` |
+
+#### Smart charge sensors
+
+| Entity | Description | Example value |
+|---|---|---|
+| `sensor.foxess_charge_power` | Current charge power in watts. | `6000` |
+| `sensor.foxess_charge_window` | Charge time window. | `02:00 – 06:00` |
+| `sensor.foxess_charge_remaining` | Estimated time until target SoC is reached, or time until deferred charging begins. | `1h 30m`, `starts in 2h 15m`, `starting` |
+
+#### Smart discharge sensors
+
+| Entity | Description | Example value |
+|---|---|---|
+| `sensor.foxess_discharge_power` | Current discharge power in watts. | `5000` |
+| `sensor.foxess_discharge_window` | Discharge time window. | `17:00 – 20:00` |
+| `sensor.foxess_discharge_remaining` | Estimated time until min SoC is reached or the window ends, whichever comes first. | `45m`, `1h 20m` |
+
+#### Battery forecast sensor
+
+| Entity | Description |
+|---|---|
+| `sensor.foxess_battery_forecast` | Projected battery SoC (%) over time. The `forecast` attribute contains timestamped data points for charting. |
+
+The forecast projects SoC based on the active smart operation:
+- **Charging**: SoC rises from current level toward target_soc at the current charge power
+- **Deferred charge**: SoC stays flat until the estimated start time, then rises
+- **Discharging**: SoC drops from current level toward min_soc at the current discharge power
+
+Requires **Battery Capacity** to be configured in the integration options.
+
+#### ApexCharts example
+
+Use the [apexcharts-card](https://github.com/RomRider/apexcharts-card) custom card to display the forecast on a dashboard:
+
+```yaml
+type: custom:apexcharts-card
+header:
+  title: Battery Forecast
+  show: true
+graph_span: 6h
+yaxis:
+  - min: 0
+    max: 100
+    decimals: 0
+    apex_config:
+      title:
+        text: "SoC %"
+series:
+  - entity: sensor.foxess_battery_forecast
+    data_generator: |
+      return entity.attributes.forecast.map(p => [p.time, p.soc]);
+    name: Forecast
+    type: area
+    color: "#4CAF50"
+    opacity: 0.3
+    stroke_width: 2
+```
+
+To overlay the forecast on top of actual SoC history (requires a SoC sensor from foxess-ha or similar):
+
+```yaml
+type: custom:apexcharts-card
+header:
+  title: Battery SoC
+  show: true
+graph_span: 12h
+span:
+  start: day
+yaxis:
+  - min: 0
+    max: 100
+    decimals: 0
+series:
+  - entity: sensor.foxess_inv1_battery_soc
+    name: Actual
+    type: area
+    color: "#2196F3"
+    opacity: 0.2
+    stroke_width: 2
+  - entity: sensor.foxess_battery_forecast
+    data_generator: |
+      return entity.attributes.forecast.map(p => [p.time, p.soc]);
+    name: Forecast
+    type: line
+    color: "#FF9800"
+    stroke_width: 2
+    stroke_dash: 4
+```
+
+### Dashboard card example
+
+All individual sensors work directly with the standard **Entities** card — no Jinja templates needed:
+
+```yaml
+type: entities
+title: Smart Operations
+entities:
+  - entity: sensor.foxess_smart_operations
+  - entity: sensor.foxess_charge_power
+  - entity: sensor.foxess_charge_window
+  - entity: sensor.foxess_charge_remaining
+  - entity: sensor.foxess_discharge_power
+  - entity: sensor.foxess_discharge_window
+  - entity: sensor.foxess_discharge_remaining
 ```
 
 ## Binary sensors
@@ -244,6 +380,7 @@ automation:
 - Each force action only replaces existing overrides of the **same mode** (e.g. force charge replaces previous force charge windows, but leaves force discharge windows intact). Overrides of a different mode are always preserved, even if their time window has already passed today — this allows standing daily schedules (e.g. a free-electricity charge window) to coexist with evening discharge overrides.
 - If the new window would overlap with an existing override of a **different** mode, the action aborts with an error to prevent conflicts.
 - When a smart action ends (SoC target reached, time window expired), it removes **only its own mode's groups** from the schedule. Other modes' groups are preserved. For example, a smart discharge ending does not remove a standing `ForceCharge` window. If no groups remain after removal, the schedule reverts to self-use.
+- Smart sessions are persisted to Home Assistant's `.storage` directory. If HA restarts during an active session, it is automatically resumed if still within its time window, or cleaned up (schedule groups removed) if expired. Sessions from a previous day are discarded.
 - The API client throttles requests (minimum 5 seconds between calls) and retries with exponential backoff on rate limits.
 
 ## Known limitations
@@ -257,6 +394,8 @@ automation:
 ## Compatibility with foxess-ha
 
 This integration uses its own config entry and does not read configuration from the foxess-ha sensor integration. You will need to enter your API key and serial number separately. Both integrations can run side-by-side without conflict.
+
+With the built-in polled sensors, FoxESS Control can operate standalone without foxess-ha. If you run both integrations, set the polling interval to 300 seconds (the default) to avoid exceeding the FoxESS API quota. If you remove foxess-ha, you can lower the polling interval for faster updates.
 
 ## Support
 

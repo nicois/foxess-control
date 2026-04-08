@@ -5,10 +5,16 @@ from __future__ import annotations
 import datetime
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .const import CONF_BATTERY_CAPACITY_KWH, DOMAIN
+from .coordinator import FoxESSDataCoordinator
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -37,19 +43,28 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up FoxESS Control sensors."""
-    async_add_entities(
-        [
-            InverterOverrideStatusSensor(hass, entry),
-            SmartOperationsOverviewSensor(hass, entry),
-            ChargePowerSensor(hass, entry),
-            ChargeWindowSensor(hass, entry),
-            ChargeRemainingSensor(hass, entry),
-            DischargePowerSensor(hass, entry),
-            DischargeWindowSensor(hass, entry),
-            DischargeRemainingSensor(hass, entry),
-            BatteryForecastSensor(hass, entry),
-        ]
+    entities: list[SensorEntity] = [
+        InverterOverrideStatusSensor(hass, entry),
+        SmartOperationsOverviewSensor(hass, entry),
+        ChargePowerSensor(hass, entry),
+        ChargeWindowSensor(hass, entry),
+        ChargeRemainingSensor(hass, entry),
+        DischargePowerSensor(hass, entry),
+        DischargeWindowSensor(hass, entry),
+        DischargeRemainingSensor(hass, entry),
+        BatteryForecastSensor(hass, entry),
+    ]
+
+    coordinator: FoxESSDataCoordinator | None = (
+        hass.data[DOMAIN].get(entry.entry_id, {}).get("coordinator")
     )
+    if coordinator is not None:
+        entities.extend(
+            FoxESSPolledSensor(coordinator, entry, desc)
+            for desc in POLLED_SENSOR_DESCRIPTIONS
+        )
+
+    async_add_entities(entities)
 
 
 def _format_power(watts: int) -> str:
@@ -705,3 +720,140 @@ class BatteryForecastSensor(SensorEntity):
             return None
         forecast = _build_forecast(self.hass, cs, ds)
         return {"forecast": forecast}
+
+
+# ---------------------------------------------------------------------------
+# Coordinator-backed sensors — polled from the FoxESS Cloud API
+# ---------------------------------------------------------------------------
+
+
+class _PolledSensorDescription:
+    """Descriptor for a coordinator-backed sensor."""
+
+    __slots__ = (
+        "variable",
+        "name",
+        "unique_id_suffix",
+        "device_class",
+        "unit",
+        "state_class",
+        "icon",
+    )
+
+    def __init__(
+        self,
+        variable: str,
+        name: str,
+        unique_id_suffix: str,
+        device_class: SensorDeviceClass | None,
+        unit: str,
+        state_class: SensorStateClass,
+        icon: str,
+    ) -> None:
+        self.variable = variable
+        self.name = name
+        self.unique_id_suffix = unique_id_suffix
+        self.device_class = device_class
+        self.unit = unit
+        self.state_class = state_class
+        self.icon = icon
+
+
+POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
+    _PolledSensorDescription(
+        "SoC",
+        "FoxESS Battery SoC",
+        "battery_soc",
+        SensorDeviceClass.BATTERY,
+        "%",
+        SensorStateClass.MEASUREMENT,
+        "mdi:battery",
+    ),
+    _PolledSensorDescription(
+        "batChargePower",
+        "FoxESS Charge Rate",
+        "bat_charge_power",
+        SensorDeviceClass.POWER,
+        "kW",
+        SensorStateClass.MEASUREMENT,
+        "mdi:battery-charging",
+    ),
+    _PolledSensorDescription(
+        "batDischargePower",
+        "FoxESS Discharge Rate",
+        "bat_discharge_power",
+        SensorDeviceClass.POWER,
+        "kW",
+        SensorStateClass.MEASUREMENT,
+        "mdi:battery-arrow-down",
+    ),
+    _PolledSensorDescription(
+        "loadsPower",
+        "FoxESS House Load",
+        "loads_power",
+        SensorDeviceClass.POWER,
+        "kW",
+        SensorStateClass.MEASUREMENT,
+        "mdi:home-lightning-bolt",
+    ),
+    _PolledSensorDescription(
+        "pvPower",
+        "FoxESS Solar Power",
+        "pv_power",
+        SensorDeviceClass.POWER,
+        "kW",
+        SensorStateClass.MEASUREMENT,
+        "mdi:solar-power",
+    ),
+    _PolledSensorDescription(
+        "ResidualEnergy",
+        "FoxESS Residual Energy",
+        "residual_energy",
+        SensorDeviceClass.ENERGY_STORAGE,
+        "kWh",
+        SensorStateClass.MEASUREMENT,
+        "mdi:battery-heart-variant",
+    ),
+    _PolledSensorDescription(
+        "batTemperature",
+        "FoxESS Battery Temperature",
+        "bat_temperature",
+        SensorDeviceClass.TEMPERATURE,
+        "°C",
+        SensorStateClass.MEASUREMENT,
+        "mdi:thermometer",
+    ),
+]
+
+
+class FoxESSPolledSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity):
+    """Sensor backed by the DataUpdateCoordinator."""
+
+    _attr_has_entity_name = False
+
+    def __init__(
+        self,
+        coordinator: FoxESSDataCoordinator,
+        entry: ConfigEntry,
+        desc: _PolledSensorDescription,
+    ) -> None:
+        super().__init__(coordinator)
+        self._variable = desc.variable
+        self._attr_unique_id = f"{entry.entry_id}_{desc.unique_id_suffix}"
+        self._attr_name = desc.name
+        self._attr_device_class = desc.device_class
+        self._attr_native_unit_of_measurement = desc.unit
+        self._attr_state_class = desc.state_class
+        self._attr_icon = desc.icon
+
+    @property
+    def native_value(self) -> float | None:
+        if self.coordinator.data is None:
+            return None
+        val = self.coordinator.data.get(self._variable)
+        if val is None:
+            return None
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return None

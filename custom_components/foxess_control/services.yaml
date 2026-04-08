@@ -142,7 +142,7 @@ smart_charge:
       required: true
       selector:
         number:
-          min: 11
+          min: 5
           max: 100
           unit_of_measurement: "%"
     power:
@@ -194,7 +194,7 @@ smart_discharge:
       required: true
       selector:
         number:
-          min: 11
+          min: 5
           max: 100
           unit_of_measurement: "%"
     replace_conflicts:

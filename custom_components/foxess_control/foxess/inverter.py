@@ -154,6 +154,7 @@ class Inverter:
         min_soc_on_grid: int = 11,
         fd_soc: int = 11,
         fd_pwr: int | None = None,
+        api_min_soc: int = 11,
     ) -> None:
         """Set the inverter to a single work mode for the entire day.
 
@@ -162,18 +163,19 @@ class Inverter:
             min_soc_on_grid: Minimum SoC to maintain while on-grid (%).
             fd_soc: Target SoC for force discharge, stop at this level (%).
             fd_pwr: Power limit (watts). None uses inverter rated power.
+            api_min_soc: Minimum fdSoc accepted by the API (default 11).
 
-        The FoxESS API requires ``fdSoc >= 11`` and
+        The FoxESS API requires ``fdSoc >= api_min_soc`` and
         ``minSocOnGrid <= fdSoc``.
         """
         if fd_pwr is None:
             fd_pwr = self.max_power_w
 
         # ForceCharge typically wants a high target SoC
-        if mode == WorkMode.FORCE_CHARGE and fd_soc <= 11:
+        if mode == WorkMode.FORCE_CHARGE and fd_soc <= api_min_soc:
             fd_soc = 100
 
-        fd_soc = max(fd_soc, 11)
+        fd_soc = max(fd_soc, api_min_soc)
         min_soc_on_grid = min(min_soc_on_grid, fd_soc)
 
         group: ScheduleGroup = {
@@ -205,9 +207,13 @@ class Inverter:
 
     # --- Convenience methods ---
 
-    def self_use(self, min_soc_on_grid: int = 11) -> None:
+    def self_use(self, min_soc_on_grid: int = 11, api_min_soc: int = 11) -> None:
         """Switch to self-use mode (default operating mode)."""
-        self.set_work_mode(WorkMode.SELF_USE, min_soc_on_grid=min_soc_on_grid)
+        self.set_work_mode(
+            WorkMode.SELF_USE,
+            min_soc_on_grid=min_soc_on_grid,
+            api_min_soc=api_min_soc,
+        )
 
     def force_charge(self, min_soc_on_grid: int = 11, target_soc: int = 100) -> None:
         """Force charge the battery from grid + PV.
@@ -227,6 +233,7 @@ class Inverter:
         min_soc: int = 11,
         power: int | None = None,
         min_soc_on_grid: int = 11,
+        api_min_soc: int = 11,
     ) -> None:
         """Force discharge the battery.
 
@@ -240,6 +247,7 @@ class Inverter:
             min_soc_on_grid=min_soc_on_grid,
             fd_soc=min_soc,
             fd_pwr=power,
+            api_min_soc=api_min_soc,
         )
 
     # --- Query current mode ---

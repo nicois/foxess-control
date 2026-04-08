@@ -20,17 +20,22 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_API_KEY,
+    CONF_API_MIN_SOC,
     CONF_BATTERY_CAPACITY_KWH,
     CONF_BATTERY_SOC_ENTITY,
     CONF_DEVICE_SERIAL,
     CONF_MIN_POWER_CHANGE,
     CONF_MIN_SOC_ON_GRID,
+    CONF_POLLING_INTERVAL,
+    DEFAULT_API_MIN_SOC,
     DEFAULT_MIN_POWER_CHANGE,
     DEFAULT_MIN_SOC_ON_GRID,
+    DEFAULT_POLLING_INTERVAL,
     DOMAIN,
     MAX_OVERRIDE_HOURS,
     PLATFORMS,
 )
+from .coordinator import FoxESSDataCoordinator
 from .foxess import FoxESSClient, Inverter, WorkMode
 
 if TYPE_CHECKING:
@@ -100,7 +105,7 @@ SCHEMA_SMART_DISCHARGE = vol.Schema(
         vol.Required("start_time"): cv.time,
         vol.Required("end_time"): cv.time,
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
-        vol.Required("min_soc"): vol.All(int, vol.Range(min=11, max=100)),
+        vol.Required("min_soc"): vol.All(int, vol.Range(min=5, max=100)),
     },
     extra=vol.ALLOW_EXTRA,
 )
@@ -109,7 +114,7 @@ SCHEMA_SMART_CHARGE = vol.Schema(
     {
         vol.Required("start_time"): cv.time,
         vol.Required("end_time"): cv.time,
-        vol.Required("target_soc"): vol.All(int, vol.Range(min=11, max=100)),
+        vol.Required("target_soc"): vol.All(int, vol.Range(min=5, max=100)),
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
     },
     extra=vol.ALLOW_EXTRA,
@@ -139,6 +144,16 @@ def _get_min_soc_on_grid(hass: HomeAssistant) -> int:
         return DEFAULT_MIN_SOC_ON_GRID
     soc: int = entry.options.get(CONF_MIN_SOC_ON_GRID, DEFAULT_MIN_SOC_ON_GRID)
     return soc
+
+
+def _get_api_min_soc(hass: HomeAssistant) -> int:
+    """Get api_min_soc from the first config entry's options."""
+    entry_id = _first_entry_id(hass)
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None:
+        return DEFAULT_API_MIN_SOC
+    val: int = int(entry.options.get(CONF_API_MIN_SOC, DEFAULT_API_MIN_SOC))
+    return val
 
 
 def _resolve_start_end(
@@ -226,6 +241,33 @@ def _get_battery_soc_entity(hass: HomeAssistant) -> str:
     return entity
 
 
+def _get_current_soc(hass: HomeAssistant) -> float | None:
+    """Get current battery SoC, preferring external entity, falling back to coordinator.
+
+    Returns None if SoC is unavailable from all sources.
+    """
+    soc_entity = _get_battery_soc_entity(hass)
+    if soc_entity:
+        soc_state = hass.states.get(soc_entity)
+        if soc_state is not None and soc_state.state not in (
+            "unknown",
+            "unavailable",
+        ):
+            with contextlib.suppress(ValueError, TypeError):
+                return float(soc_state.state)
+
+    # Fall back to coordinator data
+    entry_id = _first_entry_id(hass)
+    coordinator: FoxESSDataCoordinator | None = (
+        hass.data[DOMAIN].get(entry_id, {}).get("coordinator")
+    )
+    if coordinator is not None and coordinator.data:
+        with contextlib.suppress(ValueError, TypeError):
+            return float(coordinator.data["SoC"])
+
+    return None
+
+
 def _cancel_smart_discharge(hass: HomeAssistant) -> None:
     """Cancel any active smart discharge listeners and clear stored session."""
     unsubs: list[Callable[[], None]] = hass.data[DOMAIN].get(
@@ -274,6 +316,7 @@ def _session_data_from_charge_state(state: dict[str, Any]) -> dict[str, Any]:
         "soc_entity": state["soc_entity"],
         "min_soc_on_grid": state["min_soc_on_grid"],
         "min_power_change": state["min_power_change"],
+        "api_min_soc": state.get("api_min_soc", DEFAULT_API_MIN_SOC),
         "force": state.get("force", False),
         "charging_started": state["charging_started"],
     }
@@ -517,12 +560,14 @@ def _build_override_group(
     min_soc_on_grid: int,
     fd_soc: int,
     fd_pwr: int | None = None,
+    api_min_soc: int = DEFAULT_API_MIN_SOC,
 ) -> ScheduleGroup:
     """Build a single ScheduleGroup for a timed override.
 
-    The FoxESS API requires ``fdSoc >= 11`` and ``minSocOnGrid <= fdSoc``.
+    The FoxESS API requires ``fdSoc >= api_min_soc`` and
+    ``minSocOnGrid <= fdSoc``.
     """
-    fd_soc = max(fd_soc, 11)
+    fd_soc = max(fd_soc, api_min_soc)
     min_soc_on_grid = min(min_soc_on_grid, fd_soc)
     return {
         "enable": 1,
@@ -606,8 +651,8 @@ def _setup_smart_charge_listeners(
         if cur_state is None:
             return
 
-        soc_st = hass.states.get(cur_state["soc_entity"])
-        if soc_st is None or soc_st.state in ("unknown", "unavailable"):
+        cur_soc = _get_current_soc(hass)
+        if cur_soc is None:
             cur_state["soc_unavailable_count"] = (
                 cur_state.get("soc_unavailable_count", 0) + 1
             )
@@ -622,10 +667,6 @@ def _setup_smart_charge_listeners(
                     await _remove_charge_override()
                 return
             _LOGGER.debug("Smart charge: SoC unavailable, skipping adjustment")
-            return
-        try:
-            cur_soc = float(soc_st.state)
-        except (ValueError, TypeError):
             return
         cur_state["soc_unavailable_count"] = 0
 
@@ -680,6 +721,7 @@ def _setup_smart_charge_listeners(
                 cur_state["min_soc_on_grid"],
                 fd_soc=100,
                 fd_pwr=new_power,
+                api_min_soc=cur_state.get("api_min_soc", DEFAULT_API_MIN_SOC),
             )
             try:
                 groups = await hass.async_add_executor_job(
@@ -743,21 +785,19 @@ def _setup_smart_charge_listeners(
         cur_state["last_power_w"] = new_power
         await hass.async_add_executor_job(inverter.set_schedule, cur_state["groups"])
 
-    unsub_charge_state = async_track_state_change_event(
-        hass, [soc_entity], _on_charge_soc_change
-    )
-    unsub_charge_timer = async_track_point_in_time(
-        hass, _on_charge_timer_expire, end_utc
-    )
-    unsub_charge_interval = async_track_time_interval(
-        hass, _adjust_charge_power, SMART_CHARGE_ADJUST_INTERVAL
+    unsubs: list[Callable[[], None]] = []
+    if soc_entity:
+        unsubs.append(
+            async_track_state_change_event(hass, [soc_entity], _on_charge_soc_change)
+        )
+    unsubs.append(async_track_point_in_time(hass, _on_charge_timer_expire, end_utc))
+    unsubs.append(
+        async_track_time_interval(
+            hass, _adjust_charge_power, SMART_CHARGE_ADJUST_INTERVAL
+        )
     )
 
-    hass.data[DOMAIN]["_smart_charge_unsubs"] = [
-        unsub_charge_state,
-        unsub_charge_timer,
-        unsub_charge_interval,
-    ]
+    hass.data[DOMAIN]["_smart_charge_unsubs"] = unsubs
 
 
 def _setup_smart_discharge_listeners(
@@ -807,10 +847,39 @@ def _setup_smart_discharge_listeners(
         _cancel_smart_discharge(hass)
         await _remove_discharge_override()
 
-    unsub_state = async_track_state_change_event(hass, [soc_entity], _on_soc_change)
-    unsub_timer = async_track_point_in_time(hass, _on_timer_expire, end_utc)
+    async def _check_discharge_soc(_now: datetime.datetime) -> None:
+        """Periodic SoC check for coordinator-only mode (no external entity)."""
+        cur_state = hass.data[DOMAIN].get("_smart_discharge_state")
+        if cur_state is None:
+            return
+        soc_value = _get_current_soc(hass)
+        if soc_value is None:
+            return
+        if soc_value <= cur_state["min_soc"]:
+            _LOGGER.info(
+                "Smart discharge: SoC %.1f%% reached threshold %d%%, removing override",
+                soc_value,
+                cur_state["min_soc"],
+            )
+            _cancel_smart_discharge(hass)
+            await _remove_discharge_override()
 
-    hass.data[DOMAIN]["_smart_discharge_unsubs"] = [unsub_state, unsub_timer]
+    unsubs: list[Callable[[], None]] = []
+    if soc_entity:
+        unsubs.append(
+            async_track_state_change_event(hass, [soc_entity], _on_soc_change)
+        )
+    else:
+        unsubs.append(
+            async_track_time_interval(
+                hass,
+                _check_discharge_soc,
+                datetime.timedelta(seconds=60),
+            )
+        )
+    unsubs.append(async_track_point_in_time(hass, _on_timer_expire, end_utc))
+
+    hass.data[DOMAIN]["_smart_discharge_unsubs"] = unsubs
 
 
 def _has_matching_schedule_group(
@@ -911,14 +980,7 @@ async def _recover_sessions(
                     # Rebuild in-memory state
                     remaining = (end - now).total_seconds() / 3600.0
                     soc_entity = charge_data["soc_entity"]
-                    soc_st = hass.states.get(soc_entity)
-                    current_soc: float | None = None
-                    if soc_st is not None and soc_st.state not in (
-                        "unknown",
-                        "unavailable",
-                    ):
-                        with contextlib.suppress(ValueError, TypeError):
-                            current_soc = float(soc_st.state)
+                    current_soc = _get_current_soc(hass)
 
                     last_power = charge_data["max_power_w"]
                     if current_soc is not None and charge_data.get(
@@ -943,6 +1005,9 @@ async def _recover_sessions(
                         "soc_entity": soc_entity,
                         "min_soc_on_grid": charge_data["min_soc_on_grid"],
                         "min_power_change": charge_data["min_power_change"],
+                        "api_min_soc": charge_data.get(
+                            "api_min_soc", DEFAULT_API_MIN_SOC
+                        ),
                         "charging_started": charge_data.get("charging_started", False),
                         "force": charge_data.get("force", False),
                         "soc_unavailable_count": 0,
@@ -1048,7 +1113,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN].setdefault(
         "_store", Store[dict[str, Any]](hass, STORAGE_VERSION, STORAGE_KEY)
     )
-    hass.data[DOMAIN][entry.entry_id] = {"inverter": inverter}
+    # Create DataUpdateCoordinator for API polling
+    polling_interval = int(
+        entry.options.get(CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL)
+    )
+    coordinator = FoxESSDataCoordinator(hass, inverter, polling_interval)
+    await coordinator.async_config_entry_first_refresh()
+
+    hass.data[DOMAIN][entry.entry_id] = {
+        "inverter": inverter,
+        "coordinator": coordinator,
+    }
 
     # Register services once (first real entry)
     real_entries = {k for k in hass.data[DOMAIN] if not k.startswith("_")}
@@ -1060,7 +1135,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Recover smart sessions persisted before a restart
     await _recover_sessions(hass, inverter)
 
+    # Reload entry when options change (picks up new polling interval)
+    entry.async_on_unload(entry.add_update_listener(_async_update_options))
+
     return True
+
+
+async def _async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the config entry when options change."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -1127,6 +1210,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
         inverter = _get_inverter(hass)
         min_soc_on_grid = _get_min_soc_on_grid(hass)
+        api_min_soc = _get_api_min_soc(hass)
 
         group = _build_override_group(
             start,
@@ -1136,6 +1220,7 @@ def _register_services(hass: HomeAssistant) -> None:
             min_soc_on_grid,
             fd_soc=100,
             fd_pwr=power,
+            api_min_soc=api_min_soc,
         )
 
         groups = await hass.async_add_executor_job(
@@ -1166,6 +1251,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
         inverter = _get_inverter(hass)
         min_soc_on_grid = _get_min_soc_on_grid(hass)
+        api_min_soc = _get_api_min_soc(hass)
 
         group = _build_override_group(
             start,
@@ -1173,8 +1259,9 @@ def _register_services(hass: HomeAssistant) -> None:
             WorkMode.FORCE_DISCHARGE,
             inverter,
             min_soc_on_grid,
-            fd_soc=11,
+            fd_soc=api_min_soc,
             fd_pwr=power,
+            api_min_soc=api_min_soc,
         )
 
         groups = await hass.async_add_executor_job(
@@ -1205,6 +1292,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
         inverter = _get_inverter(hass)
         min_soc_on_grid = _get_min_soc_on_grid(hass)
+        api_min_soc = _get_api_min_soc(hass)
 
         group = _build_override_group(
             start,
@@ -1212,8 +1300,9 @@ def _register_services(hass: HomeAssistant) -> None:
             WorkMode.FEEDIN,
             inverter,
             min_soc_on_grid,
-            fd_soc=11,
+            fd_soc=api_min_soc,
             fd_pwr=power,
+            api_min_soc=api_min_soc,
         )
 
         groups = await hass.async_add_executor_job(
@@ -1244,14 +1333,15 @@ def _register_services(hass: HomeAssistant) -> None:
         start, end = _resolve_start_end_explicit(start_time, end_time)
 
         soc_entity = _get_battery_soc_entity(hass)
-        if not soc_entity:
+        if not soc_entity and _get_current_soc(hass) is None:
             raise ServiceValidationError(
-                "Battery SoC entity not configured. Set it in the "
-                "integration options before using smart discharge."
+                "Battery SoC is not available. Configure a Battery SoC Entity "
+                "in the integration options or wait for the API poll to complete."
             )
 
         inverter = _get_inverter(hass)
         min_soc_on_grid = _get_min_soc_on_grid(hass)
+        api_min_soc = _get_api_min_soc(hass)
 
         group = _build_override_group(
             start,
@@ -1259,8 +1349,9 @@ def _register_services(hass: HomeAssistant) -> None:
             WorkMode.FORCE_DISCHARGE,
             inverter,
             min_soc_on_grid,
-            fd_soc=11,
+            fd_soc=api_min_soc,
             fd_pwr=power,
+            api_min_soc=api_min_soc,
         )
 
         groups = await hass.async_add_executor_job(
@@ -1317,10 +1408,10 @@ def _register_services(hass: HomeAssistant) -> None:
         start, end = _resolve_start_end_explicit(start_time_val, end_time_val)
 
         soc_entity = _get_battery_soc_entity(hass)
-        if not soc_entity:
+        if not soc_entity and _get_current_soc(hass) is None:
             raise ServiceValidationError(
-                "Battery SoC entity not configured. Set it in the "
-                "integration options before using smart charge."
+                "Battery SoC is not available. Configure a Battery SoC Entity "
+                "in the integration options or wait for the API poll to complete."
             )
 
         battery_capacity_kwh = _get_battery_capacity_kwh(hass)
@@ -1332,27 +1423,18 @@ def _register_services(hass: HomeAssistant) -> None:
 
         inverter = _get_inverter(hass)
         min_soc_on_grid = _get_min_soc_on_grid(hass)
+        api_min_soc = _get_api_min_soc(hass)
         effective_max_power = (
             max_power if max_power is not None else inverter.max_power_w
         )
 
         # Read current SoC for initial power calculation and deferred start
-        soc_state = hass.states.get(soc_entity)
-        current_soc: float | None = None
-        if soc_state is not None and soc_state.state not in (
-            "unknown",
-            "unavailable",
-        ):
-            try:
-                current_soc = float(soc_state.state)
-            except (ValueError, TypeError):
-                pass
-            else:
-                if current_soc >= target_soc:
-                    raise ServiceValidationError(
-                        f"Current SoC ({current_soc}%) already at or above "
-                        f"target ({target_soc}%)"
-                    )
+        current_soc = _get_current_soc(hass)
+        if current_soc is not None and current_soc >= target_soc:
+            raise ServiceValidationError(
+                f"Current SoC ({current_soc}%) already at or above "
+                f"target ({target_soc}%)"
+            )
 
         # Validate conflicts upfront using the full window
         validation_group = _build_override_group(
@@ -1363,6 +1445,7 @@ def _register_services(hass: HomeAssistant) -> None:
             min_soc_on_grid,
             fd_soc=100,
             fd_pwr=effective_max_power,
+            api_min_soc=api_min_soc,
         )
         await hass.async_add_executor_job(
             _merge_with_existing,
@@ -1420,6 +1503,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 min_soc_on_grid,
                 fd_soc=100,
                 fd_pwr=initial_power,
+                api_min_soc=api_min_soc,
             )
             initial_groups = await hass.async_add_executor_job(
                 _merge_with_existing,
@@ -1456,6 +1540,7 @@ def _register_services(hass: HomeAssistant) -> None:
             "soc_entity": soc_entity,
             "min_soc_on_grid": min_soc_on_grid,
             "min_power_change": min_power_change,
+            "api_min_soc": api_min_soc,
             "charging_started": not should_defer,
             "force": force,
             "soc_unavailable_count": 0,

@@ -10,6 +10,7 @@ import pytest
 
 from custom_components.foxess_control.const import DOMAIN
 from custom_components.foxess_control.sensor import (
+    POLLED_SENSOR_DESCRIPTIONS,
     BatteryForecastSensor,
     ChargePowerSensor,
     ChargeRemainingSensor,
@@ -17,6 +18,7 @@ from custom_components.foxess_control.sensor import (
     DischargePowerSensor,
     DischargeRemainingSensor,
     DischargeWindowSensor,
+    FoxESSPolledSensor,
     InverterOverrideStatusSensor,
     SmartOperationsOverviewSensor,
     async_setup_entry,
@@ -666,6 +668,75 @@ class TestBatteryForecastSensor:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# FoxESSPolledSensor (coordinator-backed)
+# ---------------------------------------------------------------------------
+
+
+class TestFoxESSPolledSensor:
+    """Tests for coordinator-backed polled sensors."""
+
+    def _make_coordinator(self, data: dict[str, Any] | None = None) -> MagicMock:
+        coordinator = MagicMock()
+        coordinator.data = data
+        return coordinator
+
+    def test_native_value_reads_from_coordinator(self) -> None:
+        coordinator = self._make_coordinator({"SoC": 75.5, "batChargePower": 1.2})
+        entry = _make_entry()
+        desc = POLLED_SENSOR_DESCRIPTIONS[0]  # SoC
+        sensor = FoxESSPolledSensor(coordinator, entry, desc)
+        assert sensor.native_value == 75.5
+
+    def test_native_value_returns_none_when_data_is_none(self) -> None:
+        coordinator = self._make_coordinator(None)
+        entry = _make_entry()
+        desc = POLLED_SENSOR_DESCRIPTIONS[0]
+        sensor = FoxESSPolledSensor(coordinator, entry, desc)
+        assert sensor.native_value is None
+
+    def test_native_value_returns_none_when_variable_missing(self) -> None:
+        coordinator = self._make_coordinator({"batChargePower": 1.2})
+        entry = _make_entry()
+        desc = POLLED_SENSOR_DESCRIPTIONS[0]  # SoC — not in data
+        sensor = FoxESSPolledSensor(coordinator, entry, desc)
+        assert sensor.native_value is None
+
+    def test_unique_id(self) -> None:
+        coordinator = self._make_coordinator({})
+        entry = _make_entry("myentry")
+        desc = POLLED_SENSOR_DESCRIPTIONS[0]
+        sensor = FoxESSPolledSensor(coordinator, entry, desc)
+        assert sensor.unique_id == "myentry_battery_soc"
+
+    def test_all_descriptors_create_sensors(self) -> None:
+        coordinator = self._make_coordinator(
+            {
+                "SoC": 50,
+                "batChargePower": 1.0,
+                "batDischargePower": 0.5,
+                "loadsPower": 3.2,
+                "pvPower": 4.1,
+                "ResidualEnergy": 8.0,
+                "batTemperature": 25.0,
+            }
+        )
+        entry = _make_entry()
+        sensors = [
+            FoxESSPolledSensor(coordinator, entry, desc)
+            for desc in POLLED_SENSOR_DESCRIPTIONS
+        ]
+        assert len(sensors) == 7
+        # All should have a non-None value
+        for s in sensors:
+            assert s.native_value is not None
+
+
+# ---------------------------------------------------------------------------
+# Platform setup
+# ---------------------------------------------------------------------------
+
+
 class TestAsyncSetupEntry:
     @pytest.mark.asyncio
     async def test_creates_all_entities(self) -> None:
@@ -688,3 +759,23 @@ class TestAsyncSetupEntry:
         assert isinstance(added[6], DischargeWindowSensor)
         assert isinstance(added[7], DischargeRemainingSensor)
         assert isinstance(added[8], BatteryForecastSensor)
+
+    @pytest.mark.asyncio
+    async def test_creates_polled_sensors_when_coordinator_present(self) -> None:
+        hass = _make_hass()
+        entry = _make_entry()
+        # Add a coordinator to domain data
+        coordinator = MagicMock()
+        coordinator.data = {"SoC": 50}
+        hass.data[DOMAIN][entry.entry_id] = {"coordinator": coordinator}
+
+        added: list[Any] = []
+
+        def mock_add(entities: Any, update_before_add: bool = False) -> None:
+            added.extend(entities)
+
+        await async_setup_entry(hass, entry, mock_add)  # type: ignore[arg-type]
+
+        assert len(added) == 16  # 9 existing + 7 polled
+        polled = [e for e in added if isinstance(e, FoxESSPolledSensor)]
+        assert len(polled) == 7

@@ -24,13 +24,17 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     CONF_API_KEY,
+    CONF_API_MIN_SOC,
     CONF_BATTERY_CAPACITY_KWH,
     CONF_BATTERY_SOC_ENTITY,
     CONF_DEVICE_SERIAL,
     CONF_MIN_POWER_CHANGE,
     CONF_MIN_SOC_ON_GRID,
+    CONF_POLLING_INTERVAL,
+    DEFAULT_API_MIN_SOC,
     DEFAULT_MIN_POWER_CHANGE,
     DEFAULT_MIN_SOC_ON_GRID,
+    DEFAULT_POLLING_INTERVAL,
     DOMAIN,
 )
 from .foxess import FoxESSClient, Inverter
@@ -119,13 +123,19 @@ class FoxessControlOptionsFlow(OptionsFlow):
         current_min_power = self._config_entry.options.get(
             CONF_MIN_POWER_CHANGE, DEFAULT_MIN_POWER_CHANGE
         )
+        current_api_min_soc = self._config_entry.options.get(
+            CONF_API_MIN_SOC, DEFAULT_API_MIN_SOC
+        )
+        current_polling = self._config_entry.options.get(
+            CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL
+        )
 
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
                     vol.Optional(CONF_MIN_SOC_ON_GRID, default=current): vol.All(
-                        int, vol.Range(min=11, max=100)
+                        int, vol.Range(min=5, max=100)
                     ),
                     vol.Optional(
                         CONF_BATTERY_SOC_ENTITY, default=current_entity
@@ -149,6 +159,28 @@ class FoxessControlOptionsFlow(OptionsFlow):
                             max=5000,
                             step=50,
                             unit_of_measurement="W",
+                            mode=NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_API_MIN_SOC, default=current_api_min_soc
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=5,
+                            max=11,
+                            step=1,
+                            unit_of_measurement="%",
+                            mode=NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_POLLING_INTERVAL, default=current_polling
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=60,
+                            max=600,
+                            step=10,
+                            unit_of_measurement="s",
                             mode=NumberSelectorMode.BOX,
                         )
                     ),

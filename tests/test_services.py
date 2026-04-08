@@ -18,11 +18,13 @@ from custom_components.foxess_control import (
 )
 from custom_components.foxess_control.const import (
     CONF_API_KEY,
+    CONF_API_MIN_SOC,
     CONF_BATTERY_CAPACITY_KWH,
     CONF_BATTERY_SOC_ENTITY,
     CONF_DEVICE_SERIAL,
     CONF_MIN_POWER_CHANGE,
     CONF_MIN_SOC_ON_GRID,
+    DEFAULT_API_MIN_SOC,
     DEFAULT_MIN_POWER_CHANGE,
     DEFAULT_MIN_SOC_ON_GRID,
     DOMAIN,
@@ -37,8 +39,15 @@ def _make_hass(
     battery_soc_entity: str = "",
     battery_capacity_kwh: float = 0.0,
     min_power_change: int = DEFAULT_MIN_POWER_CHANGE,
+    api_min_soc: int = DEFAULT_API_MIN_SOC,
+    coordinator_data: dict[str, Any] | None = None,
 ) -> MagicMock:
-    """Create a mock hass with DOMAIN data populated."""
+    """Create a mock hass with DOMAIN data populated.
+
+    *coordinator_data* populates the coordinator mock's ``.data`` attribute.
+    Pass ``None`` (default) to create a coordinator with no data, or a dict
+    like ``{"SoC": 50.0}`` to simulate polled values.
+    """
     hass = MagicMock()
     hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
     hass.async_create_task = MagicMock(
@@ -53,9 +62,12 @@ def _make_hass(
     mock_store.async_load = AsyncMock(return_value={})
     mock_store.async_save = AsyncMock()
 
+    mock_coordinator = MagicMock()
+    mock_coordinator.data = coordinator_data
+
     hass.data = {
         DOMAIN: {
-            entry_id: {"inverter": inverter},
+            entry_id: {"inverter": inverter, "coordinator": mock_coordinator},
             "_smart_discharge_unsubs": [],
             "_smart_charge_unsubs": [],
             "_store": mock_store,
@@ -69,6 +81,7 @@ def _make_hass(
         CONF_BATTERY_SOC_ENTITY: battery_soc_entity,
         CONF_BATTERY_CAPACITY_KWH: battery_capacity_kwh,
         CONF_MIN_POWER_CHANGE: min_power_change,
+        CONF_API_MIN_SOC: api_min_soc,
     }
     hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
 
@@ -133,10 +146,16 @@ class TestSetupEntry:
                 "custom_components.foxess_control._recover_sessions",
                 new_callable=AsyncMock,
             ),
+            patch(
+                "custom_components.foxess_control.FoxESSDataCoordinator",
+            ) as mock_coord_cls,
         ):
             mock_inv = MagicMock()
             mock_inv.max_power_w = 10500
             mock_inv_cls.return_value = mock_inv
+            mock_coord = MagicMock()
+            mock_coord.async_config_entry_first_refresh = AsyncMock()
+            mock_coord_cls.return_value = mock_coord
 
             assert await async_setup_entry(hass, entry) is True
 
@@ -162,10 +181,16 @@ class TestSetupEntry:
                 "custom_components.foxess_control._recover_sessions",
                 new_callable=AsyncMock,
             ),
+            patch(
+                "custom_components.foxess_control.FoxESSDataCoordinator",
+            ) as mock_coord_cls,
         ):
             mock_inv = MagicMock()
             mock_inv.max_power_w = 10500
             mock_inv_cls.return_value = mock_inv
+            mock_coord = MagicMock()
+            mock_coord.async_config_entry_first_refresh = AsyncMock()
+            mock_coord_cls.return_value = mock_coord
 
             assert await async_setup_entry(hass, entry) is True
 
@@ -684,6 +709,124 @@ class TestHandleForceDischarge:
         assert hass.data[DOMAIN]["_smart_discharge_unsubs"] == []
         assert "_smart_discharge_state" not in hass.data[DOMAIN]
 
+    @pytest.mark.asyncio
+    async def test_force_discharge_uses_custom_api_min_soc(self) -> None:
+        """fdSoc uses the configured api_min_soc instead of hardcoded 11."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(inverter=inv, api_min_soc=8)
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[3].args[2]
+
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+        ):
+            await handler(_make_call({"duration": datetime.timedelta(hours=2)}))
+
+        groups = inv.set_schedule.call_args.args[0]
+        assert groups[0]["fdSoc"] == 8
+
+
+class TestSmartChargeCoordinatorFallback:
+    """Tests for smart charge using coordinator SoC when no external entity."""
+
+    @pytest.mark.asyncio
+    async def test_smart_charge_works_with_coordinator_soc(self) -> None:
+        """Smart charge uses coordinator SoC when battery_soc_entity is empty."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_soc_entity="",
+            battery_capacity_kwh=10.0,
+            coordinator_data={"SoC": 20.0},
+        )
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(2, 0),
+                        "end_time": datetime.time(6, 0),
+                        "target_soc": 80,
+                    }
+                )
+            )
+
+        # Session should be active — coordinator SoC was used
+        state = hass.data[DOMAIN]["_smart_charge_state"]
+        assert state["target_soc"] == 80
+        assert state["soc_entity"] == ""
+
+    @pytest.mark.asyncio
+    async def test_smart_discharge_works_with_coordinator_soc(self) -> None:
+        """Smart discharge uses coordinator SoC when battery_soc_entity is empty."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_soc_entity="",
+            coordinator_data={"SoC": 80.0},
+        )
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 30,
+                    }
+                )
+            )
+
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state["min_soc"] == 30
+        assert state["soc_entity"] == ""
+
 
 class TestHandleSmartDischarge:
     """Tests for handle_smart_discharge service handler."""
@@ -802,7 +945,7 @@ class TestHandleSmartDischarge:
                 "custom_components.foxess_control.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
             ),
-            pytest.raises(ServiceValidationError, match="Battery SoC entity"),
+            pytest.raises(ServiceValidationError, match="Battery SoC is not available"),
         ):
             await handler(
                 _make_call(
@@ -1174,7 +1317,7 @@ class TestHandleSmartCharge:
                 "custom_components.foxess_control.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
-            pytest.raises(ServiceValidationError, match="Battery SoC entity"),
+            pytest.raises(ServiceValidationError, match="Battery SoC is not available"),
         ):
             await handler(
                 _make_call(
