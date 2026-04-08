@@ -713,7 +713,7 @@ class TestHandleSmartDischarge:
         assert groups[0]["workMode"] == "ForceDischarge"
         assert groups[0]["startHour"] == 17
         assert groups[0]["endHour"] == 20
-        assert groups[0]["fdSoc"] == 30
+        assert groups[0]["fdSoc"] == 11
 
         # Verify state dict is stored for binary sensor
         state = hass.data[DOMAIN]["_smart_discharge_state"]
@@ -1016,7 +1016,7 @@ class TestHandleSmartCharge:
         assert groups[0]["workMode"] == "ForceCharge"
         assert groups[0]["startHour"] == 2
         assert groups[0]["endHour"] == 6
-        assert groups[0]["fdSoc"] == 80
+        assert groups[0]["fdSoc"] == 100
 
     @pytest.mark.asyncio
     async def test_smart_charge_registers_three_listeners(self) -> None:

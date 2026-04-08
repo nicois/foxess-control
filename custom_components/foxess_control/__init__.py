@@ -627,7 +627,7 @@ def _register_services(hass: HomeAssistant) -> None:
             WorkMode.FORCE_DISCHARGE,
             inverter,
             min_soc_on_grid,
-            fd_soc=min_soc,
+            fd_soc=11,
             fd_pwr=power,
         )
 
@@ -760,7 +760,7 @@ def _register_services(hass: HomeAssistant) -> None:
             WorkMode.FORCE_CHARGE,
             inverter,
             min_soc_on_grid,
-            fd_soc=target_soc,
+            fd_soc=100,
             fd_pwr=initial_power,
         )
 
