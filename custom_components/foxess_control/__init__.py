@@ -107,18 +107,24 @@ SCHEMA_SMART_CHARGE = vol.Schema(
 )
 
 
+def _first_entry_id(hass: HomeAssistant) -> str:
+    """Return the entry_id of the first real config entry in domain data."""
+    for key in hass.data[DOMAIN]:
+        if not str(key).startswith("_"):
+            return str(key)
+    raise ServiceValidationError("No FoxESS Control integration configured")
+
+
 def _get_inverter(hass: HomeAssistant) -> Inverter:
     """Get the first configured Inverter instance."""
-    entries: dict[str, Any] = hass.data[DOMAIN]
-    if not entries:
-        raise ServiceValidationError("No FoxESS Control integration configured")
-    inverter: Inverter = next(iter(entries.values()))["inverter"]
+    entry_id = _first_entry_id(hass)
+    inverter: Inverter = hass.data[DOMAIN][entry_id]["inverter"]
     return inverter
 
 
 def _get_min_soc_on_grid(hass: HomeAssistant) -> int:
     """Get min_soc_on_grid from the first config entry's options."""
-    entry_id = next(iter(hass.data[DOMAIN]))
+    entry_id = _first_entry_id(hass)
     entry = hass.config_entries.async_get_entry(entry_id)
     if entry is None:
         return DEFAULT_MIN_SOC_ON_GRID
@@ -203,7 +209,7 @@ def _resolve_start_end_explicit(
 
 def _get_battery_soc_entity(hass: HomeAssistant) -> str:
     """Get battery_soc_entity from the first config entry's options."""
-    entry_id = next(iter(hass.data[DOMAIN]))
+    entry_id = _first_entry_id(hass)
     entry = hass.config_entries.async_get_entry(entry_id)
     if entry is None:
         return ""
@@ -224,7 +230,7 @@ def _cancel_smart_discharge(hass: HomeAssistant) -> None:
 
 def _get_battery_capacity_kwh(hass: HomeAssistant) -> float:
     """Get battery_capacity_kwh from the first config entry's options."""
-    entry_id = next(iter(hass.data[DOMAIN]))
+    entry_id = _first_entry_id(hass)
     entry = hass.config_entries.async_get_entry(entry_id)
     if entry is None:
         return 0.0
@@ -234,7 +240,7 @@ def _get_battery_capacity_kwh(hass: HomeAssistant) -> float:
 
 def _get_min_power_change(hass: HomeAssistant) -> int:
     """Get min_power_change from the first config entry's options."""
-    entry_id = next(iter(hass.data[DOMAIN]))
+    entry_id = _first_entry_id(hass)
     entry = hass.config_entries.async_get_entry(entry_id)
     if entry is None:
         return DEFAULT_MIN_POWER_CHANGE
