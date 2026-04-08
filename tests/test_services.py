@@ -962,7 +962,8 @@ class TestHandleSmartCharge:
     """Tests for handle_smart_charge service handler."""
 
     @pytest.mark.asyncio
-    async def test_smart_charge_sets_schedule(self) -> None:
+    async def test_smart_charge_defers_when_window_long_enough(self) -> None:
+        """With a small battery and long window, charging is deferred."""
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
@@ -972,7 +973,6 @@ class TestHandleSmartCharge:
             battery_capacity_kwh=10.0,
         )
 
-        # Mock current SoC state
         soc_state = MagicMock()
         soc_state.state = "20"
         hass.states.get = MagicMock(return_value=soc_state)
@@ -1010,13 +1010,73 @@ class TestHandleSmartCharge:
                 )
             )
 
+        # Schedule should NOT be set yet — charging is deferred
+        inv.set_schedule.assert_not_called()
+
+        state = hass.data[DOMAIN]["_smart_charge_state"]
+        assert state["charging_started"] is False
+        assert state["groups"] is None
+        assert state["last_power_w"] == 0
+
+    @pytest.mark.asyncio
+    async def test_smart_charge_immediate_when_window_tight(self) -> None:
+        """With a large battery, there's not enough time to defer."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_soc_entity="sensor.battery_soc",
+            battery_capacity_kwh=60.0,
+        )
+
+        # 60kWh * 60% = 36kWh needed; 80% of 10.5kW = 8.4kW → 4.29h > 4h window
+        soc_state = MagicMock()
+        soc_state.state = "20"
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_state_change_event",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(2, 0),
+                        "end_time": datetime.time(6, 0),
+                        "target_soc": 80,
+                    }
+                )
+            )
+
+        # Should set schedule immediately — window is too tight to defer
         inv.set_schedule.assert_called_once()
         groups = inv.set_schedule.call_args.args[0]
         assert len(groups) == 1
         assert groups[0]["workMode"] == "ForceCharge"
-        assert groups[0]["startHour"] == 2
-        assert groups[0]["endHour"] == 6
         assert groups[0]["fdSoc"] == 100
+
+        state = hass.data[DOMAIN]["_smart_charge_state"]
+        assert state["charging_started"] is True
 
     @pytest.mark.asyncio
     async def test_smart_charge_registers_three_listeners(self) -> None:
@@ -1306,6 +1366,162 @@ class TestHandleSmartCharge:
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        # Large capacity → immediate start (no deferral)
+        hass = _make_hass(
+            inverter=inv,
+            battery_soc_entity="sensor.battery_soc",
+            battery_capacity_kwh=60.0,
+            min_power_change=100,
+        )
+
+        soc_state = MagicMock()
+        soc_state.state = "20"
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        captured_interval_callback = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval_callback
+            captured_interval_callback = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_state_change_event",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(2, 0),
+                        "end_time": datetime.time(6, 0),
+                        "target_soc": 80,
+                    }
+                )
+            )
+
+        assert captured_interval_callback is not None
+
+        # Reset set_schedule call count from initial setup
+        inv.set_schedule.reset_mock()
+
+        # Initial: 60kWh * 60% / 4h = 9000W
+        # At 60% with 2h left: 60kWh * 20% / 2h = 6000W → delta 3000W > 100W
+        soc_state_new = MagicMock()
+        soc_state_new.state = "60"
+        hass.states.get = MagicMock(return_value=soc_state_new)
+
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 4, 0, 0),
+        ):
+            await captured_interval_callback(datetime.datetime(2026, 4, 7, 4, 0, 0))
+
+        inv.set_schedule.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_deferred_charge_starts_when_time_arrives(self) -> None:
+        """Periodic callback starts charging when deferred start time is reached."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        # Small capacity → deferred
+        hass = _make_hass(
+            inverter=inv,
+            battery_soc_entity="sensor.battery_soc",
+            battery_capacity_kwh=10.0,
+            min_power_change=100,
+        )
+
+        soc_state = MagicMock()
+        soc_state.state = "20"
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        captured_interval_callback = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval_callback
+            captured_interval_callback = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_state_change_event",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(2, 0),
+                        "end_time": datetime.time(6, 0),
+                        "target_soc": 80,
+                    }
+                )
+            )
+
+        assert captured_interval_callback is not None
+        state = hass.data[DOMAIN]["_smart_charge_state"]
+        assert state["charging_started"] is False
+        inv.set_schedule.assert_not_called()
+
+        # At 05:50 with SoC still at 20%, deferred_start ≈ 05:17 → now > deferred
+        soc_state_late = MagicMock()
+        soc_state_late.state = "20"
+        hass.states.get = MagicMock(return_value=soc_state_late)
+
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 5, 50, 0),
+        ):
+            await captured_interval_callback(datetime.datetime(2026, 4, 7, 5, 50, 0))
+
+        # Now charging should have started
+        inv.set_schedule.assert_called_once()
+        assert state["charging_started"] is True
+        assert state["groups"] is not None
+
+    @pytest.mark.asyncio
+    async def test_deferred_charge_keeps_waiting_when_solar_raises_soc(self) -> None:
+        """If solar raises SoC during wait, deferred start pushes later."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
         hass = _make_hass(
             inverter=inv,
             battery_soc_entity="sensor.battery_soc",
@@ -1359,21 +1575,22 @@ class TestHandleSmartCharge:
 
         assert captured_interval_callback is not None
 
-        # Reset set_schedule call count from initial setup
-        inv.set_schedule.reset_mock()
-
-        # Simulate SoC advancing to 60% — power drops from 1500W to 1000W
-        soc_state_50 = MagicMock()
-        soc_state_50.state = "60"
-        hass.states.get = MagicMock(return_value=soc_state_50)
+        # At 05:20, SoC rose to 60% via solar → only 20% needed
+        # 10kWh * 20% = 2kWh; 80% of 10.5kW = 8.4kW; 2/8.4 = 0.238h ≈ 14min
+        # deferred_start = 05:46 → still in the future at 05:20
+        soc_solar = MagicMock()
+        soc_solar.state = "60"
+        hass.states.get = MagicMock(return_value=soc_solar)
 
         with patch(
             "custom_components.foxess_control.dt_util.now",
-            return_value=datetime.datetime(2026, 4, 7, 4, 0, 0),
+            return_value=datetime.datetime(2026, 4, 7, 5, 20, 0),
         ):
-            await captured_interval_callback(datetime.datetime(2026, 4, 7, 4, 0, 0))
+            await captured_interval_callback(datetime.datetime(2026, 4, 7, 5, 20, 0))
 
-        inv.set_schedule.assert_called_once()
+        # Still deferred — solar pushed the start time later
+        inv.set_schedule.assert_not_called()
+        assert hass.data[DOMAIN]["_smart_charge_state"]["charging_started"] is False
 
     @pytest.mark.asyncio
     async def test_periodic_adjustment_skips_below_threshold(self) -> None:
@@ -1381,10 +1598,11 @@ class TestHandleSmartCharge:
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        # Large capacity → immediate start
         hass = _make_hass(
             inverter=inv,
             battery_soc_entity="sensor.battery_soc",
-            battery_capacity_kwh=10.0,
+            battery_capacity_kwh=60.0,
             min_power_change=5000,
         )
 
@@ -1454,10 +1672,11 @@ class TestHandleSmartCharge:
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        # Large capacity → immediate start
         hass = _make_hass(
             inverter=inv,
             battery_soc_entity="sensor.battery_soc",
-            battery_capacity_kwh=10.0,
+            battery_capacity_kwh=60.0,
         )
 
         soc_state = MagicMock()

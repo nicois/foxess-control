@@ -268,6 +268,38 @@ def _calculate_charge_power(
     return max(100, min(int(power_w), max_power_w))
 
 
+# Fraction of max power used to calculate the deferred start time.
+# 0.8 means we plan to charge at 80% of max, leaving a 20% buffer
+# to absorb local consumption or reduced solar.
+DEFERRED_START_POWER_FRACTION = 0.8
+
+
+def _calculate_deferred_start(
+    current_soc: float,
+    target_soc: int,
+    battery_capacity_kwh: float,
+    max_power_w: int,
+    end: datetime.datetime,
+) -> datetime.datetime:
+    """Calculate the latest time to start charging to reach target SoC by *end*.
+
+    Plans charging at 80% of *max_power_w*, leaving a 20% buffer to
+    account for local consumption that reduces effective charge rate.
+
+    Returns *end* if no charging is needed (SoC already at target).
+    Returns a time before *end* otherwise; may be in the past if the
+    window is too short to reach the target even at 80% power.
+    """
+    energy_needed_kwh = (target_soc - current_soc) / 100.0 * battery_capacity_kwh
+    if energy_needed_kwh <= 0:
+        return end
+    charge_power_kw = max_power_w * DEFERRED_START_POWER_FRACTION / 1000.0
+    if charge_power_kw <= 0:
+        return end
+    charge_hours = energy_needed_kwh / charge_power_kw
+    return end - datetime.timedelta(hours=charge_hours)
+
+
 def _remove_mode_from_schedule(
     inverter: Inverter,
     mode: WorkMode,
@@ -763,9 +795,9 @@ def _register_services(hass: HomeAssistant) -> None:
             max_power if max_power is not None else inverter.max_power_w
         )
 
-        # Read current SoC for initial power calculation
+        # Read current SoC for initial power calculation and deferred start
         soc_state = hass.states.get(soc_entity)
-        initial_power = effective_max_power
+        current_soc: float | None = None
         if soc_state is not None and soc_state.state not in (
             "unknown",
             "unavailable",
@@ -780,8 +812,57 @@ def _register_services(hass: HomeAssistant) -> None:
                         f"Current SoC ({current_soc}%) already at or above "
                         f"target ({target_soc}%)"
                     )
-                now = dt_util.now()
-                remaining = (end - now).total_seconds() / 3600.0
+
+        # Validate conflicts upfront using the full window
+        validation_group = _build_override_group(
+            start,
+            end,
+            WorkMode.FORCE_CHARGE,
+            inverter,
+            min_soc_on_grid,
+            fd_soc=100,
+            fd_pwr=effective_max_power,
+        )
+        await hass.async_add_executor_job(
+            _merge_with_existing,
+            inverter,
+            validation_group,
+            WorkMode.FORCE_CHARGE,
+            force,
+        )
+
+        # Decide whether to start charging now or defer
+        now = dt_util.now()
+        should_defer = False
+        if current_soc is not None:
+            deferred_start = _calculate_deferred_start(
+                current_soc,
+                target_soc,
+                battery_capacity_kwh,
+                effective_max_power,
+                end,
+            )
+            should_defer = now < deferred_start
+
+        if should_defer:
+            _LOGGER.info(
+                "Smart charge %02d:%02d - %02d:%02d deferred until ~%02d:%02d "
+                "(target_soc=%d%%, SoC=%.1f%%)",
+                start.hour,
+                start.minute,
+                end.hour,
+                end.minute,
+                deferred_start.hour,
+                deferred_start.minute,
+                target_soc,
+                current_soc,
+            )
+            initial_groups: list[ScheduleGroup] | None = None
+            initial_power = 0
+        else:
+            remaining = (end - now).total_seconds() / 3600.0
+            initial_power = effective_max_power
+            if current_soc is not None:
                 initial_power = _calculate_charge_power(
                     current_soc,
                     target_soc,
@@ -790,34 +871,32 @@ def _register_services(hass: HomeAssistant) -> None:
                     effective_max_power,
                 )
 
-        group = _build_override_group(
-            start,
-            end,
-            WorkMode.FORCE_CHARGE,
-            inverter,
-            min_soc_on_grid,
-            fd_soc=100,
-            fd_pwr=initial_power,
-        )
-
-        groups = await hass.async_add_executor_job(
-            _merge_with_existing,
-            inverter,
-            group,
-            WorkMode.FORCE_CHARGE,
-            force,
-        )
-
-        _LOGGER.info(
-            "Smart charge %02d:%02d - %02d:%02d (power=%dW, target_soc=%d%%)",
-            start.hour,
-            start.minute,
-            end.hour,
-            end.minute,
-            initial_power,
-            target_soc,
-        )
-        await hass.async_add_executor_job(inverter.set_schedule, groups)
+            group = _build_override_group(
+                start,
+                end,
+                WorkMode.FORCE_CHARGE,
+                inverter,
+                min_soc_on_grid,
+                fd_soc=100,
+                fd_pwr=initial_power,
+            )
+            initial_groups = await hass.async_add_executor_job(
+                _merge_with_existing,
+                inverter,
+                group,
+                WorkMode.FORCE_CHARGE,
+                force,
+            )
+            _LOGGER.info(
+                "Smart charge %02d:%02d - %02d:%02d (power=%dW, target_soc=%d%%)",
+                start.hour,
+                start.minute,
+                end.hour,
+                end.minute,
+                initial_power,
+                target_soc,
+            )
+            await hass.async_add_executor_job(inverter.set_schedule, initial_groups)
 
         # Cancel any previous smart charge listeners
         _cancel_smart_charge(hass)
@@ -826,7 +905,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
         # Store state for periodic adjustments
         hass.data[DOMAIN]["_smart_charge_state"] = {
-            "groups": groups,
+            "groups": initial_groups,
             "end": end,
             "target_soc": target_soc,
             "battery_capacity_kwh": battery_capacity_kwh,
@@ -835,6 +914,8 @@ def _register_services(hass: HomeAssistant) -> None:
             "soc_entity": soc_entity,
             "min_soc_on_grid": min_soc_on_grid,
             "min_power_change": min_power_change,
+            "charging_started": not should_defer,
+            "force": force,
         }
 
         end_utc = dt_util.as_utc(end)
@@ -896,7 +977,8 @@ def _register_services(hass: HomeAssistant) -> None:
                     cur_soc,
                     state["target_soc"],
                 )
-                await _remove_charge_override()
+                if state["charging_started"]:
+                    await _remove_charge_override()
                 _cancel_smart_charge(hass)
                 return
 
@@ -905,6 +987,61 @@ def _register_services(hass: HomeAssistant) -> None:
             if remaining <= 0:
                 return  # end timer will handle cleanup
 
+            if not state["charging_started"]:
+                # Check if it's time to start deferred charging
+                deferred = _calculate_deferred_start(
+                    cur_soc,
+                    state["target_soc"],
+                    state["battery_capacity_kwh"],
+                    state["max_power_w"],
+                    state["end"],
+                )
+                if now_dt < deferred:
+                    _LOGGER.debug(
+                        "Smart charge: deferring until ~%02d:%02d (SoC=%.1f%%)",
+                        deferred.hour,
+                        deferred.minute,
+                        cur_soc,
+                    )
+                    return
+
+                # Time to start charging — build and set the schedule
+                new_power = _calculate_charge_power(
+                    cur_soc,
+                    state["target_soc"],
+                    state["battery_capacity_kwh"],
+                    remaining,
+                    state["max_power_w"],
+                )
+                group = _build_override_group(
+                    now_dt,
+                    state["end"],
+                    WorkMode.FORCE_CHARGE,
+                    inverter,
+                    state["min_soc_on_grid"],
+                    fd_soc=100,
+                    fd_pwr=new_power,
+                )
+                groups = await hass.async_add_executor_job(
+                    _merge_with_existing,
+                    inverter,
+                    group,
+                    WorkMode.FORCE_CHARGE,
+                    state.get("force", False),
+                )
+                await hass.async_add_executor_job(inverter.set_schedule, groups)
+
+                state["groups"] = groups
+                state["last_power_w"] = new_power
+                state["charging_started"] = True
+                _LOGGER.info(
+                    "Smart charge: deferred charge started (SoC=%.1f%%, power=%dW)",
+                    cur_soc,
+                    new_power,
+                )
+                return
+
+            # Already charging — adjust power as needed
             new_power = _calculate_charge_power(
                 cur_soc,
                 state["target_soc"],

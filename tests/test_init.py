@@ -10,6 +10,7 @@ from homeassistant.exceptions import ServiceValidationError
 from custom_components.foxess_control import (
     _build_override_group,
     _calculate_charge_power,
+    _calculate_deferred_start,
     _groups_overlap,
     _is_expired,
     _is_placeholder,
@@ -585,6 +586,43 @@ class TestCalculateChargePower:
     def test_soc_above_target(self) -> None:
         result = _calculate_charge_power(90.0, 80, 10.0, 2.0, 10000)
         assert result == 100
+
+
+class TestCalculateDeferredStart:
+    """Tests for _calculate_deferred_start."""
+
+    def test_basic_deferral(self) -> None:
+        # 10kWh * 60% = 6kWh; 80% of 10500W = 8.4kW; 6/8.4 = 0.714h ≈ 43min
+        end = datetime.datetime(2026, 4, 7, 6, 0, 0)
+        result = _calculate_deferred_start(20.0, 80, 10.0, 10500, end)
+        # deferred = 06:00 - 42.9min ≈ 05:17
+        assert result.hour == 5
+        assert result.minute == 17
+
+    def test_soc_at_target_returns_end(self) -> None:
+        end = datetime.datetime(2026, 4, 7, 6, 0, 0)
+        result = _calculate_deferred_start(80.0, 80, 10.0, 10500, end)
+        assert result == end
+
+    def test_soc_above_target_returns_end(self) -> None:
+        end = datetime.datetime(2026, 4, 7, 6, 0, 0)
+        result = _calculate_deferred_start(90.0, 80, 10.0, 10500, end)
+        assert result == end
+
+    def test_large_battery_defers_less(self) -> None:
+        # 60kWh * 60% = 36kWh; 80% of 10.5kW = 8.4kW; 36/8.4 = 4.29h
+        end = datetime.datetime(2026, 4, 7, 6, 0, 0)
+        result = _calculate_deferred_start(20.0, 80, 60.0, 10500, end)
+        # 06:00 - 4.29h = 01:43 — before the typical start time
+        assert result.hour == 1
+        assert result.minute == 42
+
+    def test_small_charge_needed_defers_more(self) -> None:
+        # 10kWh * 10% = 1kWh; 80% of 10.5kW = 8.4kW; 1/8.4 = 0.119h ≈ 7min
+        end = datetime.datetime(2026, 4, 7, 6, 0, 0)
+        result = _calculate_deferred_start(70.0, 80, 10.0, 10500, end)
+        assert result.hour == 5
+        assert result.minute == 52
 
 
 class TestResolveStartEndExplicit:
