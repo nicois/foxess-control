@@ -25,6 +25,10 @@
         "start_time": {
           "name": "Start time",
           "description": "Time of day to start the override. Defaults to now if not set."
+        },
+        "replace_conflicts": {
+          "name": "Replace conflicts",
+          "description": "If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting."
         }
       }
     },
@@ -43,6 +47,10 @@
         "start_time": {
           "name": "Start time",
           "description": "Time of day to start the override. Defaults to now if not set."
+        },
+        "replace_conflicts": {
+          "name": "Replace conflicts",
+          "description": "If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting."
         }
       }
     },
@@ -61,6 +69,10 @@
         "start_time": {
           "name": "Start time",
           "description": "Time of day to start the override. Defaults to now if not set."
+        },
+        "replace_conflicts": {
+          "name": "Replace conflicts",
+          "description": "If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting."
         }
       }
     }

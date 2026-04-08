@@ -47,6 +47,7 @@ SCHEMA_FORCE_CHARGE = vol.Schema(
         vol.Required("duration"): cv.time_period,
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
         vol.Optional("start_time"): cv.time,
+        vol.Optional("replace_conflicts", default=False): cv.boolean,
     }
 )
 
@@ -55,6 +56,7 @@ SCHEMA_FORCE_DISCHARGE = vol.Schema(
         vol.Required("duration"): cv.time_period,
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
         vol.Optional("start_time"): cv.time,
+        vol.Optional("replace_conflicts", default=False): cv.boolean,
     }
 )
 
@@ -63,6 +65,7 @@ SCHEMA_FEEDIN = vol.Schema(
         vol.Required("duration"): cv.time_period,
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
         vol.Optional("start_time"): cv.time,
+        vol.Optional("replace_conflicts", default=False): cv.boolean,
     }
 )
 
@@ -178,6 +181,7 @@ def _merge_with_existing(
     inverter: Inverter,
     new_group: ScheduleGroup,
     work_mode: WorkMode,
+    force: bool = False,
 ) -> list[ScheduleGroup]:
     """Fetch the current schedule, remove same-mode groups, and merge.
 
@@ -186,8 +190,12 @@ def _merge_with_existing(
     them after their time window — because they may represent
     recurring daily schedules.
 
+    If *force* is True, overlapping groups of a different mode are
+    silently removed instead of raising an error.
+
     Raises ServiceValidationError if any retained group of a
-    *different* mode overlaps with the new time window.
+    *different* mode overlaps with the new time window (unless
+    *force* is True).
     """
     schedule = inverter.get_schedule()
     existing: list[dict[str, Any]] = schedule.get("groups", [])
@@ -206,6 +214,11 @@ def _merge_with_existing(
             continue
         group["enable"] = 1
         if _groups_overlap(group, new_group):
+            if force:
+                _LOGGER.debug(
+                    "Force-removing conflicting %s group", group.get("workMode")
+                )
+                continue
             raise ServiceValidationError(
                 f"New {work_mode.value} window conflicts with an existing "
                 f"{group.get('workMode')} override "
@@ -311,6 +324,7 @@ def _register_services(hass: HomeAssistant) -> None:
         duration: datetime.timedelta = call.data["duration"]
         power: int | None = call.data.get("power")
         start_time: datetime.time | None = call.data.get("start_time")
+        force: bool = call.data.get("replace_conflicts", False)
         start, end = _resolve_start_end(duration, start_time)
 
         inverter = _get_inverter(hass)
@@ -331,6 +345,7 @@ def _register_services(hass: HomeAssistant) -> None:
             inverter,
             group,
             WorkMode.FORCE_CHARGE,
+            force,
         )
 
         _LOGGER.info(
@@ -347,6 +362,7 @@ def _register_services(hass: HomeAssistant) -> None:
         duration: datetime.timedelta = call.data["duration"]
         power: int | None = call.data.get("power")
         start_time: datetime.time | None = call.data.get("start_time")
+        force: bool = call.data.get("replace_conflicts", False)
         start, end = _resolve_start_end(duration, start_time)
 
         inverter = _get_inverter(hass)
@@ -367,6 +383,7 @@ def _register_services(hass: HomeAssistant) -> None:
             inverter,
             group,
             WorkMode.FORCE_DISCHARGE,
+            force,
         )
 
         _LOGGER.info(
@@ -383,6 +400,7 @@ def _register_services(hass: HomeAssistant) -> None:
         duration: datetime.timedelta = call.data["duration"]
         power: int | None = call.data.get("power")
         start_time: datetime.time | None = call.data.get("start_time")
+        force: bool = call.data.get("replace_conflicts", False)
         start, end = _resolve_start_end(duration, start_time)
 
         inverter = _get_inverter(hass)
@@ -403,6 +421,7 @@ def _register_services(hass: HomeAssistant) -> None:
             inverter,
             group,
             WorkMode.FEEDIN,
+            force,
         )
 
         _LOGGER.info(

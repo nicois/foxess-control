@@ -41,6 +41,13 @@ feedin:
         Time of day to start the override. Defaults to now if not set.
       selector:
         time:
+    replace_conflicts:
+      name: Replace conflicts
+      description: >-
+        If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting.
+      default: false
+      selector:
+        boolean:
 
 force_charge:
   name: Force charge
@@ -67,6 +74,13 @@ force_charge:
         Time of day to start the override. Defaults to now if not set.
       selector:
         time:
+    replace_conflicts:
+      name: Replace conflicts
+      description: >-
+        If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting.
+      default: false
+      selector:
+        boolean:
 
 force_discharge:
   name: Force discharge
@@ -93,3 +107,10 @@ force_discharge:
         Time of day to start the override. Defaults to now if not set.
       selector:
         time:
+    replace_conflicts:
+      name: Replace conflicts
+      description: >-
+        If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting.
+      default: false
+      selector:
+        boolean:

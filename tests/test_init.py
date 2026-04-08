@@ -297,6 +297,27 @@ class TestMergeWithExisting:
                 WorkMode.FORCE_CHARGE,
             )
 
+    def test_force_removes_conflicting_group(self) -> None:
+        """With force=True, overlapping groups are removed instead of raising."""
+        inverter = MagicMock(spec=Inverter)
+        inverter.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [
+                self._make_group("ForceDischarge", 13, 0, 15, 0),
+            ],
+        }
+
+        new_group = self._make_group("ForceCharge", 14, 0, 16, 0)
+        result = _merge_with_existing(
+            inverter,
+            new_group,
+            WorkMode.FORCE_CHARGE,
+            force=True,
+        )
+
+        assert len(result) == 1
+        assert result[0]["workMode"] == "ForceCharge"
+
     def test_placeholder_groups_ignored(self) -> None:
         """API placeholder groups (workMode 'Invalid') are dropped."""
         inverter = MagicMock(spec=Inverter)
