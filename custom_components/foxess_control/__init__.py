@@ -268,6 +268,36 @@ def _calculate_charge_power(
     return max(100, min(int(power_w), max_power_w))
 
 
+def _remove_mode_from_schedule(
+    inverter: Inverter,
+    mode: WorkMode,
+    min_soc_on_grid: int,
+) -> None:
+    """Remove all groups of *mode* from the schedule, keeping other modes.
+
+    If no groups remain after filtering, falls back to ``self_use``.
+    This is a blocking call — use via ``async_add_executor_job``.
+    """
+    schedule = inverter.get_schedule()
+    kept: list[ScheduleGroup] = []
+    for raw_group in schedule.get("groups", []):
+        if _is_placeholder(raw_group):
+            continue
+        if raw_group.get("workMode") == mode.value:
+            continue
+        group = _sanitize_group(raw_group)
+        group["enable"] = 1
+        kept.append(group)
+    if kept:
+        _LOGGER.debug("Removing %s groups, %d groups remain", mode.value, len(kept))
+        inverter.set_schedule(kept)
+    else:
+        _LOGGER.debug(
+            "No groups remain after removing %s, reverting to SelfUse", mode.value
+        )
+        inverter.self_use(min_soc_on_grid)
+
+
 def _cancel_smart_charge(hass: HomeAssistant) -> None:
     """Cancel any active smart charge listeners."""
     unsubs: list[Callable[[], None]] = hass.data[DOMAIN].get("_smart_charge_unsubs", [])
@@ -666,8 +696,13 @@ def _register_services(hass: HomeAssistant) -> None:
 
         end_utc = dt_util.as_utc(end)
 
-        async def _revert_to_self_use() -> None:
-            await hass.async_add_executor_job(inverter.self_use, min_soc_on_grid)
+        async def _remove_discharge_override() -> None:
+            await hass.async_add_executor_job(
+                _remove_mode_from_schedule,
+                inverter,
+                WorkMode.FORCE_DISCHARGE,
+                min_soc_on_grid,
+            )
 
         def _on_soc_change(
             event: HAEvent[EventStateChangedData],
@@ -682,16 +717,16 @@ def _register_services(hass: HomeAssistant) -> None:
             if soc_value <= min_soc:
                 _LOGGER.info(
                     "Smart discharge: SoC %.1f%% reached threshold %d%%, "
-                    "reverting to self-use",
+                    "removing override",
                     soc_value,
                     min_soc,
                 )
-                hass.async_create_task(_revert_to_self_use())
+                hass.async_create_task(_remove_discharge_override())
                 _cancel_smart_discharge(hass)
 
         def _on_timer_expire(_now: datetime.datetime) -> None:
-            _LOGGER.info("Smart discharge: window ended, reverting to self-use")
-            hass.async_create_task(_revert_to_self_use())
+            _LOGGER.info("Smart discharge: window ended, removing override")
+            hass.async_create_task(_remove_discharge_override())
             _cancel_smart_discharge(hass)
 
         unsub_state = async_track_state_change_event(hass, [soc_entity], _on_soc_change)
@@ -804,8 +839,13 @@ def _register_services(hass: HomeAssistant) -> None:
 
         end_utc = dt_util.as_utc(end)
 
-        async def _revert_charge_to_self_use() -> None:
-            await hass.async_add_executor_job(inverter.self_use, min_soc_on_grid)
+        async def _remove_charge_override() -> None:
+            await hass.async_add_executor_job(
+                _remove_mode_from_schedule,
+                inverter,
+                WorkMode.FORCE_CHARGE,
+                min_soc_on_grid,
+            )
 
         def _on_charge_soc_change(
             event: HAEvent[EventStateChangedData],
@@ -822,17 +862,16 @@ def _register_services(hass: HomeAssistant) -> None:
                 return
             if soc_value >= target_soc:
                 _LOGGER.info(
-                    "Smart charge: SoC %.1f%% reached target %d%%, "
-                    "reverting to self-use",
+                    "Smart charge: SoC %.1f%% reached target %d%%, removing override",
                     soc_value,
                     target_soc,
                 )
-                hass.async_create_task(_revert_charge_to_self_use())
+                hass.async_create_task(_remove_charge_override())
                 _cancel_smart_charge(hass)
 
         def _on_charge_timer_expire(_now: datetime.datetime) -> None:
-            _LOGGER.info("Smart charge: window ended, reverting to self-use")
-            hass.async_create_task(_revert_charge_to_self_use())
+            _LOGGER.info("Smart charge: window ended, removing override")
+            hass.async_create_task(_remove_charge_override())
             _cancel_smart_charge(hass)
 
         async def _adjust_charge_power(
@@ -857,7 +896,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     cur_soc,
                     state["target_soc"],
                 )
-                await _revert_charge_to_self_use()
+                await _remove_charge_override()
                 _cancel_smart_charge(hass)
                 return
 

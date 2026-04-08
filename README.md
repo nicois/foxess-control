@@ -131,10 +131,10 @@ Charges the battery within a time window, periodically adjusting the charge rate
 **How it works:**
 
 1. Calculates the charge power needed to reach the target SoC in the remaining time, based on the configured battery capacity.
-2. Sets a `ForceCharge` schedule with the calculated power and `fdSoc` set to the target.
+2. Sets a `ForceCharge` schedule with the calculated power and `fdSoc` set high (100%) so the inverter never stops charging on its own — HA is the sole authority for stopping.
 3. Every 5 minutes, re-reads the current SoC and adjusts the charge power up or down. If the power change is below the configured **Min Power Change** threshold, the update is skipped to avoid unnecessary API calls.
-4. When the SoC reaches the target, the session ends: the schedule reverts to self-use and all listeners are cancelled.
-5. When the time window ends, listeners are cancelled (the schedule entry itself expires naturally).
+4. When the SoC reaches the target, the `ForceCharge` group is removed from the schedule, all listeners are cancelled, and the session ends. Other modes' schedule groups (e.g. a standing `ForceDischarge` window) are preserved.
+5. When the time window ends, the `ForceCharge` group is removed from the schedule and listeners are cancelled. This prevents the schedule from replaying the next day.
 
 Only one smart charge session can be active at a time. Starting a new `smart_charge` cancels any previous session. A `force_charge` action also cancels any running smart charge, since it replaces the underlying `ForceCharge` schedule.
 
@@ -165,9 +165,9 @@ Discharges the battery within a time window and automatically reverts to self-us
 
 **How it works:**
 
-1. Sets a `ForceDischarge` schedule with `fdSoc` set to the minimum SoC threshold.
-2. Monitors the Battery SoC Entity in real time. When the SoC drops to the `min_soc` threshold, the session ends: the schedule reverts to self-use and all listeners are cancelled.
-3. When the time window ends, listeners are cancelled.
+1. Sets a `ForceDischarge` schedule with `fdSoc` set low (11%) so the inverter never stops discharging on its own — HA is the sole authority for stopping.
+2. Monitors the Battery SoC Entity in real time. When the SoC drops to the `min_soc` threshold, the `ForceDischarge` group is removed from the schedule, all listeners are cancelled, and the session ends. Other modes' schedule groups (e.g. a standing `ForceCharge` window) are preserved.
+3. When the time window ends, the `ForceDischarge` group is removed from the schedule and listeners are cancelled. This prevents the schedule from replaying the next day.
 
 Only one smart discharge session can be active at a time. Starting a new `smart_discharge` cancels any previous session. A `force_discharge` action also cancels any running smart discharge, since it replaces the underlying `ForceDischarge` schedule.
 
@@ -240,11 +240,12 @@ automation:
 - Force charge/discharge actions write a time-windowed override to the inverter's scheduler via the FoxESS Cloud API. Outside scheduled windows, the inverter defaults to self-use mode.
 - Each force action only replaces existing overrides of the **same mode** (e.g. force charge replaces previous force charge windows, but leaves force discharge windows intact). Overrides of a different mode are always preserved, even if their time window has already passed today — this allows standing daily schedules (e.g. a free-electricity charge window) to coexist with evening discharge overrides.
 - If the new window would overlap with an existing override of a **different** mode, the action aborts with an error to prevent conflicts.
+- When a smart action ends (SoC target reached, time window expired), it removes **only its own mode's groups** from the schedule. Other modes' groups are preserved. For example, a smart discharge ending does not remove a standing `ForceCharge` window. If no groups remain after removal, the schedule reverts to self-use.
 - The API client throttles requests (minimum 5 seconds between calls) and retries with exponential backoff on rate limits.
 
 ## Known limitations
 
-- **Minimum SoC behaviour is unintuitive**: When the battery reaches the minimum SoC during force discharge or feed-in, the inverter's behaviour may not match expectations. It is recommended to define an automation that cancels the mode override (via `foxess_control.clear_overrides`) before the battery reaches this level, rather than relying on the inverter's built-in minimum SoC handling.
+- **Minimum SoC behaviour is unintuitive**: When the battery reaches the minimum SoC during force discharge or feed-in, the inverter's behaviour may not match expectations. Smart actions work around this by setting `fdSoc` to an extreme value (100% for charge, 11% for discharge) so the inverter never triggers its own threshold — HA monitors SoC and stops the action at the user's configured target. For plain `force_charge`/`force_discharge`, consider using an automation to cancel the override before the battery reaches the minimum SoC level.
 
 - **Schedule race condition**: Force charge/discharge actions read the current schedule, modify it, then write it back. If the schedule is changed between the read and write (e.g. via the FoxESS app), those changes will be overwritten. Enable debug logging for `foxess_control` to see before/after state if schedules change unexpectedly.
 - **FoxESS Cloud API latency**: All commands go through the FoxESS Cloud API, which throttles requests to one every 5 seconds. Actions are not instantaneous. For faster local control, consider modbus-based integrations.

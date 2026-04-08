@@ -14,6 +14,7 @@ from custom_components.foxess_control import (
     _is_expired,
     _is_placeholder,
     _merge_with_existing,
+    _remove_mode_from_schedule,
     _resolve_start_end,
     _resolve_start_end_explicit,
     _sanitize_group,
@@ -629,3 +630,77 @@ class TestResolveStartEndExplicit:
             pytest.raises(ServiceValidationError, match="4 hours"),
         ):
             _resolve_start_end_explicit(datetime.time(10, 0), datetime.time(15, 0))
+
+
+class TestRemoveModeFromSchedule:
+    """Tests for _remove_mode_from_schedule."""
+
+    @staticmethod
+    def _make_group(mode: str, sh: int, eh: int) -> dict[str, Any]:
+        return {
+            "enable": 1,
+            "startHour": sh,
+            "startMinute": 0,
+            "endHour": eh,
+            "endMinute": 0,
+            "workMode": mode,
+            "minSocOnGrid": 15,
+            "fdSoc": 100,
+            "fdPwr": 10500,
+        }
+
+    def test_removes_target_mode_keeps_others(self) -> None:
+        inv = MagicMock(spec=Inverter)
+        inv.get_schedule.return_value = {
+            "groups": [
+                self._make_group("ForceCharge", 2, 6),
+                self._make_group("ForceDischarge", 17, 20),
+            ]
+        }
+
+        _remove_mode_from_schedule(inv, WorkMode.FORCE_DISCHARGE, 15)
+
+        inv.set_schedule.assert_called_once()
+        groups = inv.set_schedule.call_args.args[0]
+        assert len(groups) == 1
+        assert groups[0]["workMode"] == "ForceCharge"
+
+    def test_falls_back_to_self_use_when_empty(self) -> None:
+        inv = MagicMock(spec=Inverter)
+        inv.get_schedule.return_value = {
+            "groups": [self._make_group("ForceDischarge", 17, 20)]
+        }
+
+        _remove_mode_from_schedule(inv, WorkMode.FORCE_DISCHARGE, 15)
+
+        inv.self_use.assert_called_once_with(15)
+        inv.set_schedule.assert_not_called()
+
+    def test_skips_placeholders(self) -> None:
+        inv = MagicMock(spec=Inverter)
+        inv.get_schedule.return_value = {
+            "groups": [
+                {"workMode": "Invalid", "enable": 0},
+                self._make_group("ForceCharge", 2, 6),
+            ]
+        }
+
+        _remove_mode_from_schedule(inv, WorkMode.FORCE_DISCHARGE, 15)
+
+        inv.set_schedule.assert_called_once()
+        groups = inv.set_schedule.call_args.args[0]
+        assert len(groups) == 1
+        assert groups[0]["workMode"] == "ForceCharge"
+
+    def test_re_enables_disabled_groups(self) -> None:
+        inv = MagicMock(spec=Inverter)
+        inv.get_schedule.return_value = {
+            "groups": [
+                {**self._make_group("ForceCharge", 2, 6), "enable": 0},
+            ]
+        }
+
+        _remove_mode_from_schedule(inv, WorkMode.FORCE_DISCHARGE, 15)
+
+        groups = inv.set_schedule.call_args.args[0]
+        assert groups[0]["enable"] == 1
