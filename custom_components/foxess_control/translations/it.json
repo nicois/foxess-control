@@ -76,6 +76,17 @@
         }
       }
     },
+    "smart_charge": {
+      "name": "Carica intelligente",
+      "description": "Caricare la batteria entro una finestra temporale, regolando periodicamente la potenza di carica per raggiungere un SoC obiettivo alla fine dell'intervallo.",
+      "fields": {
+        "start_time": { "name": "Ora di inizio", "description": "Ora del giorno per iniziare la carica." },
+        "end_time": { "name": "Ora di fine", "description": "Ora del giorno per terminare la carica. Deve essere dopo l'ora di inizio, entro 4 ore." },
+        "target_soc": { "name": "SoC obiettivo", "description": "Caricare la batteria fino a questo livello di SoC. La carica si interrompe e torna all'autoconsumo una volta raggiunto." },
+        "power": { "name": "Potenza massima", "description": "Potenza di carica massima in watt. La potenza effettiva può essere inferiore per distribuire la carica nel tempo." },
+        "replace_conflicts": { "name": "Rimuovi forzature in conflitto anziché interrompere", "description": "Se abilitato, rimuove silenziosamente le forzature esistenti sovrapposte anziché interrompere." }
+      }
+    },
     "smart_discharge": {
       "name": "Scarica intelligente",
       "description": "Scaricare la batteria entro una finestra temporale, tornando automaticamente all'autoconsumo quando viene raggiunto un SoC minimo.",
@@ -125,7 +136,9 @@
         "title": "Opzioni FoxESS Control",
         "data": {
           "min_soc_on_grid": "SoC minimo in rete (%)",
-          "battery_soc_entity": "Entità SoC della batteria"
+          "battery_soc_entity": "Entità SoC della batteria",
+          "battery_capacity_kwh": "Capacità della batteria (kWh)",
+          "min_power_change": "Variazione minima di potenza per la carica intelligente (W)"
         }
       }
     }

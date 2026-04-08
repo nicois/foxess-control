@@ -76,6 +76,17 @@
         }
       }
     },
+    "smart_charge": {
+      "name": "Carga inteligente",
+      "description": "Carregar a bateria numa janela de tempo, ajustando periodicamente a taxa de carga para atingir um SoC alvo no final do intervalo.",
+      "fields": {
+        "start_time": { "name": "Hora de início", "description": "Hora do dia para iniciar a carga." },
+        "end_time": { "name": "Hora de fim", "description": "Hora do dia para terminar a carga. Deve ser depois da hora de início, dentro de 4 horas." },
+        "target_soc": { "name": "SoC alvo", "description": "Carregar a bateria até este nível de SoC. A carga para e reverte para autoconsumo quando atingido." },
+        "power": { "name": "Potência máxima", "description": "Potência de carga máxima em watts. A potência real pode ser inferior para distribuir a carga ao longo do tempo." },
+        "replace_conflicts": { "name": "Remover substituições em conflito em vez de abortar", "description": "Se ativado, remove silenciosamente as substituições existentes sobrepostas em vez de abortar." }
+      }
+    },
     "smart_discharge": {
       "name": "Descarga inteligente",
       "description": "Descarregar a bateria numa janela de tempo, revertendo automaticamente para autoconsumo quando um SoC mínimo é atingido.",
@@ -125,7 +136,9 @@
         "title": "Opções FoxESS Control",
         "data": {
           "min_soc_on_grid": "SoC mínimo na rede (%)",
-          "battery_soc_entity": "Entidade SoC da bateria"
+          "battery_soc_entity": "Entidade SoC da bateria",
+          "battery_capacity_kwh": "Capacidade da bateria (kWh)",
+          "min_power_change": "Alteração mínima de potência para carga inteligente (W)"
         }
       }
     }

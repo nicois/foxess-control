@@ -13,8 +13,10 @@ from custom_components.foxess_control.config_flow import (
 )
 from custom_components.foxess_control.const import (
     CONF_API_KEY,
+    CONF_BATTERY_CAPACITY_KWH,
     CONF_BATTERY_SOC_ENTITY,
     CONF_DEVICE_SERIAL,
+    CONF_MIN_POWER_CHANGE,
     CONF_MIN_SOC_ON_GRID,
 )
 from custom_components.foxess_control.foxess.client import FoxESSApiError
@@ -190,3 +192,30 @@ class TestOptionsFlow:
         flow.async_create_entry.assert_called_once()
         data = flow.async_create_entry.call_args.kwargs["data"]
         assert data[CONF_BATTERY_SOC_ENTITY] == "sensor.battery_soc"
+
+    @pytest.mark.asyncio
+    async def test_saves_battery_capacity(self) -> None:
+        config_entry = MagicMock()
+        config_entry.options = {
+            CONF_MIN_SOC_ON_GRID: 20,
+            CONF_BATTERY_CAPACITY_KWH: 0.0,
+            CONF_MIN_POWER_CHANGE: 500,
+        }
+
+        flow = FoxessControlOptionsFlow(config_entry)
+        flow.async_create_entry = MagicMock(
+            return_value={"type": "create_entry"},
+        )
+
+        await flow.async_step_init(
+            {
+                CONF_MIN_SOC_ON_GRID: 20,
+                CONF_BATTERY_CAPACITY_KWH: 10.5,
+                CONF_MIN_POWER_CHANGE: 300,
+            }
+        )
+
+        flow.async_create_entry.assert_called_once()
+        data = flow.async_create_entry.call_args.kwargs["data"]
+        assert data[CONF_BATTERY_CAPACITY_KWH] == 10.5
+        assert data[CONF_MIN_POWER_CHANGE] == 300

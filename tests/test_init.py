@@ -9,6 +9,7 @@ from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.foxess_control import (
     _build_override_group,
+    _calculate_charge_power,
     _groups_overlap,
     _is_expired,
     _is_placeholder,
@@ -543,6 +544,46 @@ class TestIsExpired:
             return_value=datetime.datetime(2026, 4, 7, 14, 0, 0),
         ):
             assert not _is_expired(group)
+
+
+class TestCalculateChargePower:
+    """Tests for _calculate_charge_power."""
+
+    def test_basic_calculation(self) -> None:
+        # 50% -> 100% of 10 kWh battery in 2 hours = 5 kWh / 2h = 2500W
+        result = _calculate_charge_power(50.0, 100, 10.0, 2.0, 10000)
+        assert result == 2500
+
+    def test_result_is_int(self) -> None:
+        result = _calculate_charge_power(50.0, 100, 10.0, 3.0, 10000)
+        assert isinstance(result, int)
+
+    def test_clamped_to_min(self) -> None:
+        # Very small energy needed → clamped to 100W
+        result = _calculate_charge_power(99.0, 100, 10.0, 4.0, 10000)
+        assert result == 100
+
+    def test_clamped_to_max(self) -> None:
+        # Large energy in short time → clamped to max_power_w
+        result = _calculate_charge_power(0.0, 100, 20.0, 0.5, 5000)
+        assert result == 5000
+
+    def test_zero_remaining_hours(self) -> None:
+        result = _calculate_charge_power(50.0, 100, 10.0, 0.0, 8000)
+        assert result == 8000
+
+    def test_negative_remaining_hours(self) -> None:
+        result = _calculate_charge_power(50.0, 100, 10.0, -1.0, 8000)
+        assert result == 8000
+
+    def test_soc_at_target(self) -> None:
+        # energy_needed <= 0, returns 100
+        result = _calculate_charge_power(80.0, 80, 10.0, 2.0, 10000)
+        assert result == 100
+
+    def test_soc_above_target(self) -> None:
+        result = _calculate_charge_power(90.0, 80, 10.0, 2.0, 10000)
+        assert result == 100
 
 
 class TestResolveStartEndExplicit:

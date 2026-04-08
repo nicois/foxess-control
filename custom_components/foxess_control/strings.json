@@ -76,6 +76,32 @@
         }
       }
     },
+    "smart_charge": {
+      "name": "Smart charge",
+      "description": "Charge the battery within a time window, periodically adjusting the charge rate to reach a target SoC by the end of the interval.",
+      "fields": {
+        "start_time": {
+          "name": "Start time",
+          "description": "Time of day to start charging."
+        },
+        "end_time": {
+          "name": "End time",
+          "description": "Time of day to stop charging. Must be after start time, within 4 hours."
+        },
+        "target_soc": {
+          "name": "Target SoC",
+          "description": "Charge the battery to this SoC level. Charging stops and reverts to self-use when reached."
+        },
+        "power": {
+          "name": "Maximum power",
+          "description": "Maximum charge power in watts. The actual power may be lower to pace charging to the end of the window."
+        },
+        "replace_conflicts": {
+          "name": "Remove conflicting overrides instead of aborting",
+          "description": "If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting."
+        }
+      }
+    },
     "smart_discharge": {
       "name": "Smart discharge",
       "description": "Discharge the battery within a time window, automatically reverting to self-use when a minimum SoC is reached.",
@@ -125,7 +151,9 @@
         "title": "FoxESS Control Options",
         "data": {
           "min_soc_on_grid": "Minimum SoC on Grid (%)",
-          "battery_soc_entity": "Battery SoC Entity"
+          "battery_soc_entity": "Battery SoC Entity",
+          "battery_capacity_kwh": "Battery Capacity (kWh)",
+          "min_power_change": "Minimum Power Change for Smart Charge (W)"
         }
       }
     }

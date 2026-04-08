@@ -112,6 +112,48 @@ force_discharge:
       selector:
         boolean:
 
+smart_charge:
+  name: Smart charge
+  description: >-
+    Charge the battery within a time window, periodically adjusting the charge rate to reach a target SoC by the end of the interval.
+  fields:
+    start_time:
+      name: Start time
+      description: Time of day to start charging.
+      required: true
+      selector:
+        time:
+    end_time:
+      name: End time
+      description: Time of day to stop charging. Must be after start time, within 4 hours.
+      required: true
+      selector:
+        time:
+    target_soc:
+      name: Target SoC
+      description: >-
+        Charge the battery to this SoC level. Charging stops and reverts to self-use when reached.
+      required: true
+      selector:
+        number:
+          min: 11
+          max: 100
+          unit_of_measurement: "%"
+    power:
+      name: Maximum power
+      description: >-
+        Maximum charge power in watts. The actual power may be lower to pace charging to the end of the window.
+      selector:
+        number:
+          min: 100
+          unit_of_measurement: W
+    replace_conflicts:
+      name: Remove conflicting overrides instead of aborting
+      description: >-
+        If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting.
+      selector:
+        boolean:
+
 smart_discharge:
   name: Smart discharge
   description: >-

@@ -12,17 +12,22 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.event import (
     async_track_point_in_time,
     async_track_state_change_event,
+    async_track_time_interval,
 )
 from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_API_KEY,
+    CONF_BATTERY_CAPACITY_KWH,
     CONF_BATTERY_SOC_ENTITY,
     CONF_DEVICE_SERIAL,
+    CONF_MIN_POWER_CHANGE,
     CONF_MIN_SOC_ON_GRID,
+    DEFAULT_MIN_POWER_CHANGE,
     DEFAULT_MIN_SOC_ON_GRID,
     DOMAIN,
     MAX_OVERRIDE_HOURS,
+    PLATFORMS,
 )
 from .foxess import FoxESSClient, Inverter, WorkMode
 
@@ -41,7 +46,10 @@ SERVICE_CLEAR_OVERRIDES = "clear_overrides"
 SERVICE_FEEDIN = "feedin"
 SERVICE_FORCE_CHARGE = "force_charge"
 SERVICE_FORCE_DISCHARGE = "force_discharge"
+SERVICE_SMART_CHARGE = "smart_charge"
 SERVICE_SMART_DISCHARGE = "smart_discharge"
+
+SMART_CHARGE_ADJUST_INTERVAL = datetime.timedelta(minutes=5)
 
 VALID_MODES = [m.value for m in WorkMode]
 
@@ -84,6 +92,16 @@ SCHEMA_SMART_DISCHARGE = vol.Schema(
         vol.Required("end_time"): cv.time,
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
         vol.Required("min_soc"): vol.All(int, vol.Range(min=11, max=100)),
+        vol.Optional("replace_conflicts"): cv.boolean,
+    }
+)
+
+SCHEMA_SMART_CHARGE = vol.Schema(
+    {
+        vol.Required("start_time"): cv.time,
+        vol.Required("end_time"): cv.time,
+        vol.Required("target_soc"): vol.All(int, vol.Range(min=11, max=100)),
+        vol.Optional("power"): vol.All(int, vol.Range(min=100)),
         vol.Optional("replace_conflicts"): cv.boolean,
     }
 )
@@ -201,6 +219,56 @@ def _cancel_smart_discharge(hass: HomeAssistant) -> None:
     for unsub in unsubs:
         unsub()
     hass.data[DOMAIN]["_smart_discharge_unsubs"] = []
+    hass.data[DOMAIN].pop("_smart_discharge_state", None)
+
+
+def _get_battery_capacity_kwh(hass: HomeAssistant) -> float:
+    """Get battery_capacity_kwh from the first config entry's options."""
+    entry_id = next(iter(hass.data[DOMAIN]))
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None:
+        return 0.0
+    capacity: float = entry.options.get(CONF_BATTERY_CAPACITY_KWH, 0.0)
+    return capacity
+
+
+def _get_min_power_change(hass: HomeAssistant) -> int:
+    """Get min_power_change from the first config entry's options."""
+    entry_id = next(iter(hass.data[DOMAIN]))
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None:
+        return DEFAULT_MIN_POWER_CHANGE
+    val: int = int(entry.options.get(CONF_MIN_POWER_CHANGE, DEFAULT_MIN_POWER_CHANGE))
+    return val
+
+
+def _calculate_charge_power(
+    current_soc: float,
+    target_soc: int,
+    battery_capacity_kwh: float,
+    remaining_hours: float,
+    max_power_w: int,
+) -> int:
+    """Calculate the charge power needed to reach target SoC in remaining time.
+
+    Returns an integer power in watts, clamped to [100, max_power_w].
+    """
+    energy_needed_kwh = (target_soc - current_soc) / 100.0 * battery_capacity_kwh
+    if energy_needed_kwh <= 0:
+        return 100
+    if remaining_hours <= 0:
+        return max_power_w
+    power_w = energy_needed_kwh / remaining_hours * 1000
+    return max(100, min(int(power_w), max_power_w))
+
+
+def _cancel_smart_charge(hass: HomeAssistant) -> None:
+    """Cancel any active smart charge listeners."""
+    unsubs: list[Callable[[], None]] = hass.data[DOMAIN].get("_smart_charge_unsubs", [])
+    for unsub in unsubs:
+        unsub()
+    hass.data[DOMAIN]["_smart_charge_unsubs"] = []
+    hass.data[DOMAIN].pop("_smart_charge_state", None)
 
 
 def _to_minutes(hour: int, minute: int) -> int:
@@ -344,6 +412,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN].setdefault("_smart_discharge_unsubs", [])
+    hass.data[DOMAIN].setdefault("_smart_charge_unsubs", [])
     hass.data[DOMAIN][entry.entry_id] = {"inverter": inverter}
 
     # Register services once (first real entry)
@@ -351,22 +420,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if len(real_entries) == 1:
         _register_services(hass)
 
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
+    await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     hass.data[DOMAIN].pop(entry.entry_id)
 
     # Only "_smart_discharge_unsubs" key remains → last real entry was removed
     remaining = {k for k in hass.data[DOMAIN] if not k.startswith("_")}
     if not remaining:
         _cancel_smart_discharge(hass)
+        _cancel_smart_charge(hass)
         hass.data.pop(DOMAIN)
         hass.services.async_remove(DOMAIN, SERVICE_CLEAR_OVERRIDES)
         hass.services.async_remove(DOMAIN, SERVICE_FEEDIN)
         hass.services.async_remove(DOMAIN, SERVICE_FORCE_CHARGE)
         hass.services.async_remove(DOMAIN, SERVICE_FORCE_DISCHARGE)
+        hass.services.async_remove(DOMAIN, SERVICE_SMART_CHARGE)
         hass.services.async_remove(DOMAIN, SERVICE_SMART_DISCHARGE)
 
     return True
@@ -399,6 +473,12 @@ def _register_services(hass: HomeAssistant) -> None:
                 await hass.async_add_executor_job(inverter.set_schedule, kept)
             else:
                 await hass.async_add_executor_job(inverter.self_use, min_soc_on_grid)
+
+        # Cancel smart listeners that correspond to cleared modes
+        if mode_filter is None or mode_filter == WorkMode.FORCE_CHARGE.value:
+            _cancel_smart_charge(hass)
+        if mode_filter is None or mode_filter == WorkMode.FORCE_DISCHARGE.value:
+            _cancel_smart_discharge(hass)
 
     async def handle_force_charge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
@@ -565,6 +645,17 @@ def _register_services(hass: HomeAssistant) -> None:
         # Cancel any previous smart discharge listeners
         _cancel_smart_discharge(hass)
 
+        effective_power = power if power is not None else inverter.max_power_w
+
+        # Store state for binary sensor and diagnostics
+        hass.data[DOMAIN]["_smart_discharge_state"] = {
+            "groups": groups,
+            "end": end,
+            "min_soc": min_soc,
+            "last_power_w": effective_power,
+            "soc_entity": soc_entity,
+        }
+
         end_utc = dt_util.as_utc(end)
 
         async def _revert_to_self_use() -> None:
@@ -599,6 +690,223 @@ def _register_services(hass: HomeAssistant) -> None:
 
         hass.data[DOMAIN]["_smart_discharge_unsubs"] = [unsub_state, unsub_timer]
 
+    async def handle_smart_charge(call: ServiceCall) -> None:
+        start_time_val: datetime.time = call.data["start_time"]
+        end_time_val: datetime.time = call.data["end_time"]
+        max_power: int | None = call.data.get("power")
+        target_soc: int = call.data["target_soc"]
+        force: bool = call.data.get("replace_conflicts", False)
+
+        start, end = _resolve_start_end_explicit(start_time_val, end_time_val)
+
+        soc_entity = _get_battery_soc_entity(hass)
+        if not soc_entity:
+            raise ServiceValidationError(
+                "Battery SoC entity not configured. Set it in the "
+                "integration options before using smart charge."
+            )
+
+        battery_capacity_kwh = _get_battery_capacity_kwh(hass)
+        if battery_capacity_kwh <= 0:
+            raise ServiceValidationError(
+                "Battery capacity (kWh) not configured. Set it in the "
+                "integration options before using smart charge."
+            )
+
+        inverter = _get_inverter(hass)
+        min_soc_on_grid = _get_min_soc_on_grid(hass)
+        effective_max_power = (
+            max_power if max_power is not None else inverter.max_power_w
+        )
+
+        # Read current SoC for initial power calculation
+        soc_state = hass.states.get(soc_entity)
+        initial_power = effective_max_power
+        if soc_state is not None and soc_state.state not in (
+            "unknown",
+            "unavailable",
+        ):
+            try:
+                current_soc = float(soc_state.state)
+            except (ValueError, TypeError):
+                pass
+            else:
+                if current_soc >= target_soc:
+                    raise ServiceValidationError(
+                        f"Current SoC ({current_soc}%) already at or above "
+                        f"target ({target_soc}%)"
+                    )
+                now = dt_util.now()
+                remaining = (end - now).total_seconds() / 3600.0
+                initial_power = _calculate_charge_power(
+                    current_soc,
+                    target_soc,
+                    battery_capacity_kwh,
+                    remaining,
+                    effective_max_power,
+                )
+
+        group = _build_override_group(
+            start,
+            end,
+            WorkMode.FORCE_CHARGE,
+            inverter,
+            min_soc_on_grid,
+            fd_soc=target_soc,
+            fd_pwr=initial_power,
+        )
+
+        groups = await hass.async_add_executor_job(
+            _merge_with_existing,
+            inverter,
+            group,
+            WorkMode.FORCE_CHARGE,
+            force,
+        )
+
+        _LOGGER.info(
+            "Smart charge %02d:%02d - %02d:%02d (power=%dW, target_soc=%d%%)",
+            start.hour,
+            start.minute,
+            end.hour,
+            end.minute,
+            initial_power,
+            target_soc,
+        )
+        await hass.async_add_executor_job(inverter.set_schedule, groups)
+
+        # Cancel any previous smart charge listeners
+        _cancel_smart_charge(hass)
+
+        min_power_change = _get_min_power_change(hass)
+
+        # Store state for periodic adjustments
+        hass.data[DOMAIN]["_smart_charge_state"] = {
+            "groups": groups,
+            "end": end,
+            "target_soc": target_soc,
+            "battery_capacity_kwh": battery_capacity_kwh,
+            "max_power_w": effective_max_power,
+            "last_power_w": initial_power,
+            "soc_entity": soc_entity,
+            "min_soc_on_grid": min_soc_on_grid,
+            "min_power_change": min_power_change,
+        }
+
+        end_utc = dt_util.as_utc(end)
+
+        async def _revert_charge_to_self_use() -> None:
+            await hass.async_add_executor_job(inverter.self_use, min_soc_on_grid)
+
+        def _on_charge_soc_change(
+            event: HAEvent[EventStateChangedData],
+        ) -> None:
+            new_state = event.data.get("new_state")
+            if new_state is None or new_state.state in (
+                "unknown",
+                "unavailable",
+            ):
+                return
+            try:
+                soc_value = float(new_state.state)
+            except (ValueError, TypeError):
+                return
+            if soc_value >= target_soc:
+                _LOGGER.info(
+                    "Smart charge: SoC %.1f%% reached target %d%%, "
+                    "reverting to self-use",
+                    soc_value,
+                    target_soc,
+                )
+                hass.async_create_task(_revert_charge_to_self_use())
+                _cancel_smart_charge(hass)
+
+        def _on_charge_timer_expire(_now: datetime.datetime) -> None:
+            _LOGGER.info("Smart charge: window ended, cancelling listeners")
+            _cancel_smart_charge(hass)
+
+        async def _adjust_charge_power(
+            _now: datetime.datetime,
+        ) -> None:
+            state = hass.data[DOMAIN].get("_smart_charge_state")
+            if state is None:
+                return
+
+            soc_st = hass.states.get(state["soc_entity"])
+            if soc_st is None or soc_st.state in ("unknown", "unavailable"):
+                _LOGGER.debug("Smart charge: SoC unavailable, skipping adjustment")
+                return
+            try:
+                cur_soc = float(soc_st.state)
+            except (ValueError, TypeError):
+                return
+
+            if cur_soc >= state["target_soc"]:
+                _LOGGER.info(
+                    "Smart charge: SoC %.1f%% reached target %d%%, reverting",
+                    cur_soc,
+                    state["target_soc"],
+                )
+                await _revert_charge_to_self_use()
+                _cancel_smart_charge(hass)
+                return
+
+            now_dt = dt_util.now()
+            remaining = (state["end"] - now_dt).total_seconds() / 3600.0
+            if remaining <= 0:
+                return  # end timer will handle cleanup
+
+            new_power = _calculate_charge_power(
+                cur_soc,
+                state["target_soc"],
+                state["battery_capacity_kwh"],
+                remaining,
+                state["max_power_w"],
+            )
+
+            if abs(new_power - state["last_power_w"]) < state["min_power_change"]:
+                _LOGGER.debug(
+                    "Smart charge: power change %dW -> %dW below threshold "
+                    "%dW, skipping",
+                    state["last_power_w"],
+                    new_power,
+                    state["min_power_change"],
+                )
+                return
+
+            _LOGGER.info(
+                "Smart charge: adjusting power %dW -> %dW "
+                "(SoC=%.1f%%, remaining=%.2fh)",
+                state["last_power_w"],
+                new_power,
+                cur_soc,
+                remaining,
+            )
+
+            for g in state["groups"]:
+                if g.get("workMode") == WorkMode.FORCE_CHARGE.value:
+                    g["fdPwr"] = new_power
+                    break
+
+            state["last_power_w"] = new_power
+            await hass.async_add_executor_job(inverter.set_schedule, state["groups"])
+
+        unsub_charge_state = async_track_state_change_event(
+            hass, [soc_entity], _on_charge_soc_change
+        )
+        unsub_charge_timer = async_track_point_in_time(
+            hass, _on_charge_timer_expire, end_utc
+        )
+        unsub_charge_interval = async_track_time_interval(
+            hass, _adjust_charge_power, SMART_CHARGE_ADJUST_INTERVAL
+        )
+
+        hass.data[DOMAIN]["_smart_charge_unsubs"] = [
+            unsub_charge_state,
+            unsub_charge_timer,
+            unsub_charge_interval,
+        ]
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_CLEAR_OVERRIDES,
@@ -616,6 +924,12 @@ def _register_services(hass: HomeAssistant) -> None:
         SERVICE_FORCE_DISCHARGE,
         handle_force_discharge,
         schema=SCHEMA_FORCE_DISCHARGE,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SMART_CHARGE,
+        handle_smart_charge,
+        schema=SCHEMA_SMART_CHARGE,
     )
     hass.services.async_register(
         DOMAIN,

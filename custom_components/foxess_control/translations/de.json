@@ -76,6 +76,17 @@
         }
       }
     },
+    "smart_charge": {
+      "name": "Intelligentes Laden",
+      "description": "Batterie innerhalb eines Zeitfensters laden und die Ladeleistung periodisch anpassen, um den Ziel-SoC am Ende des Intervalls zu erreichen.",
+      "fields": {
+        "start_time": { "name": "Startzeit", "description": "Tageszeit für den Beginn des Ladens." },
+        "end_time": { "name": "Endzeit", "description": "Tageszeit für das Ende des Ladens. Muss nach der Startzeit liegen, innerhalb von 4 Stunden." },
+        "target_soc": { "name": "Ziel-SoC", "description": "Batterie bis zu diesem SoC-Niveau laden. Das Laden stoppt und kehrt zum Eigenverbrauch zurück, wenn erreicht." },
+        "power": { "name": "Maximale Leistung", "description": "Maximale Ladeleistung in Watt. Die tatsächliche Leistung kann geringer sein, um das Laden bis zum Ende des Zeitfensters zu verteilen." },
+        "replace_conflicts": { "name": "Konfliktende Übersteuerungen entfernen statt abbrechen", "description": "Wenn aktiviert, werden bestehende überlappende Übersteuerungen stillschweigend entfernt, anstatt abzubrechen." }
+      }
+    },
     "smart_discharge": {
       "name": "Intelligentes Entladen",
       "description": "Batterie innerhalb eines Zeitfensters entladen und automatisch zum Eigenverbrauch zurückkehren, wenn ein minimaler SoC erreicht wird.",
@@ -125,7 +136,9 @@
         "title": "FoxESS Control Optionen",
         "data": {
           "min_soc_on_grid": "Minimaler SoC am Netz (%)",
-          "battery_soc_entity": "Batterie-SoC-Entität"
+          "battery_soc_entity": "Batterie-SoC-Entität",
+          "battery_capacity_kwh": "Batteriekapazität (kWh)",
+          "min_power_change": "Minimale Leistungsänderung für intelligentes Laden (W)"
         }
       }
     }

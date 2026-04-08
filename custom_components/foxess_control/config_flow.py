@@ -14,13 +14,22 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.core import callback
-from homeassistant.helpers.selector import EntitySelector, EntitySelectorConfig
+from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+)
 
 from .const import (
     CONF_API_KEY,
+    CONF_BATTERY_CAPACITY_KWH,
     CONF_BATTERY_SOC_ENTITY,
     CONF_DEVICE_SERIAL,
+    CONF_MIN_POWER_CHANGE,
     CONF_MIN_SOC_ON_GRID,
+    DEFAULT_MIN_POWER_CHANGE,
     DEFAULT_MIN_SOC_ON_GRID,
     DOMAIN,
 )
@@ -104,6 +113,12 @@ class FoxessControlOptionsFlow(OptionsFlow):
             CONF_MIN_SOC_ON_GRID, DEFAULT_MIN_SOC_ON_GRID
         )
         current_entity = self._config_entry.options.get(CONF_BATTERY_SOC_ENTITY, "")
+        current_capacity = self._config_entry.options.get(
+            CONF_BATTERY_CAPACITY_KWH, 0.0
+        )
+        current_min_power = self._config_entry.options.get(
+            CONF_MIN_POWER_CHANGE, DEFAULT_MIN_POWER_CHANGE
+        )
 
         return self.async_show_form(
             step_id="init",
@@ -115,6 +130,28 @@ class FoxessControlOptionsFlow(OptionsFlow):
                     vol.Optional(
                         CONF_BATTERY_SOC_ENTITY, default=current_entity
                     ): EntitySelector(EntitySelectorConfig(domain="sensor")),
+                    vol.Optional(
+                        CONF_BATTERY_CAPACITY_KWH, default=current_capacity
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0.0,
+                            max=100.0,
+                            step=0.1,
+                            unit_of_measurement="kWh",
+                            mode=NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_MIN_POWER_CHANGE, default=current_min_power
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0,
+                            max=5000,
+                            step=50,
+                            unit_of_measurement="W",
+                            mode=NumberSelectorMode.BOX,
+                        )
+                    ),
                 }
             ),
         )

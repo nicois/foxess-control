@@ -76,6 +76,17 @@
         }
       }
     },
+    "smart_charge": {
+      "name": "Inteligentne ładowanie",
+      "description": "Ładować baterię w oknie czasowym, okresowo dostosowując moc ładowania, aby osiągnąć docelowy SoC na końcu interwału.",
+      "fields": {
+        "start_time": { "name": "Godzina rozpoczęcia", "description": "Godzina rozpoczęcia ładowania." },
+        "end_time": { "name": "Godzina zakończenia", "description": "Godzina zakończenia ładowania. Musi być po godzinie rozpoczęcia, w ciągu 4 godzin." },
+        "target_soc": { "name": "Docelowy SoC", "description": "Ładować baterię do tego poziomu SoC. Ładowanie zatrzymuje się i wraca do autokonsumpcji po osiągnięciu." },
+        "power": { "name": "Maksymalna moc", "description": "Maksymalna moc ładowania w watach. Rzeczywista moc może być niższa, aby rozłożyć ładowanie w czasie." },
+        "replace_conflicts": { "name": "Usuń konfliktujące nadpisania zamiast przerywać", "description": "Jeśli włączone, istniejące nakładające się nadpisania zostaną usunięte zamiast przerywania operacji." }
+      }
+    },
     "smart_discharge": {
       "name": "Inteligentne rozładowanie",
       "description": "Rozładowywać baterię w oknie czasowym, automatycznie wracając do autokonsumpcji po osiągnięciu minimalnego SoC.",
@@ -125,7 +136,9 @@
         "title": "Opcje FoxESS Control",
         "data": {
           "min_soc_on_grid": "Minimalny SoC w sieci (%)",
-          "battery_soc_entity": "Encja SoC baterii"
+          "battery_soc_entity": "Encja SoC baterii",
+          "battery_capacity_kwh": "Pojemność baterii (kWh)",
+          "min_power_change": "Minimalna zmiana mocy dla inteligentnego ładowania (W)"
         }
       }
     }
