@@ -45,7 +45,6 @@ feedin:
       name: Replace conflicts
       description: >-
         If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting.
-      default: false
       selector:
         boolean:
 
@@ -78,7 +77,6 @@ force_charge:
       name: Replace conflicts
       description: >-
         If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting.
-      default: false
       selector:
         boolean:
 
@@ -111,6 +109,5 @@ force_discharge:
       name: Replace conflicts
       description: >-
         If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting.
-      default: false
       selector:
         boolean:
