@@ -1,8 +1,8 @@
 # FoxESS Control
 
-A Home Assistant custom integration for controlling FoxESS inverter battery modes via the FoxESS Cloud API.
+A Home Assistant custom integration for monitoring and controlling FoxESS inverter battery modes via the FoxESS Cloud API.
 
-This integration is designed to complement the existing [foxess](https://github.com/macxq/foxess-ha) integration, which handles sensor polling and read-only state. FoxESS Control adds write actions: force charge, force discharge, and clearing overrides back to self-use mode.
+FoxESS Control polls real-time inverter data (battery SoC, charge/discharge power, solar generation, house load, temperature) and provides actions for force charge, force discharge, smart charge/discharge with SoC targets, and feed-in management. It can run standalone or alongside the [foxess-ha](https://github.com/macxq/foxess-ha) integration.
 
 ## Prerequisites
 
@@ -283,7 +283,7 @@ series:
     stroke_width: 2
 ```
 
-To overlay the forecast on top of actual SoC history (requires a SoC sensor from foxess-ha or similar):
+To overlay the forecast on top of actual SoC history:
 
 ```yaml
 type: custom:apexcharts-card
@@ -298,7 +298,7 @@ yaxis:
     max: 100
     decimals: 0
 series:
-  - entity: sensor.foxess_inv1_battery_soc
+  - entity: sensor.foxess_battery_soc
     name: Actual
     type: area
     color: "#2196F3"
@@ -314,9 +314,22 @@ series:
     stroke_dash: 4
 ```
 
-### Dashboard card example
+### Dashboard card examples
 
-All individual sensors work directly with the standard **Entities** card — no Jinja templates needed:
+All sensors work directly with the standard **Entities** card — no Jinja templates needed:
+
+```yaml
+type: entities
+title: Inverter
+entities:
+  - entity: sensor.foxess_battery_soc
+  - entity: sensor.foxess_solar_power
+  - entity: sensor.foxess_house_load
+  - entity: sensor.foxess_charge_rate
+  - entity: sensor.foxess_discharge_rate
+  - entity: sensor.foxess_residual_energy
+  - entity: sensor.foxess_battery_temperature
+```
 
 ```yaml
 type: entities
