@@ -238,7 +238,7 @@ def _build_forecast(
     """
     now = dt_util.now()
     capacity_kwh = _get_battery_capacity_kwh(hass)
-    points: list[dict[str, Any]] = []
+    raw_points: list[dict[str, Any]] = []
 
     if cs is not None:
         soc = _get_soc_value(hass)
@@ -275,7 +275,7 @@ def _build_forecast(
         cur_soc = soc
         while t <= end:
             epoch_ms = int(t.timestamp() * 1000)
-            points.append({"time": epoch_ms, "soc": round(cur_soc, 1)})
+            raw_points.append({"time": epoch_ms, "soc": round(cur_soc, 1)})
             t += _FORECAST_STEP
             if not charging_started and t < deferred_start:
                 # Still waiting — SoC stays flat
@@ -284,14 +284,14 @@ def _build_forecast(
             cur_soc = min(cur_soc + charge_rate * step_secs, target_soc)
 
         # Final point at end
-        if points and points[-1]["time"] < int(end.timestamp() * 1000):
-            points.append(
+        if raw_points and raw_points[-1]["time"] < int(end.timestamp() * 1000):
+            raw_points.append(
                 {
                     "time": int(end.timestamp() * 1000),
                     "soc": round(cur_soc, 1),
                 }
             )
-        return points
+        return _deduplicate_forecast(raw_points)
 
     if ds is not None:
         soc = _get_soc_value(hass)
@@ -313,7 +313,7 @@ def _build_forecast(
         cur_soc = soc
         while t <= end:
             epoch_ms = int(t.timestamp() * 1000)
-            points.append({"time": epoch_ms, "soc": round(cur_soc, 1)})
+            raw_points.append({"time": epoch_ms, "soc": round(cur_soc, 1)})
             t += _FORECAST_STEP
             if t < discharge_start:
                 # Before discharge starts — SoC stays flat
@@ -321,16 +321,40 @@ def _build_forecast(
             step_secs = _FORECAST_STEP.total_seconds()
             cur_soc = max(cur_soc - discharge_rate * step_secs, min_soc)
 
-        if points and points[-1]["time"] < int(end.timestamp() * 1000):
-            points.append(
+        if raw_points and raw_points[-1]["time"] < int(end.timestamp() * 1000):
+            raw_points.append(
                 {
                     "time": int(end.timestamp() * 1000),
                     "soc": round(cur_soc, 1),
                 }
             )
-        return points
+        return _deduplicate_forecast(raw_points)
 
     return []
+
+
+def _deduplicate_forecast(
+    points: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Remove intermediate points where SoC hasn't changed.
+
+    Always keeps the first point, last point, and any point where the
+    SoC differs from the previous point. Also keeps the last point
+    before a change to preserve transition timing.
+    """
+    if len(points) <= 2:
+        return points
+
+    result: list[dict[str, Any]] = [points[0]]
+    for i in range(1, len(points) - 1):
+        prev_soc = points[i - 1]["soc"]
+        cur_soc = points[i]["soc"]
+        next_soc = points[i + 1]["soc"]
+        # Keep if value changed from previous, or next will change from current
+        if cur_soc != prev_soc or next_soc != cur_soc:
+            result.append(points[i])
+    result.append(points[-1])
+    return result
 
 
 def _get_charge_state(hass: HomeAssistant) -> dict[str, Any] | None:

@@ -809,7 +809,10 @@ def _setup_smart_charge_listeners(
             net_consumption_kw=net_consumption,
         )
 
-        if abs(new_power - cur_state["last_power_w"]) < cur_state["min_power_change"]:
+        if (
+            abs(new_power - cur_state["last_power_w"]) < cur_state["min_power_change"]
+            and new_power != cur_state["max_power_w"]
+        ):
             _LOGGER.debug(
                 "Smart charge: power change %dW -> %dW below threshold %dW, skipping",
                 cur_state["last_power_w"],
