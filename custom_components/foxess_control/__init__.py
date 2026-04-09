@@ -362,6 +362,10 @@ def _calculate_charge_power(
 ) -> int:
     """Calculate the charge power needed to reach target SoC in remaining time.
 
+    Aims to finish with a 10% time buffer so the inverter doesn't have to
+    run at full capacity.  This matches the headroom used by
+    ``_calculate_deferred_start`` so the two stay in agreement.
+
     When *net_consumption_kw* is positive the house is drawing power that
     competes with the battery for inverter capacity, so we add it to the
     required charge rate.  When negative (solar exceeds consumption) the
@@ -375,7 +379,12 @@ def _calculate_charge_power(
         return 100
     if remaining_hours <= 0:
         return max_power_w
-    battery_power_kw = energy_needed_kwh / remaining_hours
+    # Plan to finish in 90% of the remaining time so there is a buffer
+    # if consumption spikes or the inverter can't sustain full power.
+    effective_hours = remaining_hours * (1 - DEFERRED_START_MIN_HEADROOM)
+    if effective_hours <= 0:
+        effective_hours = remaining_hours
+    battery_power_kw = energy_needed_kwh / effective_hours
     total_power_kw = battery_power_kw + max(0.0, net_consumption_kw)
     power_w = total_power_kw * 1000
     return max(100, min(int(power_w), max_power_w))

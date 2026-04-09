@@ -576,9 +576,9 @@ class TestCalculateChargePower:
     """Tests for _calculate_charge_power."""
 
     def test_basic_calculation(self) -> None:
-        # 50% -> 100% of 10 kWh battery in 2 hours = 5 kWh / 2h = 2500W
+        # 50% -> 100% of 10 kWh in 2h; effective = 1.8h → 5/1.8 = 2778W
         result = _calculate_charge_power(50.0, 100, 10.0, 2.0, 10000)
-        assert result == 2500
+        assert result == 2777
 
     def test_result_is_int(self) -> None:
         result = _calculate_charge_power(50.0, 100, 10.0, 3.0, 10000)
@@ -612,11 +612,11 @@ class TestCalculateChargePower:
         assert result == 100
 
     def test_consumption_increases_power(self) -> None:
-        # 5kWh / 2h = 2500W battery + 1500W consumption = 4000W
+        # 5kWh / 1.8h = 2778W battery + 1500W consumption = 4278W
         result = _calculate_charge_power(
             50.0, 100, 10.0, 2.0, 10000, net_consumption_kw=1.5
         )
-        assert result == 4000
+        assert result == 4277
 
     def test_consumption_clamped_to_max(self) -> None:
         # 5kWh / 2h = 2500W + 8000W consumption = 10500W → clamped to 10000
