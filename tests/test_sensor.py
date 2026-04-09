@@ -125,8 +125,15 @@ class TestInverterOverrideStatusSensor:
     def test_discharging(self) -> None:
         hass = _make_hass(smart_discharge_state=_discharge_state())
         sensor = InverterOverrideStatusSensor(hass, _make_entry())
-        assert sensor.native_value == "Dchg 5kW→30%"
+        assert sensor.native_value == "Dchg 5kW→20:00"
         assert sensor.icon == "mdi:battery-arrow-down"
+
+    def test_discharging_with_feedin_limit(self) -> None:
+        hass = _make_hass(
+            smart_discharge_state=_discharge_state(feedin_energy_limit_kwh=5.0)
+        )
+        sensor = InverterOverrideStatusSensor(hass, _make_entry())
+        assert sensor.native_value == "Dchg 5kW 5.0kWh"
 
     def test_charge_priority(self) -> None:
         """If both states exist, charge takes priority."""
@@ -210,11 +217,18 @@ class TestSmartOperationsOverviewSensor:
     def test_discharging(self) -> None:
         hass = _make_hass(smart_discharge_state=_discharge_state())
         sensor = SmartOperationsOverviewSensor(hass, _make_entry())
-        assert sensor.native_value == "Discharging to 30%"
+        assert sensor.native_value == "Discharging until 20:00"
         assert sensor.icon == "mdi:battery-arrow-down"
         attrs = sensor.extra_state_attributes
         assert attrs["discharge_active"] is True
         assert attrs["discharge_window"] == "17:00 – 20:00"
+
+    def test_discharging_with_feedin_limit(self) -> None:
+        hass = _make_hass(
+            smart_discharge_state=_discharge_state(feedin_energy_limit_kwh=5.0)
+        )
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        assert sensor.native_value == "Discharging 5.0 kWh feed-in"
 
     def test_both_active(self) -> None:
         hass = _make_hass(

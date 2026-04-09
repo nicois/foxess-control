@@ -383,6 +383,12 @@ class InverterOverrideStatusSensor(SensorEntity):
         ds = _get_discharge_state(self.hass)
         if ds is not None:
             power = _format_power(ds.get("last_power_w", 0))
+            feedin_limit = ds.get("feedin_energy_limit_kwh")
+            if feedin_limit is not None:
+                return f"Dchg {power} {feedin_limit}kWh"
+            end = ds.get("end")
+            if end is not None:
+                return f"Dchg {power}→{_format_time(end)}"
             min_soc = ds.get("min_soc", "?")
             return f"Dchg {power}→{min_soc}%"
 
@@ -461,6 +467,12 @@ class SmartOperationsOverviewSensor(SensorEntity):
             return f"Charging to {target}%"
 
         if ds is not None:
+            feedin_limit = ds.get("feedin_energy_limit_kwh")
+            if feedin_limit is not None:
+                return f"Discharging {feedin_limit} kWh feed-in"
+            end = ds.get("end")
+            if end is not None:
+                return f"Discharging until {_format_time(end)}"
             min_soc = ds.get("min_soc", "?")
             return f"Discharging to {min_soc}%"
 
