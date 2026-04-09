@@ -12,6 +12,7 @@ from custom_components.foxess_control import (
     _calculate_charge_power,
     _calculate_deferred_start,
     _get_current_soc,
+    _get_net_consumption,
     _groups_overlap,
     _is_expired,
     _is_placeholder,
@@ -610,17 +611,91 @@ class TestCalculateChargePower:
         result = _calculate_charge_power(90.0, 80, 10.0, 2.0, 10000)
         assert result == 100
 
+    def test_consumption_increases_power(self) -> None:
+        # 5kWh / 2h = 2500W battery + 1500W consumption = 4000W
+        result = _calculate_charge_power(
+            50.0, 100, 10.0, 2.0, 10000, net_consumption_kw=1.5
+        )
+        assert result == 4000
+
+    def test_consumption_clamped_to_max(self) -> None:
+        # 5kWh / 2h = 2500W + 8000W consumption = 10500W → clamped to 10000
+        result = _calculate_charge_power(
+            50.0, 100, 10.0, 2.0, 10000, net_consumption_kw=8.0
+        )
+        assert result == 10000
+
+    def test_negative_consumption_ignored(self) -> None:
+        # Solar surplus → net negative; should not reduce charge power
+        base = _calculate_charge_power(50.0, 100, 10.0, 2.0, 10000)
+        with_solar = _calculate_charge_power(
+            50.0, 100, 10.0, 2.0, 10000, net_consumption_kw=-3.0
+        )
+        assert with_solar == base
+
+
+class TestGetNetConsumption:
+    """Tests for _get_net_consumption."""
+
+    def test_returns_loads_minus_pv(self) -> None:
+        hass = MagicMock()
+        coordinator = MagicMock()
+        coordinator.data = {"loadsPower": 3.5, "pvPower": 1.2}
+        hass.data = {DOMAIN: {"entry1": {"coordinator": coordinator}}}
+        result = _get_net_consumption(hass)
+        assert result == pytest.approx(2.3)
+
+    def test_returns_negative_when_solar_exceeds(self) -> None:
+        hass = MagicMock()
+        coordinator = MagicMock()
+        coordinator.data = {"loadsPower": 1.0, "pvPower": 4.0}
+        hass.data = {DOMAIN: {"entry1": {"coordinator": coordinator}}}
+        result = _get_net_consumption(hass)
+        assert result == pytest.approx(-3.0)
+
+    def test_returns_zero_when_no_domain_data(self) -> None:
+        hass = MagicMock()
+        hass.data = {}
+        assert _get_net_consumption(hass) == 0.0
+
+    def test_returns_zero_when_coordinator_data_none(self) -> None:
+        hass = MagicMock()
+        coordinator = MagicMock()
+        coordinator.data = None
+        hass.data = {DOMAIN: {"entry1": {"coordinator": coordinator}}}
+        assert _get_net_consumption(hass) == 0.0
+
+    def test_returns_zero_when_values_missing(self) -> None:
+        hass = MagicMock()
+        coordinator = MagicMock()
+        coordinator.data = {"SoC": 50}
+        hass.data = {DOMAIN: {"entry1": {"coordinator": coordinator}}}
+        # loadsPower/pvPower missing → default to 0
+        assert _get_net_consumption(hass) == 0.0
+
+    def test_skips_underscore_keys(self) -> None:
+        hass = MagicMock()
+        coordinator = MagicMock()
+        coordinator.data = {"loadsPower": 5.0, "pvPower": 1.0}
+        hass.data = {
+            DOMAIN: {
+                "_state": {"some": "data"},
+                "entry1": {"coordinator": coordinator},
+            }
+        }
+        assert _get_net_consumption(hass) == pytest.approx(4.0)
+
 
 class TestCalculateDeferredStart:
     """Tests for _calculate_deferred_start."""
 
     def test_basic_deferral(self) -> None:
-        # 10kWh * 60% = 6kWh; 80% of 10500W = 8.4kW; 6/8.4 = 0.714h ≈ 43min
+        # 10kWh * 60% = 6kWh; 10.5kW - 10% headroom = 9.45kW; 6/9.45 = 0.635h ≈ 38min
         end = datetime.datetime(2026, 4, 7, 6, 0, 0)
         result = _calculate_deferred_start(20.0, 80, 10.0, 10500, end)
-        # deferred = 06:00 - 42.9min ≈ 05:17
+        # deferred = 06:00 - 38.1min ≈ 05:21
         assert result.hour == 5
-        assert result.minute == 17
+        assert result.minute == 21
 
     def test_soc_at_target_returns_end(self) -> None:
         end = datetime.datetime(2026, 4, 7, 6, 0, 0)
@@ -633,19 +708,47 @@ class TestCalculateDeferredStart:
         assert result == end
 
     def test_large_battery_defers_less(self) -> None:
-        # 60kWh * 60% = 36kWh; 80% of 10.5kW = 8.4kW; 36/8.4 = 4.29h
+        # 60kWh * 60% = 36kWh; 9.45kW effective; 36/9.45 = 3.81h
         end = datetime.datetime(2026, 4, 7, 6, 0, 0)
         result = _calculate_deferred_start(20.0, 80, 60.0, 10500, end)
-        # 06:00 - 4.29h = 01:43 — before the typical start time
-        assert result.hour == 1
-        assert result.minute == 42
+        # 06:00 - 3.81h = 02:11
+        assert result.hour == 2
+        assert result.minute == 11
 
     def test_small_charge_needed_defers_more(self) -> None:
-        # 10kWh * 10% = 1kWh; 80% of 10.5kW = 8.4kW; 1/8.4 = 0.119h ≈ 7min
+        # 10kWh * 10% = 1kWh; 9.45kW effective; 1/9.45 = 0.106h ≈ 6min
         end = datetime.datetime(2026, 4, 7, 6, 0, 0)
         result = _calculate_deferred_start(70.0, 80, 10.0, 10500, end)
         assert result.hour == 5
-        assert result.minute == 52
+        assert result.minute == 53
+
+    def test_consumption_brings_start_earlier(self) -> None:
+        # 6kWh needed; 10.5kW - 3kW consumption = 7.5kW effective; 6/7.5 = 0.8h = 48min
+        end = datetime.datetime(2026, 4, 7, 6, 0, 0)
+        result = _calculate_deferred_start(
+            20.0, 80, 10.0, 10500, end, net_consumption_kw=3.0
+        )
+        assert result.hour == 5
+        assert result.minute == 12
+
+    def test_high_consumption_uses_remaining_capacity(self) -> None:
+        # Consumption nearly equals max power — effective charge is tiny
+        # 6kWh needed; 10.5kW - 10kW = 0.5kW; 6/0.5 = 12h
+        end = datetime.datetime(2026, 4, 7, 6, 0, 0)
+        result = _calculate_deferred_start(
+            20.0, 80, 10.0, 10500, end, net_consumption_kw=10.0
+        )
+        # 06:00 - 12h = 18:00 previous day
+        assert result.hour == 18
+
+    def test_negative_consumption_ignored(self) -> None:
+        # Solar exceeding load → net negative; treated as 0 → min headroom applies
+        end = datetime.datetime(2026, 4, 7, 6, 0, 0)
+        no_consumption = _calculate_deferred_start(20.0, 80, 10.0, 10500, end)
+        with_solar = _calculate_deferred_start(
+            20.0, 80, 10.0, 10500, end, net_consumption_kw=-2.0
+        )
+        assert with_solar == no_consumption
 
 
 class TestResolveStartEndExplicit:

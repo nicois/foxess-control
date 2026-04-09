@@ -235,6 +235,31 @@ def _get_current_soc(hass: HomeAssistant) -> float | None:
     return get_coordinator_soc(hass)
 
 
+def _get_net_consumption(hass: HomeAssistant) -> float:
+    """Return net site consumption (loads minus solar) in kW.
+
+    Reads ``loadsPower`` and ``pvPower`` from the coordinator.
+    Returns ``0.0`` when coordinator data is unavailable so callers
+    fall back to the previous no-offset behaviour.
+    """
+    domain_data = hass.data.get(DOMAIN)
+    if domain_data is None:
+        return 0.0
+    for key in domain_data:
+        if not str(key).startswith("_"):
+            entry_data = domain_data.get(key)
+            if isinstance(entry_data, dict):
+                coordinator = entry_data.get("coordinator")
+                if coordinator is not None and coordinator.data:
+                    try:
+                        loads = float(coordinator.data.get("loadsPower", 0))
+                        pv = float(coordinator.data.get("pvPower", 0))
+                        return loads - pv
+                    except (ValueError, TypeError):
+                        return 0.0
+    return 0.0
+
+
 def _cancel_smart_discharge(hass: HomeAssistant) -> None:
     """Cancel any active smart discharge listeners and clear stored session."""
     unsubs: list[Callable[[], None]] = hass.data[DOMAIN].get(
@@ -327,8 +352,15 @@ def _calculate_charge_power(
     battery_capacity_kwh: float,
     remaining_hours: float,
     max_power_w: int,
+    net_consumption_kw: float = 0.0,
 ) -> int:
     """Calculate the charge power needed to reach target SoC in remaining time.
+
+    When *net_consumption_kw* is positive the house is drawing power that
+    competes with the battery for inverter capacity, so we add it to the
+    required charge rate.  When negative (solar exceeds consumption) the
+    battery gets a free boost — we don't subtract because the inverter
+    will naturally absorb the surplus.
 
     Returns an integer power in watts, clamped to [100, max_power_w].
     """
@@ -337,14 +369,16 @@ def _calculate_charge_power(
         return 100
     if remaining_hours <= 0:
         return max_power_w
-    power_w = energy_needed_kwh / remaining_hours * 1000
+    battery_power_kw = energy_needed_kwh / remaining_hours
+    total_power_kw = battery_power_kw + max(0.0, net_consumption_kw)
+    power_w = total_power_kw * 1000
     return max(100, min(int(power_w), max_power_w))
 
 
-# Fraction of max power used to calculate the deferred start time.
-# 0.8 means we plan to charge at 80% of max, leaving a 20% buffer
-# to absorb local consumption or reduced solar.
-DEFERRED_START_POWER_FRACTION = 0.8
+# Minimum fraction of max power reserved as headroom when calculating
+# the deferred start time.  Even when measured net consumption is zero
+# we still plan with at least 10% spare capacity for transient loads.
+DEFERRED_START_MIN_HEADROOM = 0.10
 
 
 def _calculate_deferred_start(
@@ -353,23 +387,29 @@ def _calculate_deferred_start(
     battery_capacity_kwh: float,
     max_power_w: int,
     end: datetime.datetime,
+    net_consumption_kw: float = 0.0,
 ) -> datetime.datetime:
     """Calculate the latest time to start charging to reach target SoC by *end*.
 
-    Plans charging at 80% of *max_power_w*, leaving a 20% buffer to
-    account for local consumption that reduces effective charge rate.
+    Uses *net_consumption_kw* (house load minus solar) to estimate how
+    much inverter capacity is available for charging.  A minimum headroom
+    of 10% of *max_power_w* is always reserved for transient loads.
 
     Returns *end* if no charging is needed (SoC already at target).
     Returns a time before *end* otherwise; may be in the past if the
-    window is too short to reach the target even at 80% power.
+    window is too short to reach the target.
     """
     energy_needed_kwh = (target_soc - current_soc) / 100.0 * battery_capacity_kwh
     if energy_needed_kwh <= 0:
         return end
-    charge_power_kw = max_power_w * DEFERRED_START_POWER_FRACTION / 1000.0
-    if charge_power_kw <= 0:
-        return end
-    charge_hours = energy_needed_kwh / charge_power_kw
+    max_power_kw = max_power_w / 1000.0
+    consumption_headroom_kw = max(0.0, net_consumption_kw)
+    min_headroom_kw = max_power_kw * DEFERRED_START_MIN_HEADROOM
+    headroom_kw = max(consumption_headroom_kw, min_headroom_kw)
+    effective_charge_kw = max_power_kw - headroom_kw
+    if effective_charge_kw <= 0:
+        effective_charge_kw = max_power_kw * DEFERRED_START_MIN_HEADROOM
+    charge_hours = energy_needed_kwh / effective_charge_kw
     return end - datetime.timedelta(hours=charge_hours)
 
 
@@ -622,6 +662,8 @@ def _setup_smart_charge_listeners(
         if remaining <= 0:
             return  # end timer will handle cleanup
 
+        net_consumption = _get_net_consumption(hass)
+
         if not cur_state["charging_started"]:
             # Check if it's time to start deferred charging
             deferred = _calculate_deferred_start(
@@ -630,13 +672,16 @@ def _setup_smart_charge_listeners(
                 cur_state["battery_capacity_kwh"],
                 cur_state["max_power_w"],
                 cur_state["end"],
+                net_consumption_kw=net_consumption,
             )
             if now_dt < deferred:
                 _LOGGER.debug(
-                    "Smart charge: deferring until ~%02d:%02d (SoC=%.1f%%)",
+                    "Smart charge: deferring until ~%02d:%02d "
+                    "(SoC=%.1f%%, net_consumption=%.2fkW)",
                     deferred.hour,
                     deferred.minute,
                     cur_soc,
+                    net_consumption,
                 )
                 return
 
@@ -647,6 +692,7 @@ def _setup_smart_charge_listeners(
                 cur_state["battery_capacity_kwh"],
                 remaining,
                 cur_state["max_power_w"],
+                net_consumption_kw=net_consumption,
             )
             group = _build_override_group(
                 now_dt,
@@ -693,6 +739,7 @@ def _setup_smart_charge_listeners(
             cur_state["battery_capacity_kwh"],
             remaining,
             cur_state["max_power_w"],
+            net_consumption_kw=net_consumption,
         )
 
         if abs(new_power - cur_state["last_power_w"]) < cur_state["min_power_change"]:
@@ -894,6 +941,7 @@ async def _recover_sessions(
                             charge_data["battery_capacity_kwh"],
                             remaining,
                             charge_data["max_power_w"],
+                            net_consumption_kw=_get_net_consumption(hass),
                         )
 
                     hass.data[DOMAIN]["_smart_charge_state"] = {
@@ -1352,6 +1400,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
         # Decide whether to start charging now or defer
         now = dt_util.now()
+        net_consumption = _get_net_consumption(hass)
         should_defer = False
         if current_soc is not None:
             deferred_start = _calculate_deferred_start(
@@ -1360,6 +1409,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 battery_capacity_kwh,
                 effective_max_power,
                 end,
+                net_consumption_kw=net_consumption,
             )
             should_defer = now < deferred_start
 
@@ -1388,6 +1438,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     battery_capacity_kwh,
                     remaining,
                     effective_max_power,
+                    net_consumption_kw=net_consumption,
                 )
 
             group = _build_override_group(

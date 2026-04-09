@@ -1153,17 +1153,17 @@ class TestHandleSmartCharge:
 
     @pytest.mark.asyncio
     async def test_smart_charge_immediate_when_window_tight(self) -> None:
-        """With a large battery, there's not enough time to defer."""
+        """With a large battery and household load, there's not enough time to defer."""
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
         hass = _make_hass(
             inverter=inv,
             battery_capacity_kwh=60.0,
-            coordinator_data={"SoC": 20.0},
+            coordinator_data={"SoC": 20.0, "loadsPower": 3.0, "pvPower": 0.0},
         )
 
-        # 60kWh * 60% = 36kWh needed; 80% of 10.5kW = 8.4kW → 4.29h > 4h window
+        # 60kWh * 60% = 36kWh needed; 10.5kW - 3kW load = 7.5kW eff; 36/7.5 = 4.8h > 4h
 
         from custom_components.foxess_control import _register_services
 
@@ -1464,12 +1464,16 @@ class TestHandleSmartCharge:
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
-        # Large capacity → immediate start (no deferral)
+        # Large capacity + load → immediate start (no deferral)
         hass = _make_hass(
             inverter=inv,
             battery_capacity_kwh=60.0,
             min_power_change=100,
-            coordinator_data={"SoC": 20.0},
+            coordinator_data={
+                "SoC": 20.0,
+                "loadsPower": 3.0,
+                "pvPower": 0.0,
+            },
         )
 
         captured_interval_callback = None
@@ -1513,9 +1517,13 @@ class TestHandleSmartCharge:
         # Reset set_schedule call count from initial setup
         inv.set_schedule.reset_mock()
 
-        # Initial: 60kWh * 60% / 4h = 9000W
-        # At 60% with 2h left: 60kWh * 20% / 2h = 6000W → delta 3000W > 100W
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 60.0}
+        # At 60% with 2h left + 3kW load: 60kWh*20%/2h + 3kW = 6000+3000 = 9000W
+        # vs initial ~12kW → delta well above 100W threshold
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 60.0,
+            "loadsPower": 3.0,
+            "pvPower": 0.0,
+        }
 
         with patch(
             "custom_components.foxess_control.dt_util.now",
