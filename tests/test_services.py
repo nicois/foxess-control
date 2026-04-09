@@ -2788,6 +2788,268 @@ class TestSocStabilityCounters:
         assert hass.data[DOMAIN]["_smart_discharge_state"]["soc_below_min_count"] == 0
 
 
+class TestFeedinEnergyLimit:
+    """Tests for the feed-in energy limit on smart discharge."""
+
+    @pytest.mark.asyncio
+    async def test_feedin_limit_stops_discharge(self) -> None:
+        """Discharge stops when feedin counter exceeds the limit."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        # feedin=100.0 at session start
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 80.0, "feedin": 100.0},
+        )
+
+        captured_interval = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval
+            captured_interval = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 10,
+                        "feedin_energy_limit_kwh": 2.0,
+                    }
+                )
+            )
+
+        assert captured_interval is not None
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state["feedin_energy_limit_kwh"] == 2.0
+        assert state["feedin_start_kwh"] == 100.0
+
+        # Counter has increased by 2.5 kWh (> 2.0 limit)
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 70.0,
+            "feedin": 102.5,
+        }
+        # First call records baseline (start was snapshotted at session start)
+        # Since start was already set, this should trigger
+        await captured_interval(datetime.datetime(2026, 4, 7, 17, 30, 0))
+
+        # Session should be cancelled
+        assert hass.data[DOMAIN].get("_smart_discharge_state") is None
+
+    @pytest.mark.asyncio
+    async def test_feedin_counter_tracks_across_intervals(self) -> None:
+        """Feed-in energy is tracked by comparing counter to start snapshot."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 80.0, "feedin": 500.0},
+        )
+
+        captured_interval = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval
+            captured_interval = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 10,
+                        "feedin_energy_limit_kwh": 3.0,
+                    }
+                )
+            )
+
+        assert captured_interval is not None
+
+        # Counter +1 kWh — under limit
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 70.0,
+            "feedin": 501.0,
+        }
+        await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state is not None
+
+        # Counter +2 kWh — still under
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 65.0,
+            "feedin": 502.0,
+        }
+        await captured_interval(datetime.datetime(2026, 4, 7, 19, 0, 0))
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state is not None
+
+        # Counter +3 kWh — at limit, should cancel
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 60.0,
+            "feedin": 503.0,
+        }
+        await captured_interval(datetime.datetime(2026, 4, 7, 19, 30, 0))
+        assert hass.data[DOMAIN].get("_smart_discharge_state") is None
+
+    @pytest.mark.asyncio
+    async def test_no_feedin_limit_skips_tracking(self) -> None:
+        """Without feedin_energy_limit_kwh, no feed-in tracking occurs."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 80.0, "feedin": 500.0},
+        )
+
+        captured_interval = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval
+            captured_interval = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 10,
+                    }
+                )
+            )
+
+        assert captured_interval is not None
+
+        # Even with large counter increase, session continues (no limit set)
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 70.0,
+            "feedin": 600.0,
+        }
+        await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state is not None
+
+    @pytest.mark.asyncio
+    async def test_feedin_counter_unavailable_does_not_cancel(self) -> None:
+        """When feedin counter is unavailable, session continues."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 80.0, "feedin": 100.0},
+        )
+
+        captured_interval = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval
+            captured_interval = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 10,
+                        "feedin_energy_limit_kwh": 2.0,
+                    }
+                )
+            )
+
+        assert captured_interval is not None
+
+        # feedin counter missing from coordinator data
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 70.0,
+        }
+        await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state is not None
+
+
 class TestRemainingZeroCancels:
     """Tests for active cancellation when remaining time <= 0."""
 

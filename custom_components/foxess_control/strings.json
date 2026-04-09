@@ -122,6 +122,10 @@
           "name": "Minimum SoC to stop discharge",
           "description": "Stop discharging and revert to self-use when the battery reaches this level."
         },
+        "feedin_energy_limit_kwh": {
+          "name": "Feed-in energy limit",
+          "description": "Stop discharging after this much energy (kWh) has been fed into the grid, beyond household self-consumption."
+        },
         "replace_conflicts": {
           "name": "Remove conflicting overrides instead of aborting",
           "description": "If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting."

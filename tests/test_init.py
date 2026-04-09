@@ -12,6 +12,7 @@ from custom_components.foxess_control import (
     _calculate_charge_power,
     _calculate_deferred_start,
     _get_current_soc,
+    _get_feedin_energy_kwh,
     _get_net_consumption,
     _groups_overlap,
     _is_expired,
@@ -931,6 +932,48 @@ class TestGetNetConsumptionParseErrors:
         coordinator.data = {}
         hass.data = {DOMAIN: {"entry1": {"coordinator": coordinator}}}
         assert _get_net_consumption(hass) == 0.0
+
+
+class TestGetFeedinEnergyKwh:
+    """Tests for _get_feedin_energy_kwh."""
+
+    def test_returns_feedin_energy(self) -> None:
+        hass = MagicMock()
+        coordinator = MagicMock()
+        coordinator.data = {"feedin": 657.1}
+        hass.data = {DOMAIN: {"entry1": {"coordinator": coordinator}}}
+        assert _get_feedin_energy_kwh(hass) == 657.1
+
+    def test_returns_none_when_no_domain_data(self) -> None:
+        hass = MagicMock()
+        hass.data = {}
+        assert _get_feedin_energy_kwh(hass) is None
+
+    def test_returns_none_when_no_coordinator(self) -> None:
+        hass = MagicMock()
+        hass.data = {DOMAIN: {"entry1": {"inverter": MagicMock()}}}
+        assert _get_feedin_energy_kwh(hass) is None
+
+    def test_returns_none_when_feedin_missing(self) -> None:
+        hass = MagicMock()
+        coordinator = MagicMock()
+        coordinator.data = {"SoC": 80.0}
+        hass.data = {DOMAIN: {"entry1": {"coordinator": coordinator}}}
+        assert _get_feedin_energy_kwh(hass) is None
+
+    def test_returns_none_for_bad_value(self) -> None:
+        hass = MagicMock()
+        coordinator = MagicMock()
+        coordinator.data = {"feedin": "bad"}
+        hass.data = {DOMAIN: {"entry1": {"coordinator": coordinator}}}
+        assert _get_feedin_energy_kwh(hass) is None
+
+    def test_skips_underscore_keys(self) -> None:
+        hass = MagicMock()
+        coordinator = MagicMock()
+        coordinator.data = {"feedin": 100.0}
+        hass.data = {DOMAIN: {"_internal": {"coordinator": coordinator}}}
+        assert _get_feedin_energy_kwh(hass) is None
 
 
 class TestCalculateChargePowerEdgeCases:

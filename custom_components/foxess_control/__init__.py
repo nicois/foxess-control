@@ -102,6 +102,9 @@ SCHEMA_SMART_DISCHARGE = vol.Schema(
         vol.Required("end_time"): cv.time,
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
         vol.Required("min_soc"): vol.All(int, vol.Range(min=5, max=100)),
+        vol.Optional("feedin_energy_limit_kwh"): vol.All(
+            vol.Coerce(float), vol.Range(min=0.1)
+        ),
     },
     extra=vol.ALLOW_EXTRA,
 )
@@ -266,6 +269,32 @@ def _get_net_consumption(hass: HomeAssistant) -> float:
     return 0.0
 
 
+def _get_feedin_energy_kwh(hass: HomeAssistant) -> float | None:
+    """Return cumulative grid feed-in energy in kWh from the coordinator.
+
+    Reads the ``feedin`` variable (lifetime counter) rather than
+    the instantaneous ``feedinPower``.  Returns ``None`` when
+    coordinator data is unavailable.
+    """
+    domain_data = hass.data.get(DOMAIN)
+    if domain_data is None:
+        return None
+    for key in domain_data:
+        if not str(key).startswith("_"):
+            entry_data = domain_data.get(key)
+            if isinstance(entry_data, dict):
+                coordinator = entry_data.get("coordinator")
+                if coordinator is not None and coordinator.data:
+                    raw = coordinator.data.get("feedin")
+                    if raw is None:
+                        return None
+                    try:
+                        return float(raw)
+                    except (ValueError, TypeError):
+                        return None
+    return None
+
+
 def _cancel_smart_discharge(hass: HomeAssistant) -> None:
     """Cancel any active smart discharge listeners and clear stored session."""
     unsubs: list[Callable[[], None]] = hass.data[DOMAIN].get(
@@ -321,7 +350,7 @@ def _session_data_from_charge_state(state: dict[str, Any]) -> dict[str, Any]:
 
 def _session_data_from_discharge_state(state: dict[str, Any]) -> dict[str, Any]:
     """Build a serialisable dict from a smart discharge state dict."""
-    return {
+    data: dict[str, Any] = {
         "date": state["start"].strftime("%Y-%m-%d"),
         "start_hour": state["start"].hour,
         "start_minute": state["start"].minute,
@@ -330,6 +359,11 @@ def _session_data_from_discharge_state(state: dict[str, Any]) -> dict[str, Any]:
         "min_soc": state["min_soc"],
         "last_power_w": state["last_power_w"],
     }
+    if state.get("feedin_energy_limit_kwh") is not None:
+        data["feedin_energy_limit_kwh"] = state["feedin_energy_limit_kwh"]
+        if state.get("feedin_start_kwh") is not None:
+            data["feedin_start_kwh"] = state["feedin_start_kwh"]
+    return data
 
 
 def _get_battery_capacity_kwh(hass: HomeAssistant) -> float:
@@ -839,10 +873,34 @@ def _setup_smart_discharge_listeners(
         await _remove_discharge_override()
 
     async def _check_discharge_soc(_now: datetime.datetime) -> None:
-        """Periodic SoC check from coordinator data."""
+        """Periodic SoC and feed-in energy check from coordinator data."""
         cur_state = hass.data[DOMAIN].get("_smart_discharge_state")
         if cur_state is None:
             return
+
+        # --- Check feed-in energy limit using cumulative counter ---
+        feedin_limit = cur_state.get("feedin_energy_limit_kwh")
+        if feedin_limit is not None:
+            feedin_now = _get_feedin_energy_kwh(hass)
+            if feedin_now is not None:
+                feedin_start = cur_state.get("feedin_start_kwh")
+                if feedin_start is None:
+                    # First reading — record baseline
+                    cur_state["feedin_start_kwh"] = feedin_now
+                else:
+                    exported = feedin_now - feedin_start
+                    if exported >= feedin_limit:
+                        _LOGGER.info(
+                            "Smart discharge: feed-in energy %.2f kWh reached "
+                            "limit %.2f kWh, removing override",
+                            exported,
+                            feedin_limit,
+                        )
+                        _cancel_smart_discharge(hass)
+                        await _remove_discharge_override()
+                        return
+
+        # --- SoC threshold check ---
         soc_value = _get_current_soc(hass)
         if soc_value is None:
             return
@@ -1088,6 +1146,8 @@ async def _recover_discharge_session(
             "min_soc": discharge_data.get("min_soc", 10),
             "last_power_w": discharge_data.get("last_power_w", 0),
             "soc_below_min_count": 0,
+            "feedin_energy_limit_kwh": discharge_data.get("feedin_energy_limit_kwh"),
+            "feedin_start_kwh": discharge_data.get("feedin_start_kwh"),
         }
         _setup_smart_discharge_listeners(hass, inverter)
     else:
@@ -1378,6 +1438,7 @@ def _register_services(hass: HomeAssistant) -> None:
         power: int | None = call.data.get("power")
         min_soc: int = call.data["min_soc"]
         force: bool = call.data.get("replace_conflicts", False)
+        feedin_energy_limit: float | None = call.data.get("feedin_energy_limit_kwh")
 
         start, end = _resolve_start_end_explicit(start_time, end_time)
 
@@ -1409,14 +1470,20 @@ def _register_services(hass: HomeAssistant) -> None:
             force,
         )
 
+        feedin_str = (
+            f", feedin_limit={feedin_energy_limit}kWh"
+            if feedin_energy_limit is not None
+            else ""
+        )
         _LOGGER.info(
-            "Smart discharge %02d:%02d - %02d:%02d (power=%s, min_soc=%d%%)",
+            "Smart discharge %02d:%02d - %02d:%02d (power=%s, min_soc=%d%%%s)",
             start.hour,
             start.minute,
             end.hour,
             end.minute,
             f"{power}W" if power else "max",
             min_soc,
+            feedin_str,
         )
         await hass.async_add_executor_job(inverter.set_schedule, groups)
 
@@ -1433,6 +1500,8 @@ def _register_services(hass: HomeAssistant) -> None:
             "min_soc": min_soc,
             "last_power_w": effective_power,
             "soc_below_min_count": 0,
+            "feedin_energy_limit_kwh": feedin_energy_limit,
+            "feedin_start_kwh": _get_feedin_energy_kwh(hass),
         }
 
         _setup_smart_discharge_listeners(hass, inverter)

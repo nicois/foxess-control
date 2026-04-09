@@ -32,4 +32,19 @@ POLLED_VARIABLES = [
     "pv2Power",
     "ambientTemperation",
     "invTemperation",
+    # Cumulative energy counters (lifetime kWh)
+    "feedin",
+    "gridConsumption",
+    "generation",
+    "chargeEnergyToTal",
+    "dischargeEnergyToTal",
+    "loads",
+    "energyThroughput",
+    # Grid connection
+    "meterPower",
+    "RVolt",
+    "RCurrent",
+    "RFreq",
+    # EPS / backup
+    "epsPower",
 ]

@@ -768,6 +768,18 @@ class TestFoxESSPolledSensor:
                 "pv2Power": 2.0,
                 "ambientTemperation": 18.0,
                 "invTemperation": 35.0,
+                "feedin": 657.1,
+                "gridConsumption": 690.0,
+                "generation": 1347.0,
+                "chargeEnergyToTal": 1028.4,
+                "dischargeEnergyToTal": 1211.4,
+                "loads": 923.1,
+                "energyThroughput": 2102.96,
+                "meterPower": -5.014,
+                "RVolt": 246.4,
+                "RCurrent": 22.1,
+                "RFreq": 50.02,
+                "epsPower": 0.158,
             }
         )
         entry = _make_entry()
@@ -775,7 +787,7 @@ class TestFoxESSPolledSensor:
             FoxESSPolledSensor(coordinator, entry, desc)
             for desc in POLLED_SENSOR_DESCRIPTIONS
         ]
-        assert len(sensors) == 16
+        assert len(sensors) == 28
         # All should have a non-None value
         for s in sensors:
             assert s.native_value is not None
@@ -865,8 +877,8 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(hass, entry, mock_add)  # type: ignore[arg-type]
 
-        # 9 base + 16 polled + 1 work mode = 26
-        assert len(added) == 26
+        # 9 base + 28 polled + 1 work mode = 38
+        assert len(added) == 38
         assert isinstance(added[0], InverterOverrideStatusSensor)
         assert isinstance(added[1], SmartOperationsOverviewSensor)
         assert isinstance(added[2], ChargePowerSensor)
@@ -889,8 +901,8 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(hass, entry, mock_add)  # type: ignore[arg-type]
 
-        assert len(added) == 26  # 9 existing + 16 polled + 1 work mode
+        assert len(added) == 38  # 9 existing + 28 polled + 1 work mode
         polled = [e for e in added if isinstance(e, FoxESSPolledSensor)]
-        assert len(polled) == 16
+        assert len(polled) == 28
         work_mode = [e for e in added if isinstance(e, FoxESSWorkModeSensor)]
         assert len(work_mode) == 1

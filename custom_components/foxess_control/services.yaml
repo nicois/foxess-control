@@ -197,6 +197,15 @@ smart_discharge:
           min: 5
           max: 100
           unit_of_measurement: "%"
+    feedin_energy_limit_kwh:
+      name: Feed-in energy limit
+      description: >-
+        Stop discharging after this much energy (kWh) has been fed into the grid. This is the excess energy exported beyond household self-consumption.
+      selector:
+        number:
+          min: 0.1
+          step: 0.1
+          unit_of_measurement: kWh
     replace_conflicts:
       name: Remove conflicting overrides instead of aborting
       description: >-
