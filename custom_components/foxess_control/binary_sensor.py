@@ -64,12 +64,13 @@ class SmartChargeActiveSensor(BinarySensorEntity):
         if state is None:
             return None
         phase = "charging" if state.get("charging_started", True) else "deferred"
+        end = state.get("end")
         return {
-            "target_soc": state["target_soc"],
+            "target_soc": state.get("target_soc"),
             "phase": phase,
-            "current_power_w": state["last_power_w"],
-            "max_power_w": state["max_power_w"],
-            "end_time": state["end"].isoformat(),
+            "current_power_w": state.get("last_power_w", 0),
+            "max_power_w": state.get("max_power_w", 0),
+            "end_time": end.isoformat() if end is not None else None,
         }
 
 
@@ -102,8 +103,9 @@ class SmartDischargeActiveSensor(BinarySensorEntity):
         state = domain_data.get("_smart_discharge_state")
         if state is None:
             return None
+        end = state.get("end")
         return {
-            "min_soc": state["min_soc"],
-            "last_power_w": state["last_power_w"],
-            "end_time": state["end"].isoformat(),
+            "min_soc": state.get("min_soc"),
+            "last_power_w": state.get("last_power_w", 0),
+            "end_time": end.isoformat() if end is not None else None,
         }

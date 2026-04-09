@@ -90,6 +90,7 @@ Prioritises feeding excess solar to the grid for a specified duration, similar t
 | `duration` | Yes | | How long to feed in. Maximum 4 hours. Must not extend past midnight. |
 | `power` | No | Inverter max | Feed-in power limit in watts (min 100). |
 | `start_time` | No | Now | Time of day to start the override (e.g. `"14:00:00"`). |
+| `replace_conflicts` | No | false | Remove conflicting overrides instead of aborting. |
 
 ```yaml
 action: foxess_control.feedin
@@ -107,6 +108,7 @@ Forces the inverter to charge the battery for a specified duration.
 | `duration` | Yes | | How long to force charge. Maximum 4 hours. Must not extend past midnight. |
 | `power` | No | Inverter max | Charge power limit in watts (min 100). |
 | `start_time` | No | Now | Time of day to start the override (e.g. `"14:30:00"`). |
+| `replace_conflicts` | No | false | Remove conflicting overrides instead of aborting. |
 
 ```yaml
 action: foxess_control.force_charge
@@ -124,6 +126,7 @@ Forces the inverter to discharge the battery for a specified duration.
 | `duration` | Yes | | How long to force discharge. Maximum 4 hours. Must not extend past midnight. |
 | `power` | No | Inverter max | Discharge power limit in watts (min 100). |
 | `start_time` | No | Now | Time of day to start the override (e.g. `"17:00:00"`). |
+| `replace_conflicts` | No | false | Remove conflicting overrides instead of aborting. |
 
 ```yaml
 action: foxess_control.force_discharge
@@ -147,7 +150,7 @@ Charges the battery within a time window, deferring grid charging as long as pos
 
 If the battery capacity is too large or the SoC too low to reach the target within the window (accounting for current consumption), charging starts immediately (no deferral).
 
-Only one smart charge session can be active at a time. Starting a new `smart_charge` cancels any previous session. A `force_charge` action also cancels any running smart charge, since it replaces the underlying `ForceCharge` schedule.
+Only one smart charge session can be active at a time. Starting a new `smart_charge` cancels any previous session, and also cancels any active `smart_discharge` session to prevent schedule conflicts. A `force_charge` action also cancels any running smart charge, since it replaces the underlying `ForceCharge` schedule.
 
 **Stopping a running smart charge:** Call `foxess_control.clear_overrides` (with no mode, or with `mode: ForceCharge`). This removes the schedule **and** cancels the background listeners.
 
@@ -178,9 +181,12 @@ Discharges the battery within a time window and automatically reverts to self-us
 
 1. Sets a `ForceDischarge` schedule with `fdSoc` set low (11%) so the inverter never stops discharging on its own — HA is the sole authority for stopping.
 2. Monitors the battery SoC periodically. When the SoC drops to the `min_soc` threshold for two consecutive readings, the `ForceDischarge` group is removed from the schedule, all listeners are cancelled, and the session ends. Requiring two readings prevents a single SoC dip from prematurely ending the session. Other modes' schedule groups (e.g. a standing `ForceCharge` window) are preserved.
-3. When the time window ends, the `ForceDischarge` group is removed from the schedule and listeners are cancelled. This prevents the schedule from replaying the next day.
+3. If `feedin_energy_limit_kwh` is set, the cumulative grid feed-in counter is snapshot at the start and compared each interval. When the exported energy reaches the limit, the session ends. This uses the API's lifetime `feedin` counter rather than integrating instantaneous power, so it is accurate across HA restarts.
+4. When the time window ends, the `ForceDischarge` group is removed from the schedule and listeners are cancelled. This prevents the schedule from replaying the next day.
 
-Only one smart discharge session can be active at a time. Starting a new `smart_discharge` cancels any previous session. A `force_discharge` action also cancels any running smart discharge, since it replaces the underlying `ForceDischarge` schedule.
+The session stops at whichever condition is reached first: time window end, SoC threshold, or feed-in energy limit.
+
+Only one smart discharge session can be active at a time. Starting a new `smart_discharge` cancels any previous session, and also cancels any active `smart_charge` session to prevent schedule conflicts. A `force_discharge` action also cancels any running smart discharge, since it replaces the underlying `ForceDischarge` schedule.
 
 **Stopping a running smart discharge:** Call `foxess_control.clear_overrides` (with no mode, or with `mode: ForceDischarge`). This removes the schedule **and** cancels the background listeners.
 
@@ -192,6 +198,7 @@ Battery SoC is read from the integration's polled data.
 | `end_time` | Yes | | Time of day to stop discharging (e.g. `"20:00:00"`). Must be after start time, within 4 hours. |
 | `power` | No | Inverter max | Discharge power limit in watts (min 100). |
 | `min_soc` | Yes | | Stop discharging and revert to self-use when the battery reaches this SoC level (11-100%). |
+| `feedin_energy_limit_kwh` | No | | Stop discharging after this much energy (kWh) has been fed into the grid. This is the excess energy exported beyond household self-consumption. Uses the cumulative `feedin` counter from the API for accuracy across restarts. |
 | `replace_conflicts` | No | false | Remove conflicting overrides instead of aborting. |
 
 ```yaml
@@ -201,6 +208,16 @@ data:
   end_time: "20:00:00"
   min_soc: 30
   power: 5000
+```
+
+```yaml
+# Discharge up to 5 kWh of grid feed-in, then stop
+action: foxess_control.smart_discharge
+data:
+  start_time: "17:00:00"
+  end_time: "20:00:00"
+  min_soc: 10
+  feedin_energy_limit_kwh: 5.0
 ```
 
 ## Sensors
@@ -227,7 +244,21 @@ The integration polls the FoxESS Cloud API at a configurable interval (default: 
 | `sensor.foxess_pv2_power` | PV string 2 power | kW |
 | `sensor.foxess_ambient_temperature` | Ambient temperature | °C |
 | `sensor.foxess_inverter_temperature` | Inverter temperature | °C |
+| `sensor.foxess_grid_feed_in_energy` | Cumulative grid feed-in energy (lifetime) | kWh |
+| `sensor.foxess_grid_consumption_energy` | Cumulative grid consumption energy (lifetime) | kWh |
+| `sensor.foxess_solar_generation_energy` | Cumulative solar generation energy (lifetime) | kWh |
+| `sensor.foxess_battery_charge_energy` | Cumulative battery charge energy (lifetime) | kWh |
+| `sensor.foxess_battery_discharge_energy` | Cumulative battery discharge energy (lifetime) | kWh |
+| `sensor.foxess_house_load_energy` | Cumulative house load energy (lifetime) | kWh |
+| `sensor.foxess_battery_throughput` | Cumulative battery throughput (lifetime) | kWh |
+| `sensor.foxess_grid_meter_power` | Grid meter power (signed: negative = exporting) | kW |
+| `sensor.foxess_grid_voltage` | Grid voltage | V |
+| `sensor.foxess_grid_current` | Grid current | A |
+| `sensor.foxess_grid_frequency` | Grid frequency | Hz |
+| `sensor.foxess_eps_power` | EPS / backup output power | kW |
 | `sensor.foxess_work_mode` | Current inverter work mode (SelfUse, ForceCharge, etc.) | — |
+
+The cumulative energy sensors use `SensorStateClass.TOTAL_INCREASING` and are compatible with Home Assistant's Energy Dashboard.
 
 These sensors update automatically and are always available (not dependent on an active smart operation). They are backed by Home Assistant's `DataUpdateCoordinator`, so all entities update atomically from a single API call. The work mode sensor makes an additional API call per poll cycle to read the active schedule.
 
@@ -239,8 +270,8 @@ The following sensors track active smart charge/discharge sessions. They are una
 
 | Entity | Description | Example value |
 |---|---|---|
-| `sensor.foxess_status` | Compact status for Android Auto. Dynamic icon reflects current state. | `Chg 6kW→80%`, `Wait→80%`, `Dchg 5kW→30%`, `Idle` |
-| `sensor.foxess_smart_operations` | Dashboard overview with rich attributes for templating. | `Charging to 80%`, `Deferred charge to 80%`, `Discharging to 30%`, `Idle` |
+| `sensor.foxess_status` | Compact status for Android Auto. Dynamic icon reflects current state. | `Chg 6kW→80%`, `Wait→80%`, `Dchg 5kW→20:00`, `Dchg 5kW 5.0kWh`, `Idle` |
+| `sensor.foxess_smart_operations` | Dashboard overview with rich attributes for templating. | `Charging to 80%`, `Deferred charge to 80%`, `Discharging until 20:00`, `Discharging 5.0 kWh feed-in`, `Idle` |
 
 #### Smart charge sensors
 

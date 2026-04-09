@@ -65,6 +65,10 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         data = self.inverter.get_real_time(POLLED_VARIABLES)
 
+        missing = [v for v in POLLED_VARIABLES if v not in data]
+        if missing:
+            _LOGGER.debug("Polled variables missing from API response: %s", missing)
+
         try:
             mode = self.inverter.get_current_mode()
             data["_work_mode"] = mode.value if mode is not None else None
