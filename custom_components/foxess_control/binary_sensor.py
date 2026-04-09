@@ -70,7 +70,6 @@ class SmartChargeActiveSensor(BinarySensorEntity):
             "current_power_w": state["last_power_w"],
             "max_power_w": state["max_power_w"],
             "end_time": state["end"].isoformat(),
-            "soc_entity": state["soc_entity"],
         }
 
 
@@ -107,5 +106,4 @@ class SmartDischargeActiveSensor(BinarySensorEntity):
             "min_soc": state["min_soc"],
             "last_power_w": state["last_power_w"],
             "end_time": state["end"].isoformat(),
-            "soc_entity": state["soc_entity"],
         }

@@ -136,7 +136,6 @@
         "title": "FoxESS Control Options",
         "data": {
           "min_soc_on_grid": "Minimum SoC on Grid (%)",
-          "battery_soc_entity": "Battery SoC Entity",
           "battery_capacity_kwh": "Battery Capacity (kWh)",
           "min_power_change": "Minimum Power Change for Smart Charge (W)",
           "api_min_soc": "Minimum API fdSoc (%) — ⚠️ Values below 11 may not work with all firmware versions",

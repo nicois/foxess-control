@@ -20,7 +20,6 @@ from custom_components.foxess_control.const import (
     CONF_API_KEY,
     CONF_API_MIN_SOC,
     CONF_BATTERY_CAPACITY_KWH,
-    CONF_BATTERY_SOC_ENTITY,
     CONF_DEVICE_SERIAL,
     CONF_MIN_POWER_CHANGE,
     CONF_MIN_SOC_ON_GRID,
@@ -36,7 +35,6 @@ def _make_hass(
     entry_id: str = "entry1",
     inverter: Inverter | None = None,
     min_soc_on_grid: int = DEFAULT_MIN_SOC_ON_GRID,
-    battery_soc_entity: str = "",
     battery_capacity_kwh: float = 0.0,
     min_power_change: int = DEFAULT_MIN_POWER_CHANGE,
     api_min_soc: int = DEFAULT_API_MIN_SOC,
@@ -78,7 +76,6 @@ def _make_hass(
     mock_entry = MagicMock()
     mock_entry.options = {
         CONF_MIN_SOC_ON_GRID: min_soc_on_grid,
-        CONF_BATTERY_SOC_ENTITY: battery_soc_entity,
         CONF_BATTERY_CAPACITY_KWH: battery_capacity_kwh,
         CONF_MIN_POWER_CHANGE: min_power_change,
         CONF_API_MIN_SOC: api_min_soc,
@@ -737,13 +734,12 @@ class TestSmartChargeCoordinatorFallback:
 
     @pytest.mark.asyncio
     async def test_smart_charge_works_with_coordinator_soc(self) -> None:
-        """Smart charge uses coordinator SoC when battery_soc_entity is empty."""
+        """Smart charge uses coordinator SoC."""
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="",
             battery_capacity_kwh=10.0,
             coordinator_data={"SoC": 20.0},
         )
@@ -780,17 +776,15 @@ class TestSmartChargeCoordinatorFallback:
         # Session should be active — coordinator SoC was used
         state = hass.data[DOMAIN]["_smart_charge_state"]
         assert state["target_soc"] == 80
-        assert state["soc_entity"] == ""
 
     @pytest.mark.asyncio
     async def test_smart_discharge_works_with_coordinator_soc(self) -> None:
-        """Smart discharge uses coordinator SoC when battery_soc_entity is empty."""
+        """Smart discharge uses coordinator SoC."""
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="",
             coordinator_data={"SoC": 80.0},
         )
 
@@ -825,7 +819,6 @@ class TestSmartChargeCoordinatorFallback:
 
         state = hass.data[DOMAIN]["_smart_discharge_state"]
         assert state["min_soc"] == 30
-        assert state["soc_entity"] == ""
 
 
 class TestHandleSmartDischarge:
@@ -836,7 +829,7 @@ class TestHandleSmartDischarge:
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
-        hass = _make_hass(inverter=inv, battery_soc_entity="sensor.battery_soc")
+        hass = _make_hass(inverter=inv, coordinator_data={"SoC": 80.0})
 
         from custom_components.foxess_control import _register_services
 
@@ -849,11 +842,11 @@ class TestHandleSmartDischarge:
                 return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_state_change_event",
+                "custom_components.foxess_control.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -879,7 +872,6 @@ class TestHandleSmartDischarge:
         state = hass.data[DOMAIN]["_smart_discharge_state"]
         assert state["min_soc"] == 30
         assert state["last_power_w"] == 10500
-        assert state["soc_entity"] == "sensor.battery_soc"
         assert state["end"] == datetime.datetime(2026, 4, 7, 20, 0, 0)
 
     @pytest.mark.asyncio
@@ -887,15 +879,15 @@ class TestHandleSmartDischarge:
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
-        hass = _make_hass(inverter=inv, battery_soc_entity="sensor.battery_soc")
+        hass = _make_hass(inverter=inv, coordinator_data={"SoC": 80.0})
 
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
         handler = hass.services.async_register.call_args_list[5].args[2]
 
-        mock_state_unsub = MagicMock()
         mock_timer_unsub = MagicMock()
+        mock_interval_unsub = MagicMock()
 
         with (
             patch(
@@ -903,13 +895,13 @@ class TestHandleSmartDischarge:
                 return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                return_value=mock_state_unsub,
-            ) as mock_track_state,
-            patch(
                 "custom_components.foxess_control.async_track_point_in_time",
                 return_value=mock_timer_unsub,
             ) as mock_track_time,
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                return_value=mock_interval_unsub,
+            ) as mock_track_interval,
         ):
             await handler(
                 _make_call(
@@ -921,10 +913,8 @@ class TestHandleSmartDischarge:
                 )
             )
 
-        mock_track_state.assert_called_once()
-        assert mock_track_state.call_args.args[1] == ["sensor.battery_soc"]
-
         mock_track_time.assert_called_once()
+        mock_track_interval.assert_called_once()
 
         unsubs = hass.data[DOMAIN]["_smart_discharge_unsubs"]
         assert len(unsubs) == 2
@@ -933,7 +923,7 @@ class TestHandleSmartDischarge:
     async def test_smart_discharge_missing_entity_raises(self) -> None:
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
-        hass = _make_hass(inverter=inv, battery_soc_entity="")
+        hass = _make_hass(inverter=inv)
 
         from custom_components.foxess_control import _register_services
 
@@ -963,7 +953,7 @@ class TestHandleSmartDischarge:
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
-        hass = _make_hass(inverter=inv, battery_soc_entity="sensor.battery_soc")
+        hass = _make_hass(inverter=inv, coordinator_data={"SoC": 80.0})
 
         prev_unsub = MagicMock()
         hass.data[DOMAIN]["_smart_discharge_unsubs"] = [prev_unsub]
@@ -979,11 +969,11 @@ class TestHandleSmartDischarge:
                 return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_state_change_event",
+                "custom_components.foxess_control.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -1005,15 +995,13 @@ class TestHandleSmartDischarge:
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
-        hass = _make_hass(inverter=inv, battery_soc_entity="sensor.battery_soc")
+        hass = _make_hass(inverter=inv, coordinator_data={"SoC": 80.0})
 
-        captured_callback = None
+        captured_interval = None
 
-        def capture_state_callback(
-            _hass: Any, _entities: Any, callback: Any
-        ) -> MagicMock:
-            nonlocal captured_callback
-            captured_callback = callback
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval
+            captured_interval = callback
             return MagicMock()
 
         from custom_components.foxess_control import _register_services
@@ -1027,12 +1015,12 @@ class TestHandleSmartDischarge:
                 return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                side_effect=capture_state_callback,
-            ),
-            patch(
                 "custom_components.foxess_control.async_track_point_in_time",
                 return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
             ),
         ):
             await handler(
@@ -1045,17 +1033,14 @@ class TestHandleSmartDischarge:
                 )
             )
 
-        assert captured_callback is not None
+        assert captured_interval is not None
 
-        # Simulate SoC dropping to threshold
-        event = MagicMock()
-        new_state = MagicMock()
-        new_state.state = "30"
-        event.data = {"new_state": new_state}
+        # Simulate SoC dropping to threshold via coordinator
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 30.0}
 
-        await captured_callback(event)
+        await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
 
-        # The callback removes the override directly
+        # The callback removes the override via _remove_mode_from_schedule
         inv.self_use.assert_called_once()
         # Listeners should be cancelled
         assert hass.data[DOMAIN]["_smart_discharge_unsubs"] == []
@@ -1066,15 +1051,13 @@ class TestHandleSmartDischarge:
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
-        hass = _make_hass(inverter=inv, battery_soc_entity="sensor.battery_soc")
+        hass = _make_hass(inverter=inv, coordinator_data={"SoC": 80.0})
 
-        captured_callback = None
+        captured_interval = None
 
-        def capture_state_callback(
-            _hass: Any, _entities: Any, callback: Any
-        ) -> MagicMock:
-            nonlocal captured_callback
-            captured_callback = callback
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval
+            captured_interval = callback
             return MagicMock()
 
         from custom_components.foxess_control import _register_services
@@ -1088,12 +1071,12 @@ class TestHandleSmartDischarge:
                 return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                side_effect=capture_state_callback,
-            ),
-            patch(
                 "custom_components.foxess_control.async_track_point_in_time",
                 return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
             ),
         ):
             await handler(
@@ -1106,14 +1089,12 @@ class TestHandleSmartDischarge:
                 )
             )
 
-        assert captured_callback is not None
+        assert captured_interval is not None
 
-        event = MagicMock()
-        new_state = MagicMock()
-        new_state.state = "50"
-        event.data = {"new_state": new_state}
+        # SoC still above threshold via coordinator
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 50.0}
 
-        await captured_callback(event)
+        await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
 
         inv.self_use.assert_not_called()
 
@@ -1129,13 +1110,9 @@ class TestHandleSmartCharge:
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
             battery_capacity_kwh=10.0,
+            coordinator_data={"SoC": 20.0},
         )
-
-        soc_state = MagicMock()
-        soc_state.state = "20"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         from custom_components.foxess_control import _register_services
 
@@ -1146,10 +1123,6 @@ class TestHandleSmartCharge:
             patch(
                 "custom_components.foxess_control.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
-            ),
-            patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                return_value=MagicMock(),
             ),
             patch(
                 "custom_components.foxess_control.async_track_point_in_time",
@@ -1186,14 +1159,11 @@ class TestHandleSmartCharge:
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
             battery_capacity_kwh=60.0,
+            coordinator_data={"SoC": 20.0},
         )
 
         # 60kWh * 60% = 36kWh needed; 80% of 10.5kW = 8.4kW → 4.29h > 4h window
-        soc_state = MagicMock()
-        soc_state.state = "20"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         from custom_components.foxess_control import _register_services
 
@@ -1204,10 +1174,6 @@ class TestHandleSmartCharge:
             patch(
                 "custom_components.foxess_control.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
-            ),
-            patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                return_value=MagicMock(),
             ),
             patch(
                 "custom_components.foxess_control.async_track_point_in_time",
@@ -1239,26 +1205,21 @@ class TestHandleSmartCharge:
         assert state["charging_started"] is True
 
     @pytest.mark.asyncio
-    async def test_smart_charge_registers_three_listeners(self) -> None:
+    async def test_smart_charge_registers_two_listeners(self) -> None:
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
             battery_capacity_kwh=10.0,
+            coordinator_data={"SoC": 20.0},
         )
-
-        soc_state = MagicMock()
-        soc_state.state = "20"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
         handler = hass.services.async_register.call_args_list[4].args[2]
 
-        mock_state_unsub = MagicMock()
         mock_timer_unsub = MagicMock()
         mock_interval_unsub = MagicMock()
 
@@ -1267,10 +1228,6 @@ class TestHandleSmartCharge:
                 "custom_components.foxess_control.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
-            patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                return_value=mock_state_unsub,
-            ) as mock_track_state,
             patch(
                 "custom_components.foxess_control.async_track_point_in_time",
                 return_value=mock_timer_unsub,
@@ -1290,12 +1247,11 @@ class TestHandleSmartCharge:
                 )
             )
 
-        mock_track_state.assert_called_once()
         mock_track_time.assert_called_once()
         mock_track_interval.assert_called_once()
 
         unsubs = hass.data[DOMAIN]["_smart_charge_unsubs"]
-        assert len(unsubs) == 3
+        assert len(unsubs) == 2
 
     @pytest.mark.asyncio
     async def test_smart_charge_missing_entity_raises(self) -> None:
@@ -1303,7 +1259,6 @@ class TestHandleSmartCharge:
         inv.max_power_w = 10500
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="",
             battery_capacity_kwh=10.0,
         )
 
@@ -1335,8 +1290,8 @@ class TestHandleSmartCharge:
         inv.max_power_w = 10500
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
             battery_capacity_kwh=0.0,
+            coordinator_data={"SoC": 20.0},
         )
 
         from custom_components.foxess_control import _register_services
@@ -1367,13 +1322,9 @@ class TestHandleSmartCharge:
         inv.max_power_w = 10500
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
             battery_capacity_kwh=10.0,
+            coordinator_data={"SoC": 80.0},
         )
-
-        soc_state = MagicMock()
-        soc_state.state = "80"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         from custom_components.foxess_control import _register_services
 
@@ -1404,13 +1355,9 @@ class TestHandleSmartCharge:
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
             battery_capacity_kwh=10.0,
+            coordinator_data={"SoC": 20.0},
         )
-
-        soc_state = MagicMock()
-        soc_state.state = "20"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         prev_unsub = MagicMock()
         hass.data[DOMAIN]["_smart_charge_unsubs"] = [prev_unsub]
@@ -1424,10 +1371,6 @@ class TestHandleSmartCharge:
             patch(
                 "custom_components.foxess_control.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
-            ),
-            patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                return_value=MagicMock(),
             ),
             patch(
                 "custom_components.foxess_control.async_track_point_in_time",
@@ -1451,28 +1394,22 @@ class TestHandleSmartCharge:
         prev_unsub.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_soc_at_target_triggers_self_use(self) -> None:
-        """SoC reaching target schedules self_use and cancels listeners."""
+    async def test_soc_at_target_triggers_cancel(self) -> None:
+        """SoC reaching target via periodic check cancels the session."""
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
             battery_capacity_kwh=10.0,
+            coordinator_data={"SoC": 20.0},
         )
 
-        soc_state = MagicMock()
-        soc_state.state = "20"
-        hass.states.get = MagicMock(return_value=soc_state)
+        captured_interval = None
 
-        captured_callback = None
-
-        def capture_state_callback(
-            _hass: Any, _entities: Any, callback: Any
-        ) -> MagicMock:
-            nonlocal captured_callback
-            captured_callback = callback
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval
+            captured_interval = callback
             return MagicMock()
 
         from custom_components.foxess_control import _register_services
@@ -1486,16 +1423,12 @@ class TestHandleSmartCharge:
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                side_effect=capture_state_callback,
-            ),
-            patch(
                 "custom_components.foxess_control.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
                 "custom_components.foxess_control.async_track_time_interval",
-                return_value=MagicMock(),
+                side_effect=capture_interval,
             ),
         ):
             await handler(
@@ -1508,14 +1441,16 @@ class TestHandleSmartCharge:
                 )
             )
 
-        assert captured_callback is not None
+        assert captured_interval is not None
 
-        event = MagicMock()
-        new_state = MagicMock()
-        new_state.state = "80"
-        event.data = {"new_state": new_state}
+        # Simulate SoC reaching target via coordinator
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 80.0}
 
-        await captured_callback(event)
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 5, 0, 0),
+        ):
+            await captured_interval(datetime.datetime(2026, 4, 7, 5, 0, 0))
 
         # Charging was deferred (10kWh, small battery), so no override to remove
         inv.self_use.assert_not_called()
@@ -1532,14 +1467,10 @@ class TestHandleSmartCharge:
         # Large capacity → immediate start (no deferral)
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
             battery_capacity_kwh=60.0,
             min_power_change=100,
+            coordinator_data={"SoC": 20.0},
         )
-
-        soc_state = MagicMock()
-        soc_state.state = "20"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         captured_interval_callback = None
 
@@ -1557,10 +1488,6 @@ class TestHandleSmartCharge:
             patch(
                 "custom_components.foxess_control.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
-            ),
-            patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                return_value=MagicMock(),
             ),
             patch(
                 "custom_components.foxess_control.async_track_point_in_time",
@@ -1588,9 +1515,7 @@ class TestHandleSmartCharge:
 
         # Initial: 60kWh * 60% / 4h = 9000W
         # At 60% with 2h left: 60kWh * 20% / 2h = 6000W → delta 3000W > 100W
-        soc_state_new = MagicMock()
-        soc_state_new.state = "60"
-        hass.states.get = MagicMock(return_value=soc_state_new)
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 60.0}
 
         with patch(
             "custom_components.foxess_control.dt_util.now",
@@ -1609,14 +1534,10 @@ class TestHandleSmartCharge:
         # Small capacity → deferred
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
             battery_capacity_kwh=10.0,
             min_power_change=100,
+            coordinator_data={"SoC": 20.0},
         )
-
-        soc_state = MagicMock()
-        soc_state.state = "20"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         captured_interval_callback = None
 
@@ -1634,10 +1555,6 @@ class TestHandleSmartCharge:
             patch(
                 "custom_components.foxess_control.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
-            ),
-            patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                return_value=MagicMock(),
             ),
             patch(
                 "custom_components.foxess_control.async_track_point_in_time",
@@ -1664,9 +1581,6 @@ class TestHandleSmartCharge:
         inv.set_schedule.assert_not_called()
 
         # At 05:50 with SoC still at 20%, deferred_start ≈ 05:17 → now > deferred
-        soc_state_late = MagicMock()
-        soc_state_late.state = "20"
-        hass.states.get = MagicMock(return_value=soc_state_late)
 
         with patch(
             "custom_components.foxess_control.dt_util.now",
@@ -1687,14 +1601,10 @@ class TestHandleSmartCharge:
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
             battery_capacity_kwh=10.0,
             min_power_change=100,
+            coordinator_data={"SoC": 20.0},
         )
-
-        soc_state = MagicMock()
-        soc_state.state = "20"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         captured_interval_callback = None
 
@@ -1712,10 +1622,6 @@ class TestHandleSmartCharge:
             patch(
                 "custom_components.foxess_control.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
-            ),
-            patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                return_value=MagicMock(),
             ),
             patch(
                 "custom_components.foxess_control.async_track_point_in_time",
@@ -1741,9 +1647,7 @@ class TestHandleSmartCharge:
         # At 05:20, SoC rose to 60% via solar → only 20% needed
         # 10kWh * 20% = 2kWh; 80% of 10.5kW = 8.4kW; 2/8.4 = 0.238h ≈ 14min
         # deferred_start = 05:46 → still in the future at 05:20
-        soc_solar = MagicMock()
-        soc_solar.state = "60"
-        hass.states.get = MagicMock(return_value=soc_solar)
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 60.0}
 
         with patch(
             "custom_components.foxess_control.dt_util.now",
@@ -1764,14 +1668,10 @@ class TestHandleSmartCharge:
         # Large capacity → immediate start
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
             battery_capacity_kwh=60.0,
             min_power_change=5000,
+            coordinator_data={"SoC": 20.0},
         )
-
-        soc_state = MagicMock()
-        soc_state.state = "20"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         captured_interval_callback = None
 
@@ -1789,10 +1689,6 @@ class TestHandleSmartCharge:
             patch(
                 "custom_components.foxess_control.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
-            ),
-            patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                return_value=MagicMock(),
             ),
             patch(
                 "custom_components.foxess_control.async_track_point_in_time",
@@ -1817,9 +1713,6 @@ class TestHandleSmartCharge:
         inv.set_schedule.reset_mock()
 
         # SoC barely changed — power delta should be below threshold
-        soc_state_21 = MagicMock()
-        soc_state_21.state = "21"
-        hass.states.get = MagicMock(return_value=soc_state_21)
 
         with patch(
             "custom_components.foxess_control.dt_util.now",
@@ -1838,13 +1731,9 @@ class TestHandleSmartCharge:
         # Large capacity → immediate start
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
             battery_capacity_kwh=60.0,
+            coordinator_data={"SoC": 20.0},
         )
-
-        soc_state = MagicMock()
-        soc_state.state = "20"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         captured_interval_callback = None
 
@@ -1862,10 +1751,6 @@ class TestHandleSmartCharge:
             patch(
                 "custom_components.foxess_control.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
-            ),
-            patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                return_value=MagicMock(),
             ),
             patch(
                 "custom_components.foxess_control.async_track_point_in_time",
@@ -1889,10 +1774,8 @@ class TestHandleSmartCharge:
         assert captured_interval_callback is not None
         inv.set_schedule.reset_mock()
 
-        # SoC unavailable
-        unavail_state = MagicMock()
-        unavail_state.state = "unavailable"
-        hass.states.get = MagicMock(return_value=unavail_state)
+        # Make SoC unavailable by clearing coordinator data
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = None
 
         with patch(
             "custom_components.foxess_control.dt_util.now",
@@ -1912,13 +1795,9 @@ class TestHandleSmartCharge:
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
             battery_capacity_kwh=60.0,
+            coordinator_data={"SoC": 20.0},
         )
-
-        soc_state = MagicMock()
-        soc_state.state = "20"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         captured_interval_callback = None
 
@@ -1941,10 +1820,6 @@ class TestHandleSmartCharge:
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                return_value=MagicMock(),
-            ),
-            patch(
                 "custom_components.foxess_control.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
@@ -1966,9 +1841,8 @@ class TestHandleSmartCharge:
         assert captured_interval_callback is not None
         inv.set_schedule.reset_mock()
 
-        unavail_state = MagicMock()
-        unavail_state.state = "unavailable"
-        hass.states.get = MagicMock(return_value=unavail_state)
+        # Make SoC unavailable
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = None
 
         # Fire unavailable checks up to threshold
         for i in range(MAX_SOC_UNAVAILABLE_COUNT):
@@ -1992,14 +1866,10 @@ class TestHandleSmartCharge:
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
             battery_capacity_kwh=60.0,
             min_power_change=100,
+            coordinator_data={"SoC": 20.0},
         )
-
-        soc_state = MagicMock()
-        soc_state.state = "20"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         captured_interval_callback = None
 
@@ -2017,10 +1887,6 @@ class TestHandleSmartCharge:
             patch(
                 "custom_components.foxess_control.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
-            ),
-            patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                return_value=MagicMock(),
             ),
             patch(
                 "custom_components.foxess_control.async_track_point_in_time",
@@ -2044,9 +1910,7 @@ class TestHandleSmartCharge:
         assert captured_interval_callback is not None
 
         # Two unavailable readings
-        unavail_state = MagicMock()
-        unavail_state.state = "unavailable"
-        hass.states.get = MagicMock(return_value=unavail_state)
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = None
 
         for t in [5, 10]:
             with patch(
@@ -2059,9 +1923,7 @@ class TestHandleSmartCharge:
         assert state["soc_unavailable_count"] == 2
 
         # One available reading resets the counter
-        avail_state = MagicMock()
-        avail_state.state = "60"
-        hass.states.get = MagicMock(return_value=avail_state)
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 60.0}
 
         inv.set_schedule.reset_mock()
         with patch(
@@ -2080,14 +1942,10 @@ class TestHandleSmartCharge:
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
             battery_capacity_kwh=10.0,
             min_power_change=100,
+            coordinator_data={"SoC": 20.0},
         )
-
-        soc_state = MagicMock()
-        soc_state.state = "20"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         captured_interval_callback = None
 
@@ -2105,10 +1963,6 @@ class TestHandleSmartCharge:
             patch(
                 "custom_components.foxess_control.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
-            ),
-            patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                return_value=MagicMock(),
             ),
             patch(
                 "custom_components.foxess_control.async_track_point_in_time",
@@ -2152,9 +2006,6 @@ class TestHandleSmartCharge:
         }
 
         # At 05:50, deferred start has passed → tries to start charging
-        soc_late = MagicMock()
-        soc_late.state = "20"
-        hass.states.get = MagicMock(return_value=soc_late)
 
         with patch(
             "custom_components.foxess_control.dt_util.now",
@@ -2180,13 +2031,9 @@ class TestSessionPersistence:
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
             battery_capacity_kwh=10.0,
+            coordinator_data={"SoC": 20.0},
         )
-
-        soc_state = MagicMock()
-        soc_state.state = "20"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         from custom_components.foxess_control import _register_services
 
@@ -2197,10 +2044,6 @@ class TestSessionPersistence:
             patch(
                 "custom_components.foxess_control.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 8, 2, 0, 0),
-            ),
-            patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                return_value=MagicMock(),
             ),
             patch(
                 "custom_components.foxess_control.async_track_point_in_time",
@@ -2239,7 +2082,7 @@ class TestSessionPersistence:
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
+            coordinator_data={"SoC": 80.0},
         )
 
         from custom_components.foxess_control import _register_services
@@ -2253,11 +2096,11 @@ class TestSessionPersistence:
                 return_value=datetime.datetime(2026, 4, 8, 10, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_state_change_event",
+                "custom_components.foxess_control.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -2327,7 +2170,6 @@ class TestRecoverSessions:
                     "target_soc": 80,
                     "max_power_w": 10500,
                     "battery_capacity_kwh": 10.0,
-                    "soc_entity": "sensor.battery_soc",
                     "min_soc_on_grid": 15,
                     "min_power_change": 500,
                     "force": False,
@@ -2369,7 +2211,6 @@ class TestRecoverSessions:
                     "target_soc": 80,
                     "max_power_w": 10500,
                     "battery_capacity_kwh": 10.0,
-                    "soc_entity": "sensor.battery_soc",
                     "min_soc_on_grid": 15,
                     "min_power_change": 500,
                     "force": False,
@@ -2414,7 +2255,7 @@ class TestRecoverSessions:
         }
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
+            coordinator_data={"SoC": 50.0},
         )
         store = hass.data[DOMAIN]["_store"]
         store.async_load = AsyncMock(
@@ -2428,7 +2269,6 @@ class TestRecoverSessions:
                     "target_soc": 80,
                     "max_power_w": 10500,
                     "battery_capacity_kwh": 10.0,
-                    "soc_entity": "sensor.battery_soc",
                     "min_soc_on_grid": 15,
                     "min_power_change": 500,
                     "force": False,
@@ -2437,20 +2277,12 @@ class TestRecoverSessions:
             }
         )
 
-        soc_state = MagicMock()
-        soc_state.state = "50"
-        hass.states.get = MagicMock(return_value=soc_state)
-
         from custom_components.foxess_control import _recover_sessions
 
         with (
             patch(
                 "custom_components.foxess_control.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 8, 4, 0, 0),
-            ),
-            patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                return_value=MagicMock(),
             ),
             patch(
                 "custom_components.foxess_control.async_track_point_in_time",
@@ -2469,9 +2301,9 @@ class TestRecoverSessions:
         assert state["charging_started"] is True
         assert state["soc_unavailable_count"] == 0
 
-        # Listeners should be registered
+        # Listeners should be registered (timer + interval)
         unsubs = hass.data[DOMAIN]["_smart_charge_unsubs"]
-        assert len(unsubs) == 3
+        assert len(unsubs) == 2
 
     @pytest.mark.asyncio
     async def test_no_matching_group_discards_session(self) -> None:
@@ -2492,7 +2324,6 @@ class TestRecoverSessions:
                     "target_soc": 80,
                     "max_power_w": 10500,
                     "battery_capacity_kwh": 10.0,
-                    "soc_entity": "sensor.battery_soc",
                     "min_soc_on_grid": 15,
                     "min_power_change": 500,
                     "force": False,
@@ -2520,7 +2351,7 @@ class TestRecoverSessions:
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
+            coordinator_data={"SoC": 20.0},
         )
         store = hass.data[DOMAIN]["_store"]
         store.async_load = AsyncMock(
@@ -2534,7 +2365,6 @@ class TestRecoverSessions:
                     "target_soc": 80,
                     "max_power_w": 10500,
                     "battery_capacity_kwh": 10.0,
-                    "soc_entity": "sensor.battery_soc",
                     "min_soc_on_grid": 15,
                     "min_power_change": 500,
                     "force": False,
@@ -2551,10 +2381,6 @@ class TestRecoverSessions:
                 return_value=datetime.datetime(2026, 4, 8, 3, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_state_change_event",
-                return_value=MagicMock(),
-            ),
-            patch(
                 "custom_components.foxess_control.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
@@ -2568,7 +2394,7 @@ class TestRecoverSessions:
         # Deferred session resumes (no group needed)
         state = hass.data[DOMAIN]["_smart_charge_state"]
         assert state["charging_started"] is False
-        assert len(hass.data[DOMAIN]["_smart_charge_unsubs"]) == 3
+        assert len(hass.data[DOMAIN]["_smart_charge_unsubs"]) == 2
 
     @pytest.mark.asyncio
     async def test_active_discharge_session_resumed(self) -> None:
@@ -2593,7 +2419,7 @@ class TestRecoverSessions:
         }
         hass = _make_hass(
             inverter=inv,
-            battery_soc_entity="sensor.battery_soc",
+            coordinator_data={"SoC": 50.0},
         )
         store = hass.data[DOMAIN]["_store"]
         store.async_load = AsyncMock(
@@ -2606,7 +2432,6 @@ class TestRecoverSessions:
                     "end_minute": 0,
                     "min_soc": 30,
                     "last_power_w": 5000,
-                    "soc_entity": "sensor.battery_soc",
                 }
             }
         )
@@ -2619,11 +2444,11 @@ class TestRecoverSessions:
                 return_value=datetime.datetime(2026, 4, 8, 18, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_state_change_event",
+                "custom_components.foxess_control.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):

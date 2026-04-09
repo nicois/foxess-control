@@ -55,7 +55,6 @@ class TestSmartChargeActiveSensor:
                 "last_power_w": 1500,
                 "max_power_w": 10500,
                 "end": datetime.datetime(2026, 4, 7, 6, 0, 0),
-                "soc_entity": "sensor.battery_soc",
             }
         )
         sensor = SmartChargeActiveSensor(hass, _make_entry())
@@ -69,7 +68,6 @@ class TestSmartChargeActiveSensor:
                 "last_power_w": 1500,
                 "max_power_w": 10500,
                 "end": end,
-                "soc_entity": "sensor.battery_soc",
                 "charging_started": True,
             }
         )
@@ -81,7 +79,6 @@ class TestSmartChargeActiveSensor:
         assert attrs["current_power_w"] == 1500
         assert attrs["max_power_w"] == 10500
         assert attrs["end_time"] == end.isoformat()
-        assert attrs["soc_entity"] == "sensor.battery_soc"
 
     def test_attributes_when_deferred(self) -> None:
         end = datetime.datetime(2026, 4, 7, 6, 0, 0)
@@ -91,7 +88,6 @@ class TestSmartChargeActiveSensor:
                 "last_power_w": 0,
                 "max_power_w": 10500,
                 "end": end,
-                "soc_entity": "sensor.battery_soc",
                 "charging_started": False,
             }
         )
@@ -132,7 +128,6 @@ class TestSmartDischargeActiveSensor:
                 "min_soc": 30,
                 "last_power_w": 5000,
                 "end": datetime.datetime(2026, 4, 7, 20, 0, 0),
-                "soc_entity": "sensor.battery_soc",
             }
         )
         sensor = SmartDischargeActiveSensor(hass, _make_entry())
@@ -145,7 +140,6 @@ class TestSmartDischargeActiveSensor:
                 "min_soc": 30,
                 "last_power_w": 5000,
                 "end": end,
-                "soc_entity": "sensor.battery_soc",
             }
         )
         sensor = SmartDischargeActiveSensor(hass, _make_entry())
@@ -154,7 +148,6 @@ class TestSmartDischargeActiveSensor:
         assert attrs["min_soc"] == 30
         assert attrs["last_power_w"] == 5000
         assert attrs["end_time"] == end.isoformat()
-        assert attrs["soc_entity"] == "sensor.battery_soc"
 
     def test_attributes_none_when_off(self) -> None:
         hass = _make_hass()

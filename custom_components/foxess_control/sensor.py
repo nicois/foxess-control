@@ -100,17 +100,8 @@ def _format_remaining(end: datetime.datetime) -> str:
     return f"{minutes}m"
 
 
-def _get_soc_value(hass: Any, soc_entity: str) -> float | None:
-    """Read the current SoC, preferring external entity, falling back to coordinator."""
-    if soc_entity:
-        soc_state = hass.states.get(soc_entity)
-        if soc_state is not None and soc_state.state not in ("unknown", "unavailable"):
-            try:
-                return float(soc_state.state)
-            except (ValueError, TypeError):
-                pass
-
-    # Fall back to coordinator data
+def _get_soc_value(hass: Any) -> float | None:
+    """Read the current SoC from the coordinator."""
     return get_coordinator_soc(hass)
 
 
@@ -148,7 +139,7 @@ def _estimate_discharge_remaining(
         return "ending"
 
     # Try to estimate time to reach min_soc
-    soc = _get_soc_value(hass, ds.get("soc_entity", ""))
+    soc = _get_soc_value(hass)
     capacity_kwh = _get_battery_capacity_kwh(hass)
     power_w = ds.get("last_power_w", 0)
     min_soc = ds.get("min_soc", 0)
@@ -199,7 +190,7 @@ def _estimate_charge_remaining(
     if window_remaining.total_seconds() <= 0:
         return "ending"
 
-    soc = _get_soc_value(hass, cs.get("soc_entity", ""))
+    soc = _get_soc_value(hass)
     capacity_kwh = _get_battery_capacity_kwh(hass)
     target_soc: int = cs.get("target_soc", 100)
     max_power_w: int = cs.get("max_power_w", 0)
@@ -250,8 +241,7 @@ def _build_forecast(
     points: list[dict[str, Any]] = []
 
     if cs is not None:
-        soc_entity = cs.get("soc_entity", "")
-        soc = _get_soc_value(hass, soc_entity)
+        soc = _get_soc_value(hass)
         if soc is None or capacity_kwh <= 0:
             return []
 
@@ -304,8 +294,7 @@ def _build_forecast(
         return points
 
     if ds is not None:
-        soc_entity = ds.get("soc_entity", "")
-        soc = _get_soc_value(hass, soc_entity)
+        soc = _get_soc_value(hass)
         if soc is None or capacity_kwh <= 0:
             return []
 
@@ -420,7 +409,6 @@ class InverterOverrideStatusSensor(SensorEntity):
                 "max_power_w": cs.get("max_power_w"),
                 "target_soc": cs.get("target_soc"),
                 "end_time": cs["end"].isoformat(),
-                "soc_entity": cs.get("soc_entity"),
             }
 
         ds = _get_discharge_state(self.hass)
@@ -430,7 +418,6 @@ class InverterOverrideStatusSensor(SensorEntity):
                 "power_w": ds.get("last_power_w", 0),
                 "min_soc": ds.get("min_soc"),
                 "end_time": ds["end"].isoformat(),
-                "soc_entity": ds.get("soc_entity"),
             }
 
         return None
@@ -498,7 +485,7 @@ class SmartOperationsOverviewSensor(SensorEntity):
 
         if cs is not None:
             charging = cs.get("charging_started", True)
-            soc = _get_soc_value(self.hass, cs.get("soc_entity", ""))
+            soc = _get_soc_value(self.hass)
             attrs.update(
                 {
                     "charge_phase": "charging" if charging else "deferred",
@@ -515,7 +502,7 @@ class SmartOperationsOverviewSensor(SensorEntity):
             )
 
         if ds is not None:
-            soc = _get_soc_value(self.hass, ds.get("soc_entity", ""))
+            soc = _get_soc_value(self.hass)
             attrs.update(
                 {
                     "discharge_power_w": ds.get("last_power_w", 0),
@@ -708,13 +695,7 @@ class BatteryForecastSensor(SensorEntity):
         ds = _get_discharge_state(self.hass)
         if cs is None and ds is None:
             return _STATE_UNAVAILABLE
-        soc_entity = ""
-        if cs is not None:
-            soc_entity = cs.get("soc_entity", "")
-        elif ds is not None:
-            soc_entity = ds.get("soc_entity", "")
-        soc = _get_soc_value(self.hass, soc_entity)
-        return soc
+        return _get_soc_value(self.hass)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:

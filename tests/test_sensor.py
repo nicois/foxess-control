@@ -30,19 +30,24 @@ from custom_components.foxess_control.sensor import (
 def _make_hass(
     smart_charge_state: dict[str, Any] | None = None,
     smart_discharge_state: dict[str, Any] | None = None,
+    coordinator_soc: float | None = None,
 ) -> MagicMock:
     """Create a mock hass with DOMAIN data."""
     hass = MagicMock()
+    mock_coordinator = MagicMock()
+    mock_coordinator.data = (
+        {"SoC": coordinator_soc} if coordinator_soc is not None else None
+    )
     domain_data: dict[str, Any] = {
         "_smart_charge_unsubs": [],
         "_smart_discharge_unsubs": [],
+        "entry1": {"coordinator": mock_coordinator},
     }
     if smart_charge_state is not None:
         domain_data["_smart_charge_state"] = smart_charge_state
     if smart_discharge_state is not None:
         domain_data["_smart_discharge_state"] = smart_discharge_state
     hass.data = {DOMAIN: domain_data}
-    hass.states.get = MagicMock(return_value=None)
     return hass
 
 
@@ -60,7 +65,6 @@ def _charge_state(**overrides: Any) -> dict[str, Any]:
         "max_power_w": 10500,
         "start": datetime.datetime(2026, 4, 8, 2, 0, 0),
         "end": datetime.datetime(2026, 4, 8, 6, 0, 0),
-        "soc_entity": "sensor.battery_soc",
         "charging_started": True,
     }
     state.update(overrides)
@@ -74,7 +78,6 @@ def _discharge_state(**overrides: Any) -> dict[str, Any]:
         "last_power_w": 5000,
         "start": datetime.datetime(2026, 4, 8, 17, 0, 0),
         "end": datetime.datetime(2026, 4, 8, 20, 0, 0),
-        "soc_entity": "sensor.battery_soc",
     }
     state.update(overrides)
     return state
@@ -242,11 +245,8 @@ class TestSmartOperationsOverviewSensor:
         ):
             assert sensor.extra_state_attributes["charge_remaining"] == "15m"
 
-    def test_current_soc_from_entity(self) -> None:
-        hass = _make_hass(smart_charge_state=_charge_state())
-        soc_state = MagicMock()
-        soc_state.state = "55.5"
-        hass.states.get = MagicMock(return_value=soc_state)
+    def test_current_soc_from_coordinator(self) -> None:
+        hass = _make_hass(smart_charge_state=_charge_state(), coordinator_soc=55.5)
         sensor = SmartOperationsOverviewSensor(hass, _make_entry())
         assert sensor.extra_state_attributes["charge_current_soc"] == 55.5
 
@@ -329,14 +329,15 @@ class TestChargeRemainingSensor:
                 last_power_w=5000, target_soc=80, charging_started=True
             )
         )
-        hass.data[DOMAIN]["entry1"] = {"inverter": MagicMock()}
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 70.0}
+        hass.data[DOMAIN]["entry1"] = {
+            "inverter": MagicMock(),
+            "coordinator": mock_coordinator,
+        }
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
-
-        soc_state = MagicMock()
-        soc_state.state = "70"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         sensor = ChargeRemainingSensor(hass, _make_entry())
         with patch(
@@ -361,14 +362,15 @@ class TestChargeRemainingSensor:
                 target_soc=80,
             )
         )
-        hass.data[DOMAIN]["entry1"] = {"inverter": MagicMock()}
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 20.0}
+        hass.data[DOMAIN]["entry1"] = {
+            "inverter": MagicMock(),
+            "coordinator": mock_coordinator,
+        }
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
-
-        soc_state = MagicMock()
-        soc_state.state = "20"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         sensor = ChargeRemainingSensor(hass, _make_entry())
         with patch(
@@ -389,14 +391,15 @@ class TestChargeRemainingSensor:
                 target_soc=80,
             )
         )
-        hass.data[DOMAIN]["entry1"] = {"inverter": MagicMock()}
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 20.0}
+        hass.data[DOMAIN]["entry1"] = {
+            "inverter": MagicMock(),
+            "coordinator": mock_coordinator,
+        }
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
-
-        soc_state = MagicMock()
-        soc_state.state = "20"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         sensor = ChargeRemainingSensor(hass, _make_entry())
         # At 05:50, deferred start (~05:17) has passed
@@ -465,14 +468,15 @@ class TestDischargeRemainingSensor:
             smart_discharge_state=_discharge_state(last_power_w=5000, min_soc=30)
         )
         # Add a real entry_id so _get_battery_capacity_kwh finds it
-        hass.data[DOMAIN]["entry1"] = {"inverter": MagicMock()}
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 40.0}
+        hass.data[DOMAIN]["entry1"] = {
+            "inverter": MagicMock(),
+            "coordinator": mock_coordinator,
+        }
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
-
-        soc_state = MagicMock()
-        soc_state.state = "40"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         sensor = DischargeRemainingSensor(hass, _make_entry())
         with patch(
@@ -490,14 +494,15 @@ class TestDischargeRemainingSensor:
         hass = _make_hass(
             smart_discharge_state=_discharge_state(last_power_w=1000, min_soc=30)
         )
-        hass.data[DOMAIN]["entry1"] = {"inverter": MagicMock()}
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 80.0}
+        hass.data[DOMAIN]["entry1"] = {
+            "inverter": MagicMock(),
+            "coordinator": mock_coordinator,
+        }
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
-
-        soc_state = MagicMock()
-        soc_state.state = "80"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         sensor = DischargeRemainingSensor(hass, _make_entry())
         with patch(
@@ -531,14 +536,15 @@ class TestBatteryForecastSensor:
                 charging_started=True,
             )
         )
-        hass.data[DOMAIN]["entry1"] = {"inverter": MagicMock()}
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 40.0}
+        hass.data[DOMAIN]["entry1"] = {
+            "inverter": MagicMock(),
+            "coordinator": mock_coordinator,
+        }
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
-
-        soc_state = MagicMock()
-        soc_state.state = "40"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         sensor = BatteryForecastSensor(hass, _make_entry())
         with patch(
@@ -562,14 +568,15 @@ class TestBatteryForecastSensor:
         hass = _make_hass(
             smart_discharge_state=_discharge_state(last_power_w=5000, min_soc=30)
         )
-        hass.data[DOMAIN]["entry1"] = {"inverter": MagicMock()}
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 70.0}
+        hass.data[DOMAIN]["entry1"] = {
+            "inverter": MagicMock(),
+            "coordinator": mock_coordinator,
+        }
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
-
-        soc_state = MagicMock()
-        soc_state.state = "70"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         sensor = BatteryForecastSensor(hass, _make_entry())
         with patch(
@@ -597,14 +604,15 @@ class TestBatteryForecastSensor:
                 target_soc=80,
             )
         )
-        hass.data[DOMAIN]["entry1"] = {"inverter": MagicMock()}
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 20.0}
+        hass.data[DOMAIN]["entry1"] = {
+            "inverter": MagicMock(),
+            "coordinator": mock_coordinator,
+        }
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
-
-        soc_state = MagicMock()
-        soc_state.state = "20"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         sensor = BatteryForecastSensor(hass, _make_entry())
         with patch(
@@ -625,10 +633,6 @@ class TestBatteryForecastSensor:
         """Without battery capacity configured, forecast is empty."""
         hass = _make_hass(smart_charge_state=_charge_state())
 
-        soc_state = MagicMock()
-        soc_state.state = "40"
-        hass.states.get = MagicMock(return_value=soc_state)
-
         sensor = BatteryForecastSensor(hass, _make_entry())
         with patch(
             "custom_components.foxess_control.sensor.dt_util.now",
@@ -641,14 +645,15 @@ class TestBatteryForecastSensor:
     def test_forecast_points_have_time_and_soc(self) -> None:
         """Each forecast point has 'time' (epoch ms) and 'soc' keys."""
         hass = _make_hass(smart_discharge_state=_discharge_state(last_power_w=5000))
-        hass.data[DOMAIN]["entry1"] = {"inverter": MagicMock()}
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 60.0}
+        hass.data[DOMAIN]["entry1"] = {
+            "inverter": MagicMock(),
+            "coordinator": mock_coordinator,
+        }
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
-
-        soc_state = MagicMock()
-        soc_state.state = "60"
-        hass.states.get = MagicMock(return_value=soc_state)
 
         sensor = BatteryForecastSensor(hass, _make_entry())
         with patch(
@@ -668,7 +673,6 @@ class TestBatteryForecastSensor:
 # ---------------------------------------------------------------------------
 # Platform setup
 # ---------------------------------------------------------------------------
-
 
 # ---------------------------------------------------------------------------
 # FoxESSPolledSensor (coordinator-backed)
@@ -788,50 +792,26 @@ class TestFoxESSWorkModeSensor:
 
 
 class TestGetSocValue:
-    """Tests for _get_soc_value with coordinator fallback."""
+    """Tests for _get_soc_value reading from coordinator."""
 
-    def test_prefers_external_entity(self) -> None:
-        hass = _make_hass()
-        soc_state = MagicMock()
-        soc_state.state = "65.0"
-        hass.states.get = MagicMock(return_value=soc_state)
-        # Also provide coordinator data — should be ignored
-        coordinator = MagicMock()
-        coordinator.data = {"SoC": 50.0}
-        hass.data[DOMAIN]["entry1"] = {"coordinator": coordinator}
-
-        assert _get_soc_value(hass, "sensor.battery_soc") == 65.0
-
-    def test_falls_back_to_coordinator_when_entity_empty(self) -> None:
+    def test_returns_coordinator_soc(self) -> None:
         hass = _make_hass()
         coordinator = MagicMock()
         coordinator.data = {"SoC": 72.0}
         hass.data[DOMAIN]["entry1"] = {"coordinator": coordinator}
 
-        assert _get_soc_value(hass, "") == 72.0
+        assert _get_soc_value(hass) == 72.0
 
-    def test_falls_back_to_coordinator_when_entity_unavailable(self) -> None:
+    def test_returns_none_when_no_data(self) -> None:
         hass = _make_hass()
-        soc_state = MagicMock()
-        soc_state.state = "unavailable"
-        hass.states.get = MagicMock(return_value=soc_state)
-        coordinator = MagicMock()
-        coordinator.data = {"SoC": 45.0}
-        hass.data[DOMAIN]["entry1"] = {"coordinator": coordinator}
 
-        assert _get_soc_value(hass, "sensor.battery_soc") == 45.0
-
-    def test_returns_none_when_both_unavailable(self) -> None:
-        hass = _make_hass()
-        hass.states.get = MagicMock(return_value=None)
-
-        assert _get_soc_value(hass, "") is None
+        assert _get_soc_value(hass) is None
 
     def test_returns_none_when_no_domain_data(self) -> None:
         hass = MagicMock()
         hass.data = {}
 
-        assert _get_soc_value(hass, "") is None
+        assert _get_soc_value(hass) is None
 
 
 # ---------------------------------------------------------------------------
@@ -851,7 +831,8 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(hass, entry, mock_add)  # type: ignore[arg-type]
 
-        assert len(added) == 9
+        # 9 base + 16 polled + 1 work mode = 26
+        assert len(added) == 26
         assert isinstance(added[0], InverterOverrideStatusSensor)
         assert isinstance(added[1], SmartOperationsOverviewSensor)
         assert isinstance(added[2], ChargePowerSensor)
@@ -866,10 +847,6 @@ class TestAsyncSetupEntry:
     async def test_creates_polled_sensors_when_coordinator_present(self) -> None:
         hass = _make_hass()
         entry = _make_entry()
-        # Add a coordinator to domain data
-        coordinator = MagicMock()
-        coordinator.data = {"SoC": 50}
-        hass.data[DOMAIN][entry.entry_id] = {"coordinator": coordinator}
 
         added: list[Any] = []
 

@@ -41,7 +41,6 @@ After setup, click **Configure** on the integration entry to adjust:
 | Option | Default | Range | Description |
 |---|---|---|---|
 | Minimum SoC on Grid | 15% | 5-100% | The minimum battery state of charge to maintain when on grid. Applied to all schedule operations. |
-| Battery SoC Entity | _(none)_ | | Optional. A Home Assistant sensor entity that reports the battery state of charge. If not set, the integration uses its own polled SoC from the FoxESS API. When set, the external entity is preferred. |
 | API Polling Interval | 300 s | 60-600 s | How often to poll the FoxESS Cloud API for real-time data (SoC, power, temperature). Default 5 minutes to coexist with foxess-ha without exceeding API quota. Lower for standalone use. |
 | Battery Capacity | 0.0 kWh | 0-100 kWh | Total usable battery capacity in kWh. Required for `smart_charge` power calculations. |
 | Min Power Change | 500 W | 0-5000 W | Minimum watt change before updating the charge schedule during `smart_charge`. Lower values improve SoC tracking, higher values reduce API calls. |
@@ -145,7 +144,7 @@ Only one smart charge session can be active at a time. Starting a new `smart_cha
 
 **Stopping a running smart charge:** Call `foxess_control.clear_overrides` (with no mode, or with `mode: ForceCharge`). This removes the schedule **and** cancels the background listeners.
 
-**Requires** Battery Capacity to be configured in the integration options. Battery SoC is read from the configured Battery SoC Entity if set, otherwise from the integration's own polled data.
+**Requires** Battery Capacity to be configured in the integration options.
 
 | Parameter | Required | Default | Description |
 |---|---|---|---|
@@ -171,14 +170,14 @@ Discharges the battery within a time window and automatically reverts to self-us
 **How it works:**
 
 1. Sets a `ForceDischarge` schedule with `fdSoc` set low (11%) so the inverter never stops discharging on its own — HA is the sole authority for stopping.
-2. Monitors the Battery SoC Entity in real time. When the SoC drops to the `min_soc` threshold, the `ForceDischarge` group is removed from the schedule, all listeners are cancelled, and the session ends. Other modes' schedule groups (e.g. a standing `ForceCharge` window) are preserved.
+2. Monitors the battery SoC periodically. When the SoC drops to the `min_soc` threshold, the `ForceDischarge` group is removed from the schedule, all listeners are cancelled, and the session ends. Other modes' schedule groups (e.g. a standing `ForceCharge` window) are preserved.
 3. When the time window ends, the `ForceDischarge` group is removed from the schedule and listeners are cancelled. This prevents the schedule from replaying the next day.
 
 Only one smart discharge session can be active at a time. Starting a new `smart_discharge` cancels any previous session. A `force_discharge` action also cancels any running smart discharge, since it replaces the underlying `ForceDischarge` schedule.
 
 **Stopping a running smart discharge:** Call `foxess_control.clear_overrides` (with no mode, or with `mode: ForceDischarge`). This removes the schedule **and** cancels the background listeners.
 
-Battery SoC is read from the configured Battery SoC Entity if set, otherwise from the integration's own polled data.
+Battery SoC is read from the integration's polled data.
 
 | Parameter | Required | Default | Description |
 |---|---|---|---|
@@ -363,8 +362,8 @@ The integration creates two binary sensors that track whether a smart charge or 
 
 | Entity | State | Attributes when on |
 |---|---|---|
-| `binary_sensor.foxess_smart_charge_active` | `on` while a smart charge session is running | `target_soc`, `current_power_w`, `max_power_w`, `end_time`, `soc_entity` |
-| `binary_sensor.foxess_smart_discharge_active` | `on` while a smart discharge session is running | `min_soc`, `last_power_w`, `end_time`, `soc_entity` |
+| `binary_sensor.foxess_smart_charge_active` | `on` while a smart charge session is running | `target_soc`, `current_power_w`, `max_power_w`, `end_time` |
+| `binary_sensor.foxess_smart_discharge_active` | `on` while a smart discharge session is running | `min_soc`, `last_power_w`, `end_time` |
 
 These sensors are useful for:
 - Dashboard indicators showing active sessions

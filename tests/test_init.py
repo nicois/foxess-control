@@ -772,24 +772,9 @@ class TestGetCurrentSoc:
 
     def _make_hass(
         self,
-        soc_entity: str = "",
-        soc_state: str | None = None,
         coordinator_soc: float | None = None,
     ) -> MagicMock:
         hass = MagicMock()
-
-        # Config entry options
-        mock_entry = MagicMock()
-        mock_entry.options = {"battery_soc_entity": soc_entity}
-        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
-
-        # External entity state
-        if soc_entity and soc_state is not None:
-            state_obj = MagicMock()
-            state_obj.state = soc_state
-            hass.states.get = MagicMock(return_value=state_obj)
-        else:
-            hass.states.get = MagicMock(return_value=None)
 
         # Coordinator
         mock_coordinator = MagicMock()
@@ -808,30 +793,10 @@ class TestGetCurrentSoc:
         }
         return hass
 
-    def test_prefers_external_entity(self) -> None:
-        hass = self._make_hass(
-            soc_entity="sensor.bat_soc",
-            soc_state="75.5",
-            coordinator_soc=50.0,
-        )
-        assert _get_current_soc(hass) == 75.5
-
-    def test_falls_back_to_coordinator(self) -> None:
-        hass = self._make_hass(
-            soc_entity="",
-            coordinator_soc=60.0,
-        )
+    def test_returns_coordinator_soc(self) -> None:
+        hass = self._make_hass(coordinator_soc=60.0)
         assert _get_current_soc(hass) == 60.0
 
-    def test_returns_none_when_both_unavailable(self) -> None:
-        hass = self._make_hass(soc_entity="", coordinator_soc=None)
+    def test_returns_none_when_unavailable(self) -> None:
+        hass = self._make_hass(coordinator_soc=None)
         assert _get_current_soc(hass) is None
-
-    def test_falls_back_when_entity_unavailable(self) -> None:
-        hass = self._make_hass(
-            soc_entity="sensor.bat_soc",
-            soc_state=None,
-            coordinator_soc=45.0,
-        )
-        # Entity configured but returns None state → fall back
-        assert _get_current_soc(hass) == 45.0
