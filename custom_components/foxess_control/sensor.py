@@ -299,6 +299,9 @@ def _build_forecast(
             return []
 
         end = ds["end"]
+        discharge_start: datetime.datetime = ds.get("start", now)
+        if discharge_start < now:
+            discharge_start = now
         min_soc: int = ds.get("min_soc", 0)
         power_w = ds.get("last_power_w", 0)
 
@@ -312,6 +315,9 @@ def _build_forecast(
             epoch_ms = int(t.timestamp() * 1000)
             points.append({"time": epoch_ms, "soc": round(cur_soc, 1)})
             t += _FORECAST_STEP
+            if t < discharge_start:
+                # Before discharge starts — SoC stays flat
+                continue
             step_secs = _FORECAST_STEP.total_seconds()
             cur_soc = max(cur_soc - discharge_rate * step_secs, min_soc)
 

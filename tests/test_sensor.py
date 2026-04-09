@@ -642,6 +642,40 @@ class TestBatteryForecastSensor:
             assert attrs is not None
             assert attrs["forecast"] == []
 
+    def test_discharge_forecast_defers_until_start(self) -> None:
+        """Discharge forecast holds SoC flat until the start time."""
+        # Discharge starts at 17:00, now is 16:00 — first hour should be flat
+        hass = _make_hass(smart_discharge_state=_discharge_state(last_power_w=5000))
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 60.0}
+        hass.data[DOMAIN]["entry1"] = {
+            "inverter": MagicMock(),
+            "coordinator": mock_coordinator,
+        }
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        sensor = BatteryForecastSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 16, 0, 0),
+        ):
+            attrs = sensor.extra_state_attributes
+            assert attrs is not None
+            forecast = attrs["forecast"]
+            assert len(forecast) > 2
+            # Points before 17:00 should all be flat at 60.0
+            start_epoch = int(
+                datetime.datetime(2026, 4, 8, 17, 0, 0).timestamp() * 1000
+            )
+            flat_points = [p for p in forecast if p["time"] < start_epoch]
+            assert len(flat_points) > 0
+            for p in flat_points:
+                assert p["soc"] == 60.0
+            # Points after start should decrease
+            assert forecast[-1]["soc"] < 60.0
+
     def test_forecast_points_have_time_and_soc(self) -> None:
         """Each forecast point has 'time' (epoch ms) and 'soc' keys."""
         hass = _make_hass(smart_discharge_state=_discharge_state(last_power_w=5000))
