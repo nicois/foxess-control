@@ -44,7 +44,7 @@ After setup, click **Configure** on the integration entry to adjust:
 | API Polling Interval | 300 s | 60-600 s | How often to poll the FoxESS Cloud API for real-time data (SoC, power, temperature). Default 5 minutes to coexist with foxess-ha without exceeding API quota. Lower for standalone use. |
 | Battery Capacity | 0.0 kWh | 0-100 kWh | Total usable battery capacity in kWh. Required for `smart_charge` power calculations. |
 | Min Power Change | 500 W | 0-5000 W | Minimum watt change before updating the charge schedule during `smart_charge`. Lower values improve SoC tracking, higher values reduce API calls. |
-| Minimum API fdSoc | 11% | 5-11% | The minimum `fdSoc` value sent to the FoxESS API. The API normally rejects values below 11 (errno 40257). Only lower this if you know your firmware supports it. |
+| Minimum API fdSoc | 11% | 0-11% | The minimum `fdSoc` value sent to the FoxESS API. The API normally rejects values below 11 (errno 40257). Only lower this if you know your firmware supports it. |
 
 > **Warning:** The inverter's behaviour when it reaches this SoC level during force discharge or feed-in is unintuitive. Consider using an automation to cancel the override before the battery reaches this level. See [Known limitations](#known-limitations).
 
@@ -131,14 +131,14 @@ Charges the battery within a time window, deferring grid charging as long as pos
 
 **How it works:**
 
-1. Calculates the latest possible time to start charging at 80% of maximum power and still reach the target SoC by the end of the window. The 20% power buffer accounts for local consumption reducing the effective charge rate.
+1. Calculates the latest possible start time by estimating the effective charge rate — inverter max power minus current household consumption (read from the polled `loadsPower` and `pvPower` data), with a minimum 10% headroom reserved for transient loads. This consumption-aware calculation means the deferral adapts to real-time site conditions rather than using a fixed buffer.
 2. **Deferred phase:** Until the calculated start time, no `ForceCharge` schedule is set. The inverter stays in its current mode (typically self-use), allowing solar generation to charge the battery naturally.
-3. **Charging phase:** When the deferred start time arrives, sets a `ForceCharge` schedule with `fdSoc` set high (100%) so the inverter never stops charging on its own — HA is the sole authority for stopping.
-4. Every 5 minutes, re-reads the current SoC and recalculates. During the deferred phase, if solar has raised the SoC, the start time is pushed later. During the charging phase, power is adjusted up or down. If the power change is below the configured **Min Power Change** threshold, the update is skipped to avoid unnecessary API calls.
-5. When the SoC reaches the target (whether from solar during the deferred phase or grid charging), the `ForceCharge` group is removed from the schedule, all listeners are cancelled, and the session ends. Other modes' schedule groups (e.g. a standing `ForceDischarge` window) are preserved.
+3. **Charging phase:** When the deferred start time arrives, sets a `ForceCharge` schedule with `fdSoc` set high (100%) so the inverter never stops charging on its own — HA is the sole authority for stopping. Charge power targets finishing with a 10% time buffer and accounts for current household consumption, so the inverter typically runs at around 80% of capacity rather than 100%.
+4. Every 5 minutes, re-reads the current SoC, household consumption, and solar generation, then recalculates. During the deferred phase, if solar has raised the SoC, the start time is pushed later. During the charging phase, power is adjusted up or down based on both the remaining energy deficit and current net consumption. If the power change is below the configured **Min Power Change** threshold, the update is skipped to avoid unnecessary API calls.
+5. When the SoC reaches the target for two consecutive readings (whether from solar during the deferred phase or grid charging), the `ForceCharge` group is removed from the schedule, all listeners are cancelled, and the session ends. Requiring two readings prevents a single SoC spike from prematurely ending the session. Other modes' schedule groups (e.g. a standing `ForceDischarge` window) are preserved.
 6. When the time window ends, the `ForceCharge` group is removed from the schedule and listeners are cancelled. This prevents the schedule from replaying the next day.
 
-If the battery capacity is too large or the SoC too low to reach the target at 80% power within the window, charging starts immediately (no deferral).
+If the battery capacity is too large or the SoC too low to reach the target within the window (accounting for current consumption), charging starts immediately (no deferral).
 
 Only one smart charge session can be active at a time. Starting a new `smart_charge` cancels any previous session. A `force_charge` action also cancels any running smart charge, since it replaces the underlying `ForceCharge` schedule.
 
@@ -170,7 +170,7 @@ Discharges the battery within a time window and automatically reverts to self-us
 **How it works:**
 
 1. Sets a `ForceDischarge` schedule with `fdSoc` set low (11%) so the inverter never stops discharging on its own — HA is the sole authority for stopping.
-2. Monitors the battery SoC periodically. When the SoC drops to the `min_soc` threshold, the `ForceDischarge` group is removed from the schedule, all listeners are cancelled, and the session ends. Other modes' schedule groups (e.g. a standing `ForceCharge` window) are preserved.
+2. Monitors the battery SoC periodically. When the SoC drops to the `min_soc` threshold for two consecutive readings, the `ForceDischarge` group is removed from the schedule, all listeners are cancelled, and the session ends. Requiring two readings prevents a single SoC dip from prematurely ending the session. Other modes' schedule groups (e.g. a standing `ForceCharge` window) are preserved.
 3. When the time window ends, the `ForceDischarge` group is removed from the schedule and listeners are cancelled. This prevents the schedule from replaying the next day.
 
 Only one smart discharge session can be active at a time. Starting a new `smart_discharge` cancels any previous session. A `force_discharge` action also cancels any running smart discharge, since it replaces the underlying `ForceDischarge` schedule.
