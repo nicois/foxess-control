@@ -903,3 +903,89 @@ class TestGetCurrentSoc:
     def test_returns_none_when_unavailable(self) -> None:
         hass = self._make_hass(coordinator_soc=None)
         assert _get_current_soc(hass) is None
+
+
+class TestGetNetConsumptionParseErrors:
+    """Tests for _get_net_consumption when coordinator returns bad values."""
+
+    def test_string_value_returns_zero_and_logs(self) -> None:
+        hass = MagicMock()
+        coordinator = MagicMock()
+        coordinator.data = {"loadsPower": "12.5kW", "pvPower": 1.0}
+        hass.data = {DOMAIN: {"entry1": {"coordinator": coordinator}}}
+        result = _get_net_consumption(hass)
+        assert result == 0.0
+
+    def test_none_values_returns_zero(self) -> None:
+        hass = MagicMock()
+        coordinator = MagicMock()
+        coordinator.data = {"loadsPower": None, "pvPower": None}
+        hass.data = {DOMAIN: {"entry1": {"coordinator": coordinator}}}
+        result = _get_net_consumption(hass)
+        assert result == 0.0
+
+    def test_empty_coordinator_data_returns_zero(self) -> None:
+        """loadsPower/pvPower absent → defaults to 0, so net = 0."""
+        hass = MagicMock()
+        coordinator = MagicMock()
+        coordinator.data = {}
+        hass.data = {DOMAIN: {"entry1": {"coordinator": coordinator}}}
+        assert _get_net_consumption(hass) == 0.0
+
+
+class TestCalculateChargePowerEdgeCases:
+    """Edge case tests for _calculate_charge_power with consumption."""
+
+    def test_consumption_exceeds_max_power(self) -> None:
+        # 5kWh/2h = 2500W + 20000W consumption → clamped to 10000
+        result = _calculate_charge_power(
+            50.0, 100, 10.0, 2.0, 10000, net_consumption_kw=20.0
+        )
+        assert result == 10000
+
+    def test_zero_battery_capacity(self) -> None:
+        # 0 capacity → 0 energy needed → min power 100
+        result = _calculate_charge_power(
+            50.0, 100, 0.0, 2.0, 10000, net_consumption_kw=3.0
+        )
+        assert result == 100
+
+    def test_very_small_remaining_with_consumption(self) -> None:
+        # Tiny remaining time → max power regardless of consumption
+        result = _calculate_charge_power(
+            50.0, 100, 10.0, 0.001, 10000, net_consumption_kw=2.0
+        )
+        assert result == 10000
+
+
+class TestCalculateDeferredStartEdgeCases:
+    """Edge case tests for _calculate_deferred_start with consumption."""
+
+    def test_consumption_equals_max_power(self) -> None:
+        # Net consumption = max power → fallback to 10% headroom
+        end = datetime.datetime(2026, 4, 7, 6, 0, 0)
+        result = _calculate_deferred_start(
+            20.0, 80, 10.0, 10500, end, net_consumption_kw=10.5
+        )
+        # effective = 10% of 10.5 = 1.05kW; 6kWh / 1.05 = 5.71h
+        # Start = 06:00 - 5.71h = 00:17
+        assert result.hour == 0
+        assert result.minute == 17
+
+    def test_consumption_exceeds_max_power(self) -> None:
+        # Net consumption > max power → same fallback to 10%
+        end = datetime.datetime(2026, 4, 7, 6, 0, 0)
+        result = _calculate_deferred_start(
+            20.0, 80, 10.0, 10500, end, net_consumption_kw=15.0
+        )
+        # Same as above: effective = 1.05kW
+        assert result.hour == 0
+        assert result.minute == 17
+
+    def test_zero_battery_capacity(self) -> None:
+        end = datetime.datetime(2026, 4, 7, 6, 0, 0)
+        result = _calculate_deferred_start(
+            50.0, 100, 0.0, 10500, end, net_consumption_kw=3.0
+        )
+        # 0 energy needed → returns end
+        assert result == end

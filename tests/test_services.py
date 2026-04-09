@@ -1038,7 +1038,12 @@ class TestHandleSmartDischarge:
         # Simulate SoC dropping to threshold via coordinator
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 30.0}
 
+        # First reading: registers count=1, doesn't cancel yet
         await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
+        assert hass.data[DOMAIN].get("_smart_discharge_state") is not None
+
+        # Second consecutive reading: confirms and cancels
+        await captured_interval(datetime.datetime(2026, 4, 7, 18, 1, 0))
 
         # The callback removes the override via _remove_mode_from_schedule
         inv.self_use.assert_called_once()
@@ -1450,7 +1455,12 @@ class TestHandleSmartCharge:
             "custom_components.foxess_control.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 5, 0, 0),
         ):
+            # First reading: registers as count=1, doesn't cancel yet
             await captured_interval(datetime.datetime(2026, 4, 7, 5, 0, 0))
+            assert hass.data[DOMAIN].get("_smart_charge_state") is not None
+
+            # Second consecutive reading: confirms and cancels
+            await captured_interval(datetime.datetime(2026, 4, 7, 5, 5, 0))
 
         # Charging was deferred (10kWh, small battery), so no override to remove
         inv.self_use.assert_not_called()
@@ -2482,3 +2492,369 @@ class TestRecoverSessions:
         assert "_smart_charge_state" not in hass.data[DOMAIN]
         assert "_smart_discharge_state" not in hass.data[DOMAIN]
         store.async_save.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_corrupted_charge_session_discarded(self) -> None:
+        """Corrupted charge data (missing keys) is discarded gracefully."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        hass = _make_hass(inverter=inv)
+        store = hass.data[DOMAIN]["_store"]
+        # Missing all required time fields
+        store.async_load = AsyncMock(
+            return_value={"smart_charge": {"date": "2026-04-09"}}
+        )
+
+        from custom_components.foxess_control import _recover_sessions
+
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 9, 3, 0, 0),
+        ):
+            await _recover_sessions(hass, inv)
+
+        assert "_smart_charge_state" not in hass.data[DOMAIN]
+        store.async_save.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_corrupted_discharge_session_discarded(self) -> None:
+        """Corrupted discharge data is discarded gracefully."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        hass = _make_hass(inverter=inv)
+        store = hass.data[DOMAIN]["_store"]
+        store.async_load = AsyncMock(
+            return_value={"smart_discharge": {"date": "2026-04-09"}}
+        )
+
+        from custom_components.foxess_control import _recover_sessions
+
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 9, 12, 0, 0),
+        ):
+            await _recover_sessions(hass, inv)
+
+        assert "_smart_discharge_state" not in hass.data[DOMAIN]
+        store.async_save.assert_called_once()
+
+
+class TestSocStabilityCounters:
+    """Tests for SoC stability counters (require 2 consecutive readings)."""
+
+    @pytest.mark.asyncio
+    async def test_charge_single_above_target_does_not_cancel(self) -> None:
+        """A single SoC reading at target should not cancel the session."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=10.0,
+            coordinator_data={"SoC": 20.0},
+        )
+
+        captured_interval = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval
+            captured_interval = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(2, 0),
+                        "end_time": datetime.time(6, 0),
+                        "target_soc": 80,
+                    }
+                )
+            )
+
+        assert captured_interval is not None
+
+        # SoC jumps to target
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 80.0}
+
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 4, 0, 0),
+        ):
+            await captured_interval(datetime.datetime(2026, 4, 7, 4, 0, 0))
+
+        # Session should still be active after one reading
+        state = hass.data[DOMAIN].get("_smart_charge_state")
+        assert state is not None
+        assert state["soc_above_target_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_charge_soc_drops_below_target_resets_counter(self) -> None:
+        """If SoC drops back below target, the counter resets."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=10.0,
+            coordinator_data={"SoC": 20.0},
+        )
+
+        captured_interval = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval
+            captured_interval = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(2, 0),
+                        "end_time": datetime.time(6, 0),
+                        "target_soc": 80,
+                    }
+                )
+            )
+
+        assert captured_interval is not None
+
+        # SoC at target → count=1
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 80.0}
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 4, 0, 0),
+        ):
+            await captured_interval(datetime.datetime(2026, 4, 7, 4, 0, 0))
+
+        assert hass.data[DOMAIN]["_smart_charge_state"]["soc_above_target_count"] == 1
+
+        # SoC drops back → counter resets
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 78.0}
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 4, 5, 0),
+        ):
+            await captured_interval(datetime.datetime(2026, 4, 7, 4, 5, 0))
+
+        assert hass.data[DOMAIN]["_smart_charge_state"]["soc_above_target_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_discharge_single_below_threshold_no_cancel(self) -> None:
+        """A single SoC reading at/below threshold does not cancel discharge."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(inverter=inv, coordinator_data={"SoC": 80.0})
+
+        captured_interval = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval
+            captured_interval = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 30,
+                    }
+                )
+            )
+
+        assert captured_interval is not None
+
+        # SoC drops to threshold
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 30.0}
+        await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
+
+        # Session still active after just one reading
+        state = hass.data[DOMAIN].get("_smart_discharge_state")
+        assert state is not None
+        assert state["soc_below_min_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_discharge_soc_recovers_resets_counter(self) -> None:
+        """If discharge SoC goes back above threshold, counter resets."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(inverter=inv, coordinator_data={"SoC": 80.0})
+
+        captured_interval = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval
+            captured_interval = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 30,
+                    }
+                )
+            )
+
+        assert captured_interval is not None
+
+        # SoC dips below → count=1
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 29.0}
+        await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
+        assert hass.data[DOMAIN]["_smart_discharge_state"]["soc_below_min_count"] == 1
+
+        # SoC recovers → counter resets
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 35.0}
+        await captured_interval(datetime.datetime(2026, 4, 7, 18, 1, 0))
+        assert hass.data[DOMAIN]["_smart_discharge_state"]["soc_below_min_count"] == 0
+
+
+class TestRemainingZeroCancels:
+    """Tests for active cancellation when remaining time <= 0."""
+
+    @pytest.mark.asyncio
+    async def test_expired_window_cancels_charge_session(self) -> None:
+        """When adjustment fires after window expired, it actively cancels."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=60.0,
+            coordinator_data={
+                "SoC": 20.0,
+                "loadsPower": 3.0,
+                "pvPower": 0.0,
+            },
+        )
+
+        captured_interval = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval
+            captured_interval = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(2, 0),
+                        "end_time": datetime.time(6, 0),
+                        "target_soc": 80,
+                    }
+                )
+            )
+
+        assert captured_interval is not None
+        assert hass.data[DOMAIN]["_smart_charge_state"]["charging_started"]
+
+        # Simulate callback firing after window has expired
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 6, 1, 0),
+        ):
+            await captured_interval(datetime.datetime(2026, 4, 7, 6, 1, 0))
+
+        # Session should be cancelled
+        assert hass.data[DOMAIN].get("_smart_charge_state") is None
+        assert hass.data[DOMAIN]["_smart_charge_unsubs"] == []
+        # Override should be removed (self_use called via _remove_mode_from_schedule)
+        inv.self_use.assert_called()

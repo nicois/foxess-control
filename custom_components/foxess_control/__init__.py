@@ -256,6 +256,12 @@ def _get_net_consumption(hass: HomeAssistant) -> float:
                         pv = float(coordinator.data.get("pvPower", 0))
                         return loads - pv
                     except (ValueError, TypeError):
+                        _LOGGER.warning(
+                            "Failed to parse loadsPower=%r / pvPower=%r "
+                            "from coordinator, using 0",
+                            coordinator.data.get("loadsPower"),
+                            coordinator.data.get("pvPower"),
+                        )
                         return 0.0
     return 0.0
 
@@ -646,8 +652,20 @@ def _setup_smart_charge_listeners(
         cur_state["soc_unavailable_count"] = 0
 
         if cur_soc >= cur_state["target_soc"]:
+            cur_state["soc_above_target_count"] = (
+                cur_state.get("soc_above_target_count", 0) + 1
+            )
+            if cur_state["soc_above_target_count"] < 2:
+                _LOGGER.debug(
+                    "Smart charge: SoC %.1f%% >= target %d%% "
+                    "(count=%d, waiting for confirmation)",
+                    cur_soc,
+                    cur_state["target_soc"],
+                    cur_state["soc_above_target_count"],
+                )
+                return
             _LOGGER.info(
-                "Smart charge: SoC %.1f%% reached target %d%%, reverting",
+                "Smart charge: SoC %.1f%% confirmed at/above target %d%%, reverting",
                 cur_soc,
                 cur_state["target_soc"],
             )
@@ -656,11 +674,17 @@ def _setup_smart_charge_listeners(
             if charging_started:
                 await _remove_charge_override()
             return
+        cur_state["soc_above_target_count"] = 0
 
         now_dt = dt_util.now()
         remaining = (cur_state["end"] - now_dt).total_seconds() / 3600.0
         if remaining <= 0:
-            return  # end timer will handle cleanup
+            _LOGGER.info("Smart charge: window expired during adjustment, reverting")
+            charging_started = cur_state["charging_started"]
+            _cancel_smart_charge(hass)
+            if charging_started:
+                await _remove_charge_override()
+            return
 
         net_consumption = _get_net_consumption(hass)
 
@@ -759,13 +783,15 @@ def _setup_smart_charge_listeners(
             remaining,
         )
 
-        for g in cur_state["groups"]:
+        groups = cur_state.get("groups") or []
+        for g in groups:
             if g.get("workMode") == WorkMode.FORCE_CHARGE.value:
                 g["fdPwr"] = new_power
                 break
 
         cur_state["last_power_w"] = new_power
-        await hass.async_add_executor_job(inverter.set_schedule, cur_state["groups"])
+        if groups:
+            await hass.async_add_executor_job(inverter.set_schedule, groups)
 
     unsubs: list[Callable[[], None]] = [
         async_track_point_in_time(hass, _on_charge_timer_expire, end_utc),
@@ -812,13 +838,28 @@ def _setup_smart_discharge_listeners(
         if soc_value is None:
             return
         if soc_value <= cur_state["min_soc"]:
+            cur_state["soc_below_min_count"] = (
+                cur_state.get("soc_below_min_count", 0) + 1
+            )
+            if cur_state["soc_below_min_count"] < 2:
+                _LOGGER.debug(
+                    "Smart discharge: SoC %.1f%% <= threshold %d%% "
+                    "(count=%d, waiting for confirmation)",
+                    soc_value,
+                    cur_state["min_soc"],
+                    cur_state["soc_below_min_count"],
+                )
+                return
             _LOGGER.info(
-                "Smart discharge: SoC %.1f%% reached threshold %d%%, removing override",
+                "Smart discharge: SoC %.1f%% confirmed at/below "
+                "threshold %d%%, removing override",
                 soc_value,
                 cur_state["min_soc"],
             )
             _cancel_smart_discharge(hass)
             await _remove_discharge_override()
+        else:
+            cur_state["soc_below_min_count"] = 0
 
     unsubs: list[Callable[[], None]] = [
         async_track_time_interval(
@@ -852,6 +893,205 @@ def _has_matching_schedule_group(
     return False
 
 
+async def _recover_charge_session(
+    hass: HomeAssistant,
+    inverter: Inverter,
+    charge_data: dict[str, Any],
+    stored: dict[str, Any],
+    now: datetime.datetime,
+    today_str: str,
+    changed: bool,
+) -> bool:
+    """Recover or discard a persisted smart charge session.
+
+    Returns the (possibly updated) *changed* flag.
+    Raises KeyError/TypeError/ValueError on corrupted data.
+    """
+    if charge_data.get("date") != today_str:
+        _LOGGER.info(
+            "Smart charge: stale session from %s, cleaning up",
+            charge_data.get("date"),
+        )
+        del stored["smart_charge"]
+        return True
+
+    end = now.replace(
+        hour=charge_data["end_hour"],
+        minute=charge_data["end_minute"],
+        second=0,
+        microsecond=0,
+    )
+    if now >= end:
+        _LOGGER.info("Smart charge: session window has passed, cleaning up")
+        min_soc_on_grid = _get_min_soc_on_grid(hass)
+        try:
+            await hass.async_add_executor_job(
+                _remove_mode_from_schedule,
+                inverter,
+                WorkMode.FORCE_CHARGE,
+                min_soc_on_grid,
+            )
+        except Exception:
+            _LOGGER.exception("Smart charge: failed to clean up expired schedule")
+        del stored["smart_charge"]
+        return True
+
+    # Window still active — check if the schedule group exists
+    has_group = await hass.async_add_executor_job(
+        _has_matching_schedule_group,
+        inverter,
+        WorkMode.FORCE_CHARGE,
+        charge_data["end_hour"],
+        charge_data["end_minute"],
+    )
+    start = now.replace(
+        hour=charge_data["start_hour"],
+        minute=charge_data["start_minute"],
+        second=0,
+        microsecond=0,
+    )
+    if has_group or not charge_data.get("charging_started", False):
+        _LOGGER.info(
+            "Smart charge: resuming session %02d:%02d-%02d:%02d (target=%d%%)",
+            charge_data["start_hour"],
+            charge_data["start_minute"],
+            charge_data["end_hour"],
+            charge_data["end_minute"],
+            charge_data.get("target_soc", 100),
+        )
+        remaining = (end - now).total_seconds() / 3600.0
+        current_soc = _get_current_soc(hass)
+
+        max_power = charge_data.get("max_power_w", 10000)
+        target_soc = charge_data.get("target_soc", 100)
+        capacity = charge_data.get("battery_capacity_kwh", 0.0)
+        last_power = max_power
+        if current_soc is not None and charge_data.get("charging_started", False):
+            last_power = _calculate_charge_power(
+                current_soc,
+                target_soc,
+                capacity,
+                remaining,
+                max_power,
+                net_consumption_kw=_get_net_consumption(hass),
+            )
+
+        hass.data[DOMAIN]["_smart_charge_state"] = {
+            "groups": [],
+            "start": start,
+            "end": end,
+            "target_soc": target_soc,
+            "battery_capacity_kwh": capacity,
+            "max_power_w": max_power,
+            "last_power_w": last_power,
+            "min_soc_on_grid": charge_data.get(
+                "min_soc_on_grid", DEFAULT_MIN_SOC_ON_GRID
+            ),
+            "min_power_change": charge_data.get(
+                "min_power_change", DEFAULT_MIN_POWER_CHANGE
+            ),
+            "api_min_soc": charge_data.get("api_min_soc", DEFAULT_API_MIN_SOC),
+            "charging_started": charge_data.get("charging_started", False),
+            "force": charge_data.get("force", False),
+            "soc_unavailable_count": 0,
+            "soc_above_target_count": 0,
+        }
+        _setup_smart_charge_listeners(hass, inverter)
+    else:
+        _LOGGER.info(
+            "Smart charge: no matching schedule group on inverter, discarding session"
+        )
+        del stored["smart_charge"]
+        return True
+
+    return changed
+
+
+async def _recover_discharge_session(
+    hass: HomeAssistant,
+    inverter: Inverter,
+    discharge_data: dict[str, Any],
+    stored: dict[str, Any],
+    now: datetime.datetime,
+    today_str: str,
+    changed: bool,
+) -> bool:
+    """Recover or discard a persisted smart discharge session.
+
+    Returns the (possibly updated) *changed* flag.
+    Raises KeyError/TypeError/ValueError on corrupted data.
+    """
+    if discharge_data.get("date") != today_str:
+        _LOGGER.info(
+            "Smart discharge: stale session from %s, cleaning up",
+            discharge_data.get("date"),
+        )
+        del stored["smart_discharge"]
+        return True
+
+    end = now.replace(
+        hour=discharge_data["end_hour"],
+        minute=discharge_data["end_minute"],
+        second=0,
+        microsecond=0,
+    )
+    if now >= end:
+        _LOGGER.info("Smart discharge: session window has passed, cleaning up")
+        min_soc_on_grid = _get_min_soc_on_grid(hass)
+        try:
+            await hass.async_add_executor_job(
+                _remove_mode_from_schedule,
+                inverter,
+                WorkMode.FORCE_DISCHARGE,
+                min_soc_on_grid,
+            )
+        except Exception:
+            _LOGGER.exception("Smart discharge: failed to clean up expired schedule")
+        del stored["smart_discharge"]
+        return True
+
+    has_group = await hass.async_add_executor_job(
+        _has_matching_schedule_group,
+        inverter,
+        WorkMode.FORCE_DISCHARGE,
+        discharge_data["end_hour"],
+        discharge_data["end_minute"],
+    )
+    if has_group:
+        start = now.replace(
+            hour=discharge_data["start_hour"],
+            minute=discharge_data["start_minute"],
+            second=0,
+            microsecond=0,
+        )
+        _LOGGER.info(
+            "Smart discharge: resuming session %02d:%02d-%02d:%02d (min_soc=%d%%)",
+            discharge_data["start_hour"],
+            discharge_data["start_minute"],
+            discharge_data["end_hour"],
+            discharge_data["end_minute"],
+            discharge_data.get("min_soc", 10),
+        )
+        hass.data[DOMAIN]["_smart_discharge_state"] = {
+            "groups": [],
+            "start": start,
+            "end": end,
+            "min_soc": discharge_data.get("min_soc", 10),
+            "last_power_w": discharge_data.get("last_power_w", 0),
+            "soc_below_min_count": 0,
+        }
+        _setup_smart_discharge_listeners(hass, inverter)
+    else:
+        _LOGGER.info(
+            "Smart discharge: no matching schedule group on inverter, "
+            "discarding session"
+        )
+        del stored["smart_discharge"]
+        return True
+
+    return changed
+
+
 async def _recover_sessions(
     hass: HomeAssistant,
     inverter: Inverter,
@@ -872,176 +1112,28 @@ async def _recover_sessions(
     # --- Smart charge recovery ---
     charge_data = stored.get("smart_charge")
     if charge_data is not None:
-        if charge_data.get("date") != today_str:
-            _LOGGER.info(
-                "Smart charge: stale session from %s, cleaning up",
-                charge_data.get("date"),
+        try:
+            changed = await _recover_charge_session(
+                hass, inverter, charge_data, stored, now, today_str, changed
             )
-            del stored["smart_charge"]
+        except (KeyError, TypeError, ValueError) as exc:
+            _LOGGER.warning("Smart charge: corrupted session data, discarding: %s", exc)
+            stored.pop("smart_charge", None)
             changed = True
-        else:
-            end = now.replace(
-                hour=charge_data["end_hour"],
-                minute=charge_data["end_minute"],
-                second=0,
-                microsecond=0,
-            )
-            if now >= end:
-                _LOGGER.info("Smart charge: session window has passed, cleaning up")
-                min_soc_on_grid = _get_min_soc_on_grid(hass)
-                try:
-                    await hass.async_add_executor_job(
-                        _remove_mode_from_schedule,
-                        inverter,
-                        WorkMode.FORCE_CHARGE,
-                        min_soc_on_grid,
-                    )
-                except Exception:
-                    _LOGGER.exception(
-                        "Smart charge: failed to clean up expired schedule"
-                    )
-                del stored["smart_charge"]
-                changed = True
-            else:
-                # Window still active — check if the schedule group exists
-                has_group = await hass.async_add_executor_job(
-                    _has_matching_schedule_group,
-                    inverter,
-                    WorkMode.FORCE_CHARGE,
-                    charge_data["end_hour"],
-                    charge_data["end_minute"],
-                )
-                start = now.replace(
-                    hour=charge_data["start_hour"],
-                    minute=charge_data["start_minute"],
-                    second=0,
-                    microsecond=0,
-                )
-                if has_group or not charge_data.get("charging_started", False):
-                    _LOGGER.info(
-                        "Smart charge: resuming session "
-                        "%02d:%02d-%02d:%02d (target=%d%%)",
-                        charge_data["start_hour"],
-                        charge_data["start_minute"],
-                        charge_data["end_hour"],
-                        charge_data["end_minute"],
-                        charge_data["target_soc"],
-                    )
-                    # Rebuild in-memory state
-                    remaining = (end - now).total_seconds() / 3600.0
-                    current_soc = _get_current_soc(hass)
-
-                    last_power = charge_data["max_power_w"]
-                    if current_soc is not None and charge_data.get(
-                        "charging_started", False
-                    ):
-                        last_power = _calculate_charge_power(
-                            current_soc,
-                            charge_data["target_soc"],
-                            charge_data["battery_capacity_kwh"],
-                            remaining,
-                            charge_data["max_power_w"],
-                            net_consumption_kw=_get_net_consumption(hass),
-                        )
-
-                    hass.data[DOMAIN]["_smart_charge_state"] = {
-                        "groups": None,
-                        "start": start,
-                        "end": end,
-                        "target_soc": charge_data["target_soc"],
-                        "battery_capacity_kwh": charge_data["battery_capacity_kwh"],
-                        "max_power_w": charge_data["max_power_w"],
-                        "last_power_w": last_power,
-                        "min_soc_on_grid": charge_data["min_soc_on_grid"],
-                        "min_power_change": charge_data["min_power_change"],
-                        "api_min_soc": charge_data.get(
-                            "api_min_soc", DEFAULT_API_MIN_SOC
-                        ),
-                        "charging_started": charge_data.get("charging_started", False),
-                        "force": charge_data.get("force", False),
-                        "soc_unavailable_count": 0,
-                    }
-                    _setup_smart_charge_listeners(hass, inverter)
-                else:
-                    _LOGGER.info(
-                        "Smart charge: no matching schedule group on inverter, "
-                        "discarding session"
-                    )
-                    del stored["smart_charge"]
-                    changed = True
 
     # --- Smart discharge recovery ---
     discharge_data = stored.get("smart_discharge")
     if discharge_data is not None:
-        if discharge_data.get("date") != today_str:
-            _LOGGER.info(
-                "Smart discharge: stale session from %s, cleaning up",
-                discharge_data.get("date"),
+        try:
+            changed = await _recover_discharge_session(
+                hass, inverter, discharge_data, stored, now, today_str, changed
             )
-            del stored["smart_discharge"]
+        except (KeyError, TypeError, ValueError) as exc:
+            _LOGGER.warning(
+                "Smart discharge: corrupted session data, discarding: %s", exc
+            )
+            stored.pop("smart_discharge", None)
             changed = True
-        else:
-            end = now.replace(
-                hour=discharge_data["end_hour"],
-                minute=discharge_data["end_minute"],
-                second=0,
-                microsecond=0,
-            )
-            if now >= end:
-                _LOGGER.info("Smart discharge: session window has passed, cleaning up")
-                min_soc_on_grid = _get_min_soc_on_grid(hass)
-                try:
-                    await hass.async_add_executor_job(
-                        _remove_mode_from_schedule,
-                        inverter,
-                        WorkMode.FORCE_DISCHARGE,
-                        min_soc_on_grid,
-                    )
-                except Exception:
-                    _LOGGER.exception(
-                        "Smart discharge: failed to clean up expired schedule"
-                    )
-                del stored["smart_discharge"]
-                changed = True
-            else:
-                has_group = await hass.async_add_executor_job(
-                    _has_matching_schedule_group,
-                    inverter,
-                    WorkMode.FORCE_DISCHARGE,
-                    discharge_data["end_hour"],
-                    discharge_data["end_minute"],
-                )
-                if has_group:
-                    start = now.replace(
-                        hour=discharge_data["start_hour"],
-                        minute=discharge_data["start_minute"],
-                        second=0,
-                        microsecond=0,
-                    )
-                    _LOGGER.info(
-                        "Smart discharge: resuming session "
-                        "%02d:%02d-%02d:%02d (min_soc=%d%%)",
-                        discharge_data["start_hour"],
-                        discharge_data["start_minute"],
-                        discharge_data["end_hour"],
-                        discharge_data["end_minute"],
-                        discharge_data["min_soc"],
-                    )
-                    hass.data[DOMAIN]["_smart_discharge_state"] = {
-                        "groups": None,
-                        "start": start,
-                        "end": end,
-                        "min_soc": discharge_data["min_soc"],
-                        "last_power_w": discharge_data["last_power_w"],
-                    }
-                    _setup_smart_discharge_listeners(hass, inverter)
-                else:
-                    _LOGGER.info(
-                        "Smart discharge: no matching schedule group on inverter, "
-                        "discarding session"
-                    )
-                    del stored["smart_discharge"]
-                    changed = True
 
     if changed:
         await store.async_save(stored)
@@ -1331,6 +1423,7 @@ def _register_services(hass: HomeAssistant) -> None:
             "end": end,
             "min_soc": min_soc,
             "last_power_w": effective_power,
+            "soc_below_min_count": 0,
         }
 
         _setup_smart_discharge_listeners(hass, inverter)
@@ -1489,6 +1582,7 @@ def _register_services(hass: HomeAssistant) -> None:
             "charging_started": not should_defer,
             "force": force,
             "soc_unavailable_count": 0,
+            "soc_above_target_count": 0,
         }
 
         _setup_smart_charge_listeners(hass, inverter)
