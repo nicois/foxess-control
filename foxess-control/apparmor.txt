@@ -1,0 +1,26 @@
+#include <tunables/global>
+
+profile foxess_control flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  # Allow reading the bundled integration files
+  /opt/foxess_control/** r,
+
+  # Allow writing to the HA config custom_components directory
+  /config/custom_components/ rw,
+  /config/custom_components/** rw,
+
+  # Allow executing the run script and shell
+  /run.sh ix,
+  /usr/bin/bashio ix,
+  /bin/bash ix,
+  /bin/sh ix,
+  /usr/bin/mkdir ix,
+  /usr/bin/cp ix,
+  /bin/rm ix,
+
+  # Deny everything else by default
+  deny /proc/** rw,
+  deny /sys/** rw,
+  deny /dev/** rw,
+}

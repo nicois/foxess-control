@@ -16,5 +16,6 @@ startup: once
 boot: auto
 map:
   - config:rw
+apparmor: true
 options: {}
 schema: {}
