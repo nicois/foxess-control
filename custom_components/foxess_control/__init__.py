@@ -1487,6 +1487,17 @@ def _register_services(hass: HomeAssistant) -> None:
         )
         await hass.async_add_executor_job(inverter.set_schedule, groups)
 
+        conditions = [
+            f"window ends at {end.strftime('%H:%M')}",
+            f"SoC drops to {min_soc}%",
+        ]
+        if feedin_energy_limit is not None:
+            conditions.append(f"feed-in reaches {feedin_energy_limit} kWh")
+        _LOGGER.debug(
+            "Smart discharge: will stop when: %s",
+            " OR ".join(conditions),
+        )
+
         # Cancel any previous smart discharge listeners
         _cancel_smart_discharge(hass)
 
