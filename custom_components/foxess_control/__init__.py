@@ -830,13 +830,41 @@ def _setup_smart_charge_listeners(
         )
 
         groups = cur_state.get("groups") or []
-        for g in groups:
-            if g.get("workMode") == WorkMode.FORCE_CHARGE.value:
-                g["fdPwr"] = new_power
-                break
+        if groups:
+            for g in groups:
+                if g.get("workMode") == WorkMode.FORCE_CHARGE.value:
+                    g["fdPwr"] = new_power
+                    break
+        else:
+            # Post-recovery: rebuild groups from the live schedule
+            now_dt_adj = dt_util.now()
+            group = _build_override_group(
+                now_dt_adj,
+                cur_state["end"],
+                WorkMode.FORCE_CHARGE,
+                inverter,
+                cur_state["min_soc_on_grid"],
+                fd_soc=100,
+                fd_pwr=new_power,
+                api_min_soc=cur_state.get("api_min_soc", DEFAULT_API_MIN_SOC),
+            )
+            try:
+                groups = await hass.async_add_executor_job(
+                    _merge_with_existing,
+                    inverter,
+                    group,
+                    WorkMode.FORCE_CHARGE,
+                    cur_state.get("force", False),
+                )
+            except ServiceValidationError:
+                _LOGGER.warning(
+                    "Smart charge: conflict rebuilding schedule after recovery"
+                )
+                groups = []
 
         cur_state["last_power_w"] = new_power
         if groups:
+            cur_state["groups"] = groups
             await hass.async_add_executor_job(inverter.set_schedule, groups)
 
     unsubs: list[Callable[[], None]] = [
