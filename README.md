@@ -22,6 +22,13 @@ FoxESS Control polls real-time inverter data (battery SoC, charge/discharge powe
 6. Search for "FoxESS Control" in the HACS integrations list and click **Download**.
 7. Restart Home Assistant.
 
+### Home Assistant Add-on
+
+1. Go to **Settings > Add-ons > Add-on Store**.
+2. Click **⋮ > Repositories** and add `https://github.com/nicois/foxess-control`.
+3. Install **FoxESS Control** from the store and start it.
+4. Restart Home Assistant.
+
 ### Manual
 
 1. Copy the `custom_components/foxess_control` directory into your Home Assistant `config/custom_components/` directory.
