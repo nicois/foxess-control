@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.1-beta.8
+
+- 10% charge power headroom to absorb unexpected household load
+- Release notes now use changelog entries instead of auto-generated diff
+
 ## 0.13.1-beta.7
 
 - Fix smart sessions lost on config entry options reload
