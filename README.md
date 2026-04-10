@@ -10,6 +10,8 @@ FoxESS Control polls real-time inverter data (battery SoC, charge/discharge powe
 - A FoxESS Cloud API key (generate one at [foxesscloud.com](https://www.foxesscloud.com/) under User Profile > API Management)
 - Your inverter's device serial number
 
+> **Note:** If you use [foxess_modbus](https://github.com/nathanmarlor/foxess_modbus), the cloud API key is optional. See [Entity mode](#entity-mode-foxess_modbus-interop) for details.
+
 ## Installation
 
 ### HACS (recommended)
@@ -54,6 +56,31 @@ After setup, click **Configure** on the integration entry to adjust:
 | Minimum API fdSoc | 11% | 0-11% | The minimum `fdSoc` value sent to the FoxESS API. The API normally rejects values below 11 (errno 40257). Only lower this if you know your firmware supports it. |
 
 > **Warning:** The inverter's behaviour when it reaches this SoC level during force discharge or feed-in is unintuitive. Consider using an automation to cancel the override before the battery reaches this level. See [Known limitations](#known-limitations).
+
+### Entity mode (foxess_modbus interop)
+
+If you use [foxess_modbus](https://github.com/nathanmarlor/foxess_modbus) for local Modbus control, foxess_control can optionally read inverter state from and write mode changes to foxess_modbus's HA entities instead of the FoxESS Cloud API. This gives you fast local control combined with foxess_control's smart charge/discharge algorithms — no cloud API connection required.
+
+To enable entity mode, configure the **Work Mode Entity** option to point at the foxess_modbus `select` entity for your inverter's work mode (e.g. `select.foxess_inv1_work_mode`). All other entity fields are optional — features degrade gracefully when not provided.
+
+| Option | Domain | Required | Description |
+|---|---|---|---|
+| Work Mode Entity | `select` | Yes | foxess_modbus work mode select entity. Setting this enables entity mode. |
+| Charge Power Entity | `number` | For smart charge | foxess_modbus charge power number entity. |
+| Discharge Power Entity | `number` | For smart discharge | foxess_modbus discharge power number entity. |
+| Min SoC Entity | `number` | No | foxess_modbus min SoC number entity. |
+| SoC Entity | `sensor` | No | Battery SoC sensor (overrides cloud polling). |
+| Loads Power Entity | `sensor` | No | House load sensor (improves consumption-aware charging). |
+| PV Power Entity | `sensor` | No | Solar generation sensor (improves charge deferral). |
+| Feed-in Energy Entity | `sensor` | No | Cumulative feed-in energy sensor (for discharge energy limits). |
+
+When entity mode is active:
+
+- **Reads** come from HA entity states (polled at the configured interval) instead of the FoxESS Cloud API.
+- **Writes** use `select.select_option` and `number.set_value` service calls to foxess_modbus entities instead of the cloud API scheduler.
+- All actions (`force_charge`, `smart_charge`, `smart_discharge`, `feedin`, `clear_overrides`) work identically — only the underlying transport changes.
+- Schedule merging and multi-window management are not used; foxess_control sets the mode directly.
+- A cloud API key is not required. If provided, it is unused while entity mode is active.
 
 ## Actions
 
@@ -467,7 +494,7 @@ automation:
 - **Minimum SoC behaviour is unintuitive**: When the battery reaches the minimum SoC during force discharge or feed-in, the inverter's behaviour may not match expectations. Smart actions work around this by setting `fdSoc` to an extreme value (100% for charge, 11% for discharge) so the inverter never triggers its own threshold — HA monitors SoC and stops the action at the user's configured target. For plain `force_charge`/`force_discharge`, consider using an automation to cancel the override before the battery reaches the minimum SoC level.
 
 - **Schedule race condition**: Force charge/discharge actions read the current schedule, modify it, then write it back. If the schedule is changed between the read and write (e.g. via the FoxESS app), those changes will be overwritten. Enable debug logging for `foxess_control` to see before/after state if schedules change unexpectedly.
-- **FoxESS Cloud API latency**: All commands go through the FoxESS Cloud API, which throttles requests to one every 5 seconds. Actions are not instantaneous. For faster local control, consider modbus-based integrations.
+- **FoxESS Cloud API latency**: In cloud mode, all commands go through the FoxESS Cloud API, which throttles requests to one every 5 seconds. Actions are not instantaneous. For faster local control, enable [entity mode](#entity-mode-foxess_modbus-interop) with foxess_modbus.
 - **FoxESS mode scheduler bugs**: The FoxESS Cloud API has known issues with schedule validation (e.g. rejecting its own saved schedules due to overlap detection on disabled groups). This integration works around known issues, but the API may introduce new ones.
 
 ## Compatibility with foxess-ha

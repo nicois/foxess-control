@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13.2-beta.6
+
+- Add entity-based backend for foxess_modbus interop: optionally read inverter state from and write mode changes to foxess_modbus entities instead of the FoxESS Cloud API
+- New config options: Work Mode Entity, Charge/Discharge Power Entity, Min SoC Entity, SoC Entity, Loads Power Entity, PV Power Entity, Feed-in Energy Entity
+- All smart charge/discharge algorithms work in entity mode without a cloud API connection
+- Add FoxESSEntityCoordinator for reading inverter state from HA entity states
+
 ## 0.13.2-beta.5
 
 - Battery forecast accounts for discharge energy limit (SoC flattens when limit reached)
