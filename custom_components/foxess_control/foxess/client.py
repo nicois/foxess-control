@@ -97,7 +97,8 @@ class FoxESSClient:
                 last_exc = exc
                 if self._is_transient(exc) and attempt < self.TRANSIENT_RETRIES:
                     delay = self._backoff_delay(attempt)
-                    self._log.warning(
+                    log = self._log.warning if attempt > 0 else self._log.debug
+                    log(
                         "Transient error on GET %s: %s, retrying in %.1fs",
                         path,
                         exc,
@@ -137,7 +138,8 @@ class FoxESSClient:
                 last_exc = exc
                 if self._is_transient(exc) and attempt < self.TRANSIENT_RETRIES:
                     delay = self._backoff_delay(attempt)
-                    self._log.warning(
+                    log = self._log.warning if attempt > 0 else self._log.debug
+                    log(
                         "Transient error on POST %s: %s, retrying in %.1fs",
                         path,
                         exc,
