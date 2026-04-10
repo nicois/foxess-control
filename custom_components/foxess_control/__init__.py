@@ -688,8 +688,19 @@ def _is_placeholder(group: dict[str, Any]) -> bool:
 
 
 def _sanitize_group(raw: dict[str, Any]) -> ScheduleGroup:
-    """Strip unknown fields from an API-returned group."""
-    return {k: raw[k] for k in _SCHEDULE_GROUP_KEYS if k in raw}  # type: ignore[return-value]
+    """Strip unknown fields and fix invalid values in an API-returned group.
+
+    The FoxESS API sometimes returns groups with fdSoc below its own minimum
+    (11).  It accepts these on read but rejects them on write (errno 40257).
+    Clamp fdSoc and ensure minSocOnGrid <= fdSoc so the schedule can be
+    written back without errors.
+    """
+    group: ScheduleGroup = {k: raw[k] for k in _SCHEDULE_GROUP_KEYS if k in raw}  # type: ignore[assignment]
+    if "fdSoc" in group:
+        group["fdSoc"] = max(group["fdSoc"], DEFAULT_API_MIN_SOC)
+    if "minSocOnGrid" in group and "fdSoc" in group:
+        group["minSocOnGrid"] = min(group["minSocOnGrid"], group["fdSoc"])
+    return group
 
 
 def _is_expired(group: ScheduleGroup) -> bool:

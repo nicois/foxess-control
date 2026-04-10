@@ -513,6 +513,38 @@ class TestSanitizeGroup:
         assert "properties" not in result
         assert result["workMode"] == "ForceCharge"
 
+    def test_clamps_fd_soc_to_api_minimum(self) -> None:
+        raw: dict[str, Any] = {
+            "enable": 1,
+            "startHour": 0,
+            "startMinute": 0,
+            "endHour": 6,
+            "endMinute": 0,
+            "workMode": "ForceCharge",
+            "minSocOnGrid": 10,
+            "fdSoc": 10,
+            "fdPwr": 6000,
+        }
+        result = _sanitize_group(raw)
+        assert result["fdSoc"] == 11
+        assert result["minSocOnGrid"] <= result["fdSoc"]
+
+    def test_clamps_min_soc_on_grid_to_fd_soc(self) -> None:
+        raw: dict[str, Any] = {
+            "enable": 1,
+            "startHour": 17,
+            "startMinute": 0,
+            "endHour": 20,
+            "endMinute": 0,
+            "workMode": "ForceDischarge",
+            "minSocOnGrid": 50,
+            "fdSoc": 20,
+            "fdPwr": 5000,
+        }
+        result = _sanitize_group(raw)
+        assert result["fdSoc"] == 20
+        assert result["minSocOnGrid"] == 20
+
 
 class TestIsPlaceholder:
     """Tests for _is_placeholder."""
