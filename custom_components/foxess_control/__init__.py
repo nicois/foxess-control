@@ -218,6 +218,13 @@ async def _apply_mode_via_entities(
     """
     opts = _get_first_entry(hass).options
 
+    _LOGGER.debug(
+        "Entity backend: setting mode=%s power=%s fd_soc=%d",
+        mode,
+        f"{power_w}W" if power_w is not None else "unchanged",
+        fd_soc,
+    )
+
     mode_option = _ENTITY_MODE_MAP.get(mode)
     if mode_option:
         await hass.services.async_call(
@@ -604,8 +611,15 @@ def _remove_mode_from_schedule(
     callers use ``_async_remove_override`` instead.
     """
     schedule = inverter.get_schedule()
+    raw_groups = schedule.get("groups", [])
+    _LOGGER.debug(
+        "Removing %s: current schedule has %d groups: %s",
+        mode.value,
+        len(raw_groups),
+        raw_groups,
+    )
     kept: list[ScheduleGroup] = []
-    for raw_group in schedule.get("groups", []):
+    for raw_group in raw_groups:
         if _is_placeholder(raw_group):
             continue
         if raw_group.get("workMode") == mode.value:
@@ -614,7 +628,7 @@ def _remove_mode_from_schedule(
         group["enable"] = 1
         kept.append(group)
     if kept:
-        _LOGGER.debug("Removing %s groups, %d groups remain", mode.value, len(kept))
+        _LOGGER.debug("After filtering: %d groups remain: %s", len(kept), kept)
         inverter.set_schedule(kept)
     else:
         _LOGGER.debug(
@@ -739,7 +753,7 @@ def _merge_with_existing(
     """
     schedule = inverter.get_schedule()
     existing: list[dict[str, Any]] = schedule.get("groups", [])
-    _LOGGER.debug("Current schedule has %d groups", len(existing))
+    _LOGGER.debug("Current schedule has %d groups: %s", len(existing), existing)
 
     kept: list[ScheduleGroup] = []
     for raw_group in existing:
@@ -768,7 +782,7 @@ def _merge_with_existing(
         kept.append(group)
 
     kept.append(new_group)
-    _LOGGER.debug("Setting schedule with %d groups", len(kept))
+    _LOGGER.debug("Setting schedule with %d groups: %s", len(kept), kept)
     return kept
 
 
@@ -961,10 +975,12 @@ def _setup_smart_charge_listeners(
                         WorkMode.FORCE_CHARGE,
                         cur_state.get("force", False),
                     )
-                except Exception as exc:
+                except Exception:
                     _LOGGER.warning(
-                        "Smart charge: failed to start deferred charge, aborting: %s",
-                        exc,
+                        "Smart charge: failed to start deferred charge "
+                        "(cloud mode, new_group=%s), aborting",
+                        group,
+                        exc_info=True,
                     )
                     _cancel_smart_charge(hass)
                     return
@@ -1067,7 +1083,9 @@ def _setup_smart_charge_listeners(
                     )
                 except (ServiceValidationError, Exception):
                     _LOGGER.warning(
-                        "Smart charge: conflict rebuilding schedule after recovery",
+                        "Smart charge: conflict rebuilding schedule after "
+                        "recovery (cloud mode, new_group=%s)",
+                        group,
                         exc_info=True,
                     )
                     groups = []
@@ -1463,7 +1481,13 @@ async def _recover_sessions(
                 hass, inverter, charge_data, stored, now, today_str, changed
             )
         except (KeyError, TypeError, ValueError) as exc:
-            _LOGGER.warning("Smart charge: corrupted session data, discarding: %s", exc)
+            _LOGGER.warning(
+                "Smart charge: corrupted session data, discarding "
+                "(backend=%s, data=%s): %s",
+                "entity" if _is_entity_mode(hass) else "cloud",
+                charge_data,
+                exc,
+            )
             stored.pop("smart_charge", None)
             changed = True
 
@@ -1476,7 +1500,11 @@ async def _recover_sessions(
             )
         except (KeyError, TypeError, ValueError) as exc:
             _LOGGER.warning(
-                "Smart discharge: corrupted session data, discarding: %s", exc
+                "Smart discharge: corrupted session data, discarding "
+                "(backend=%s, data=%s): %s",
+                "entity" if _is_entity_mode(hass) else "cloud",
+                discharge_data,
+                exc,
             )
             stored.pop("smart_discharge", None)
             changed = True
