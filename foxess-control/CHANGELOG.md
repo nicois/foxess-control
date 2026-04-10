@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.1-beta.7
+
+- Fix smart sessions lost on config entry options reload
+
 ## 0.13.1-beta.6
 
 - Add 10% time buffer to deferred charge start for household load volatility
