@@ -1,52 +1,24 @@
 # Changelog
 
-## 0.13.1-beta.9
-
-- Downgrade unchanged charge power log from info to debug ("holding at" vs "adjusting")
-
-## 0.13.1-beta.8
-
-- 10% charge power headroom to absorb unexpected household load
-- Release notes now use changelog entries instead of auto-generated diff
-
-## 0.13.1-beta.7
-
-- Fix smart sessions lost on config entry options reload
-
-## 0.13.1-beta.6
-
-- Add 10% time buffer to deferred charge start for household load volatility
-- Release changelog now diffs against last stable release
-
-## 0.13.1-beta.5
-
-- Downgrade first transient API retry to debug logging (warn only on repeated retries)
-
-## 0.13.1-beta.4
-
-- Update dashboard card examples with visibility-conditional charge/discharge cards
-
-## 0.13.1-beta.3
-
-- Fix charge power entity showing max power before charging begins on session recovery
-
-## 0.13.1-beta.2
-
-- Harden binary sensor attributes against incomplete state dicts
-- Fix race conditions in async charge/discharge callbacks
-- Persist session state after power adjustments and feedin baseline capture
-- Warn when start_time is in the past
-- Smart charge/discharge cross-cancellation (starting one cancels the other)
-- Warn when multiple config entries detected (single-inverter limitation)
-- Log missing polled variables at debug level
-- Documentation updates for new parameters, sensors, and features
-
-## 0.13.1-beta.1
+## 0.13.1
 
 - Fix smart session recovery: rebuild schedule groups after HA restart
-- Deduplicate flat segments in battery forecast time series
+- Fix smart sessions lost on config entry options reload
+- Fix charge power entity showing max power before charging begins on session recovery
+- Fix race conditions in async charge/discharge callbacks
+- Harden binary sensor attributes against incomplete state dicts
+- Persist session state after power adjustments and feedin baseline capture
+- 10% charge power headroom to absorb unexpected household load
+- 10% time buffer on deferred charge start for household load volatility
+- Smart charge/discharge cross-cancellation (starting one cancels the other)
 - Allow max power changes to bypass minimum power change threshold
-- Debug logging for discharge stop conditions
+- Deduplicate flat segments in battery forecast time series
+- Downgrade first transient API retry to debug logging (warn only on repeated retries)
+- Downgrade unchanged charge power log to debug level
+- Warn when start_time is in the past
+- Warn when multiple config entries detected (single-inverter limitation)
+- Updated dashboard card examples with visibility-conditional cards
+- Documentation updates for new parameters, sensors, and features
 
 ## 0.13.0
 
