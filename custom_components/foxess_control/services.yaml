@@ -53,7 +53,7 @@ feedin:
 force_charge:
   name: Force charge
   description: >-
-    Charge the battery for a set duration, optionally at a specific time and power limit.
+    Charge the battery for a set duration, optionally at a specific time and power limit. The inverter automatically reverts to self-use when the window ends.
   fields:
     duration:
       name: Duration
@@ -87,7 +87,7 @@ force_charge:
 force_discharge:
   name: Force discharge
   description: >-
-    Discharge the battery for a set duration, optionally at a specific time and power limit.
+    Discharge the battery for a set duration, optionally at a specific time and power limit. The inverter automatically reverts to self-use when the window ends.
   fields:
     duration:
       name: Duration
