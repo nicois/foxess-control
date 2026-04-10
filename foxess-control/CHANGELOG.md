@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.1-beta.3
+
+- Fix charge power entity showing max power before charging begins on session recovery
+
 ## 0.13.1-beta.2
 
 - Harden binary sensor attributes against incomplete state dicts
