@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.2-beta.1
+
+- Remove ForceCharge override immediately when target SoC reached (confirm before ending session)
+- Fix charge remaining estimate using window end time instead of inflated power-based calculation
+
 ## 0.13.1
 
 - Fix smart session recovery: rebuild schedule groups after HA restart
