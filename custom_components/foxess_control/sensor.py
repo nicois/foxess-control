@@ -119,40 +119,68 @@ def _get_battery_capacity_kwh(hass: HomeAssistant) -> float:
     return 0.0
 
 
+def _get_coordinator_value(hass: HomeAssistant, key: str) -> float | None:
+    """Read a numeric value from the first available coordinator."""
+    domain_data = hass.data.get(DOMAIN)
+    if domain_data is None:
+        return None
+    for k in domain_data:
+        if not str(k).startswith("_"):
+            entry_data = domain_data.get(k)
+            if isinstance(entry_data, dict):
+                coordinator = entry_data.get("coordinator")
+                if coordinator is not None and coordinator.data:
+                    raw = coordinator.data.get(key)
+                    if raw is not None:
+                        try:
+                            return float(raw)
+                        except (ValueError, TypeError):
+                            pass
+    return None
+
+
 def _estimate_discharge_remaining(
     hass: HomeAssistant,
     ds: dict[str, Any],
 ) -> str:
-    """Estimate time until discharge ends or min_soc is reached.
+    """Estimate time until discharge ends or energy limit is reached.
 
-    Returns the shorter of: time remaining in the window, or time
-    to reach min_soc at current discharge power.  Falls back to
-    the window remaining when SoC or capacity aren't available.
+    Before the discharge window opens, shows "starts in Xh Ym".
+    During the window, shows whichever constraint is closer to being
+    hit: time remaining or energy remaining (kWh).  If no energy limit
+    is configured, always shows time remaining.
     """
     now = dt_util.now()
+    start: datetime.datetime = ds.get("start", now)
     end: datetime.datetime = ds["end"]
     if end.tzinfo is None and now.tzinfo is not None:
         now = now.replace(tzinfo=None)
+
+    if now < start:
+        wait = start - now
+        return f"starts in {_format_duration(wait)}"
 
     window_remaining = end - now
     if window_remaining.total_seconds() <= 0:
         return "ending"
 
-    # Try to estimate time to reach min_soc
-    soc = _get_soc_value(hass)
-    capacity_kwh = _get_battery_capacity_kwh(hass)
-    power_w = ds.get("last_power_w", 0)
-    min_soc = ds.get("min_soc", 0)
+    # Check if the energy limit is closer to being hit than the time window
+    energy_limit = ds.get("feedin_energy_limit_kwh")
+    feedin_start = ds.get("feedin_start_kwh")
+    if energy_limit and feedin_start is not None:
+        feedin_now = _get_coordinator_value(hass, "feedin")
+        if feedin_now is not None:
+            energy_used = feedin_now - feedin_start
+            energy_remaining = max(0.0, energy_limit - energy_used)
+            elapsed = (now - start).total_seconds()
+            total_window = (end - start).total_seconds()
+            if total_window > 0 and energy_limit > 0:
+                time_fraction = elapsed / total_window
+                energy_fraction = energy_used / energy_limit
+                if energy_fraction > time_fraction:
+                    return f"{energy_remaining:.1f} kWh left"
 
-    if soc is not None and capacity_kwh > 0 and power_w > 0 and soc > min_soc:
-        energy_kwh = (soc - min_soc) / 100.0 * capacity_kwh
-        hours = energy_kwh / (power_w / 1000.0)
-        soc_remaining = datetime.timedelta(hours=hours)
-        remaining = min(window_remaining, soc_remaining)
-    else:
-        remaining = window_remaining
-
-    return _format_duration(remaining)
+    return _format_duration(window_remaining)
 
 
 # Fraction of max power used to plan deferred start (mirrors __init__.py).

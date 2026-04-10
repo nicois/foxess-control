@@ -470,16 +470,12 @@ class TestDischargeRemainingSensor:
         ):
             assert sensor.native_value == "45m"
 
-    def test_soc_estimate_shorter_than_window(self) -> None:
-        """When SoC will reach min_soc before window ends, show that."""
-        # 10kWh battery, SoC=40%, min_soc=30%, power=5000W
-        # Energy = 10% * 10kWh = 1kWh; time = 1kWh / 5kW = 0.2h = 12min
+    def test_uses_window_remaining_not_soc_estimate(self) -> None:
+        """Discharge remaining uses window end, not power-based SoC estimate."""
         # Window remaining at 17:30 with end 20:00 = 2h30m
-        # So SoC estimate (12m) is shorter
         hass = _make_hass(
             smart_discharge_state=_discharge_state(last_power_w=5000, min_soc=30)
         )
-        # Add a real entry_id so _get_battery_capacity_kwh finds it
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 40.0}
         hass.data[DOMAIN]["entry1"] = {
@@ -495,12 +491,22 @@ class TestDischargeRemainingSensor:
             "custom_components.foxess_control.sensor.dt_util.now",
             return_value=datetime.datetime(2026, 4, 8, 17, 30, 0),
         ):
-            assert sensor.native_value == "12m"
+            assert sensor.native_value == "2h 30m"
 
-    def test_window_shorter_than_soc_estimate(self) -> None:
-        """When window ends before min_soc would be reached, show window."""
-        # 10kWh battery, SoC=80%, min_soc=30%, power=1000W
-        # Energy = 50% * 10kWh = 5kWh; time = 5kWh / 1kW = 5h
+    def test_before_start_shows_starts_in(self) -> None:
+        """Before discharge window opens, show time until start."""
+        hass = _make_hass(
+            smart_discharge_state=_discharge_state(last_power_w=5000, min_soc=30)
+        )
+        sensor = DischargeRemainingSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 14, 15, 0),
+        ):
+            assert sensor.native_value == "starts in 2h 45m"
+
+    def test_window_remaining(self) -> None:
+        """During discharge, show window remaining."""
         # Window remaining at 19:30 with end 20:00 = 30m
         # Window (30m) is shorter
         hass = _make_hass(
@@ -522,6 +528,56 @@ class TestDischargeRemainingSensor:
             return_value=datetime.datetime(2026, 4, 8, 19, 30, 0),
         ):
             assert sensor.native_value == "30m"
+
+    def test_energy_limit_closer_shows_kwh(self) -> None:
+        """When energy limit is closer to being hit, show kWh remaining."""
+        # 50% of time elapsed (18:30 of 17:00-20:00), 80% of energy used
+        hass = _make_hass(
+            smart_discharge_state=_discharge_state(
+                last_power_w=5000,
+                min_soc=10,
+                feedin_energy_limit_kwh=5.0,
+                feedin_start_kwh=100.0,
+            )
+        )
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 50.0, "feedin": 104.0}
+        hass.data[DOMAIN]["entry1"] = {
+            "inverter": MagicMock(),
+            "coordinator": mock_coordinator,
+        }
+
+        sensor = DischargeRemainingSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 18, 30, 0),
+        ):
+            assert sensor.native_value == "1.0 kWh left"
+
+    def test_time_closer_shows_duration(self) -> None:
+        """When time window is closer to ending, show time remaining."""
+        # 80% of time elapsed (19:24 of 17:00-20:00), 20% of energy used
+        hass = _make_hass(
+            smart_discharge_state=_discharge_state(
+                last_power_w=5000,
+                min_soc=10,
+                feedin_energy_limit_kwh=5.0,
+                feedin_start_kwh=100.0,
+            )
+        )
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 50.0, "feedin": 101.0}
+        hass.data[DOMAIN]["entry1"] = {
+            "inverter": MagicMock(),
+            "coordinator": mock_coordinator,
+        }
+
+        sensor = DischargeRemainingSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 19, 24, 0),
+        ):
+            assert sensor.native_value == "36m"
 
     def test_none_when_idle(self) -> None:
         sensor = DischargeRemainingSensor(_make_hass(), _make_entry())

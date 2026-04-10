@@ -287,7 +287,7 @@ The following sensors track active smart charge/discharge sessions. They are una
 |---|---|---|
 | `sensor.foxess_discharge_power` | Current discharge power in watts. | `5000` |
 | `sensor.foxess_discharge_window` | Discharge time window. | `17:00 – 20:00` |
-| `sensor.foxess_discharge_remaining` | Estimated time until min SoC is reached or the window ends, whichever comes first. | `45m`, `1h 20m` |
+| `sensor.foxess_discharge_remaining` | Time remaining in the discharge window, or time until discharge begins. | `45m`, `1h 20m`, `starts in 3h 45m` |
 
 #### Battery forecast sensor
 
