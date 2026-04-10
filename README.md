@@ -270,8 +270,8 @@ The following sensors track active smart charge/discharge sessions. They are una
 
 | Entity | Description | Example value |
 |---|---|---|
-| `sensor.foxess_status` | Compact status for Android Auto. Dynamic icon reflects current state. | `Chg 6kW→80%`, `Wait→80%`, `Dchg 5kW→20:00`, `Dchg 5kW 5.0kWh`, `Idle` |
-| `sensor.foxess_smart_operations` | Dashboard overview with rich attributes for templating. | `Charging to 80%`, `Deferred charge to 80%`, `Discharging until 20:00`, `Discharging 5.0 kWh feed-in`, `Idle` |
+| `sensor.foxess_status` | Compact status for Android Auto. Dynamic icon reflects current state. | `Chg 6kW→80%`, `Wait→80%`, `Dchg@18:00`, `Dchg 5kW→20:00`, `Dchg 5kW 5.0kWh`, `Idle` |
+| `sensor.foxess_smart_operations` | Dashboard overview with rich attributes for templating. | `Charging to 80%`, `Deferred charge to 80%`, `Discharge scheduled at 18:00`, `Discharging until 20:00`, `Discharging 5.0 kWh feed-in`, `Idle` |
 
 #### Smart charge sensors
 
@@ -287,7 +287,7 @@ The following sensors track active smart charge/discharge sessions. They are una
 |---|---|---|
 | `sensor.foxess_discharge_power` | Current discharge power in watts. | `5000` |
 | `sensor.foxess_discharge_window` | Discharge time window. | `17:00 – 20:00` |
-| `sensor.foxess_discharge_remaining` | Time remaining in the discharge window, or time until discharge begins. | `45m`, `1h 20m`, `starts in 3h 45m` |
+| `sensor.foxess_discharge_remaining` | Time remaining in the discharge window, energy remaining if energy limit is closer, or time until discharge begins. | `45m`, `1h 20m`, `1.0 kWh left`, `starts in 3h 45m` |
 
 #### Battery forecast sensor
 

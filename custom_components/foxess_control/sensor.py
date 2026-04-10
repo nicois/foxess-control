@@ -428,6 +428,12 @@ class InverterOverrideStatusSensor(SensorEntity):
 
         ds = _get_discharge_state(self.hass)
         if ds is not None:
+            now = dt_util.now()
+            start = ds.get("start", now)
+            if start.tzinfo is None and now.tzinfo is not None:
+                now = now.replace(tzinfo=None)
+            if now < start:
+                return f"Dchg@{_format_time(start)}"
             power = _format_power(ds.get("last_power_w", 0))
             feedin_limit = ds.get("feedin_energy_limit_kwh")
             if feedin_limit is not None:
@@ -513,6 +519,12 @@ class SmartOperationsOverviewSensor(SensorEntity):
             return f"Charging to {target}%"
 
         if ds is not None:
+            now = dt_util.now()
+            start = ds.get("start", now)
+            if start.tzinfo is None and now.tzinfo is not None:
+                now = now.replace(tzinfo=None)
+            if now < start:
+                return f"Discharge scheduled at {_format_time(start)}"
             feedin_limit = ds.get("feedin_energy_limit_kwh")
             if feedin_limit is not None:
                 return f"Discharging {feedin_limit} kWh feed-in"
@@ -560,22 +572,27 @@ class SmartOperationsOverviewSensor(SensorEntity):
                     "charge_window": (
                         f"{_format_time(cs['start'])} – {_format_time(cs['end'])}"
                     ),
-                    "charge_remaining": _format_remaining(cs["end"]),
+                    "charge_remaining": _estimate_charge_remaining(self.hass, cs),
                     "charge_end_time": cs["end"].isoformat(),
                 }
             )
 
         if ds is not None:
             soc = _get_soc_value(self.hass)
+            now = dt_util.now()
+            ds_start = ds.get("start", now)
+            if ds_start.tzinfo is None and now.tzinfo is not None:
+                now = now.replace(tzinfo=None)
+            ds_power = 0 if now < ds_start else ds.get("last_power_w", 0)
             attrs.update(
                 {
-                    "discharge_power_w": ds.get("last_power_w", 0),
+                    "discharge_power_w": ds_power,
                     "discharge_min_soc": ds.get("min_soc"),
                     "discharge_current_soc": soc,
                     "discharge_window": (
                         f"{_format_time(ds['start'])} – {_format_time(ds['end'])}"
                     ),
-                    "discharge_remaining": _format_remaining(ds["end"]),
+                    "discharge_remaining": _estimate_discharge_remaining(self.hass, ds),
                     "discharge_end_time": ds["end"].isoformat(),
                 }
             )
@@ -679,6 +696,12 @@ class DischargePowerSensor(SensorEntity):
         ds = _get_discharge_state(self.hass)
         if ds is None:
             return _STATE_UNAVAILABLE
+        now = dt_util.now()
+        start = ds.get("start", now)
+        if start.tzinfo is None and now.tzinfo is not None:
+            now = now.replace(tzinfo=None)
+        if now < start:
+            return 0
         power: int = ds.get("last_power_w", 0)
         return power
 
