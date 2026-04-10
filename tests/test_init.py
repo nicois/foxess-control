@@ -11,6 +11,7 @@ from custom_components.foxess_control import (
     _build_override_group,
     _calculate_charge_power,
     _calculate_deferred_start,
+    _check_schedule_safe,
     _get_current_soc,
     _get_feedin_energy_kwh,
     _get_net_consumption,
@@ -490,6 +491,19 @@ class TestMergeWithExisting:
         assert len(result) == 1
         assert result[0]["workMode"] == "ForceCharge"
 
+    def test_rejects_schedule_with_backup_mode(self) -> None:
+        """Merge refuses if the schedule contains an unmanaged mode."""
+        inverter = MagicMock(spec=Inverter)
+        inverter.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [
+                self._make_group("Backup", 0, 0, 23, 59),
+            ],
+        }
+        new_group = self._make_group("ForceCharge", 14, 0, 16, 0)
+        with pytest.raises(ServiceValidationError, match="Backup"):
+            _merge_with_existing(inverter, new_group, WorkMode.FORCE_CHARGE)
+
 
 class TestSanitizeGroup:
     """Tests for _sanitize_group."""
@@ -909,6 +923,21 @@ class TestRemoveModeFromSchedule:
         groups = inv.set_schedule.call_args.args[0]
         assert groups[0]["enable"] == 1
 
+    def test_rejects_schedule_with_backup_mode(self) -> None:
+        inv = MagicMock(spec=Inverter)
+        inv.get_schedule.return_value = {
+            "groups": [
+                self._make_group("ForceCharge", 2, 6),
+                self._make_group("Backup", 22, 6),
+            ]
+        }
+
+        with pytest.raises(ServiceValidationError, match="Backup"):
+            _remove_mode_from_schedule(inv, WorkMode.FORCE_CHARGE, 15)
+
+        inv.set_schedule.assert_not_called()
+        inv.self_use.assert_not_called()
+
 
 class TestGetCurrentSoc:
     """Tests for _get_current_soc helper."""
@@ -1072,3 +1101,114 @@ class TestCalculateDeferredStartEdgeCases:
         )
         # 0 energy needed → returns end
         assert result == end
+
+
+class TestCheckScheduleSafe:
+    """Tests for _check_schedule_safe validation."""
+
+    def test_empty_groups_passes(self) -> None:
+        _check_schedule_safe([])
+
+    def test_self_use_groups_pass(self) -> None:
+        groups: list[dict[str, Any]] = [
+            {
+                "workMode": "SelfUse",
+                "startHour": 0,
+                "startMinute": 0,
+                "endHour": 23,
+                "endMinute": 59,
+            },
+        ]
+        _check_schedule_safe(groups)
+
+    def test_managed_modes_pass(self) -> None:
+        groups: list[dict[str, Any]] = [
+            {
+                "workMode": "ForceCharge",
+                "startHour": 1,
+                "startMinute": 0,
+                "endHour": 5,
+                "endMinute": 0,
+            },
+            {
+                "workMode": "ForceDischarge",
+                "startHour": 17,
+                "startMinute": 0,
+                "endHour": 20,
+                "endMinute": 0,
+            },
+            {
+                "workMode": "Feedin",
+                "startHour": 12,
+                "startMinute": 0,
+                "endHour": 16,
+                "endMinute": 0,
+            },
+        ]
+        _check_schedule_safe(groups)
+
+    def test_placeholder_groups_ignored(self) -> None:
+        groups: list[dict[str, Any]] = [
+            {
+                "workMode": "Invalid",
+                "startHour": 0,
+                "startMinute": 0,
+                "endHour": 0,
+                "endMinute": 0,
+            },
+            {
+                "workMode": "",
+                "startHour": 0,
+                "startMinute": 0,
+                "endHour": 0,
+                "endMinute": 0,
+            },
+        ]
+        _check_schedule_safe(groups)
+
+    def test_backup_mode_raises(self) -> None:
+        groups: list[dict[str, Any]] = [
+            {
+                "workMode": "Backup",
+                "startHour": 0,
+                "startMinute": 0,
+                "endHour": 23,
+                "endMinute": 59,
+            },
+        ]
+        with pytest.raises(ServiceValidationError, match="Backup"):
+            _check_schedule_safe(groups)
+
+    def test_unknown_mode_raises(self) -> None:
+        groups: list[dict[str, Any]] = [
+            {
+                "workMode": "PeakShaving",
+                "startHour": 8,
+                "startMinute": 0,
+                "endHour": 20,
+                "endMinute": 0,
+            },
+        ]
+        with pytest.raises(ServiceValidationError, match="PeakShaving"):
+            _check_schedule_safe(groups)
+
+    def test_backup_among_managed_raises(self) -> None:
+        """A single unmanaged group among managed ones still raises."""
+        groups: list[dict[str, Any]] = [
+            {
+                "workMode": "ForceCharge",
+                "startHour": 1,
+                "startMinute": 0,
+                "endHour": 5,
+                "endMinute": 0,
+            },
+            {
+                "workMode": "Backup",
+                "startHour": 22,
+                "startMinute": 0,
+                "endHour": 6,
+                "endMinute": 0,
+            },
+        ]
+        with pytest.raises(ServiceValidationError, match="Backup"):
+            _check_schedule_safe(groups)

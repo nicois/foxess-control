@@ -7,6 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
+from homeassistant.components.persistent_notification import async_create as pn_create
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.event import (
@@ -74,6 +75,18 @@ STORAGE_KEY = "foxess_control_sessions"
 STORAGE_VERSION = 1
 
 VALID_MODES = [m.value for m in WorkMode]
+
+# Modes that this integration creates or treats as a safe baseline.
+# Any other mode in existing schedule groups indicates a non-standard
+# configuration that we should not overwrite.
+_MANAGED_WORK_MODES = frozenset(
+    {
+        WorkMode.SELF_USE.value,
+        WorkMode.FORCE_CHARGE.value,
+        WorkMode.FORCE_DISCHARGE.value,
+        WorkMode.FEEDIN.value,
+    }
+)
 
 SCHEMA_CLEAR_OVERRIDES = vol.Schema(
     {
@@ -620,6 +633,7 @@ def _remove_mode_from_schedule(
         len(raw_groups),
         raw_groups,
     )
+    _check_schedule_safe(raw_groups)
     kept: list[ScheduleGroup] = []
     for raw_group in raw_groups:
         if _is_placeholder(raw_group):
@@ -719,6 +733,48 @@ def _sanitize_group(raw: dict[str, Any]) -> ScheduleGroup:
     return group
 
 
+def _check_schedule_safe(
+    groups: list[dict[str, Any]],
+    hass: HomeAssistant | None = None,
+) -> None:
+    """Raise if the schedule contains modes this integration does not manage.
+
+    The integration assumes SelfUse is the baseline mode.  If the schedule
+    contains groups with unmanaged modes (e.g. Backup), modifying the
+    schedule could overwrite the user's intended configuration.
+
+    When *hass* is provided a persistent notification is created so the
+    user sees the problem in the HA UI even if the exception is caught
+    silently by a smart-session callback.
+    """
+    for group in groups:
+        if _is_placeholder(group):
+            continue
+        mode = group.get("workMode", "")
+        if mode and mode not in _MANAGED_WORK_MODES:
+            time_range = (
+                f"{group.get('startHour', 0):02d}:{group.get('startMinute', 0):02d}"
+                f"–{group.get('endHour', 0):02d}:{group.get('endMinute', 0):02d}"
+            )
+            message = (
+                f"The inverter schedule contains a **{mode}** group "
+                f"({time_range}) which is not managed by this integration. "
+                f"FoxESS Control expects Self Use as the default work mode "
+                f"and will not modify the schedule while an unmanaged mode "
+                f"is present.\n\n"
+                f"Please remove the '{mode}' schedule group via the "
+                f"FoxESS app, then retry the operation."
+            )
+            if hass is not None:
+                pn_create(
+                    hass,
+                    message=message,
+                    title="FoxESS Control: unmanaged work mode detected",
+                    notification_id="foxess_control_unmanaged_mode",
+                )
+            raise ServiceValidationError(message)
+
+
 def _is_expired(group: ScheduleGroup) -> bool:
     """Check if a group's end time has already passed today.
 
@@ -756,6 +812,7 @@ def _merge_with_existing(
     schedule = inverter.get_schedule()
     existing: list[dict[str, Any]] = schedule.get("groups", [])
     _LOGGER.debug("Current schedule has %d groups: %s", len(existing), existing)
+    _check_schedule_safe(existing)
 
     kept: list[ScheduleGroup] = []
     for raw_group in existing:
@@ -977,6 +1034,26 @@ def _setup_smart_charge_listeners(
                         WorkMode.FORCE_CHARGE,
                         cur_state.get("force", False),
                     )
+                except ServiceValidationError:
+                    _LOGGER.warning(
+                        "Smart charge: failed to start deferred charge "
+                        "(cloud mode, new_group=%s), aborting",
+                        group,
+                        exc_info=True,
+                    )
+                    pn_create(
+                        hass,
+                        message=(
+                            "Smart charge could not start because the "
+                            "inverter schedule contains an unmanaged work "
+                            "mode. Check the FoxESS app and remove any "
+                            "non-Self Use schedule groups."
+                        ),
+                        title="FoxESS Control: schedule conflict",
+                        notification_id="foxess_control_unmanaged_mode",
+                    )
+                    _cancel_smart_charge(hass)
+                    return
                 except Exception:
                     _LOGGER.warning(
                         "Smart charge: failed to start deferred charge "
@@ -1083,7 +1160,26 @@ def _setup_smart_charge_listeners(
                         WorkMode.FORCE_CHARGE,
                         cur_state.get("force", False),
                     )
-                except (ServiceValidationError, Exception):
+                except ServiceValidationError:
+                    _LOGGER.warning(
+                        "Smart charge: conflict rebuilding schedule after "
+                        "recovery (cloud mode, new_group=%s)",
+                        group,
+                        exc_info=True,
+                    )
+                    pn_create(
+                        hass,
+                        message=(
+                            "Smart charge power adjustment failed because "
+                            "the inverter schedule contains an unmanaged "
+                            "work mode. Check the FoxESS app and remove "
+                            "any non-Self Use schedule groups."
+                        ),
+                        title="FoxESS Control: schedule conflict",
+                        notification_id="foxess_control_unmanaged_mode",
+                    )
+                    groups = []
+                except Exception:
                     _LOGGER.warning(
                         "Smart charge: conflict rebuilding schedule after "
                         "recovery (cloud mode, new_group=%s)",
@@ -1704,6 +1800,8 @@ def _register_services(hass: HomeAssistant) -> None:
         elif mode_filter is None:
             inverter = _get_inverter(hass)
             min_soc_on_grid = _get_min_soc_on_grid(hass)
+            schedule = await hass.async_add_executor_job(inverter.get_schedule)
+            _check_schedule_safe(schedule.get("groups", []), hass)
             _LOGGER.info("Clearing all overrides, setting SelfUse")
             await hass.async_add_executor_job(inverter.self_use, min_soc_on_grid)
         else:
@@ -1711,6 +1809,7 @@ def _register_services(hass: HomeAssistant) -> None:
             min_soc_on_grid = _get_min_soc_on_grid(hass)
             _LOGGER.info("Clearing %s overrides", mode_filter)
             schedule = await hass.async_add_executor_job(inverter.get_schedule)
+            _check_schedule_safe(schedule.get("groups", []), hass)
             kept: list[ScheduleGroup] = []
             for g in schedule.get("groups", []):
                 if _is_placeholder(g):
