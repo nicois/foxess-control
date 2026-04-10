@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.1-beta.9
+
+- Downgrade unchanged charge power log from info to debug ("holding at" vs "adjusting")
+
 ## 0.13.1-beta.8
 
 - 10% charge power headroom to absorb unexpected household load
