@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.13.3
+
+- **Custom Lovelace card:** built-in card with battery gauge, smart charge/discharge status, progress indicators, and SVG forecast sparkline — zero-config, auto-discovers entities
+- Card auto-registers as Lovelace resource with versioned cache-busting URL
+- Sensors grouped under a single FoxESS Inverter device instead of generic "Sensors"
+- Forecast sparkline with time axis labels and dynamic Y-axis scaling to fit data range
+- Smart discharge: replace power tapering with early-stop timer based on observed export rate extrapolation
+- Clamp deferred charge start time to the configured window opening (prevents "starts in" showing a time before the window)
+- Refuse to modify schedule when unmanaged work mode detected (e.g. manual changes via FoxESS app)
+- Fix API error 40257 by clamping fdSoc in `_sanitize_group`
+- Improved diagnostic context in exception and debug logging
+- Clarify self-use fallback in force charge/discharge service descriptions
+- Comprehensive README updates: attribute documentation, replace_conflicts explanation, session recovery notes, custom card documentation
+
 ## 0.13.2
 
 - **Entity mode (foxess_modbus interop):** optionally read inverter state from and write mode changes to foxess_modbus entities instead of the FoxESS Cloud API — fully cloud-free, no API key required
