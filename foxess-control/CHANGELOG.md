@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.2-beta.2
+
+- Fix ApexCharts crash when no smart operation active (forecast attribute always present)
+- Update README for charge remaining and target SoC confirmation behavior
+
 ## 0.13.2-beta.1
 
 - Remove ForceCharge override immediately when target SoC reached (confirm before ending session)
