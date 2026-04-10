@@ -1718,6 +1718,49 @@ def _build_entity_map(opts: Any) -> dict[str, str]:
     return mapping
 
 
+_CARD_URL = f"/{DOMAIN}/foxess-control-card.js"
+
+
+async def _register_card_frontend(hass: HomeAssistant) -> None:
+    """Serve the custom Lovelace card JS and register it as a resource."""
+    from pathlib import Path
+
+    from homeassistant.components.http import StaticPathConfig
+
+    card_path = Path(__file__).parent / "www" / "foxess-control-card.js"
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(_CARD_URL, str(card_path), cache_headers=True)]
+    )
+
+    # Auto-register as a Lovelace resource (storage mode only).
+    try:
+        import importlib
+
+        _ll_mod = importlib.import_module("homeassistant.components.lovelace")
+        LOVELACE_DATA = _ll_mod.LOVELACE_DATA
+
+        ll_data = hass.data.get(LOVELACE_DATA)
+        if ll_data is not None and hasattr(ll_data.resources, "async_create_item"):
+            # Check if already registered
+            existing = [
+                r
+                for r in ll_data.resources.async_items()
+                if _CARD_URL in r.get("url", "")
+            ]
+            if not existing:
+                await ll_data.resources.async_create_item(
+                    {"res_type": "module", "url": _CARD_URL}
+                )
+                _LOGGER.info("Registered Lovelace resource: %s", _CARD_URL)
+    except Exception:
+        _LOGGER.debug(
+            "Could not auto-register Lovelace resource; "
+            "add %s manually as a module resource",
+            _CARD_URL,
+            exc_info=True,
+        )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up FoxESS Control from a config entry."""
     hass.data.setdefault(DOMAIN, {})
@@ -1767,10 +1810,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "coordinator": coordinator,
     }
 
-    # Register services once (first real entry)
+    # Register services and frontend card once (first real entry)
     real_entries = {k for k in hass.data[DOMAIN] if not k.startswith("_")}
     if len(real_entries) == 1:
         _register_services(hass)
+        await _register_card_frontend(hass)
     elif len(real_entries) > 1:
         _LOGGER.warning(
             "Multiple FoxESS Control entries detected. Services and smart "

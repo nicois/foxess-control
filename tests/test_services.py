@@ -148,6 +148,10 @@ class TestSetupEntry:
             patch(
                 "custom_components.foxess_control.FoxESSDataCoordinator",
             ) as mock_coord_cls,
+            patch(
+                "custom_components.foxess_control._register_card_frontend",
+                new_callable=AsyncMock,
+            ),
         ):
             mock_inv = MagicMock()
             mock_inv.max_power_w = 10500

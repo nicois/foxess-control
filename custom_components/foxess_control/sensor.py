@@ -10,10 +10,11 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_BATTERY_CAPACITY_KWH, DOMAIN
+from .const import CONF_BATTERY_CAPACITY_KWH, CONF_DEVICE_SERIAL, DOMAIN
 from .coordinator import FoxESSDataCoordinator, get_coordinator_soc
 
 if TYPE_CHECKING:
@@ -35,6 +36,18 @@ _STATE_UNAVAILABLE = None
 
 # Resolution for forecast data points (5 minutes).
 _FORECAST_STEP = datetime.timedelta(minutes=5)
+
+
+def _device_info(entry: ConfigEntry) -> DeviceInfo:
+    """Build DeviceInfo so all sensors are grouped under one device."""
+    serial = entry.options.get(CONF_DEVICE_SERIAL) or entry.data.get(
+        CONF_DEVICE_SERIAL, ""
+    )
+    return DeviceInfo(
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=f"FoxESS Inverter ({serial})" if serial else "FoxESS Inverter",
+        manufacturer="FoxESS",
+    )
 
 
 async def async_setup_entry(
@@ -431,6 +444,7 @@ class InverterOverrideStatusSensor(SensorEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_override_status"
         self._attr_name = "FoxESS Status"
+        self._attr_device_info = _device_info(entry)
         self.hass = hass
 
     @property
@@ -523,6 +537,7 @@ class SmartOperationsOverviewSensor(SensorEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_smart_operations"
         self._attr_name = "FoxESS Smart Operations"
+        self._attr_device_info = _device_info(entry)
         self.hass = hass
 
     @property
@@ -638,6 +653,7 @@ class ChargePowerSensor(SensorEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_charge_power"
         self._attr_name = "FoxESS Charge Power"
+        self._attr_device_info = _device_info(entry)
         self.hass = hass
 
     @property
@@ -670,6 +686,7 @@ class ChargeWindowSensor(SensorEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_charge_window"
         self._attr_name = "FoxESS Charge Window"
+        self._attr_device_info = _device_info(entry)
         self.hass = hass
 
     @property
@@ -690,6 +707,7 @@ class ChargeRemainingSensor(SensorEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_charge_remaining"
         self._attr_name = "FoxESS Charge Remaining"
+        self._attr_device_info = _device_info(entry)
         self.hass = hass
 
     @property
@@ -711,6 +729,7 @@ class DischargePowerSensor(SensorEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_discharge_power"
         self._attr_name = "FoxESS Discharge Power"
+        self._attr_device_info = _device_info(entry)
         self.hass = hass
 
     @property
@@ -745,6 +764,7 @@ class DischargeWindowSensor(SensorEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_discharge_window"
         self._attr_name = "FoxESS Discharge Window"
+        self._attr_device_info = _device_info(entry)
         self.hass = hass
 
     @property
@@ -765,6 +785,7 @@ class DischargeRemainingSensor(SensorEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_discharge_remaining"
         self._attr_name = "FoxESS Discharge Remaining"
+        self._attr_device_info = _device_info(entry)
         self.hass = hass
 
     @property
@@ -796,6 +817,7 @@ class BatteryForecastSensor(SensorEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_battery_forecast"
         self._attr_name = "FoxESS Battery Forecast"
+        self._attr_device_info = _device_info(entry)
         self.hass = hass
 
     @property
@@ -1131,6 +1153,7 @@ class FoxESSPolledSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity)
         self._attr_native_unit_of_measurement = desc.unit
         self._attr_state_class = desc.state_class
         self._attr_icon = desc.icon
+        self._attr_device_info = _device_info(entry)
 
     @property
     def native_value(self) -> float | None:
@@ -1159,6 +1182,7 @@ class FoxESSWorkModeSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntit
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_work_mode"
         self._attr_name = "FoxESS Work Mode"
+        self._attr_device_info = _device_info(entry)
 
     @property
     def native_value(self) -> str | None:
