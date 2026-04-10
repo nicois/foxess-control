@@ -309,7 +309,7 @@ def _get_feedin_energy_kwh(hass: HomeAssistant) -> float | None:
     return None
 
 
-def _cancel_smart_discharge(hass: HomeAssistant) -> None:
+def _cancel_smart_discharge(hass: HomeAssistant, *, clear_storage: bool = True) -> None:
     """Cancel any active smart discharge listeners and clear stored session."""
     unsubs: list[Callable[[], None]] = hass.data[DOMAIN].get(
         "_smart_discharge_unsubs", []
@@ -318,7 +318,7 @@ def _cancel_smart_discharge(hass: HomeAssistant) -> None:
         unsub()
     hass.data[DOMAIN]["_smart_discharge_unsubs"] = []
     hass.data[DOMAIN].pop("_smart_discharge_state", None)
-    if hass.data.get(DOMAIN, {}).get("_store") is not None:
+    if clear_storage and hass.data.get(DOMAIN, {}).get("_store") is not None:
         hass.async_create_task(_clear_stored_session(hass, "smart_discharge"))
 
 
@@ -510,14 +510,14 @@ def _remove_mode_from_schedule(
         inverter.self_use(min_soc_on_grid)
 
 
-def _cancel_smart_charge(hass: HomeAssistant) -> None:
+def _cancel_smart_charge(hass: HomeAssistant, *, clear_storage: bool = True) -> None:
     """Cancel any active smart charge listeners and clear stored session."""
     unsubs: list[Callable[[], None]] = hass.data[DOMAIN].get("_smart_charge_unsubs", [])
     for unsub in unsubs:
         unsub()
     hass.data[DOMAIN]["_smart_charge_unsubs"] = []
     hass.data[DOMAIN].pop("_smart_charge_state", None)
-    if hass.data.get(DOMAIN, {}).get("_store") is not None:
+    if clear_storage and hass.data.get(DOMAIN, {}).get("_store") is not None:
         hass.async_create_task(_clear_stored_session(hass, "smart_charge"))
 
 
@@ -1357,11 +1357,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     hass.data[DOMAIN].pop(entry.entry_id)
 
-    # Only "_smart_discharge_unsubs" key remains → last real entry was removed
+    # Only internal "_*" keys remain → last real entry was removed
     remaining = {k for k in hass.data[DOMAIN] if not k.startswith("_")}
     if not remaining:
-        _cancel_smart_discharge(hass)
-        _cancel_smart_charge(hass)
+        # Preserve persisted sessions so recovery works after options reload
+        _cancel_smart_discharge(hass, clear_storage=False)
+        _cancel_smart_charge(hass, clear_storage=False)
         hass.data.pop(DOMAIN)
         hass.services.async_remove(DOMAIN, SERVICE_CLEAR_OVERRIDES)
         hass.services.async_remove(DOMAIN, SERVICE_FEEDIN)
