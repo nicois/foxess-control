@@ -473,7 +473,11 @@ def _calculate_deferred_start(
     if effective_charge_kw <= 0:
         effective_charge_kw = max_power_kw * DEFERRED_START_MIN_HEADROOM
     charge_hours = energy_needed_kwh / effective_charge_kw
-    return end - datetime.timedelta(hours=charge_hours)
+    # Add a time buffer so that transient load spikes don't prevent
+    # reaching the target.  This matches the 10% headroom used by
+    # _calculate_charge_power when sizing the charge rate.
+    buffered_hours = charge_hours / (1 - DEFERRED_START_MIN_HEADROOM)
+    return end - datetime.timedelta(hours=buffered_hours)
 
 
 def _remove_mode_from_schedule(

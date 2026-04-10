@@ -1598,7 +1598,7 @@ class TestHandleSmartCharge:
         assert state["charging_started"] is False
         inv.set_schedule.assert_not_called()
 
-        # At 05:50 with SoC still at 20%, deferred_start ≈ 05:17 → now > deferred
+        # At 05:50, SoC still 20% → deferred_start ≈ 05:17 → now past it
 
         with patch(
             "custom_components.foxess_control.dt_util.now",
@@ -1663,8 +1663,9 @@ class TestHandleSmartCharge:
         assert captured_interval_callback is not None
 
         # At 05:20, SoC rose to 60% via solar → only 20% needed
-        # 10kWh * 20% = 2kWh; 80% of 10.5kW = 8.4kW; 2/8.4 = 0.238h ≈ 14min
-        # deferred_start = 05:46 → still in the future at 05:20
+        # 10kWh * 20% = 2kWh; 80% of 10.5kW = 8.4kW; 2/8.4 = 0.238h
+        # + 10% time buffer: 0.238/0.9 = 0.264h ≈ 16min
+        # deferred_start = 05:44 → still in the future at 05:20
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 60.0}
 
         with patch(

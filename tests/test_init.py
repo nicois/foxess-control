@@ -691,12 +691,13 @@ class TestCalculateDeferredStart:
     """Tests for _calculate_deferred_start."""
 
     def test_basic_deferral(self) -> None:
-        # 10kWh * 60% = 6kWh; 10.5kW - 10% headroom = 9.45kW; 6/9.45 = 0.635h ≈ 38min
+        # 10kWh * 60% = 6kWh; 10.5kW - 10% headroom = 9.45kW; 6/9.45 = 0.635h
+        # + 10% time buffer: 0.635/0.9 = 0.706h ≈ 42min
         end = datetime.datetime(2026, 4, 7, 6, 0, 0)
         result = _calculate_deferred_start(20.0, 80, 10.0, 10500, end)
-        # deferred = 06:00 - 38.1min ≈ 05:21
+        # deferred = 06:00 - 42.3min ≈ 05:17
         assert result.hour == 5
-        assert result.minute == 21
+        assert result.minute == 17
 
     def test_soc_at_target_returns_end(self) -> None:
         end = datetime.datetime(2026, 4, 7, 6, 0, 0)
@@ -710,37 +711,41 @@ class TestCalculateDeferredStart:
 
     def test_large_battery_defers_less(self) -> None:
         # 60kWh * 60% = 36kWh; 9.45kW effective; 36/9.45 = 3.81h
+        # + 10% time buffer: 3.81/0.9 = 4.233h ≈ 4h14min
         end = datetime.datetime(2026, 4, 7, 6, 0, 0)
         result = _calculate_deferred_start(20.0, 80, 60.0, 10500, end)
-        # 06:00 - 3.81h = 02:11
-        assert result.hour == 2
-        assert result.minute == 11
+        # 06:00 - 4h14m = 01:46
+        assert result.hour == 1
+        assert result.minute == 46
 
     def test_small_charge_needed_defers_more(self) -> None:
-        # 10kWh * 10% = 1kWh; 9.45kW effective; 1/9.45 = 0.106h ≈ 6min
+        # 10kWh * 10% = 1kWh; 9.45kW effective; 1/9.45 = 0.106h
+        # + 10% time buffer: 0.106/0.9 = 0.118h ≈ 7min
         end = datetime.datetime(2026, 4, 7, 6, 0, 0)
         result = _calculate_deferred_start(70.0, 80, 10.0, 10500, end)
         assert result.hour == 5
-        assert result.minute == 53
+        assert result.minute == 52
 
     def test_consumption_brings_start_earlier(self) -> None:
-        # 6kWh needed; 10.5kW - 3kW consumption = 7.5kW effective; 6/7.5 = 0.8h = 48min
+        # 6kWh needed; 10.5kW - 3kW consumption = 7.5kW effective; 6/7.5 = 0.8h
+        # + 10% time buffer: 0.8/0.9 = 0.889h ≈ 53min
         end = datetime.datetime(2026, 4, 7, 6, 0, 0)
         result = _calculate_deferred_start(
             20.0, 80, 10.0, 10500, end, net_consumption_kw=3.0
         )
         assert result.hour == 5
-        assert result.minute == 12
+        assert result.minute == 6
 
     def test_high_consumption_uses_remaining_capacity(self) -> None:
         # Consumption nearly equals max power — effective charge is tiny
         # 6kWh needed; 10.5kW - 10kW = 0.5kW; 6/0.5 = 12h
+        # + 10% time buffer: 12/0.9 = 13.33h
         end = datetime.datetime(2026, 4, 7, 6, 0, 0)
         result = _calculate_deferred_start(
             20.0, 80, 10.0, 10500, end, net_consumption_kw=10.0
         )
-        # 06:00 - 12h = 18:00 previous day
-        assert result.hour == 18
+        # 06:00 - 13.33h = 16:40 previous day
+        assert result.hour == 16
 
     def test_negative_consumption_ignored(self) -> None:
         # Solar exceeding load → net negative; treated as 0 → min headroom applies
@@ -1011,9 +1016,10 @@ class TestCalculateDeferredStartEdgeCases:
             20.0, 80, 10.0, 10500, end, net_consumption_kw=10.5
         )
         # effective = 10% of 10.5 = 1.05kW; 6kWh / 1.05 = 5.71h
-        # Start = 06:00 - 5.71h = 00:17
-        assert result.hour == 0
-        assert result.minute == 17
+        # + 10% time buffer: 5.71/0.9 = 6.35h
+        # Start = 06:00 - 6.35h = 23:39 previous day
+        assert result.hour == 23
+        assert result.minute == 39
 
     def test_consumption_exceeds_max_power(self) -> None:
         # Net consumption > max power → same fallback to 10%
@@ -1021,9 +1027,9 @@ class TestCalculateDeferredStartEdgeCases:
         result = _calculate_deferred_start(
             20.0, 80, 10.0, 10500, end, net_consumption_kw=15.0
         )
-        # Same as above: effective = 1.05kW
-        assert result.hour == 0
-        assert result.minute == 17
+        # Same as above: effective = 1.05kW; + 10% buffer → 6.35h
+        assert result.hour == 23
+        assert result.minute == 39
 
     def test_zero_battery_capacity(self) -> None:
         end = datetime.datetime(2026, 4, 7, 6, 0, 0)
