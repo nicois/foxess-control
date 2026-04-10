@@ -1,4 +1,4 @@
-"""DataUpdateCoordinator for polling the FoxESS Cloud API."""
+"""DataUpdateCoordinator for polling the FoxESS Cloud API or external entities."""
 
 from __future__ import annotations
 
@@ -85,4 +85,56 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         except Exception as err:
             raise UpdateFailed(f"Error fetching FoxESS data: {err}") from err
+        return data
+
+
+class FoxESSEntityCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+    """Read inverter state from external HA entities (foxess_modbus interop).
+
+    Instead of querying the FoxESS Cloud API, this coordinator reads
+    sensor/select entity states from another integration (typically
+    foxess_modbus).  The returned data dict has the same shape as
+    :class:`FoxESSDataCoordinator` so all sensors and smart-session
+    logic can consume it identically.
+    """
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entity_map: dict[str, str],
+        update_interval_seconds: int,
+    ) -> None:
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=DOMAIN,
+            update_interval=datetime.timedelta(seconds=update_interval_seconds),
+        )
+        # {polled_variable_name: entity_id}  e.g. {"SoC": "sensor.foxess_battery_soc"}
+        self._entity_map = entity_map
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        data: dict[str, Any] = {}
+        for var_name, entity_id in self._entity_map.items():
+            if var_name == "_work_mode":
+                continue  # handled separately below
+            state = self.hass.states.get(entity_id)
+            if state is not None and state.state not in ("unknown", "unavailable"):
+                try:
+                    data[var_name] = float(state.state)
+                except (ValueError, TypeError):
+                    data[var_name] = state.state
+
+        # Work mode from a select entity
+        work_mode_eid = self._entity_map.get("_work_mode")
+        if work_mode_eid:
+            state = self.hass.states.get(work_mode_eid)
+            data["_work_mode"] = (
+                state.state
+                if state is not None and state.state not in ("unknown", "unavailable")
+                else None
+            )
+        else:
+            data["_work_mode"] = None
+
         return data

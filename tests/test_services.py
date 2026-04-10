@@ -135,6 +135,7 @@ class TestSetupEntry:
         entry = MagicMock()
         entry.entry_id = "entry1"
         entry.data = {CONF_API_KEY: "key", CONF_DEVICE_SERIAL: "SN001"}
+        entry.options = {}
 
         with (
             patch("custom_components.foxess_control.FoxESSClient"),
@@ -170,6 +171,7 @@ class TestSetupEntry:
         entry = MagicMock()
         entry.entry_id = "entry2"
         entry.data = {CONF_API_KEY: "key", CONF_DEVICE_SERIAL: "SN002"}
+        entry.options = {}
 
         with (
             patch("custom_components.foxess_control.FoxESSClient"),

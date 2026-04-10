@@ -15,6 +15,8 @@ from homeassistant.config_entries import (
 )
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -24,10 +26,18 @@ from .const import (
     CONF_API_KEY,
     CONF_API_MIN_SOC,
     CONF_BATTERY_CAPACITY_KWH,
+    CONF_CHARGE_POWER_ENTITY,
     CONF_DEVICE_SERIAL,
+    CONF_DISCHARGE_POWER_ENTITY,
+    CONF_FEEDIN_ENERGY_ENTITY,
+    CONF_LOADS_POWER_ENTITY,
     CONF_MIN_POWER_CHANGE,
+    CONF_MIN_SOC_ENTITY,
     CONF_MIN_SOC_ON_GRID,
     CONF_POLLING_INTERVAL,
+    CONF_PV_POWER_ENTITY,
+    CONF_SOC_ENTITY,
+    CONF_WORK_MODE_ENTITY,
     DEFAULT_API_MIN_SOC,
     DEFAULT_MIN_POWER_CHANGE,
     DEFAULT_MIN_SOC_ON_GRID,
@@ -126,6 +136,11 @@ class FoxessControlOptionsFlow(OptionsFlow):
             CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL
         )
 
+        opts = self._config_entry.options
+        select_selector = EntitySelector(EntitySelectorConfig(domain="select"))
+        number_selector = EntitySelector(EntitySelectorConfig(domain="number"))
+        sensor_selector = EntitySelector(EntitySelectorConfig(domain="sensor"))
+
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
@@ -177,6 +192,39 @@ class FoxessControlOptionsFlow(OptionsFlow):
                             mode=NumberSelectorMode.BOX,
                         )
                     ),
+                    # Entity-mode options (foxess_modbus interop)
+                    vol.Optional(
+                        CONF_WORK_MODE_ENTITY,
+                        default=opts.get(CONF_WORK_MODE_ENTITY, ""),
+                    ): select_selector,
+                    vol.Optional(
+                        CONF_CHARGE_POWER_ENTITY,
+                        default=opts.get(CONF_CHARGE_POWER_ENTITY, ""),
+                    ): number_selector,
+                    vol.Optional(
+                        CONF_DISCHARGE_POWER_ENTITY,
+                        default=opts.get(CONF_DISCHARGE_POWER_ENTITY, ""),
+                    ): number_selector,
+                    vol.Optional(
+                        CONF_MIN_SOC_ENTITY,
+                        default=opts.get(CONF_MIN_SOC_ENTITY, ""),
+                    ): number_selector,
+                    vol.Optional(
+                        CONF_SOC_ENTITY,
+                        default=opts.get(CONF_SOC_ENTITY, ""),
+                    ): sensor_selector,
+                    vol.Optional(
+                        CONF_LOADS_POWER_ENTITY,
+                        default=opts.get(CONF_LOADS_POWER_ENTITY, ""),
+                    ): sensor_selector,
+                    vol.Optional(
+                        CONF_PV_POWER_ENTITY,
+                        default=opts.get(CONF_PV_POWER_ENTITY, ""),
+                    ): sensor_selector,
+                    vol.Optional(
+                        CONF_FEEDIN_ENERGY_ENTITY,
+                        default=opts.get(CONF_FEEDIN_ENERGY_ENTITY, ""),
+                    ): sensor_selector,
                 }
             ),
         )

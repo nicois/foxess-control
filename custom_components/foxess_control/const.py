@@ -13,6 +13,16 @@ DEFAULT_API_MIN_SOC = 11
 CONF_POLLING_INTERVAL = "polling_interval"
 DEFAULT_POLLING_INTERVAL = 300  # seconds
 MAX_OVERRIDE_HOURS = 4
+
+# Entity-mode configuration (optional foxess_modbus interop)
+CONF_WORK_MODE_ENTITY = "work_mode_entity"
+CONF_CHARGE_POWER_ENTITY = "charge_power_entity"
+CONF_DISCHARGE_POWER_ENTITY = "discharge_power_entity"
+CONF_MIN_SOC_ENTITY = "min_soc_entity"
+CONF_SOC_ENTITY = "soc_entity"
+CONF_LOADS_POWER_ENTITY = "loads_power_entity"
+CONF_PV_POWER_ENTITY = "pv_power_entity"
+CONF_FEEDIN_ENERGY_ENTITY = "feedin_energy_entity"
 PLATFORMS: list[str] = ["binary_sensor", "sensor"]
 
 POLLED_VARIABLES = [
