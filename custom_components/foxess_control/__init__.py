@@ -183,6 +183,15 @@ def _get_first_entry(hass: HomeAssistant) -> ConfigEntry:
     return entry
 
 
+def _get_polling_interval_seconds(hass: HomeAssistant) -> int:
+    """Return the coordinator's polling interval in seconds."""
+    entry_id = _first_entry_id(hass)
+    coordinator = hass.data[DOMAIN][entry_id].get("coordinator")
+    if coordinator is not None and coordinator.update_interval is not None:
+        return int(coordinator.update_interval.total_seconds())
+    return DEFAULT_POLLING_INTERVAL
+
+
 def _is_entity_mode(hass: HomeAssistant) -> bool:
     """Check if entity-based control is configured (foxess_modbus interop)."""
     try:
@@ -1272,11 +1281,12 @@ def _setup_smart_discharge_listeners(
 
                     # --- Taper power to reduce overshoot ---
                     remaining_kwh = feedin_limit - exported
-                    check_hours = SMART_DISCHARGE_CHECK_INTERVAL.total_seconds() / 3600
+                    poll_seconds = _get_polling_interval_seconds(hass)
+                    poll_hours = poll_seconds / 3600
                     # Power that would export the remaining energy in
-                    # 2 check intervals — gives one interval of margin
-                    # before the hard stop above.
-                    taper_power_w = int(remaining_kwh / (2 * check_hours) * 1000)
+                    # 2 polling intervals — gives one full data refresh
+                    # of margin before the hard stop above.
+                    taper_power_w = int(remaining_kwh / (2 * poll_hours) * 1000)
                     last_power = cur_state["last_power_w"]
                     if 0 < taper_power_w < last_power:
                         # Clamp to a minimum of 100W to avoid near-zero

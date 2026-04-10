@@ -62,6 +62,7 @@ def _make_hass(
 
     mock_coordinator = MagicMock()
     mock_coordinator.data = coordinator_data
+    mock_coordinator.update_interval = datetime.timedelta(seconds=300)
 
     hass.data = {
         DOMAIN: {
@@ -3172,8 +3173,9 @@ class TestFeedinEnergyLimit:
         assert state["last_power_w"] == 10500
 
         # Exported 2.8 kWh of 3.0 limit → 0.2 kWh remaining.
-        # Check interval is 60s.  taper = 0.2 / (2 * 60/3600) * 1000 = 6000W
-        # 6000 < 10500 → power should taper.
+        # Poll interval is 300s (0.08333h).
+        # taper = 0.2 / (2 * 0.08333) * 1000 = 1200W
+        # 1200 < 10500 → power should taper.
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {
             "SoC": 60.0,
             "feedin": 102.8,
@@ -3183,7 +3185,7 @@ class TestFeedinEnergyLimit:
 
         state = hass.data[DOMAIN]["_smart_discharge_state"]
         assert state is not None  # Session still active
-        assert state["last_power_w"] == 6000
+        assert state["last_power_w"] == 1200
 
     @pytest.mark.asyncio
     async def test_feedin_taper_clamps_to_minimum_100w(self) -> None:
@@ -3236,7 +3238,7 @@ class TestFeedinEnergyLimit:
         assert captured_interval is not None
 
         # Exported 2.999 kWh → 0.001 kWh remaining.
-        # taper = 0.001 / (2 * 60/3600) * 1000 = 30W → clamped to 100W
+        # taper = 0.001 / (2 * 300/3600) * 1000 = 6W → clamped to 100W
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {
             "SoC": 55.0,
             "feedin": 102.999,
@@ -3298,7 +3300,7 @@ class TestFeedinEnergyLimit:
         assert captured_interval is not None
 
         # Exported 1.0 kWh → 2.0 kWh remaining.
-        # taper = 2.0 / (2 * 60/3600) * 1000 = 60000W > 10500 → no taper
+        # taper = 2.0 / (2 * 300/3600) * 1000 = 12000W > 10500 → no taper
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {
             "SoC": 70.0,
             "feedin": 101.0,
