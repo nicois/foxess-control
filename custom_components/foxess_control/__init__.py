@@ -1117,8 +1117,9 @@ async def _recover_charge_session(
         max_power = charge_data.get("max_power_w", 10000)
         target_soc = charge_data.get("target_soc", 100)
         capacity = charge_data.get("battery_capacity_kwh", 0.0)
-        last_power = max_power
-        if current_soc is not None and charge_data.get("charging_started", False):
+        if not charge_data.get("charging_started", False):
+            last_power = 0
+        elif current_soc is not None:
             last_power = _calculate_charge_power(
                 current_soc,
                 target_soc,
@@ -1127,6 +1128,8 @@ async def _recover_charge_session(
                 max_power,
                 net_consumption_kw=_get_net_consumption(hass),
             )
+        else:
+            last_power = max_power
 
         hass.data[DOMAIN]["_smart_charge_state"] = {
             "groups": [],
