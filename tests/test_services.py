@@ -3121,8 +3121,8 @@ class TestFeedinEnergyLimit:
         assert state is not None
 
     @pytest.mark.asyncio
-    async def test_feedin_tapers_power_when_close_to_limit(self) -> None:
-        """Power is reduced using observed export rate, not configured power."""
+    async def test_feedin_schedules_early_stop_when_close_to_limit(self) -> None:
+        """Early stop is scheduled using observed export rate."""
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
@@ -3132,10 +3132,15 @@ class TestFeedinEnergyLimit:
         )
 
         captured_interval = None
+        point_in_time_calls: list[Any] = []
 
         def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
             nonlocal captured_interval
             captured_interval = callback
+            return MagicMock()
+
+        def capture_point_in_time(_hass: Any, callback: Any, when: Any) -> MagicMock:
+            point_in_time_calls.append((callback, when))
             return MagicMock()
 
         from custom_components.foxess_control import _register_services
@@ -3143,15 +3148,17 @@ class TestFeedinEnergyLimit:
         _register_services(hass)
         handler = hass.services.async_register.call_args_list[5].args[2]
 
+        pit_patch = patch(
+            "custom_components.foxess_control.async_track_point_in_time",
+            side_effect=capture_point_in_time,
+        )
+
         with (
             patch(
                 "custom_components.foxess_control.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
             ),
-            patch(
-                "custom_components.foxess_control.async_track_point_in_time",
-                return_value=MagicMock(),
-            ),
+            pit_patch,
             patch(
                 "custom_components.foxess_control.async_track_time_interval",
                 side_effect=capture_interval,
@@ -3169,81 +3176,83 @@ class TestFeedinEnergyLimit:
             )
 
         assert captured_interval is not None
-        state = hass.data[DOMAIN]["_smart_discharge_state"]
-        assert state["last_power_w"] == 10500
+        # One point_in_time call for the window end timer
+        initial_point_calls = len(point_in_time_calls)
 
-        # Poll 1: exported 0.30 kWh.  No previous reading yet, so
-        # observed_rate falls back to configured power (10.5kW).
-        # energy_next_poll = 10.5 * 0.08333 = 0.875 kWh
-        # remaining = 0.70 > 0.875?  No → taper triggers with fallback.
-        # But once feedin_prev is recorded, next poll will use observed.
+        # Poll 1: exported 0.30 kWh. No previous reading yet →
+        # no observed rate, no early stop scheduled.
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {
             "SoC": 70.0,
             "feedin": 100.3,
         }
-        await captured_interval(datetime.datetime(2026, 4, 7, 17, 5, 0))
+        with (
+            pit_patch,
+            patch(
+                "custom_components.foxess_control.dt_util.utcnow",
+                return_value=datetime.datetime(2026, 4, 7, 17, 5, 0),
+            ),
+        ):
+            await captured_interval(datetime.datetime(2026, 4, 7, 17, 5, 0))
         state = hass.data[DOMAIN]["_smart_discharge_state"]
-        # Fallback rate thinks 0.70 < 0.875 so it tapers (conservative).
-        # feedin_prev is now recorded for next poll.
         assert state is not None
         assert state.get("feedin_prev_kwh") == 100.3
+        assert len(point_in_time_calls) == initial_point_calls  # No stop scheduled
 
         # Poll 2: exported 0.60 kWh total (0.30 this interval).
         # observed_rate = (100.6 - 100.3) / 0.08333 = 3.6 kW
         # energy_next_poll = 3.6 * 0.08333 = 0.30 kWh
-        # remaining = 0.40 kWh > 0.30 → no taper, full power continues.
+        # remaining = 0.40 kWh > 0.30 → no early stop
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {
             "SoC": 65.0,
             "feedin": 100.6,
         }
-        await captured_interval(datetime.datetime(2026, 4, 7, 17, 10, 0))
+        with (
+            pit_patch,
+            patch(
+                "custom_components.foxess_control.dt_util.utcnow",
+                return_value=datetime.datetime(2026, 4, 7, 17, 10, 0),
+            ),
+        ):
+            await captured_interval(datetime.datetime(2026, 4, 7, 17, 10, 0))
         state = hass.data[DOMAIN]["_smart_discharge_state"]
         assert state is not None
-        assert state["last_power_w"] == 10500  # No taper
+        assert state["last_power_w"] == 10500  # Unchanged
+        assert len(point_in_time_calls) == initial_point_calls  # Still no stop
 
-        # Poll 3: exported 0.80 kWh total (0.20 this interval).
-        # observed_rate = (100.8 - 100.6) / 0.08333 = 2.4 kW
-        # energy_next_poll = 2.4 * 0.08333 = 0.20 kWh
-        # remaining = 0.20 kWh, NOT > 0.20 → taper activates.
-        # efficiency = 2.4 / 10.5 = 0.2286
-        # taper_power = 0.20 / 0.08333 / 0.2286 * 1000 = 10500W
-        # 10500 >= 10500 → no change (taper doesn't reduce power).
-        # Actually remaining == energy_next_poll exactly, edge case.
-        # Let's use 0.15 remaining instead.
+        # Poll 3: exported 0.85 kWh total (0.25 this interval).
+        # observed_rate = (100.85 - 100.6) / 0.08333 = 3.0 kW
+        # remaining = 0.15 kWh, energy_next_poll = 0.25
+        # 0.15 <= 0.25 → schedule early stop
+        # seconds_to_target = 0.15 / 3.0 * 3600 = 180s
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {
             "SoC": 62.0,
-            "feedin": 100.85,  # 0.85 exported, 0.15 remaining
-        }
-        await captured_interval(datetime.datetime(2026, 4, 7, 17, 15, 0))
-        state = hass.data[DOMAIN]["_smart_discharge_state"]
-        assert state is not None
-        # observed_rate = (100.85 - 100.6) / 0.08333 = 3.0 kW
-        # energy_next_poll = 3.0 * 0.08333 = 0.25
-        # remaining = 0.15 < 0.25 → taper
-        # efficiency = 3.0 / 10.5 = 0.2857
-        # taper_power = 0.15 / 0.08333 / 0.2857 * 1000 = 6300W
-        assert state["last_power_w"] == 6300
-        assert state["feedin_taper_baseline"] == 100.85
-
-        # Next check before poll: feedin unchanged → still running
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
-            "SoC": 61.0,
             "feedin": 100.85,
         }
-        await captured_interval(datetime.datetime(2026, 4, 7, 17, 16, 0))
-        assert hass.data[DOMAIN].get("_smart_discharge_state") is not None
+        with (
+            pit_patch,
+            patch(
+                "custom_components.foxess_control.dt_util.utcnow",
+                return_value=datetime.datetime(2026, 4, 7, 17, 15, 0),
+            ),
+        ):
+            await captured_interval(datetime.datetime(2026, 4, 7, 17, 15, 0))
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state is not None
+        assert state.get("feedin_stop_scheduled") is True
+        assert len(point_in_time_calls) == initial_point_calls + 1
 
-        # Next poll: feedin changed → stop
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
-            "SoC": 60.0,
-            "feedin": 100.97,  # 0.97 < 1.0 limit, but fresh data after taper
-        }
-        await captured_interval(datetime.datetime(2026, 4, 7, 17, 20, 0))
+        # Verify the scheduled stop time is ~180s from 17:15
+        _stop_cb, stop_time = point_in_time_calls[-1]
+        expected_stop = datetime.datetime(2026, 4, 7, 17, 18, 0)
+        assert abs((stop_time - expected_stop).total_seconds()) < 5
+
+        # Invoking the early stop callback cancels the discharge
+        await _stop_cb(stop_time)
         assert hass.data[DOMAIN].get("_smart_discharge_state") is None
 
     @pytest.mark.asyncio
-    async def test_feedin_taper_clamps_to_minimum_100w(self) -> None:
-        """Taper power is clamped to 100W minimum to avoid near-zero flutter."""
+    async def test_feedin_no_early_stop_when_plenty_remaining(self) -> None:
+        """No early stop scheduled when remaining energy is large."""
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
@@ -3253,10 +3262,15 @@ class TestFeedinEnergyLimit:
         )
 
         captured_interval = None
+        point_in_time_calls: list[Any] = []
 
         def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
             nonlocal captured_interval
             captured_interval = callback
+            return MagicMock()
+
+        def capture_point_in_time(_hass: Any, callback: Any, when: Any) -> MagicMock:
+            point_in_time_calls.append((callback, when))
             return MagicMock()
 
         from custom_components.foxess_control import _register_services
@@ -3264,15 +3278,17 @@ class TestFeedinEnergyLimit:
         _register_services(hass)
         handler = hass.services.async_register.call_args_list[5].args[2]
 
+        pit_patch = patch(
+            "custom_components.foxess_control.async_track_point_in_time",
+            side_effect=capture_point_in_time,
+        )
+
         with (
             patch(
                 "custom_components.foxess_control.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
             ),
-            patch(
-                "custom_components.foxess_control.async_track_point_in_time",
-                return_value=MagicMock(),
-            ),
+            pit_patch,
             patch(
                 "custom_components.foxess_control.async_track_time_interval",
                 side_effect=capture_interval,
@@ -3290,99 +3306,44 @@ class TestFeedinEnergyLimit:
             )
 
         assert captured_interval is not None
-
-        # Poll 1: establish observed rate baseline
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
-            "SoC": 70.0,
-            "feedin": 100.3,
-        }
-        await captured_interval(datetime.datetime(2026, 4, 7, 17, 5, 0))
-
-        # Poll 2: observed_rate = (102.999 - 100.3) / 0.08333 = ~32.4 kW
-        # remaining = 0.001 kWh.  energy_next_poll = 32.4 * 0.08333 = 2.7
-        # 0.001 < 2.7 → taper.
-        # target_kw = 0.001 / 0.08333 = 0.012
-        # taper = 10500 * 0.012 / 32.4 = 3.9W → clamped to 100W
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
-            "SoC": 55.0,
-            "feedin": 102.999,
-        }
-        await captured_interval(datetime.datetime(2026, 4, 7, 17, 10, 0))
-
-        state = hass.data[DOMAIN]["_smart_discharge_state"]
-        assert state is not None
-        assert state["last_power_w"] == 100
-
-    @pytest.mark.asyncio
-    async def test_feedin_no_taper_when_plenty_remaining(self) -> None:
-        """No tapering when remaining energy is large relative to observed rate."""
-        inv = MagicMock(spec=Inverter)
-        inv.max_power_w = 10500
-        inv.get_schedule.return_value = {"enable": 0, "groups": []}
-        hass = _make_hass(
-            inverter=inv,
-            coordinator_data={"SoC": 80.0, "feedin": 100.0},
-        )
-
-        captured_interval = None
-
-        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
-            nonlocal captured_interval
-            captured_interval = callback
-            return MagicMock()
-
-        from custom_components.foxess_control import _register_services
-
-        _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
-
-        with (
-            patch(
-                "custom_components.foxess_control.dt_util.now",
-                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
-            ),
-            patch(
-                "custom_components.foxess_control.async_track_point_in_time",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "custom_components.foxess_control.async_track_time_interval",
-                side_effect=capture_interval,
-            ),
-        ):
-            await handler(
-                _make_call(
-                    {
-                        "start_time": datetime.time(17, 0),
-                        "end_time": datetime.time(20, 0),
-                        "min_soc": 10,
-                        "feedin_energy_limit_kwh": 3.0,
-                    }
-                )
-            )
-
-        assert captured_interval is not None
+        initial_point_calls = len(point_in_time_calls)
 
         # Poll 1: establish observed rate baseline
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {
             "SoC": 75.0,
             "feedin": 100.3,
         }
-        await captured_interval(datetime.datetime(2026, 4, 7, 17, 5, 0))
+        with (
+            pit_patch,
+            patch(
+                "custom_components.foxess_control.dt_util.utcnow",
+                return_value=datetime.datetime(2026, 4, 7, 17, 5, 0),
+            ),
+        ):
+            await captured_interval(datetime.datetime(2026, 4, 7, 17, 5, 0))
 
         # Poll 2: exported 1.0 kWh total → 2.0 kWh remaining.
         # observed_rate = (101.0 - 100.3) / 0.08333 = 8.4 kW
         # energy_next_poll = 8.4 * 0.08333 = 0.70 kWh
-        # 2.0 > 0.70 → won't overshoot, no taper
+        # 2.0 > 0.70 → no early stop
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {
             "SoC": 70.0,
             "feedin": 101.0,
         }
-        await captured_interval(datetime.datetime(2026, 4, 7, 17, 10, 0))
+        with (
+            pit_patch,
+            patch(
+                "custom_components.foxess_control.dt_util.utcnow",
+                return_value=datetime.datetime(2026, 4, 7, 17, 10, 0),
+            ),
+        ):
+            await captured_interval(datetime.datetime(2026, 4, 7, 17, 10, 0))
 
         state = hass.data[DOMAIN]["_smart_discharge_state"]
         assert state is not None
         assert state["last_power_w"] == 10500  # Unchanged
+        # No new point_in_time calls beyond the initial window end timer
+        assert len(point_in_time_calls) == initial_point_calls
 
 
 class TestRemainingZeroCancels:

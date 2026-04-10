@@ -1275,21 +1275,11 @@ def _setup_smart_discharge_listeners(
                     )
                 else:
                     exported = feedin_now - feedin_start
-                    taper_baseline = cur_state.get("feedin_taper_baseline")
-                    # Stop when the hard limit is reached, OR when the
-                    # taper has been active and fresh poll data has
-                    # arrived (feedin counter changed since taper).
-                    taper_done = (
-                        taper_baseline is not None and feedin_now != taper_baseline
-                    )
-                    if exported >= feedin_limit or taper_done:
+                    if exported >= feedin_limit:
                         _LOGGER.info(
                             "Smart discharge: feed-in energy %.2f kWh "
-                            "%s limit %.2f kWh, removing override",
+                            "reached limit %.2f kWh, removing override",
                             exported,
-                            "reached"
-                            if exported >= feedin_limit
-                            else "~reached (tapered)",
                             feedin_limit,
                         )
                         if hass.data[DOMAIN].get("_smart_discharge_state") is not None:
@@ -1297,7 +1287,7 @@ def _setup_smart_discharge_listeners(
                             await _remove_discharge_override()
                         return
 
-                    # --- Taper power to reduce overshoot ---
+                    # --- Early stop to avoid overshoot ---
                     remaining_kwh = feedin_limit - exported
                     poll_seconds = _get_polling_interval_seconds(hass)
                     poll_hours = poll_seconds / 3600
@@ -1312,58 +1302,47 @@ def _setup_smart_discharge_listeners(
                         observed_rate_kw = (feedin_now - feedin_prev) / poll_hours
                     cur_state["feedin_prev_kwh"] = feedin_now
 
-                    if not has_observed:
-                        pass  # Need at least one observed delta to taper
-                    elif remaining_kwh > observed_rate_kw * poll_hours:
-                        pass  # Won't overshoot at observed rate
-                    else:
-                        # Would overshoot — scale the discharge power
-                        # so the observed export rate delivers exactly
-                        # the remaining energy in one poll interval.
-                        target_kw = remaining_kwh / poll_hours
-                        taper_power_w = int(
-                            cur_state["last_power_w"] * target_kw / observed_rate_kw
+                    if (
+                        has_observed
+                        and observed_rate_kw > 0
+                        and remaining_kwh <= observed_rate_kw * poll_hours
+                        and not cur_state.get("feedin_stop_scheduled")
+                    ):
+                        # Target will be reached before the next poll.
+                        # Schedule a one-shot stop at the projected time.
+                        seconds_to_target = remaining_kwh / observed_rate_kw * 3600
+                        stop_at = dt_util.utcnow() + datetime.timedelta(
+                            seconds=seconds_to_target
                         )
-                        # Clamp to a minimum of 100W to avoid near-zero
-                        # flutter; the hard stop handles the final cutoff.
-                        taper_power_w = max(taper_power_w, 100)
                         _LOGGER.info(
-                            "Smart discharge: tapering power %dW -> %dW "
+                            "Smart discharge: scheduling stop in %.0fs "
                             "(remaining=%.2f kWh, exported=%.2f kWh, "
-                            "observed=%.1fkW) — will stop at next poll",
-                            cur_state["last_power_w"],
-                            taper_power_w,
+                            "observed=%.1fkW)",
+                            seconds_to_target,
                             remaining_kwh,
                             exported,
                             observed_rate_kw,
                         )
-                        cur_state["last_power_w"] = taper_power_w
-                        cur_state["feedin_taper_baseline"] = feedin_now
-                        if _is_entity_mode(hass):
-                            await _apply_mode_via_entities(
-                                hass,
-                                WorkMode.FORCE_DISCHARGE,
-                                taper_power_w,
+
+                        async def _early_stop(
+                            _now: datetime.datetime,
+                        ) -> None:
+                            _LOGGER.info(
+                                "Smart discharge: early stop triggered "
+                                "(feed-in target ~reached)"
                             )
-                        else:
-                            assert inverter is not None  # cloud mode
-                            groups = cur_state.get("groups") or []
-                            for g in groups:
-                                if g.get("workMode") == WorkMode.FORCE_DISCHARGE.value:
-                                    g["fdPwr"] = taper_power_w
-                                    break
-                            if groups:
-                                cur_state["groups"] = groups
-                                await hass.async_add_executor_job(
-                                    inverter.set_schedule, groups
-                                )
-                        hass.async_create_task(
-                            _save_session(
-                                hass,
-                                "smart_discharge",
-                                _session_data_from_discharge_state(cur_state),
-                            )
-                        )
+                            if (
+                                hass.data[DOMAIN].get("_smart_discharge_state")
+                                is not None
+                            ):
+                                _cancel_smart_discharge(hass)
+                                await _remove_discharge_override()
+
+                        unsub = async_track_point_in_time(hass, _early_stop, stop_at)
+                        hass.data[DOMAIN].setdefault(
+                            "_smart_discharge_unsubs", []
+                        ).append(unsub)
+                        cur_state["feedin_stop_scheduled"] = True
 
         # --- SoC threshold check ---
         soc_value = _get_current_soc(hass)
