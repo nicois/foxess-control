@@ -592,12 +592,16 @@ def _calculate_deferred_start(
     max_power_w: int,
     end: datetime.datetime,
     net_consumption_kw: float = 0.0,
+    start: datetime.datetime | None = None,
 ) -> datetime.datetime:
     """Calculate the latest time to start charging to reach target SoC by *end*.
 
     Uses *net_consumption_kw* (house load minus solar) to estimate how
     much inverter capacity is available for charging.  A minimum headroom
     of 10% of *max_power_w* is always reserved for transient loads.
+
+    When *start* is provided the result is clamped so it never precedes
+    the window opening time.
 
     Returns *end* if no charging is needed (SoC already at target).
     Returns a time before *end* otherwise; may be in the past if the
@@ -618,7 +622,10 @@ def _calculate_deferred_start(
     # reaching the target.  This matches the 10% headroom used by
     # _calculate_charge_power when sizing the charge rate.
     buffered_hours = charge_hours / (1 - DEFERRED_START_MIN_HEADROOM)
-    return end - datetime.timedelta(hours=buffered_hours)
+    deferred = end - datetime.timedelta(hours=buffered_hours)
+    if start is not None and deferred < start:
+        deferred = start
+    return deferred
 
 
 def _remove_mode_from_schedule(
@@ -995,6 +1002,7 @@ def _setup_smart_charge_listeners(
                 cur_state["max_power_w"],
                 cur_state["end"],
                 net_consumption_kw=net_consumption,
+                start=cur_state["start"],
             )
             if now_dt < deferred:
                 _LOGGER.debug(
@@ -2183,6 +2191,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 effective_max_power,
                 end,
                 net_consumption_kw=net_consumption,
+                start=start,
             )
             should_defer = now < deferred_start
 

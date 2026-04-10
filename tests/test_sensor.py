@@ -421,6 +421,40 @@ class TestChargeRemainingSensor:
         ):
             assert sensor.native_value == "starting"
 
+    def test_deferred_clamps_to_window_start(self) -> None:
+        """Deferred start never shows a time before the window opens."""
+        hass = _make_hass(
+            smart_charge_state=_charge_state(
+                last_power_w=0,
+                charging_started=False,
+                max_power_w=10500,
+                target_soc=100,
+                # Window 11:00-12:00 — energy calc needs >1h so deferred_start
+                # would be before 11:00 without clamping
+                start=datetime.datetime(2026, 4, 8, 11, 0, 0),
+                end=datetime.datetime(2026, 4, 8, 12, 0, 0),
+            )
+        )
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 10.0}
+        hass.data[DOMAIN]["entry1"] = {
+            "inverter": MagicMock(),
+            "coordinator": mock_coordinator,
+        }
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        sensor = ChargeRemainingSensor(hass, _make_entry())
+        # At 08:00, unclamped deferred start would be before 11:00.
+        # Clamped to 11:00, so "starts in 3h 0m".
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 8, 0, 0),
+        ):
+            result = sensor.native_value
+            assert result == "starts in 3h 0m"
+
     def test_none_when_idle(self) -> None:
         sensor = ChargeRemainingSensor(_make_hass(), _make_entry())
         assert sensor.native_value is None

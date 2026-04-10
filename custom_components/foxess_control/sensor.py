@@ -225,6 +225,7 @@ def _estimate_charge_remaining(
 
     if not cs.get("charging_started", True):
         # Deferred — estimate when charging will begin
+        start: datetime.datetime | None = cs.get("start")
         if (
             soc is not None
             and capacity_kwh > 0
@@ -235,6 +236,9 @@ def _estimate_charge_remaining(
             charge_kw = max_power_w * _DEFERRED_POWER_FRACTION / 1000.0
             charge_hours = energy_kwh / charge_kw
             deferred_start = end - datetime.timedelta(hours=charge_hours)
+            # Never show a start time before the window opens
+            if start is not None and deferred_start < start:
+                deferred_start = start
             wait = deferred_start - now
             if wait.total_seconds() <= 0:
                 return "starting"

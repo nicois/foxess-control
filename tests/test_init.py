@@ -804,6 +804,24 @@ class TestCalculateDeferredStart:
         )
         assert with_solar == no_consumption
 
+    def test_clamps_to_start(self) -> None:
+        """Deferred start never precedes the window opening."""
+        start = datetime.datetime(2026, 4, 7, 11, 0, 0)
+        end = datetime.datetime(2026, 4, 7, 12, 0, 0)
+        # 90% of 10kWh at 10.5kW needs ~1.14h with headroom — exceeds 1h window
+        unclamped = _calculate_deferred_start(10.0, 100, 10.0, 10500, end)
+        assert unclamped < start
+        clamped = _calculate_deferred_start(10.0, 100, 10.0, 10500, end, start=start)
+        assert clamped == start
+
+    def test_start_not_clamped_when_within_window(self) -> None:
+        """When deferred start is after window start, no clamping occurs."""
+        start = datetime.datetime(2026, 4, 7, 2, 0, 0)
+        end = datetime.datetime(2026, 4, 7, 6, 0, 0)
+        # Small energy need → deferred start well within window
+        result = _calculate_deferred_start(70.0, 80, 10.0, 10500, end, start=start)
+        assert result > start
+
 
 class TestResolveStartEndExplicit:
     """Tests for _resolve_start_end_explicit."""
