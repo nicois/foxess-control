@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.2-beta.3
+
+- Discharge remaining shows "starts in" before window opens
+- Discharge remaining shows kWh left when energy limit is closer than time window
+- Update README for discharge remaining sensor description
+
 ## 0.13.2-beta.2
 
 - Fix ApexCharts crash when no smart operation active (forecast attribute always present)
