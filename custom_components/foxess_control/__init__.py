@@ -1267,11 +1267,14 @@ def _setup_smart_discharge_listeners(
                     )
                 else:
                     exported = feedin_now - feedin_start
-                    if exported >= feedin_limit:
+                    if exported >= feedin_limit or cur_state.get("feedin_taper_active"):
                         _LOGGER.info(
-                            "Smart discharge: feed-in energy %.2f kWh reached "
-                            "limit %.2f kWh, removing override",
+                            "Smart discharge: feed-in energy %.2f kWh "
+                            "%s limit %.2f kWh, removing override",
                             exported,
+                            "reached"
+                            if exported >= feedin_limit
+                            else "~reached (tapered)",
                             feedin_limit,
                         )
                         if hass.data[DOMAIN].get("_smart_discharge_state") is not None:
@@ -1283,24 +1286,33 @@ def _setup_smart_discharge_listeners(
                     remaining_kwh = feedin_limit - exported
                     poll_seconds = _get_polling_interval_seconds(hass)
                     poll_hours = poll_seconds / 3600
-                    # Power that would export the remaining energy in
-                    # 2 polling intervals — gives one full data refresh
-                    # of margin before the hard stop above.
-                    taper_power_w = int(remaining_kwh / (2 * poll_hours) * 1000)
                     last_power = cur_state["last_power_w"]
-                    if 0 < taper_power_w < last_power:
+                    # Energy that would be exported at current power in
+                    # one poll interval.  Only taper if the current rate
+                    # would overshoot before the next data refresh.
+                    energy_next_poll = last_power / 1000 * poll_hours
+                    if remaining_kwh > energy_next_poll:
+                        # Full power won't exceed the limit before the
+                        # next poll — no taper needed.
+                        pass
+                    else:
+                        # Would overshoot — set power to exactly exhaust
+                        # remaining energy over one poll interval.
+                        taper_power_w = int(remaining_kwh / poll_hours * 1000)
                         # Clamp to a minimum of 100W to avoid near-zero
                         # flutter; the hard stop handles the final cutoff.
                         taper_power_w = max(taper_power_w, 100)
                         _LOGGER.info(
                             "Smart discharge: tapering power %dW -> %dW "
-                            "(remaining=%.2f kWh, exported=%.2f kWh)",
+                            "(remaining=%.2f kWh, exported=%.2f kWh)"
+                            " — will stop at next poll",
                             last_power,
                             taper_power_w,
                             remaining_kwh,
                             exported,
                         )
                         cur_state["last_power_w"] = taper_power_w
+                        cur_state["feedin_taper_active"] = True
                         if _is_entity_mode(hass):
                             await _apply_mode_via_entities(
                                 hass,

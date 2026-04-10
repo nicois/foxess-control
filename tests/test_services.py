@@ -3173,9 +3173,10 @@ class TestFeedinEnergyLimit:
         assert state["last_power_w"] == 10500
 
         # Exported 2.8 kWh of 3.0 limit → 0.2 kWh remaining.
-        # Poll interval is 300s (0.08333h).
-        # taper = 0.2 / (2 * 0.08333) * 1000 = 1200W
-        # 1200 < 10500 → power should taper.
+        # Poll interval 300s (0.08333h).
+        # energy_next_poll = 10500/1000 * 0.08333 = 0.875 kWh
+        # 0.2 < 0.875 → would overshoot, taper needed.
+        # taper = 0.2 / 0.08333 * 1000 = 2400W
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {
             "SoC": 60.0,
             "feedin": 102.8,
@@ -3185,7 +3186,17 @@ class TestFeedinEnergyLimit:
 
         state = hass.data[DOMAIN]["_smart_discharge_state"]
         assert state is not None  # Session still active
-        assert state["last_power_w"] == 1200
+        assert state["last_power_w"] == 2400
+        assert state["feedin_taper_active"] is True
+
+        # Next poll: taper was active, so discharge stops even though
+        # the counter hasn't quite reached the limit.
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 58.0,
+            "feedin": 102.95,  # 2.95 < 3.0 limit, but taper was active
+        }
+        await captured_interval(datetime.datetime(2026, 4, 7, 18, 5, 0))
+        assert hass.data[DOMAIN].get("_smart_discharge_state") is None
 
     @pytest.mark.asyncio
     async def test_feedin_taper_clamps_to_minimum_100w(self) -> None:
@@ -3238,7 +3249,8 @@ class TestFeedinEnergyLimit:
         assert captured_interval is not None
 
         # Exported 2.999 kWh → 0.001 kWh remaining.
-        # taper = 0.001 / (2 * 300/3600) * 1000 = 6W → clamped to 100W
+        # energy_next_poll = 0.875 kWh > 0.001 → taper.
+        # taper = 0.001 / 0.08333 * 1000 = 12W → clamped to 100W
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {
             "SoC": 55.0,
             "feedin": 102.999,
@@ -3300,7 +3312,8 @@ class TestFeedinEnergyLimit:
         assert captured_interval is not None
 
         # Exported 1.0 kWh → 2.0 kWh remaining.
-        # taper = 2.0 / (2 * 300/3600) * 1000 = 12000W > 10500 → no taper
+        # energy_next_poll = 10500/1000 * 0.08333 = 0.875 kWh
+        # 2.0 > 0.875 → full power won't overshoot, no taper
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {
             "SoC": 70.0,
             "feedin": 101.0,
