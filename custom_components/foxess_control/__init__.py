@@ -64,6 +64,7 @@ SERVICE_SMART_CHARGE = "smart_charge"
 SERVICE_SMART_DISCHARGE = "smart_discharge"
 
 SMART_CHARGE_ADJUST_INTERVAL = datetime.timedelta(minutes=5)
+SMART_DISCHARGE_CHECK_INTERVAL = datetime.timedelta(seconds=60)
 
 # Cancel a smart session if the SoC entity is unavailable for this many
 # consecutive periodic checks (3 × 5 min = 15 minutes).
@@ -480,6 +481,7 @@ def _session_data_from_discharge_state(state: dict[str, Any]) -> dict[str, Any]:
         "end_hour": state["end"].hour,
         "end_minute": state["end"].minute,
         "min_soc": state["min_soc"],
+        "max_power_w": state.get("max_power_w", state["last_power_w"]),
         "last_power_w": state["last_power_w"],
     }
     if state.get("feedin_energy_limit_kwh") is not None:
@@ -1172,6 +1174,53 @@ def _setup_smart_discharge_listeners(
                             await _remove_discharge_override()
                         return
 
+                    # --- Taper power to reduce overshoot ---
+                    remaining_kwh = feedin_limit - exported
+                    check_hours = SMART_DISCHARGE_CHECK_INTERVAL.total_seconds() / 3600
+                    # Power that would export the remaining energy in
+                    # 2 check intervals — gives one interval of margin
+                    # before the hard stop above.
+                    taper_power_w = int(remaining_kwh / (2 * check_hours) * 1000)
+                    last_power = cur_state["last_power_w"]
+                    if 0 < taper_power_w < last_power:
+                        # Clamp to a minimum of 100W to avoid near-zero
+                        # flutter; the hard stop handles the final cutoff.
+                        taper_power_w = max(taper_power_w, 100)
+                        _LOGGER.info(
+                            "Smart discharge: tapering power %dW -> %dW "
+                            "(remaining=%.2f kWh, exported=%.2f kWh)",
+                            last_power,
+                            taper_power_w,
+                            remaining_kwh,
+                            exported,
+                        )
+                        cur_state["last_power_w"] = taper_power_w
+                        if _is_entity_mode(hass):
+                            await _apply_mode_via_entities(
+                                hass,
+                                WorkMode.FORCE_DISCHARGE,
+                                taper_power_w,
+                            )
+                        else:
+                            assert inverter is not None  # cloud mode
+                            groups = cur_state.get("groups") or []
+                            for g in groups:
+                                if g.get("workMode") == WorkMode.FORCE_DISCHARGE.value:
+                                    g["fdPwr"] = taper_power_w
+                                    break
+                            if groups:
+                                cur_state["groups"] = groups
+                                await hass.async_add_executor_job(
+                                    inverter.set_schedule, groups
+                                )
+                        hass.async_create_task(
+                            _save_session(
+                                hass,
+                                "smart_discharge",
+                                _session_data_from_discharge_state(cur_state),
+                            )
+                        )
+
         # --- SoC threshold check ---
         soc_value = _get_current_soc(hass)
         if soc_value is None:
@@ -1205,7 +1254,7 @@ def _setup_smart_discharge_listeners(
         async_track_time_interval(
             hass,
             _check_discharge_soc,
-            datetime.timedelta(seconds=60),
+            SMART_DISCHARGE_CHECK_INTERVAL,
         ),
         async_track_point_in_time(hass, _on_timer_expire, end_utc),
     ]
@@ -1434,12 +1483,14 @@ async def _recover_discharge_session(
             discharge_data["end_minute"],
             discharge_data.get("min_soc", 10),
         )
+        recovered_power = discharge_data.get("last_power_w", 0)
         hass.data[DOMAIN]["_smart_discharge_state"] = {
             "groups": [],
             "start": start,
             "end": end,
             "min_soc": discharge_data.get("min_soc", 10),
-            "last_power_w": discharge_data.get("last_power_w", 0),
+            "max_power_w": discharge_data.get("max_power_w", recovered_power),
+            "last_power_w": recovered_power,
             "soc_below_min_count": 0,
             "feedin_energy_limit_kwh": discharge_data.get("feedin_energy_limit_kwh"),
             "feedin_start_kwh": discharge_data.get("feedin_start_kwh"),
@@ -1905,6 +1956,7 @@ def _register_services(hass: HomeAssistant) -> None:
             "start": start,
             "end": end,
             "min_soc": min_soc,
+            "max_power_w": effective_power,
             "last_power_w": effective_power,
             "soc_below_min_count": 0,
             "feedin_energy_limit_kwh": feedin_energy_limit,

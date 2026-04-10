@@ -3119,6 +3119,196 @@ class TestFeedinEnergyLimit:
         state = hass.data[DOMAIN]["_smart_discharge_state"]
         assert state is not None
 
+    @pytest.mark.asyncio
+    async def test_feedin_tapers_power_when_close_to_limit(self) -> None:
+        """Power is reduced when remaining energy is small relative to poll interval."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 80.0, "feedin": 100.0},
+        )
+
+        captured_interval = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval
+            captured_interval = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 10,
+                        "feedin_energy_limit_kwh": 3.0,
+                    }
+                )
+            )
+
+        assert captured_interval is not None
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state["last_power_w"] == 10500
+
+        # Exported 2.8 kWh of 3.0 limit → 0.2 kWh remaining.
+        # Check interval is 60s.  taper = 0.2 / (2 * 60/3600) * 1000 = 6000W
+        # 6000 < 10500 → power should taper.
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 60.0,
+            "feedin": 102.8,
+        }
+        inv.set_schedule.reset_mock()
+        await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
+
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state is not None  # Session still active
+        assert state["last_power_w"] == 6000
+
+    @pytest.mark.asyncio
+    async def test_feedin_taper_clamps_to_minimum_100w(self) -> None:
+        """Taper power is clamped to 100W minimum to avoid near-zero flutter."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 80.0, "feedin": 100.0},
+        )
+
+        captured_interval = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval
+            captured_interval = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 10,
+                        "feedin_energy_limit_kwh": 3.0,
+                    }
+                )
+            )
+
+        assert captured_interval is not None
+
+        # Exported 2.999 kWh → 0.001 kWh remaining.
+        # taper = 0.001 / (2 * 60/3600) * 1000 = 30W → clamped to 100W
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 55.0,
+            "feedin": 102.999,
+        }
+        await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
+
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state is not None
+        assert state["last_power_w"] == 100
+
+    @pytest.mark.asyncio
+    async def test_feedin_no_taper_when_plenty_remaining(self) -> None:
+        """No tapering when remaining energy is large relative to power."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 80.0, "feedin": 100.0},
+        )
+
+        captured_interval = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval
+            captured_interval = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 10,
+                        "feedin_energy_limit_kwh": 3.0,
+                    }
+                )
+            )
+
+        assert captured_interval is not None
+
+        # Exported 1.0 kWh → 2.0 kWh remaining.
+        # taper = 2.0 / (2 * 60/3600) * 1000 = 60000W > 10500 → no taper
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 70.0,
+            "feedin": 101.0,
+        }
+        await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
+
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state is not None
+        assert state["last_power_w"] == 10500  # Unchanged
+
 
 class TestRemainingZeroCancels:
     """Tests for active cancellation when remaining time <= 0."""
