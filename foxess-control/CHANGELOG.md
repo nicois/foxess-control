@@ -1,42 +1,19 @@
 # Changelog
 
-## 0.13.2-beta.6
+## 0.13.2
 
-- Add entity-based backend for foxess_modbus interop: optionally read inverter state from and write mode changes to foxess_modbus entities instead of the FoxESS Cloud API
-- Auto-detect foxess_modbus entities from the entity registry — pre-populates config with no manual mapping needed
-- Entity mapping step hidden when foxess_modbus is not installed
-- Entity mode is fully cloud-free: no API key or cloud connection required
+- **Entity mode (foxess_modbus interop):** optionally read inverter state from and write mode changes to foxess_modbus entities instead of the FoxESS Cloud API — fully cloud-free, no API key required
+- Auto-detect foxess_modbus entities from the entity registry; entity mapping step hidden when foxess_modbus is not installed
 - New config options: Work Mode Entity, Charge/Discharge Power Entity, Min SoC Entity, SoC Entity, Loads Power Entity, PV Power Entity, Feed-in Energy Entity, Inverter Rated Power
 - Default polling interval is 30s in entity mode (vs 300s cloud)
-- Add FoxESSEntityCoordinator for reading inverter state from HA entity states
 - Smart session recovery works without cloud schedule validation in entity mode
-
-## 0.13.2-beta.5
-
 - Battery forecast accounts for discharge energy limit (SoC flattens when limit reached)
-
-## 0.13.2-beta.4
-
-- Show 0W discharge power before window opens
-- Smart operations shows "Discharge scheduled at" before window opens
+- Discharge sensors show "starts in" / "scheduled at" before window opens, kWh left when energy limit is closer than time window
 - Smart operations attributes use proper remaining estimates
-- Android Auto shows "Dchg@HH:MM" before discharge starts
-
-## 0.13.2-beta.3
-
-- Discharge remaining shows "starts in" before window opens
-- Discharge remaining shows kWh left when energy limit is closer than time window
-- Update README for discharge remaining sensor description
-
-## 0.13.2-beta.2
-
-- Fix ApexCharts crash when no smart operation active (forecast attribute always present)
-- Update README for charge remaining and target SoC confirmation behavior
-
-## 0.13.2-beta.1
-
+- Android Auto shows "Dchg@HH:MM" before discharge starts, 0W discharge power before window opens
 - Remove ForceCharge override immediately when target SoC reached (confirm before ending session)
 - Fix charge remaining estimate using window end time instead of inflated power-based calculation
+- Fix ApexCharts crash when no smart operation active (forecast attribute always present)
 
 ## 0.13.1
 
