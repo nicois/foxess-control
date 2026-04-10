@@ -1,8 +1,8 @@
 # FoxESS Control
 
-A Home Assistant custom integration for monitoring and controlling FoxESS inverter battery modes via the FoxESS Cloud API.
+A Home Assistant custom integration for monitoring and controlling FoxESS inverter battery modes.
 
-FoxESS Control polls real-time inverter data (battery SoC, charge/discharge power, solar generation, house load, temperature) and provides actions for force charge, force discharge, smart charge/discharge with SoC targets, and feed-in management. It can run standalone or alongside the [foxess-ha](https://github.com/macxq/foxess-ha) integration.
+FoxESS Control polls real-time inverter data (battery SoC, charge/discharge power, solar generation, house load, temperature) and provides actions for force charge, force discharge, smart charge/discharge with SoC targets, and feed-in management. It supports two backends: the **FoxESS Cloud API** and **local entity mode** via [foxess_modbus](https://github.com/nathanmarlor/foxess_modbus). It can run standalone or alongside the [foxess-ha](https://github.com/macxq/foxess-ha) integration.
 
 ## Prerequisites
 
@@ -50,7 +50,7 @@ After setup, click **Configure** on the integration entry to adjust:
 | Option | Default | Range | Description |
 |---|---|---|---|
 | Minimum SoC on Grid | 15% | 5-100% | The minimum battery state of charge to maintain when on grid. Applied to all schedule operations. |
-| API Polling Interval | 300 s | 60-600 s | How often to poll the FoxESS Cloud API for real-time data (SoC, power, temperature). Default 5 minutes to coexist with foxess-ha without exceeding API quota. Lower for standalone use. |
+| API Polling Interval | 300 s (cloud) / 30 s (entity mode) | 60-600 s | How often to poll for real-time data. In cloud mode, defaults to 5 minutes to coexist with foxess-ha without exceeding API quota. In entity mode, defaults to 30 seconds since reads are local. |
 | Battery Capacity | 0.0 kWh | 0-100 kWh | Total usable battery capacity in kWh. Required for `smart_charge` power calculations. |
 | Min Power Change | 500 W | 0-5000 W | Minimum watt change before updating the charge schedule during `smart_charge`. Lower values improve SoC tracking, higher values reduce API calls. |
 | Minimum API fdSoc | 11% | 0-11% | The minimum `fdSoc` value sent to the FoxESS API. The API normally rejects values below 11 (errno 40257). Only lower this if you know your firmware supports it. |
@@ -61,7 +61,9 @@ After setup, click **Configure** on the integration entry to adjust:
 
 If you use [foxess_modbus](https://github.com/nathanmarlor/foxess_modbus) for local Modbus control, foxess_control can optionally read inverter state from and write mode changes to foxess_modbus's HA entities instead of the FoxESS Cloud API. This gives you fast local control combined with foxess_control's smart charge/discharge algorithms — no cloud API connection required.
 
-To enable entity mode, configure the **Work Mode Entity** option to point at the foxess_modbus `select` entity for your inverter's work mode (e.g. `select.foxess_inv1_work_mode`). All other entity fields are optional — features degrade gracefully when not provided.
+**Setup:** When foxess_modbus is installed, the options flow automatically shows a second step with entity mappings. Entities are **auto-detected** from the foxess_modbus entity registry and pre-populated — in most cases no manual configuration is needed. You can override any mapping if the auto-detection picks the wrong entity.
+
+If foxess_modbus is not installed, the entity mapping step is hidden entirely.
 
 | Option | Domain | Required | Description |
 |---|---|---|---|
@@ -73,14 +75,16 @@ To enable entity mode, configure the **Work Mode Entity** option to point at the
 | Loads Power Entity | `sensor` | No | House load sensor (improves consumption-aware charging). |
 | PV Power Entity | `sensor` | No | Solar generation sensor (improves charge deferral). |
 | Feed-in Energy Entity | `sensor` | No | Cumulative feed-in energy sensor (for discharge energy limits). |
+| Inverter Rated Power | — | No | Inverter's maximum power in watts (default 12000). Used as the default power limit when no explicit power is specified in actions. In cloud mode this is queried from the API automatically. |
 
 When entity mode is active:
 
-- **Reads** come from HA entity states (polled at the configured interval) instead of the FoxESS Cloud API.
+- **No cloud connection required.** The FoxESS Cloud API key is not needed. If provided, it is unused while entity mode is active.
+- **Reads** come from HA entity states (polled every 30 seconds by default) instead of the FoxESS Cloud API.
 - **Writes** use `select.select_option` and `number.set_value` service calls to foxess_modbus entities instead of the cloud API scheduler.
 - All actions (`force_charge`, `smart_charge`, `smart_discharge`, `feedin`, `clear_overrides`) work identically — only the underlying transport changes.
 - Schedule merging and multi-window management are not used; foxess_control sets the mode directly.
-- A cloud API key is not required. If provided, it is unused while entity mode is active.
+- Smart session recovery after HA restart works without checking cloud schedule state.
 
 ## Actions
 
@@ -251,7 +255,7 @@ data:
 
 ### Polled sensors
 
-The integration polls the FoxESS Cloud API at a configurable interval (default: 5 minutes) and creates the following sensor entities:
+The integration polls inverter data at a configurable interval and creates the following sensor entities. In cloud mode, data comes from the FoxESS Cloud API (default: 5 minutes). In entity mode, data comes from foxess_modbus HA entities (default: 30 seconds) — only sensors with a mapped entity are available.
 
 | Entity | Description | Unit |
 |---|---|---|
@@ -287,7 +291,7 @@ The integration polls the FoxESS Cloud API at a configurable interval (default: 
 
 The cumulative energy sensors use `SensorStateClass.TOTAL_INCREASING` and are compatible with Home Assistant's Energy Dashboard.
 
-These sensors update automatically and are always available (not dependent on an active smart operation). They are backed by Home Assistant's `DataUpdateCoordinator`, so all entities update atomically from a single API call. The work mode sensor makes an additional API call per poll cycle to read the active schedule.
+These sensors update automatically and are always available (not dependent on an active smart operation). They are backed by Home Assistant's `DataUpdateCoordinator`, so all entities update atomically from a single poll. In cloud mode, the work mode sensor makes an additional API call per poll cycle to read the active schedule. In entity mode, work mode is read from the mapped select entity.
 
 ### Smart operation sensors
 
@@ -482,6 +486,8 @@ automation:
 
 ## How it works
 
+### Cloud mode (default)
+
 - Force charge/discharge actions write a time-windowed override to the inverter's scheduler via the FoxESS Cloud API. Outside scheduled windows, the inverter defaults to self-use mode.
 - Each force action only replaces existing overrides of the **same mode** (e.g. force charge replaces previous force charge windows, but leaves force discharge windows intact). Overrides of a different mode are always preserved, even if their time window has already passed today — this allows standing daily schedules (e.g. a free-electricity charge window) to coexist with evening discharge overrides.
 - If the new window would overlap with an existing override of a **different** mode, the action aborts with an error to prevent conflicts.
@@ -489,13 +495,20 @@ automation:
 - Smart sessions are persisted to Home Assistant's `.storage` directory. If HA restarts during an active session, it is automatically resumed if still within its time window, or cleaned up (schedule groups removed) if expired. Sessions from a previous day are discarded.
 - The API client throttles requests (minimum 5 seconds between calls) and retries with exponential backoff on rate limits.
 
+### Entity mode
+
+- Force charge/discharge actions set the inverter's work mode directly via foxess_modbus entity service calls. foxess_control manages time windows using Home Assistant timers — no cloud schedule involved.
+- There is no multi-window schedule management. Each action sets a single mode; `clear_overrides` returns to Self Use.
+- Smart sessions use the same algorithms (consumption-aware deferral, SoC monitoring, power adjustment) as cloud mode — only the read/write transport differs.
+- Session recovery after HA restart resumes based on persisted state without needing to verify cloud schedule groups.
+
 ## Known limitations
 
 - **Minimum SoC behaviour is unintuitive**: When the battery reaches the minimum SoC during force discharge or feed-in, the inverter's behaviour may not match expectations. Smart actions work around this by setting `fdSoc` to an extreme value (100% for charge, 11% for discharge) so the inverter never triggers its own threshold — HA monitors SoC and stops the action at the user's configured target. For plain `force_charge`/`force_discharge`, consider using an automation to cancel the override before the battery reaches the minimum SoC level.
 
-- **Schedule race condition**: Force charge/discharge actions read the current schedule, modify it, then write it back. If the schedule is changed between the read and write (e.g. via the FoxESS app), those changes will be overwritten. Enable debug logging for `foxess_control` to see before/after state if schedules change unexpectedly.
-- **FoxESS Cloud API latency**: In cloud mode, all commands go through the FoxESS Cloud API, which throttles requests to one every 5 seconds. Actions are not instantaneous. For faster local control, enable [entity mode](#entity-mode-foxess_modbus-interop) with foxess_modbus.
-- **FoxESS mode scheduler bugs**: The FoxESS Cloud API has known issues with schedule validation (e.g. rejecting its own saved schedules due to overlap detection on disabled groups). This integration works around known issues, but the API may introduce new ones.
+- **Schedule race condition** (cloud mode only): Force charge/discharge actions read the current schedule, modify it, then write it back. If the schedule is changed between the read and write (e.g. via the FoxESS app), those changes will be overwritten. Enable debug logging for `foxess_control` to see before/after state if schedules change unexpectedly. Entity mode does not have this issue.
+- **FoxESS Cloud API latency** (cloud mode only): All commands go through the FoxESS Cloud API, which throttles requests to one every 5 seconds. Actions are not instantaneous. For faster local control, enable [entity mode](#entity-mode-foxess_modbus-interop) with foxess_modbus.
+- **FoxESS mode scheduler bugs** (cloud mode only): The FoxESS Cloud API has known issues with schedule validation (e.g. rejecting its own saved schedules due to overlap detection on disabled groups). This integration works around known issues, but the API may introduce new ones.
 
 ## Compatibility with foxess-ha
 

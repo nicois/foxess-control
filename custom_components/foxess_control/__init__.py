@@ -23,12 +23,15 @@ from .const import (
     CONF_CHARGE_POWER_ENTITY,
     CONF_DEVICE_SERIAL,
     CONF_DISCHARGE_POWER_ENTITY,
+    CONF_INVERTER_POWER,
     CONF_MIN_POWER_CHANGE,
     CONF_MIN_SOC_ENTITY,
     CONF_MIN_SOC_ON_GRID,
     CONF_POLLING_INTERVAL,
     CONF_WORK_MODE_ENTITY,
     DEFAULT_API_MIN_SOC,
+    DEFAULT_ENTITY_POLLING_INTERVAL,
+    DEFAULT_INVERTER_POWER,
     DEFAULT_MIN_POWER_CHANGE,
     DEFAULT_MIN_SOC_ON_GRID,
     DEFAULT_POLLING_INTERVAL,
@@ -173,6 +176,23 @@ def _is_entity_mode(hass: HomeAssistant) -> bool:
     except (ServiceValidationError, KeyError):
         return False
     return bool(entry.options.get(CONF_WORK_MODE_ENTITY))
+
+
+def _get_max_power_w(hass: HomeAssistant) -> int:
+    """Return the inverter's maximum power in watts.
+
+    In entity mode this comes from the ``CONF_INVERTER_POWER`` option.
+    In cloud mode it comes from the cached ``Inverter.max_power_w`` property.
+    """
+    entry = _get_first_entry(hass)
+    configured = entry.options.get(CONF_INVERTER_POWER)
+    if configured:
+        return int(configured)
+    # Fall back to cloud API inverter object
+    try:
+        return _get_inverter(hass).max_power_w
+    except Exception:
+        return DEFAULT_INVERTER_POWER
 
 
 # Map foxess_control WorkMode values to foxess_modbus select entity options.
@@ -773,7 +793,7 @@ def _build_override_group(
 
 def _setup_smart_charge_listeners(
     hass: HomeAssistant,
-    inverter: Inverter,
+    inverter: Inverter | None,
 ) -> None:
     """Register HA listeners for an active smart charge session.
 
@@ -911,6 +931,7 @@ def _setup_smart_charge_listeners(
                 )
                 groups: list[ScheduleGroup] = []
             else:
+                assert inverter is not None  # cloud mode
                 group = _build_override_group(
                     now_dt,
                     cur_state["end"],
@@ -1005,6 +1026,7 @@ def _setup_smart_charge_listeners(
                 new_power,
             )
         else:
+            assert inverter is not None  # cloud mode
             groups = cur_state.get("groups") or []
             if groups:
                 for g in groups:
@@ -1063,7 +1085,7 @@ def _setup_smart_charge_listeners(
 
 def _setup_smart_discharge_listeners(
     hass: HomeAssistant,
-    inverter: Inverter,
+    inverter: Inverter | None,
 ) -> None:
     """Register HA listeners for an active smart discharge session.
 
@@ -1184,7 +1206,7 @@ def _has_matching_schedule_group(
 
 async def _recover_charge_session(
     hass: HomeAssistant,
-    inverter: Inverter,
+    inverter: Inverter | None,
     charge_data: dict[str, Any],
     stored: dict[str, Any],
     now: datetime.datetime,
@@ -1212,33 +1234,42 @@ async def _recover_charge_session(
     )
     if now >= end:
         _LOGGER.info("Smart charge: session window has passed, cleaning up")
-        min_soc_on_grid = _get_min_soc_on_grid(hass)
-        try:
-            await hass.async_add_executor_job(
-                _remove_mode_from_schedule,
-                inverter,
-                WorkMode.FORCE_CHARGE,
-                min_soc_on_grid,
-            )
-        except Exception:
-            _LOGGER.exception("Smart charge: failed to clean up expired schedule")
+        if _is_entity_mode(hass):
+            await _async_remove_override(hass, WorkMode.FORCE_CHARGE)
+        else:
+            assert inverter is not None  # cloud mode
+            min_soc_on_grid = _get_min_soc_on_grid(hass)
+            try:
+                await hass.async_add_executor_job(
+                    _remove_mode_from_schedule,
+                    inverter,
+                    WorkMode.FORCE_CHARGE,
+                    min_soc_on_grid,
+                )
+            except Exception:
+                _LOGGER.exception("Smart charge: failed to clean up expired schedule")
         del stored["smart_charge"]
         return True
 
-    # Window still active — check if the schedule group exists
-    has_group = await hass.async_add_executor_job(
-        _has_matching_schedule_group,
-        inverter,
-        WorkMode.FORCE_CHARGE,
-        charge_data["end_hour"],
-        charge_data["end_minute"],
-    )
+    # Window still active — check if session should be resumed
     start = now.replace(
         hour=charge_data["start_hour"],
         minute=charge_data["start_minute"],
         second=0,
         microsecond=0,
     )
+    if _is_entity_mode(hass):
+        # Entity mode: no schedule groups to check, always resume
+        has_group = True
+    else:
+        assert inverter is not None  # cloud mode
+        has_group = await hass.async_add_executor_job(
+            _has_matching_schedule_group,
+            inverter,
+            WorkMode.FORCE_CHARGE,
+            charge_data["end_hour"],
+            charge_data["end_minute"],
+        )
     if has_group or not charge_data.get("charging_started", False):
         _LOGGER.info(
             "Smart charge: resuming session %02d:%02d-%02d:%02d (target=%d%%)",
@@ -1301,7 +1332,7 @@ async def _recover_charge_session(
 
 async def _recover_discharge_session(
     hass: HomeAssistant,
-    inverter: Inverter,
+    inverter: Inverter | None,
     discharge_data: dict[str, Any],
     stored: dict[str, Any],
     now: datetime.datetime,
@@ -1329,26 +1360,36 @@ async def _recover_discharge_session(
     )
     if now >= end:
         _LOGGER.info("Smart discharge: session window has passed, cleaning up")
-        min_soc_on_grid = _get_min_soc_on_grid(hass)
-        try:
-            await hass.async_add_executor_job(
-                _remove_mode_from_schedule,
-                inverter,
-                WorkMode.FORCE_DISCHARGE,
-                min_soc_on_grid,
-            )
-        except Exception:
-            _LOGGER.exception("Smart discharge: failed to clean up expired schedule")
+        if _is_entity_mode(hass):
+            await _async_remove_override(hass, WorkMode.FORCE_DISCHARGE)
+        else:
+            assert inverter is not None  # cloud mode
+            min_soc_on_grid = _get_min_soc_on_grid(hass)
+            try:
+                await hass.async_add_executor_job(
+                    _remove_mode_from_schedule,
+                    inverter,
+                    WorkMode.FORCE_DISCHARGE,
+                    min_soc_on_grid,
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "Smart discharge: failed to clean up expired schedule"
+                )
         del stored["smart_discharge"]
         return True
 
-    has_group = await hass.async_add_executor_job(
-        _has_matching_schedule_group,
-        inverter,
-        WorkMode.FORCE_DISCHARGE,
-        discharge_data["end_hour"],
-        discharge_data["end_minute"],
-    )
+    if _is_entity_mode(hass):
+        has_group = True
+    else:
+        assert inverter is not None  # cloud mode
+        has_group = await hass.async_add_executor_job(
+            _has_matching_schedule_group,
+            inverter,
+            WorkMode.FORCE_DISCHARGE,
+            discharge_data["end_hour"],
+            discharge_data["end_minute"],
+        )
     if has_group:
         start = now.replace(
             hour=discharge_data["start_hour"],
@@ -1388,7 +1429,7 @@ async def _recover_discharge_session(
 
 async def _recover_sessions(
     hass: HomeAssistant,
-    inverter: Inverter,
+    inverter: Inverter | None,
 ) -> None:
     """Recover or clean up smart sessions persisted before a restart."""
     store: Store[dict[str, Any]] | None = hass.data[DOMAIN].get("_store")
@@ -1466,24 +1507,35 @@ def _build_entity_map(opts: Any) -> dict[str, str]:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up FoxESS Control from a config entry."""
-    client = FoxESSClient(entry.data[CONF_API_KEY])
-    inverter = Inverter(client, entry.data[CONF_DEVICE_SERIAL])
-
-    # Pre-warm max_power_w (validates connection, caches rated power)
-    await hass.async_add_executor_job(lambda: inverter.max_power_w)
-
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN].setdefault("_smart_discharge_unsubs", [])
     hass.data[DOMAIN].setdefault("_smart_charge_unsubs", [])
     hass.data[DOMAIN].setdefault(
         "_store", Store[dict[str, Any]](hass, STORAGE_VERSION, STORAGE_KEY)
     )
-    polling_interval = int(
-        entry.options.get(CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL)
-    )
 
-    # Choose coordinator based on entity-mode configuration
     entity_map = _build_entity_map(entry.options)
+    entity_mode = bool(entity_map)
+    api_key = entry.data.get(CONF_API_KEY, "")
+
+    inverter: Inverter | None = None
+    if api_key:
+        client = FoxESSClient(api_key)
+        inverter = Inverter(client, entry.data[CONF_DEVICE_SERIAL])
+        # Pre-warm max_power_w (validates connection, caches rated power)
+        await hass.async_add_executor_job(lambda: inverter.max_power_w)
+    elif not entity_mode:
+        raise ServiceValidationError(
+            "No API key configured and entity mode is not active. "
+            "Provide a FoxESS Cloud API key or configure foxess_modbus entities."
+        )
+
+    # Choose coordinator and polling interval
+    default_poll = (
+        DEFAULT_ENTITY_POLLING_INTERVAL if entity_mode else DEFAULT_POLLING_INTERVAL
+    )
+    polling_interval = int(entry.options.get(CONF_POLLING_INTERVAL, default_poll))
+
     if entity_map:
         _LOGGER.info(
             "Entity mode active: reading from %d mapped entities",
@@ -1493,6 +1545,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             FoxESSEntityCoordinator(hass, entity_map, polling_interval)
         )
     else:
+        assert inverter is not None
         coordinator = FoxESSDataCoordinator(hass, inverter, polling_interval)
     await coordinator.async_config_entry_first_refresh()
 
@@ -1729,6 +1782,7 @@ def _register_services(hass: HomeAssistant) -> None:
         min_soc: int = call.data["min_soc"]
         force: bool = call.data.get("replace_conflicts", False)
         feedin_energy_limit: float | None = call.data.get("feedin_energy_limit_kwh")
+        inverter: Inverter | None = None
 
         start, end = _resolve_start_end_explicit(start_time, end_time)
 
@@ -1737,7 +1791,6 @@ def _register_services(hass: HomeAssistant) -> None:
                 "Battery SoC is not available. Wait for the API poll to complete."
             )
 
-        inverter = _get_inverter(hass)
         api_min_soc = _get_api_min_soc(hass)
 
         feedin_str = (
@@ -1765,6 +1818,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 fd_soc=api_min_soc,
             )
         else:
+            inverter = _get_inverter(hass)
             min_soc_on_grid = _get_min_soc_on_grid(hass)
             group = _build_override_group(
                 start,
@@ -1804,7 +1858,7 @@ def _register_services(hass: HomeAssistant) -> None:
             _LOGGER.info("Smart discharge: cancelling active smart charge session")
             _cancel_smart_charge(hass)
 
-        effective_power = power if power is not None else inverter.max_power_w
+        effective_power = power if power is not None else _get_max_power_w(hass)
 
         # Store state for binary sensor and diagnostics
         hass.data[DOMAIN]["_smart_discharge_state"] = {
@@ -1834,6 +1888,7 @@ def _register_services(hass: HomeAssistant) -> None:
         max_power: int | None = call.data.get("power")
         target_soc: int = call.data["target_soc"]
         force: bool = call.data.get("replace_conflicts", False)
+        inverter: Inverter | None = None
 
         start, end = _resolve_start_end_explicit(start_time_val, end_time_val)
 
@@ -1849,11 +1904,10 @@ def _register_services(hass: HomeAssistant) -> None:
                 "integration options before using smart charge."
             )
 
-        inverter = _get_inverter(hass)
         min_soc_on_grid = _get_min_soc_on_grid(hass)
         api_min_soc = _get_api_min_soc(hass)
         effective_max_power = (
-            max_power if max_power is not None else inverter.max_power_w
+            max_power if max_power is not None else _get_max_power_w(hass)
         )
 
         # Read current SoC for initial power calculation and deferred start
@@ -1868,6 +1922,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
         # Validate conflicts upfront (cloud mode only)
         if not entity_mode:
+            inverter = _get_inverter(hass)
             validation_group = _build_override_group(
                 start,
                 end,
@@ -1947,6 +2002,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 )
                 initial_groups = []
             else:
+                assert inverter is not None  # cloud mode
                 group = _build_override_group(
                     start,
                     end,

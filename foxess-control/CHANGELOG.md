@@ -3,9 +3,13 @@
 ## 0.13.2-beta.6
 
 - Add entity-based backend for foxess_modbus interop: optionally read inverter state from and write mode changes to foxess_modbus entities instead of the FoxESS Cloud API
-- New config options: Work Mode Entity, Charge/Discharge Power Entity, Min SoC Entity, SoC Entity, Loads Power Entity, PV Power Entity, Feed-in Energy Entity
-- All smart charge/discharge algorithms work in entity mode without a cloud API connection
+- Auto-detect foxess_modbus entities from the entity registry — pre-populates config with no manual mapping needed
+- Entity mapping step hidden when foxess_modbus is not installed
+- Entity mode is fully cloud-free: no API key or cloud connection required
+- New config options: Work Mode Entity, Charge/Discharge Power Entity, Min SoC Entity, SoC Entity, Loads Power Entity, PV Power Entity, Feed-in Energy Entity, Inverter Rated Power
+- Default polling interval is 30s in entity mode (vs 300s cloud)
 - Add FoxESSEntityCoordinator for reading inverter state from HA entity states
+- Smart session recovery works without cloud schedule validation in entity mode
 
 ## 0.13.2-beta.5
 

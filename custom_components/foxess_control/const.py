@@ -12,7 +12,10 @@ CONF_API_MIN_SOC = "api_min_soc"
 DEFAULT_API_MIN_SOC = 11
 CONF_POLLING_INTERVAL = "polling_interval"
 DEFAULT_POLLING_INTERVAL = 300  # seconds
+DEFAULT_ENTITY_POLLING_INTERVAL = 30  # seconds — entity mode updates are fast
 MAX_OVERRIDE_HOURS = 4
+CONF_INVERTER_POWER = "inverter_power"
+DEFAULT_INVERTER_POWER = 12000  # watts
 
 # Entity-mode configuration (optional foxess_modbus interop)
 CONF_WORK_MODE_ENTITY = "work_mode_entity"

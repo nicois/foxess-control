@@ -158,15 +158,22 @@
           "battery_capacity_kwh": "Battery Capacity (kWh)",
           "min_power_change": "Minimum Power Change for Smart Charge (W)",
           "api_min_soc": "Minimum API fdSoc (%) — ⚠️ Values below 11 may not work with all firmware versions",
-          "polling_interval": "API Polling Interval (seconds)",
-          "work_mode_entity": "Work mode entity (foxess_modbus select)",
-          "charge_power_entity": "Charge power limit entity (foxess_modbus number)",
-          "discharge_power_entity": "Discharge power limit entity (foxess_modbus number)",
-          "min_soc_entity": "Min SoC entity (foxess_modbus number)",
+          "polling_interval": "API Polling Interval (seconds)"
+        }
+      },
+      "modbus": {
+        "title": "foxess_modbus Entity Mapping",
+        "description": "foxess_modbus detected. Entities have been auto-detected — adjust if needed. Clear all fields to use cloud API instead.",
+        "data": {
+          "work_mode_entity": "Work mode entity (select)",
+          "charge_power_entity": "Charge power limit entity (number)",
+          "discharge_power_entity": "Discharge power limit entity (number)",
+          "min_soc_entity": "Min SoC entity (number)",
           "soc_entity": "Battery SoC entity (sensor)",
           "loads_power_entity": "House load power entity (sensor)",
           "pv_power_entity": "Solar generation power entity (sensor)",
-          "feedin_energy_entity": "Cumulative feed-in energy entity (sensor)"
+          "feedin_energy_entity": "Cumulative feed-in energy entity (sensor)",
+          "inverter_power": "Inverter rated power (W)"
         }
       }
     }
