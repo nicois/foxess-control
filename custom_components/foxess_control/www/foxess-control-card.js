@@ -254,10 +254,20 @@ class FoxESSControlCard extends HTMLElement {
     const points = attrs.forecast;
     if (!points || !Array.isArray(points) || points.length < 2) return "";
 
+    const fmt = (ms) => {
+      const d = new Date(ms);
+      const h = d.getHours();
+      const m = d.getMinutes();
+      return `${h}:${m < 10 ? "0" + m : m}`;
+    };
+
     // Build SVG sparkline
     const width = 280;
-    const height = 60;
-    const pad = 4;
+    const height = 72;
+    const padTop = 4;
+    const padBottom = 14; // room for time labels
+    const padX = 4;
+    const chartHeight = height - padTop - padBottom;
     const minSoc = 0;
     const maxSoc = 100;
 
@@ -267,9 +277,9 @@ class FoxESSControlCard extends HTMLElement {
     const tMax = Math.max(...times);
     const tRange = tMax - tMin || 1;
 
-    const toX = (t) => pad + ((t - tMin) / tRange) * (width - 2 * pad);
+    const toX = (t) => padX + ((t - tMin) / tRange) * (width - 2 * padX);
     const toY = (s) =>
-      pad + (1 - (s - minSoc) / (maxSoc - minSoc)) * (height - 2 * pad);
+      padTop + (1 - (s - minSoc) / (maxSoc - minSoc)) * chartHeight;
 
     const pathParts = points.map(
       (p, i) => `${i === 0 ? "M" : "L"}${toX(p.time).toFixed(1)},${toY(p.soc).toFixed(1)}`
@@ -277,14 +287,34 @@ class FoxESSControlCard extends HTMLElement {
     const linePath = pathParts.join(" ");
 
     // Area fill
+    const chartBottom = padTop + chartHeight;
     const areaPath =
       linePath +
-      ` L${toX(times[times.length - 1]).toFixed(1)},${(height - pad).toFixed(1)}` +
-      ` L${toX(times[0]).toFixed(1)},${(height - pad).toFixed(1)} Z`;
+      ` L${toX(times[times.length - 1]).toFixed(1)},${chartBottom.toFixed(1)}` +
+      ` L${toX(times[0]).toFixed(1)},${chartBottom.toFixed(1)} Z`;
 
     // Now marker
     const nowX = toX(now);
     const showNow = now >= tMin && now <= tMax;
+
+    // Time axis labels — start, end, and optionally "now"
+    const labelY = height - 2;
+    let timeLabels = `
+      <text x="${padX}" y="${labelY}" font-size="7" text-anchor="start"
+            fill="var(--secondary-text-color)" opacity="0.6">${fmt(tMin)}</text>
+      <text x="${width - padX}" y="${labelY}" font-size="7" text-anchor="end"
+            fill="var(--secondary-text-color)" opacity="0.6">${fmt(tMax)}</text>
+    `;
+    if (showNow) {
+      // Only show "now" label if it won't overlap start/end
+      const nowPct = (now - tMin) / tRange;
+      if (nowPct > 0.15 && nowPct < 0.85) {
+        timeLabels += `
+          <text x="${nowX.toFixed(1)}" y="${labelY}" font-size="7" text-anchor="middle"
+                fill="var(--primary-text-color)" opacity="0.5">now</text>
+        `;
+      }
+    }
 
     return `
       <div class="forecast">
@@ -299,12 +329,14 @@ class FoxESSControlCard extends HTMLElement {
           <path d="${areaPath}" fill="url(#fg)"/>
           <path d="${linePath}" fill="none" stroke="var(--primary-color)"
                 stroke-width="1.5" stroke-linejoin="round"/>
-          ${showNow ? `<line x1="${nowX.toFixed(1)}" y1="${pad}" x2="${nowX.toFixed(1)}" y2="${height - pad}" stroke="var(--primary-text-color)" stroke-width="0.5" stroke-dasharray="2,2" opacity="0.4"/>` : ""}
+          ${showNow ? `<line x1="${nowX.toFixed(1)}" y1="${padTop}" x2="${nowX.toFixed(1)}" y2="${chartBottom}" stroke="var(--primary-text-color)" stroke-width="0.5" stroke-dasharray="2,2" opacity="0.4"/>` : ""}
           <!-- Y-axis labels -->
-          <text x="${pad}" y="${pad + 6}" font-size="7"
+          <text x="${padX}" y="${padTop + 6}" font-size="7"
                 fill="var(--secondary-text-color)" opacity="0.6">100%</text>
-          <text x="${pad}" y="${height - pad}" font-size="7"
+          <text x="${padX}" y="${chartBottom}" font-size="7"
                 fill="var(--secondary-text-color)" opacity="0.6">0%</text>
+          <!-- Time axis -->
+          ${timeLabels}
         </svg>
       </div>
     `;
@@ -518,7 +550,7 @@ class FoxESSControlCard extends HTMLElement {
       }
       .forecast-svg {
         width: 100%;
-        height: 60px;
+        height: 72px;
         display: block;
       }
     `;
