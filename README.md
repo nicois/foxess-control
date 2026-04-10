@@ -383,15 +383,31 @@ entities:
 
 ```yaml
 type: entities
-title: Smart Operations
 entities:
-  - entity: sensor.foxess_smart_operations
-  - entity: sensor.foxess_charge_power
   - entity: sensor.foxess_charge_window
   - entity: sensor.foxess_charge_remaining
-  - entity: sensor.foxess_discharge_power
+  - entity: sensor.foxess_charge_power
+  - entity: sensor.foxess_charge_rate
+visibility:
+  - condition: state
+    entity: binary_sensor.foxess_smart_charge_active
+    state: "on"
+grid_options:
+  columns: 12
+  rows: auto
+```
+
+```yaml
+type: entities
+entities:
   - entity: sensor.foxess_discharge_window
   - entity: sensor.foxess_discharge_remaining
+  - entity: sensor.foxess_battery_discharge_energy
+  - entity: sensor.foxess_discharge_power
+visibility:
+  - condition: state
+    entity: binary_sensor.foxess_smart_discharge_active
+    state: "on"
 ```
 
 ## Binary sensors

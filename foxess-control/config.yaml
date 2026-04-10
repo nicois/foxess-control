@@ -2,7 +2,7 @@ name: FoxESS Control
 description: >-
   Installs the FoxESS Control custom integration into Home Assistant.
   Manages battery charge/discharge schedules via the FoxESS Cloud API.
-version: 0.13.1-beta.3
+version: 0.13.1-beta.4
 slug: foxess_control
 url: https://github.com/nicois/foxess-control
 image: ghcr.io/nicois/foxess-control-{arch}
