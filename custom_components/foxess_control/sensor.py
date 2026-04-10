@@ -734,11 +734,11 @@ class BatteryForecastSensor(SensorEntity):
         return _get_soc_value(self.hass)
 
     @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
+    def extra_state_attributes(self) -> dict[str, Any]:
         cs = _get_charge_state(self.hass)
         ds = _get_discharge_state(self.hass)
         if cs is None and ds is None:
-            return None
+            return {"forecast": []}
         forecast = _build_forecast(self.hass, cs, ds)
         return {"forecast": forecast}
 

@@ -145,7 +145,7 @@ Charges the battery within a time window, deferring grid charging as long as pos
 2. **Deferred phase:** Until the calculated start time, no `ForceCharge` schedule is set. The inverter stays in its current mode (typically self-use), allowing solar generation to charge the battery naturally.
 3. **Charging phase:** When the deferred start time arrives, sets a `ForceCharge` schedule with `fdSoc` set high (100%) so the inverter never stops charging on its own — HA is the sole authority for stopping. Charge power targets finishing with a 10% time buffer and accounts for current household consumption, so the inverter typically runs at around 80% of capacity rather than 100%.
 4. Every 5 minutes, re-reads the current SoC, household consumption, and solar generation, then recalculates. During the deferred phase, if solar has raised the SoC, the start time is pushed later. During the charging phase, power is adjusted up or down based on both the remaining energy deficit and current net consumption. If the power change is below the configured **Min Power Change** threshold, the update is skipped to avoid unnecessary API calls.
-5. When the SoC reaches the target for two consecutive readings (whether from solar during the deferred phase or grid charging), the `ForceCharge` group is removed from the schedule, all listeners are cancelled, and the session ends. Requiring two readings prevents a single SoC spike from prematurely ending the session. Other modes' schedule groups (e.g. a standing `ForceDischarge` window) are preserved.
+5. When the SoC reaches the target (whether from solar during the deferred phase or grid charging), the `ForceCharge` group is removed from the schedule immediately to stop unnecessary charging. The session continues monitoring for one more reading: if the SoC is confirmed at or above target, the session ends; if it drops back below, the charge override is re-applied. This prevents a single SoC spike from prematurely ending the session while avoiding overcharging during the confirmation period. Other modes' schedule groups (e.g. a standing `ForceDischarge` window) are preserved.
 6. When the time window ends, the `ForceCharge` group is removed from the schedule and listeners are cancelled. This prevents the schedule from replaying the next day.
 
 If the battery capacity is too large or the SoC too low to reach the target within the window (accounting for current consumption), charging starts immediately (no deferral).
@@ -279,7 +279,7 @@ The following sensors track active smart charge/discharge sessions. They are una
 |---|---|---|
 | `sensor.foxess_charge_power` | Current charge power in watts. | `6000` |
 | `sensor.foxess_charge_window` | Charge time window. | `02:00 – 06:00` |
-| `sensor.foxess_charge_remaining` | Estimated time until target SoC is reached, or time until deferred charging begins. | `1h 30m`, `starts in 2h 15m`, `starting` |
+| `sensor.foxess_charge_remaining` | Time remaining in the charge window, or time until deferred charging begins. | `1h 30m`, `starts in 2h 15m`, `starting` |
 
 #### Smart discharge sensors
 

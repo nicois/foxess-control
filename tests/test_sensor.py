@@ -534,10 +534,10 @@ class TestDischargeRemainingSensor:
 
 
 class TestBatteryForecastSensor:
-    def test_idle_returns_none(self) -> None:
+    def test_idle_returns_empty_forecast(self) -> None:
         sensor = BatteryForecastSensor(_make_hass(), _make_entry())
         assert sensor.native_value is None
-        assert sensor.extra_state_attributes is None
+        assert sensor.extra_state_attributes == {"forecast": []}
 
     def test_charging_forecast_rises_to_target(self) -> None:
         """Forecast SoC rises from current to target during charge."""
