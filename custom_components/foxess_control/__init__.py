@@ -865,13 +865,22 @@ def _setup_smart_charge_listeners(
             )
             return
 
-        _LOGGER.info(
-            "Smart charge: adjusting power %dW -> %dW (SoC=%.1f%%, remaining=%.2fh)",
-            cur_state["last_power_w"],
-            new_power,
-            cur_soc,
-            remaining,
-        )
+        if new_power != cur_state["last_power_w"]:
+            _LOGGER.info(
+                "Smart charge: adjusting power %dW -> %dW"
+                " (SoC=%.1f%%, remaining=%.2fh)",
+                cur_state["last_power_w"],
+                new_power,
+                cur_soc,
+                remaining,
+            )
+        else:
+            _LOGGER.debug(
+                "Smart charge: holding at %dW (SoC=%.1f%%, remaining=%.2fh)",
+                new_power,
+                cur_soc,
+                remaining,
+            )
 
         groups = cur_state.get("groups") or []
         if groups:
