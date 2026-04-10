@@ -434,6 +434,10 @@ def _calculate_charge_power(
         effective_hours = remaining_hours
     battery_power_kw = energy_needed_kwh / effective_hours
     total_power_kw = battery_power_kw + max(0.0, net_consumption_kw)
+    # Over-provision the charge rate so unexpected load doesn't prevent
+    # reaching the target.  The absolute headroom scales linearly with the
+    # required power, so it naturally shrinks as SoC approaches the target.
+    total_power_kw *= _CHARGE_POWER_HEADROOM
     power_w = total_power_kw * 1000
     return max(100, min(int(power_w), max_power_w))
 
@@ -442,6 +446,10 @@ def _calculate_charge_power(
 # the deferred start time.  Even when measured net consumption is zero
 # we still plan with at least 10% spare capacity for transient loads.
 DEFERRED_START_MIN_HEADROOM = 0.10
+
+# Multiplier applied to the calculated charge power to absorb unexpected
+# household load.  e.g. 1.1 means a 9kW calculation becomes ~10kW.
+_CHARGE_POWER_HEADROOM = 1.10
 
 
 def _calculate_deferred_start(

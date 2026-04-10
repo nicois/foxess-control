@@ -15,8 +15,6 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Get tag version
         id: tag
@@ -35,20 +33,21 @@ jobs:
             exit 1
           fi
 
-      - name: Find previous stable tag
-        id: prev
+      - name: Extract changelog
+        id: changelog
         run: |
-          # List tags in version order, keep only stable (no hyphen after v prefix),
-          # exclude the current tag, and take the latest.
-          prev=$(git tag --sort=-version:refname \
-            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-            | grep -v "^${GITHUB_REF_NAME}$" \
-            | head -1)
-          echo "tag=${prev}" >> "$GITHUB_OUTPUT"
+          version="${{ steps.tag.outputs.version }}"
+          # Extract the section for this version from CHANGELOG.md
+          body=$(awk -v ver="## ${version}" '
+            $0 == ver { found=1; next }
+            found && /^## / { exit }
+            found { print }
+          ' foxess-control/CHANGELOG.md)
+          # Write to file to preserve newlines
+          echo "$body" > /tmp/release_body.md
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: /tmp/release_body.md
           prerelease: ${{ contains(github.ref_name, '-') }}
-          previous_tag: ${{ steps.prev.outputs.tag }}

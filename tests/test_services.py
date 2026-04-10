@@ -1684,10 +1684,10 @@ class TestHandleSmartCharge:
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
-        # Large capacity → immediate start
+        # 10kWh battery → power well below max so threshold logic applies
         hass = _make_hass(
             inverter=inv,
-            battery_capacity_kwh=60.0,
+            battery_capacity_kwh=10.0,
             min_power_change=5000,
             coordinator_data={"SoC": 20.0},
         )
