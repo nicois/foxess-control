@@ -333,10 +333,8 @@ class TestChargeRemainingSensor:
         ):
             assert sensor.native_value == "1h 0m"
 
-    def test_soc_estimate_shorter_than_window(self) -> None:
-        """When target SoC will be reached before window ends, show that."""
-        # 10kWh battery, SoC=70%, target=80%, power=5000W
-        # Energy = 10% * 10kWh = 1kWh; time = 1kWh / 5kW = 0.2h = 12min
+    def test_uses_window_remaining_not_soc_estimate(self) -> None:
+        """Charge remaining uses window end, not power-based SoC estimate."""
         # Window remaining at 02:30 with end 06:00 = 3h30m
         hass = _make_hass(
             smart_charge_state=_charge_state(
@@ -358,7 +356,7 @@ class TestChargeRemainingSensor:
             "custom_components.foxess_control.sensor.dt_util.now",
             return_value=datetime.datetime(2026, 4, 8, 2, 30, 0),
         ):
-            assert sensor.native_value == "12m"
+            assert sensor.native_value == "3h 30m"
 
     def test_deferred_shows_starts_in(self) -> None:
         """When deferred, show time until charging begins."""

@@ -732,12 +732,17 @@ def _setup_smart_charge_listeners(
                 cur_state.get("soc_above_target_count", 0) + 1
             )
             if cur_state["soc_above_target_count"] < 2:
-                _LOGGER.debug(
-                    "Smart charge: SoC %.1f%% >= target %d%% "
-                    "(count=%d, waiting for confirmation)",
+                # Remove the ForceCharge override immediately to stop
+                # unnecessary charging, but keep monitoring in case SoC
+                # drops back below target on the next reading.
+                if cur_state.get("charging_started", False):
+                    await _remove_charge_override()
+                    cur_state["groups"] = []
+                _LOGGER.info(
+                    "Smart charge: SoC %.1f%% >= target %d%%, "
+                    "charge stopped, waiting for confirmation",
                     cur_soc,
                     cur_state["target_soc"],
-                    cur_state["soc_above_target_count"],
                 )
                 return
             _LOGGER.info(
@@ -745,12 +750,17 @@ def _setup_smart_charge_listeners(
                 cur_soc,
                 cur_state["target_soc"],
             )
-            charging_started = cur_state.get("charging_started", False)
             if hass.data[DOMAIN].get("_smart_charge_state") is not None:
                 _cancel_smart_charge(hass)
-                if charging_started:
-                    await _remove_charge_override()
             return
+        if cur_state.get("soc_above_target_count", 0) > 0:
+            # SoC dropped back below target after a tentative stop —
+            # re-apply the charge override.
+            _LOGGER.info(
+                "Smart charge: SoC %.1f%% dropped below target %d%%, resuming",
+                cur_soc,
+                cur_state["target_soc"],
+            )
         cur_state["soc_above_target_count"] = 0
 
         now_dt = dt_util.now()

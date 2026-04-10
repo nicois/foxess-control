@@ -213,17 +213,11 @@ def _estimate_charge_remaining(
             return f"starts in {_format_duration(wait)}"
         return _format_remaining(end)
 
-    # Actively charging — estimate time to target SoC
-    power_w: int = cs.get("last_power_w", 0)
-    if soc is not None and capacity_kwh > 0 and power_w > 0 and soc < target_soc:
-        energy_kwh = (target_soc - soc) / 100.0 * capacity_kwh
-        hours = energy_kwh / (power_w / 1000.0)
-        soc_remaining = datetime.timedelta(hours=hours)
-        remaining = min(window_remaining, soc_remaining)
-    else:
-        remaining = window_remaining
-
-    return _format_duration(remaining)
+    # Actively charging — the session is designed to finish by end, so
+    # window remaining is the best estimate.  The inverter power includes
+    # household load headroom that doesn't reach the battery, making a
+    # power-based SoC estimate unreliable.
+    return _format_duration(window_remaining)
 
 
 def _build_forecast(
