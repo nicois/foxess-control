@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13.2-beta.4
+
+- Show 0W discharge power before window opens
+- Smart operations shows "Discharge scheduled at" before window opens
+- Smart operations attributes use proper remaining estimates
+- Android Auto shows "Dchg@HH:MM" before discharge starts
+
 ## 0.13.2-beta.3
 
 - Discharge remaining shows "starts in" before window opens
