@@ -392,54 +392,42 @@ series:
     stroke_dash: 4
 ```
 
-### Dashboard card examples
+### Dashboard card
 
-All sensors work directly with the standard **Entities** card — no Jinja templates needed:
+The integration includes a custom Lovelace card that automatically displays the current smart operation status with a battery gauge, progress indicators, and a SoC forecast sparkline. When no smart operation is active, the card shows an idle state.
 
-```yaml
-type: entities
-title: Inverter
-entities:
-  - entity: sensor.foxess_work_mode
-  - entity: sensor.foxess_battery_soc
-  - entity: sensor.foxess_solar_power
-  - entity: sensor.foxess_house_load
-  - entity: sensor.foxess_charge_rate
-  - entity: sensor.foxess_discharge_rate
-  - entity: sensor.foxess_grid_consumption
-  - entity: sensor.foxess_feedin_power
-  - entity: sensor.foxess_residual_energy
-  - entity: sensor.foxess_battery_temperature
-```
+The card is auto-registered as a Lovelace resource when the integration loads (storage mode dashboards). No manual resource setup is needed.
 
 ```yaml
-type: entities
-entities:
-  - entity: sensor.foxess_charge_window
-  - entity: sensor.foxess_charge_remaining
-  - entity: sensor.foxess_charge_power
-  - entity: sensor.foxess_charge_rate
-visibility:
-  - condition: state
-    entity: binary_sensor.foxess_smart_charge_active
-    state: "on"
-grid_options:
-  columns: 12
-  rows: auto
+type: custom:foxess-control-card
 ```
 
+That's it — no configuration required. The card auto-discovers the `sensor.foxess_smart_operations`, `sensor.foxess_battery_forecast`, and `sensor.foxess_battery_soc` entities.
+
+**What the card shows:**
+
+- **Header**: Battery SoC gauge with colour-coded fill (green/orange/red by level)
+- **Smart Charge** (green section): Time window, power, target SoC with progress bar, remaining time badge. Shows "Charge Scheduled" with a dim indicator when deferred, "Smart Charge" with a pulsing dot when actively charging.
+- **Smart Discharge** (orange section): Time window, power, min SoC, feed-in energy limit. Shows "Discharge Scheduled" before the window opens.
+- **Idle**: Clean message when no smart operation is active.
+- **Forecast**: SVG sparkline of projected SoC with time axis labels and a "now" marker. Y-axis scales to fit the data range.
+
+To override the default entity IDs (e.g. if you renamed them):
+
 ```yaml
-type: entities
-entities:
-  - entity: sensor.foxess_discharge_window
-  - entity: sensor.foxess_discharge_remaining
-  - entity: sensor.foxess_battery_discharge_energy
-  - entity: sensor.foxess_discharge_power
-visibility:
-  - condition: state
-    entity: binary_sensor.foxess_smart_discharge_active
-    state: "on"
+type: custom:foxess-control-card
+operations_entity: sensor.foxess_smart_operations
+forecast_entity: sensor.foxess_battery_forecast
+soc_entity: sensor.foxess_battery_soc
 ```
+
+> **YAML mode dashboards:** If you use YAML-mode Lovelace (not the default storage mode), add the resource manually to your `configuration.yaml`:
+> ```yaml
+> lovelace:
+>   resources:
+>     - url: /foxess_control/foxess-control-card.js
+>       type: module
+> ```
 
 ## Binary sensors
 
