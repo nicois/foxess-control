@@ -268,8 +268,13 @@ class FoxESSControlCard extends HTMLElement {
     const padBottom = 14; // room for time labels
     const padX = 4;
     const chartHeight = height - padTop - padBottom;
-    const minSoc = 0;
-    const maxSoc = 100;
+    // Scale Y-axis to the data extent with some padding
+    const socValues = points.map((p) => p.soc);
+    const rawMin = Math.min(...socValues);
+    const rawMax = Math.max(...socValues);
+    const socMargin = Math.max(5, (rawMax - rawMin) * 0.1);
+    const minSoc = Math.max(0, Math.floor((rawMin - socMargin) / 5) * 5);
+    const maxSoc = Math.min(100, Math.ceil((rawMax + socMargin) / 5) * 5);
 
     const now = Date.now();
     const times = points.map((p) => p.time);
@@ -332,9 +337,9 @@ class FoxESSControlCard extends HTMLElement {
           ${showNow ? `<line x1="${nowX.toFixed(1)}" y1="${padTop}" x2="${nowX.toFixed(1)}" y2="${chartBottom}" stroke="var(--primary-text-color)" stroke-width="0.5" stroke-dasharray="2,2" opacity="0.4"/>` : ""}
           <!-- Y-axis labels -->
           <text x="${padX}" y="${padTop + 6}" font-size="7"
-                fill="var(--secondary-text-color)" opacity="0.6">100%</text>
+                fill="var(--secondary-text-color)" opacity="0.6">${maxSoc}%</text>
           <text x="${padX}" y="${chartBottom}" font-size="7"
-                fill="var(--secondary-text-color)" opacity="0.6">0%</text>
+                fill="var(--secondary-text-color)" opacity="0.6">${minSoc}%</text>
           <!-- Time axis -->
           ${timeLabels}
         </svg>
