@@ -3122,7 +3122,7 @@ class TestFeedinEnergyLimit:
 
     @pytest.mark.asyncio
     async def test_feedin_tapers_power_when_close_to_limit(self) -> None:
-        """Power is reduced when remaining energy is small relative to poll interval."""
+        """Power is reduced using observed export rate, not configured power."""
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
@@ -3163,7 +3163,7 @@ class TestFeedinEnergyLimit:
                         "start_time": datetime.time(17, 0),
                         "end_time": datetime.time(20, 0),
                         "min_soc": 10,
-                        "feedin_energy_limit_kwh": 3.0,
+                        "feedin_energy_limit_kwh": 1.0,
                     }
                 )
             )
@@ -3172,30 +3172,73 @@ class TestFeedinEnergyLimit:
         state = hass.data[DOMAIN]["_smart_discharge_state"]
         assert state["last_power_w"] == 10500
 
-        # Exported 2.8 kWh of 3.0 limit → 0.2 kWh remaining.
-        # Poll interval 300s (0.08333h).
-        # energy_next_poll = 10500/1000 * 0.08333 = 0.875 kWh
-        # 0.2 < 0.875 → would overshoot, taper needed.
-        # taper = 0.2 / 0.08333 * 1000 = 2400W
+        # Poll 1: exported 0.30 kWh.  No previous reading yet, so
+        # observed_rate falls back to configured power (10.5kW).
+        # energy_next_poll = 10.5 * 0.08333 = 0.875 kWh
+        # remaining = 0.70 > 0.875?  No → taper triggers with fallback.
+        # But once feedin_prev is recorded, next poll will use observed.
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 70.0,
+            "feedin": 100.3,
+        }
+        await captured_interval(datetime.datetime(2026, 4, 7, 17, 5, 0))
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        # Fallback rate thinks 0.70 < 0.875 so it tapers (conservative).
+        # feedin_prev is now recorded for next poll.
+        assert state is not None
+        assert state.get("feedin_prev_kwh") == 100.3
+
+        # Poll 2: exported 0.60 kWh total (0.30 this interval).
+        # observed_rate = (100.6 - 100.3) / 0.08333 = 3.6 kW
+        # energy_next_poll = 3.6 * 0.08333 = 0.30 kWh
+        # remaining = 0.40 kWh > 0.30 → no taper, full power continues.
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 65.0,
+            "feedin": 100.6,
+        }
+        await captured_interval(datetime.datetime(2026, 4, 7, 17, 10, 0))
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state is not None
+        assert state["last_power_w"] == 10500  # No taper
+
+        # Poll 3: exported 0.80 kWh total (0.20 this interval).
+        # observed_rate = (100.8 - 100.6) / 0.08333 = 2.4 kW
+        # energy_next_poll = 2.4 * 0.08333 = 0.20 kWh
+        # remaining = 0.20 kWh, NOT > 0.20 → taper activates.
+        # efficiency = 2.4 / 10.5 = 0.2286
+        # taper_power = 0.20 / 0.08333 / 0.2286 * 1000 = 10500W
+        # 10500 >= 10500 → no change (taper doesn't reduce power).
+        # Actually remaining == energy_next_poll exactly, edge case.
+        # Let's use 0.15 remaining instead.
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 62.0,
+            "feedin": 100.85,  # 0.85 exported, 0.15 remaining
+        }
+        await captured_interval(datetime.datetime(2026, 4, 7, 17, 15, 0))
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state is not None
+        # observed_rate = (100.85 - 100.6) / 0.08333 = 3.0 kW
+        # energy_next_poll = 3.0 * 0.08333 = 0.25
+        # remaining = 0.15 < 0.25 → taper
+        # efficiency = 3.0 / 10.5 = 0.2857
+        # taper_power = 0.15 / 0.08333 / 0.2857 * 1000 = 6300W
+        assert state["last_power_w"] == 6300
+        assert state["feedin_taper_baseline"] == 100.85
+
+        # Next check before poll: feedin unchanged → still running
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 61.0,
+            "feedin": 100.85,
+        }
+        await captured_interval(datetime.datetime(2026, 4, 7, 17, 16, 0))
+        assert hass.data[DOMAIN].get("_smart_discharge_state") is not None
+
+        # Next poll: feedin changed → stop
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {
             "SoC": 60.0,
-            "feedin": 102.8,
+            "feedin": 100.97,  # 0.97 < 1.0 limit, but fresh data after taper
         }
-        inv.set_schedule.reset_mock()
-        await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
-
-        state = hass.data[DOMAIN]["_smart_discharge_state"]
-        assert state is not None  # Session still active
-        assert state["last_power_w"] == 2400
-        assert state["feedin_taper_active"] is True
-
-        # Next poll: taper was active, so discharge stops even though
-        # the counter hasn't quite reached the limit.
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
-            "SoC": 58.0,
-            "feedin": 102.95,  # 2.95 < 3.0 limit, but taper was active
-        }
-        await captured_interval(datetime.datetime(2026, 4, 7, 18, 5, 0))
+        await captured_interval(datetime.datetime(2026, 4, 7, 17, 20, 0))
         assert hass.data[DOMAIN].get("_smart_discharge_state") is None
 
     @pytest.mark.asyncio
@@ -3248,14 +3291,23 @@ class TestFeedinEnergyLimit:
 
         assert captured_interval is not None
 
-        # Exported 2.999 kWh → 0.001 kWh remaining.
-        # energy_next_poll = 0.875 kWh > 0.001 → taper.
-        # taper = 0.001 / 0.08333 * 1000 = 12W → clamped to 100W
+        # Poll 1: establish observed rate baseline
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 70.0,
+            "feedin": 100.3,
+        }
+        await captured_interval(datetime.datetime(2026, 4, 7, 17, 5, 0))
+
+        # Poll 2: observed_rate = (102.999 - 100.3) / 0.08333 = ~32.4 kW
+        # remaining = 0.001 kWh.  energy_next_poll = 32.4 * 0.08333 = 2.7
+        # 0.001 < 2.7 → taper.
+        # target_kw = 0.001 / 0.08333 = 0.012
+        # taper = 10500 * 0.012 / 32.4 = 3.9W → clamped to 100W
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {
             "SoC": 55.0,
             "feedin": 102.999,
         }
-        await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
+        await captured_interval(datetime.datetime(2026, 4, 7, 17, 10, 0))
 
         state = hass.data[DOMAIN]["_smart_discharge_state"]
         assert state is not None
@@ -3263,7 +3315,7 @@ class TestFeedinEnergyLimit:
 
     @pytest.mark.asyncio
     async def test_feedin_no_taper_when_plenty_remaining(self) -> None:
-        """No tapering when remaining energy is large relative to power."""
+        """No tapering when remaining energy is large relative to observed rate."""
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
@@ -3311,14 +3363,22 @@ class TestFeedinEnergyLimit:
 
         assert captured_interval is not None
 
-        # Exported 1.0 kWh → 2.0 kWh remaining.
-        # energy_next_poll = 10500/1000 * 0.08333 = 0.875 kWh
-        # 2.0 > 0.875 → full power won't overshoot, no taper
+        # Poll 1: establish observed rate baseline
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 75.0,
+            "feedin": 100.3,
+        }
+        await captured_interval(datetime.datetime(2026, 4, 7, 17, 5, 0))
+
+        # Poll 2: exported 1.0 kWh total → 2.0 kWh remaining.
+        # observed_rate = (101.0 - 100.3) / 0.08333 = 8.4 kW
+        # energy_next_poll = 8.4 * 0.08333 = 0.70 kWh
+        # 2.0 > 0.70 → won't overshoot, no taper
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {
             "SoC": 70.0,
             "feedin": 101.0,
         }
-        await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
+        await captured_interval(datetime.datetime(2026, 4, 7, 17, 10, 0))
 
         state = hass.data[DOMAIN]["_smart_discharge_state"]
         assert state is not None
