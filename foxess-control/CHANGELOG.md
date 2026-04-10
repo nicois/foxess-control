@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.2-beta.5
+
+- Battery forecast accounts for discharge energy limit (SoC flattens when limit reached)
+
 ## 0.13.2-beta.4
 
 - Show 0W discharge power before window opens
