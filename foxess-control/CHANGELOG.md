@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.1-beta.5
+
+- Downgrade first transient API retry to debug logging (warn only on repeated retries)
+
 ## 0.13.1-beta.4
 
 - Update dashboard card examples with visibility-conditional charge/discharge cards
