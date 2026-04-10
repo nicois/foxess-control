@@ -1723,14 +1723,24 @@ _CARD_URL = f"/{DOMAIN}/foxess-control-card.js"
 
 async def _register_card_frontend(hass: HomeAssistant) -> None:
     """Serve the custom Lovelace card JS and register it as a resource."""
+    import json
     from pathlib import Path
 
     from homeassistant.components.http import StaticPathConfig
 
-    card_path = Path(__file__).parent / "www" / "foxess-control-card.js"
+    card_dir = Path(__file__).parent
+    card_path = card_dir / "www" / "foxess-control-card.js"
     await hass.http.async_register_static_paths(
         [StaticPathConfig(_CARD_URL, str(card_path), cache_headers=True)]
     )
+
+    # Read version from manifest for cache-busting query parameter.
+    try:
+        manifest = json.loads((card_dir / "manifest.json").read_text())
+        version = manifest.get("version", "0")
+    except Exception:
+        version = "0"
+    versioned_url = f"{_CARD_URL}?v={version}"
 
     # Auto-register as a Lovelace resource (storage mode only).
     try:
@@ -1741,17 +1751,26 @@ async def _register_card_frontend(hass: HomeAssistant) -> None:
 
         ll_data = hass.data.get(LOVELACE_DATA)
         if ll_data is not None and hasattr(ll_data.resources, "async_create_item"):
-            # Check if already registered
+            # Remove any existing registration (may have old version query)
             existing = [
                 r
                 for r in ll_data.resources.async_items()
                 if _CARD_URL in r.get("url", "")
             ]
-            if not existing:
+            for r in existing:
+                if r.get("url") != versioned_url:
+                    await ll_data.resources.async_delete_item(r["id"])
+            # Register with versioned URL if not already present
+            current = [
+                r
+                for r in ll_data.resources.async_items()
+                if r.get("url") == versioned_url
+            ]
+            if not current:
                 await ll_data.resources.async_create_item(
-                    {"res_type": "module", "url": _CARD_URL}
+                    {"res_type": "module", "url": versioned_url}
                 )
-                _LOGGER.info("Registered Lovelace resource: %s", _CARD_URL)
+                _LOGGER.info("Registered Lovelace resource: %s", versioned_url)
     except Exception:
         _LOGGER.debug(
             "Could not auto-register Lovelace resource; "
