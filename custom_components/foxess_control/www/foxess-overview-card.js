@@ -4,34 +4,36 @@
  * Shows live energy flows between solar, battery, grid and house
  * with power values and key inverter stats.
  *
+ * Entity discovery uses a WebSocket call to the foxess_control
+ * integration, which returns the exact entity_ids from the HA
+ * entity registry. No name guessing required.
+ *
  * Usage:
  *   type: custom:foxess-overview-card
- *   # All entities auto-discovered from the foxess_control integration.
- *   # Override any entity manually if needed:
+ *   # All entities auto-discovered; override any manually:
  *   # solar_entity: sensor.foxess_solar_power
  *   # house_entity: sensor.foxess_house_load
  *   # etc.
  */
 
-const OVERVIEW_VERSION = "1.3.0";
+const OVERVIEW_VERSION = "2.0.0";
 
-// Config key → original_name set by the integration (from _attr_name).
-// Used to look up actual entity_ids from the HA entity registry.
-const _ENTITY_NAMES = {
-  solar_entity:             "Solar Power",
-  house_entity:             "House Load",
-  grid_import_entity:       "Grid Consumption",
-  grid_export_entity:       "Grid Feed-in",
-  battery_charge_entity:    "Charge Rate",
-  battery_discharge_entity: "Discharge Rate",
-  soc_entity:               "Battery SoC",
-  work_mode_entity:         "Work Mode",
-  pv1_entity:               "PV1 Power",
-  pv2_entity:               "PV2 Power",
-  grid_voltage_entity:      "Grid Voltage",
-  grid_frequency_entity:    "Grid Frequency",
-  bat_temp_entity:          "Battery Temperature",
-  residual_entity:          "Residual Energy",
+// Config key → role name returned by the foxess_control/entity_map WS command.
+const _ROLE_MAP = {
+  solar_entity:             "solar_power",
+  house_entity:             "house_load",
+  grid_import_entity:       "grid_consumption",
+  grid_export_entity:       "grid_feed_in",
+  battery_charge_entity:    "charge_rate",
+  battery_discharge_entity: "discharge_rate",
+  soc_entity:               "battery_soc",
+  work_mode_entity:         "work_mode",
+  pv1_entity:               "pv1_power",
+  pv2_entity:               "pv2_power",
+  grid_voltage_entity:      "grid_voltage",
+  grid_frequency_entity:    "grid_frequency",
+  bat_temp_entity:          "battery_temperature",
+  residual_entity:          "residual_energy",
 };
 
 class FoxESSOverviewCard extends HTMLElement {
@@ -40,6 +42,8 @@ class FoxESSOverviewCard extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._userConfig = {};
     this._hass = null;
+    this._entityMap = null;      // role → entity_id from WS
+    this._fetchPending = false;
   }
 
   setConfig(config) {
@@ -48,6 +52,9 @@ class FoxESSOverviewCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    if (!this._entityMap && !this._fetchPending) {
+      this._fetchEntityMap();
+    }
     this._render();
   }
 
@@ -59,36 +66,32 @@ class FoxESSOverviewCard extends HTMLElement {
     return {};
   }
 
-  // -- Entity discovery -------------------------------------------------------
+  // -- Entity discovery via WebSocket -----------------------------------------
 
-  /**
-   * Build a name→entity_id map from the HA entity registry.
-   * hass.entities contains EntityRegistryDisplayEntry objects with
-   * platform and original_name (the name the integration set).
-   */
-  _buildRegistryMap() {
-    if (!this._hass || !this._hass.entities) return null;
-    const map = {};
-    for (const [entityId, entry] of Object.entries(this._hass.entities)) {
-      if (entry.platform !== "foxess_control") continue;
-      const name = entry.original_name || entry.name;
-      if (name) map[name] = entityId;
+  async _fetchEntityMap() {
+    this._fetchPending = true;
+    try {
+      this._entityMap = await this._hass.callWS({
+        type: "foxess_control/entity_map",
+      });
+    } catch (e) {
+      // Integration may not be loaded yet or WS command not registered
+      console.warn("FoxESS Overview: could not fetch entity map", e);
+      this._entityMap = {};
     }
-    return map;
+    this._fetchPending = false;
+    this._render();
   }
 
   /** Resolve a config key to an entity_id. */
-  _resolve(key, registryMap) {
+  _resolve(key) {
     // 1. User explicitly set this entity
     if (this._userConfig[key]) return this._userConfig[key];
-
-    // 2. Look up from entity registry by original_name
-    const name = _ENTITY_NAMES[key];
-    if (name && registryMap && registryMap[name]) {
-      return registryMap[name];
+    // 2. WS entity map
+    const role = _ROLE_MAP[key];
+    if (role && this._entityMap && this._entityMap[role]) {
+      return this._entityMap[role];
     }
-
-    // 3. No match found
     return null;
   }
 
@@ -126,12 +129,10 @@ class FoxESSOverviewCard extends HTMLElement {
   _render() {
     if (!this._hass) return;
 
-    const registryMap = this._buildRegistryMap();
-
     // Resolve entity IDs
     const eid = {};
-    for (const key of Object.keys(_ENTITY_NAMES)) {
-      eid[key] = this._resolve(key, registryMap);
+    for (const key of Object.keys(_ROLE_MAP)) {
+      eid[key] = this._resolve(key);
     }
 
     const solar = this._num(eid.solar_entity);

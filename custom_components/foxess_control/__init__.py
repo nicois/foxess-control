@@ -1994,6 +1994,76 @@ def _build_entity_map(opts: Any) -> dict[str, str]:
     return mapping
 
 
+# -- WebSocket API for Lovelace cards ----------------------------------------
+
+# Map of role → unique_id suffix used by the integration's sensor entities.
+_ENTITY_ROLES: dict[str, str] = {
+    "solar_power": "pv_power",
+    "house_load": "loads_power",
+    "grid_consumption": "grid_consumption",
+    "grid_feed_in": "feedin_power",
+    "charge_rate": "bat_charge_power",
+    "discharge_rate": "bat_discharge_power",
+    "battery_soc": "battery_soc",
+    "work_mode": "work_mode",
+    "pv1_power": "pv1_power",
+    "pv2_power": "pv2_power",
+    "grid_voltage": "grid_voltage",
+    "grid_frequency": "grid_frequency",
+    "battery_temperature": "bat_temperature",
+    "residual_energy": "residual_energy",
+    "smart_operations": "smart_operations",
+    "battery_forecast": "battery_forecast",
+}
+
+
+def _register_websocket_api(hass: HomeAssistant) -> None:
+    """Register WebSocket commands for Lovelace card entity discovery."""
+    from homeassistant.components.websocket_api import (  # type: ignore[attr-defined]
+        async_register_command,
+        async_response,
+        websocket_command,
+    )
+    from homeassistant.helpers import entity_registry as er
+
+    @websocket_command({vol.Required("type"): f"{DOMAIN}/entity_map"})
+    @async_response
+    async def ws_entity_map(
+        hass: HomeAssistant,
+        connection: Any,
+        msg: dict[str, Any],
+    ) -> None:
+        """Return a role->entity_id mapping for foxess_control entities."""
+        registry = er.async_get(hass)
+        # Find the config entry id
+        entry_id: str | None = None
+        for key in hass.data.get(DOMAIN, {}):
+            if not str(key).startswith("_"):
+                entry_id = key
+                break
+
+        result: dict[str, str] = {}
+        if entry_id is not None:
+            entries = er.async_entries_for_config_entry(registry, entry_id)
+            # Build suffix -> entity_id lookup
+            suffix_map: dict[str, str] = {}
+            for ent in entries:
+                for suffix in _ENTITY_ROLES.values():
+                    if ent.unique_id.endswith(f"_{suffix}"):
+                        suffix_map[suffix] = ent.entity_id
+                        break
+            # Map role -> entity_id
+            for role, suffix in _ENTITY_ROLES.items():
+                if suffix in suffix_map:
+                    result[role] = suffix_map[suffix]
+
+        connection.send_result(msg["id"], result)
+
+    async_register_command(hass, ws_entity_map)
+
+
+# -- Lovelace card frontend --------------------------------------------------
+
 _CARD_URLS = [
     f"/{DOMAIN}/foxess-control-card.js",
     f"/{DOMAIN}/foxess-overview-card.js",
@@ -2112,10 +2182,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "coordinator": coordinator,
     }
 
-    # Register services and frontend card once (first real entry)
+    # Register services, frontend card, and WS API once (first real entry)
     real_entries = {k for k in hass.data[DOMAIN] if not k.startswith("_")}
     if len(real_entries) == 1:
         _register_services(hass)
+        _register_websocket_api(hass)
         await _register_card_frontend(hass)
     elif len(real_entries) > 1:
         _LOGGER.warning(
