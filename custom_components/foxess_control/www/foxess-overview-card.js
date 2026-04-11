@@ -23,70 +23,40 @@
  *   # residual_entity: sensor.foxess_residual_energy
  */
 
-const OVERVIEW_VERSION = "1.0.1";
+const OVERVIEW_VERSION = "1.1.0";
+
+// Mapping: config key → list of candidate entity_id suffixes to try.
+const _ENTITY_CANDIDATES = {
+  solar_entity:             ["solar_power", "pv_power"],
+  house_entity:             ["house_load", "loads_power"],
+  grid_import_entity:       ["grid_consumption"],
+  grid_export_entity:       ["grid_feed_in", "feedin_power"],
+  battery_charge_entity:    ["charge_rate", "bat_charge_power"],
+  battery_discharge_entity: ["discharge_rate", "bat_discharge_power"],
+  soc_entity:               ["battery_soc"],
+  work_mode_entity:         ["work_mode"],
+  pv1_entity:               ["pv1_power"],
+  pv2_entity:               ["pv2_power"],
+  grid_voltage_entity:      ["grid_voltage"],
+  grid_frequency_entity:    ["grid_frequency"],
+  bat_temp_entity:          ["battery_temperature", "bat_temperature"],
+  residual_entity:          ["residual_energy"],
+};
 
 class FoxESSOverviewCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
-    this._config = {};
+    this._userConfig = {};
     this._hass = null;
   }
 
   setConfig(config) {
-    // User overrides are applied after auto-discovery in _resolveEntities().
     this._userConfig = config || {};
-    this._config = {};
-    this._resolved = false;
-  }
-
-  _resolveEntities() {
-    if (this._resolved) return;
-    if (!this._hass) return;
-    this._resolved = true;
-
-    // Mapping: config key → list of candidate entity_id suffixes to try.
-    // First match in hass.states wins.
-    const candidates = {
-      solar_entity:             ["solar_power", "pv_power"],
-      house_entity:             ["house_load", "loads_power"],
-      grid_import_entity:       ["grid_consumption"],
-      grid_export_entity:       ["grid_feed_in", "feedin_power"],
-      battery_charge_entity:    ["charge_rate", "bat_charge_power"],
-      battery_discharge_entity: ["discharge_rate", "bat_discharge_power"],
-      soc_entity:               ["battery_soc"],
-      work_mode_entity:         ["work_mode"],
-      pv1_entity:               ["pv1_power"],
-      pv2_entity:               ["pv2_power"],
-      grid_voltage_entity:      ["grid_voltage"],
-      grid_frequency_entity:    ["grid_frequency"],
-      bat_temp_entity:          ["battery_temperature", "bat_temperature"],
-      residual_entity:          ["residual_energy"],
-    };
-
-    const resolved = {};
-    for (const [key, suffixes] of Object.entries(candidates)) {
-      if (this._userConfig[key]) {
-        resolved[key] = this._userConfig[key];
-        continue;
-      }
-      let found = null;
-      for (const suffix of suffixes) {
-        const eid = `sensor.foxess_${suffix}`;
-        if (eid in this._hass.states) {
-          found = eid;
-          break;
-        }
-      }
-      resolved[key] = found || `sensor.foxess_${suffixes[0]}`;
-    }
-
-    this._config = { ...this._userConfig, ...resolved };
   }
 
   set hass(hass) {
     this._hass = hass;
-    this._resolveEntities();
     this._render();
   }
 
@@ -99,6 +69,18 @@ class FoxESSOverviewCard extends HTMLElement {
   }
 
   // -- Helpers ---------------------------------------------------------------
+
+  /** Resolve a config key to an entity_id by scanning hass.states. */
+  _resolve(key) {
+    if (this._userConfig[key]) return this._userConfig[key];
+    const suffixes = _ENTITY_CANDIDATES[key];
+    if (!suffixes) return null;
+    for (const suffix of suffixes) {
+      const eid = `sensor.foxess_${suffix}`;
+      if (eid in this._hass.states) return eid;
+    }
+    return `sensor.foxess_${suffixes[0]}`;
+  }
 
   _exists(entityId) {
     return this._hass && entityId in this._hass.states;
@@ -132,27 +114,32 @@ class FoxESSOverviewCard extends HTMLElement {
   _render() {
     if (!this._hass) return;
 
-    const c = this._config;
-    const solar = this._num(c.solar_entity);
-    const house = this._num(c.house_entity);
-    const gridImport = this._num(c.grid_import_entity);
-    const gridExport = this._num(c.grid_export_entity);
-    const batCharge = this._num(c.battery_charge_entity);
-    const batDischarge = this._num(c.battery_discharge_entity);
-    const soc = this._num(c.soc_entity);
-    const workMode = this._str(c.work_mode_entity);
-    const pv1 = this._num(c.pv1_entity);
-    const pv2 = this._num(c.pv2_entity);
-    const gridV = this._num(c.grid_voltage_entity);
-    const gridHz = this._num(c.grid_frequency_entity);
-    const batTemp = this._num(c.bat_temp_entity);
-    const residual = this._num(c.residual_entity);
+    // Resolve entity IDs fresh each render (entities may appear after first render)
+    const eid = {};
+    for (const key of Object.keys(_ENTITY_CANDIDATES)) {
+      eid[key] = this._resolve(key);
+    }
+
+    const solar = this._num(eid.solar_entity);
+    const house = this._num(eid.house_entity);
+    const gridImport = this._num(eid.grid_import_entity);
+    const gridExport = this._num(eid.grid_export_entity);
+    const batCharge = this._num(eid.battery_charge_entity);
+    const batDischarge = this._num(eid.battery_discharge_entity);
+    const soc = this._num(eid.soc_entity);
+    const workMode = this._str(eid.work_mode_entity);
+    const pv1 = this._num(eid.pv1_entity);
+    const pv2 = this._num(eid.pv2_entity);
+    const gridV = this._num(eid.grid_voltage_entity);
+    const gridHz = this._num(eid.grid_frequency_entity);
+    const batTemp = this._num(eid.bat_temp_entity);
+    const residual = this._num(eid.residual_entity);
 
     // Track which core entities exist in HA at all
-    const solarFound = this._exists(c.solar_entity);
-    const houseFound = this._exists(c.house_entity);
-    const gridFound = this._exists(c.grid_import_entity) || this._exists(c.grid_export_entity);
-    const batFound = this._exists(c.battery_charge_entity) || this._exists(c.battery_discharge_entity);
+    const solarFound = this._exists(eid.solar_entity);
+    const houseFound = this._exists(eid.house_entity);
+    const gridFound = this._exists(eid.grid_import_entity) || this._exists(eid.grid_export_entity);
+    const batFound = this._exists(eid.battery_charge_entity) || this._exists(eid.battery_discharge_entity);
 
     // Net battery: positive = charging, negative = discharging
     const batNet = (batCharge || 0) - (batDischarge || 0);
@@ -181,13 +168,13 @@ class FoxESSOverviewCard extends HTMLElement {
           ${workMode ? `<span class="work-mode">${this._formatWorkMode(workMode)}</span>` : ""}
         </div>
         <div class="flow-container">
+          ${this._renderFlowLines(solarActive, houseActive, gridImporting, gridExporting, batCharging, batDischarging)}
           <div class="flow-grid">
-            ${this._renderNode("solar", "☀️", "Solar", solarFound, this._formatKw(solar), solarActive, pv1 != null || pv2 != null ? this._pvDetail(pv1, pv2) : "", c.solar_entity)}
-            ${this._renderNode("house", "🏠", "House", houseFound, this._formatKw(house), houseActive, "", c.house_entity)}
-            ${this._renderNode("grid", "⚡", "Grid", gridFound, this._formatKw(Math.abs(gridNet)), gridImporting || gridExporting, this._gridSub(gridImporting, gridExporting, gridV, gridHz), c.grid_import_entity)}
+            ${this._renderNode("solar", "☀️", "Solar", solarFound, this._formatKw(solar), solarActive, pv1 != null || pv2 != null ? this._pvDetail(pv1, pv2) : "", eid.solar_entity)}
+            ${this._renderNode("house", "🏠", "House", houseFound, this._formatKw(house), houseActive, "", eid.house_entity)}
+            ${this._renderNode("grid", "⚡", "Grid", gridFound, this._formatKw(Math.abs(gridNet)), gridImporting || gridExporting, this._gridSub(gridImporting, gridExporting, gridV, gridHz), eid.grid_import_entity)}
             ${this._renderBatteryNode(soc, socPct, socColor, batNet, batCharging, batDischarging, batTemp, residual, batFound)}
           </div>
-          ${this._renderFlowLines(solarActive, houseActive, gridImporting, gridExporting, batCharging, batDischarging)}
         </div>
       </ha-card>
     `;
@@ -276,17 +263,17 @@ class FoxESSOverviewCard extends HTMLElement {
   }
 
   _renderFlowLines(solarActive, houseActive, gridImporting, gridExporting, batCharging, batDischarging) {
-    // Flow lines overlaid on the 2×2 grid.
+    // Flow lines overlaid on the 2×2 grid using CSS Grid stacking.
     // Node centres (percentage-based to match the grid layout):
-    //   solar=top-left(25%,30%)  house=top-right(75%,30%)
-    //   grid=bottom-left(25%,70%)  battery=bottom-right(75%,70%)
+    //   solar=top-left(25%,25%)  house=top-right(75%,25%)
+    //   grid=bottom-left(25%,75%)  battery=bottom-right(75%,75%)
     // Centre hub at (50%,50%).
 
     const nodes = {
-      solar:   { x: 25, y: 28 },
-      house:   { x: 75, y: 28 },
-      grid:    { x: 25, y: 72 },
-      battery: { x: 75, y: 72 },
+      solar:   { x: 25, y: 25 },
+      house:   { x: 75, y: 25 },
+      grid:    { x: 25, y: 75 },
+      battery: { x: 75, y: 75 },
     };
     const cx = 50, cy = 50;
 
@@ -309,7 +296,7 @@ class FoxESSOverviewCard extends HTMLElement {
       flows.push({ from: nodes.battery, to: { x: cx, y: cy }, color: "var(--fo-bat-discharge)", cls: "flow-bat-out" });
     }
 
-    if (flows.length === 0) return "";
+    if (flows.length === 0) return `<svg class="flow-overlay" viewBox="0 0 100 100"></svg>`;
 
     const lines = flows.map(f => {
       const dx = f.to.x - f.from.x;
@@ -368,28 +355,27 @@ class FoxESSOverviewCard extends HTMLElement {
         white-space: nowrap;
       }
 
-      /* Container positions the grid and the overlay SVG on top of each other */
+      /* CSS Grid stacking: overlay and grid occupy the same cell */
       .flow-container {
-        position: relative;
+        display: grid;
         padding: 8px 16px 16px;
       }
+      .flow-container > * {
+        grid-area: 1 / 1;
+      }
 
-      /* 2×2 node grid */
+      /* 2×2 node grid — on top of the flow overlay */
       .flow-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 10px;
-        position: relative;
         z-index: 1;
       }
 
-      /* Flow lines overlaid on the grid */
+      /* Flow lines behind the node boxes */
       .flow-overlay {
-        position: absolute;
-        top: 8px;
-        left: 16px;
-        right: 16px;
-        bottom: 16px;
+        width: 100%;
+        height: 100%;
         z-index: 0;
         pointer-events: none;
       }
@@ -399,7 +385,6 @@ class FoxESSOverviewCard extends HTMLElement {
         padding: 12px;
         text-align: center;
         transition: opacity 0.3s;
-        background-clip: padding-box;
       }
       .node.inactive {
         opacity: 0.45;
