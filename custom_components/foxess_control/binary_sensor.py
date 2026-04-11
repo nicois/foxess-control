@@ -11,6 +11,7 @@ from homeassistant.components.binary_sensor import (
 )
 
 from .const import DOMAIN
+from .sensor import _device_info
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -38,12 +39,14 @@ class SmartChargeActiveSensor(BinarySensorEntity):
     """Binary sensor that is on while a smart charge session is active."""
 
     _attr_device_class = BinarySensorDeviceClass.RUNNING
+    _attr_has_entity_name = True
     _attr_should_poll = True
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_smart_charge_active"
-        self._attr_name = "FoxESS Smart Charge Active"
+        self._attr_name = "Smart Charge Active"
+        self._attr_device_info = _device_info(entry)
         self.hass = hass
 
     @property
@@ -78,12 +81,14 @@ class SmartDischargeActiveSensor(BinarySensorEntity):
     """Binary sensor that is on while a smart discharge session is active."""
 
     _attr_device_class = BinarySensorDeviceClass.RUNNING
+    _attr_has_entity_name = True
     _attr_should_poll = True
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_smart_discharge_active"
-        self._attr_name = "FoxESS Smart Discharge Active"
+        self._attr_name = "Smart Discharge Active"
+        self._attr_device_info = _device_info(entry)
         self.hass = hass
 
     @property

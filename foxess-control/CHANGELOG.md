@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.1-beta.1
+
+- **Shorter entity names:** use `has_entity_name` so entity friendly names are compact (e.g. "FoxESS Battery SoC" instead of "FoxESS Inverter (serial) Battery SoC"); device views show just the suffix
+- Binary sensors now grouped under the FoxESS device
+
 ## 0.14.0
 
 - **Smart discharge power pacing:** discharge rate is calculated to reach `min_soc` at the end of the window, recalculated every 5 minutes — mirrors smart charge behaviour. House load assists discharge (subtracted from required power). User-specified `power` acts as a ceiling; pacing still operates below it. Requires `battery_capacity_kwh` in options; falls back to max power without it.

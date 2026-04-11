@@ -150,7 +150,7 @@ class TestInverterOverrideStatusSensor:
 
     def test_name(self) -> None:
         sensor = InverterOverrideStatusSensor(_make_hass(), _make_entry())
-        assert sensor.name == "FoxESS Status"
+        assert sensor.name == "Status"
 
     def test_attributes_charging(self) -> None:
         hass = _make_hass(smart_charge_state=_charge_state())
@@ -931,7 +931,7 @@ class TestFoxESSWorkModeSensor:
     def test_name(self) -> None:
         coordinator = self._make_coordinator({})
         sensor = FoxESSWorkModeSensor(coordinator, _make_entry())
-        assert sensor.name == "FoxESS Work Mode"
+        assert sensor.name == "Work Mode"
 
 
 # ---------------------------------------------------------------------------

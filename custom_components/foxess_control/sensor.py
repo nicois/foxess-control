@@ -16,7 +16,6 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_BATTERY_CAPACITY_KWH,
-    CONF_DEVICE_SERIAL,
     CONF_SMART_HEADROOM,
     DEFAULT_SMART_HEADROOM,
     DOMAIN,
@@ -46,12 +45,9 @@ _FORECAST_STEP = datetime.timedelta(minutes=5)
 
 def _device_info(entry: ConfigEntry) -> DeviceInfo:
     """Build DeviceInfo so all sensors are grouped under one device."""
-    serial = entry.options.get(CONF_DEVICE_SERIAL) or entry.data.get(
-        CONF_DEVICE_SERIAL, ""
-    )
     return DeviceInfo(
         identifiers={(DOMAIN, entry.entry_id)},
-        name=f"FoxESS Inverter ({serial})" if serial else "FoxESS Inverter",
+        name="FoxESS",
         manufacturer="FoxESS",
     )
 
@@ -467,12 +463,13 @@ def _get_discharge_state(hass: HomeAssistant) -> dict[str, Any] | None:
 class InverterOverrideStatusSensor(SensorEntity):
     """Compact status for Android Auto: icon + short text."""
 
+    _attr_has_entity_name = True
     _attr_should_poll = True
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_override_status"
-        self._attr_name = "FoxESS Status"
+        self._attr_name = "Status"
         self._attr_device_info = _device_info(entry)
         self.hass = hass
 
@@ -560,12 +557,13 @@ class InverterOverrideStatusSensor(SensorEntity):
 class SmartOperationsOverviewSensor(SensorEntity):
     """Dashboard sensor providing a rich overview of smart operations."""
 
+    _attr_has_entity_name = True
     _attr_should_poll = True
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_smart_operations"
-        self._attr_name = "FoxESS Smart Operations"
+        self._attr_name = "Smart Operations"
         self._attr_device_info = _device_info(entry)
         self.hass = hass
 
@@ -674,6 +672,7 @@ class SmartOperationsOverviewSensor(SensorEntity):
 class ChargePowerSensor(SensorEntity):
     """Current smart charge power."""
 
+    _attr_has_entity_name = True
     _attr_should_poll = True
     _attr_icon = _ICON_POWER
     _attr_native_unit_of_measurement = "W"
@@ -681,7 +680,7 @@ class ChargePowerSensor(SensorEntity):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_charge_power"
-        self._attr_name = "FoxESS Charge Power"
+        self._attr_name = "Charge Power"
         self._attr_device_info = _device_info(entry)
         self.hass = hass
 
@@ -708,13 +707,14 @@ class ChargePowerSensor(SensorEntity):
 class ChargeWindowSensor(SensorEntity):
     """Smart charge time window."""
 
+    _attr_has_entity_name = True
     _attr_should_poll = True
     _attr_icon = _ICON_CLOCK
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_charge_window"
-        self._attr_name = "FoxESS Charge Window"
+        self._attr_name = "Charge Window"
         self._attr_device_info = _device_info(entry)
         self.hass = hass
 
@@ -729,13 +729,14 @@ class ChargeWindowSensor(SensorEntity):
 class ChargeRemainingSensor(SensorEntity):
     """Time remaining in the smart charge window."""
 
+    _attr_has_entity_name = True
     _attr_should_poll = True
     _attr_icon = _ICON_TIMER
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_charge_remaining"
-        self._attr_name = "FoxESS Charge Remaining"
+        self._attr_name = "Charge Remaining"
         self._attr_device_info = _device_info(entry)
         self.hass = hass
 
@@ -750,6 +751,7 @@ class ChargeRemainingSensor(SensorEntity):
 class DischargePowerSensor(SensorEntity):
     """Current smart discharge power."""
 
+    _attr_has_entity_name = True
     _attr_should_poll = True
     _attr_icon = _ICON_POWER
     _attr_native_unit_of_measurement = "W"
@@ -757,7 +759,7 @@ class DischargePowerSensor(SensorEntity):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_discharge_power"
-        self._attr_name = "FoxESS Discharge Power"
+        self._attr_name = "Discharge Power"
         self._attr_device_info = _device_info(entry)
         self.hass = hass
 
@@ -786,13 +788,14 @@ class DischargePowerSensor(SensorEntity):
 class DischargeWindowSensor(SensorEntity):
     """Smart discharge time window."""
 
+    _attr_has_entity_name = True
     _attr_should_poll = True
     _attr_icon = _ICON_CLOCK
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_discharge_window"
-        self._attr_name = "FoxESS Discharge Window"
+        self._attr_name = "Discharge Window"
         self._attr_device_info = _device_info(entry)
         self.hass = hass
 
@@ -807,13 +810,14 @@ class DischargeWindowSensor(SensorEntity):
 class DischargeRemainingSensor(SensorEntity):
     """Time remaining in the smart discharge window."""
 
+    _attr_has_entity_name = True
     _attr_should_poll = True
     _attr_icon = _ICON_TIMER
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_discharge_remaining"
-        self._attr_name = "FoxESS Discharge Remaining"
+        self._attr_name = "Discharge Remaining"
         self._attr_device_info = _device_info(entry)
         self.hass = hass
 
@@ -838,6 +842,7 @@ class BatteryForecastSensor(SensorEntity):
           );
     """
 
+    _attr_has_entity_name = True
     _attr_should_poll = True
     _attr_icon = _ICON_FORECAST
     _attr_native_unit_of_measurement = "%"
@@ -845,7 +850,7 @@ class BatteryForecastSensor(SensorEntity):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_battery_forecast"
-        self._attr_name = "FoxESS Battery Forecast"
+        self._attr_name = "Battery Forecast"
         self._attr_device_info = _device_info(entry)
         self.hass = hass
 
@@ -907,7 +912,7 @@ class _PolledSensorDescription:
 POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     _PolledSensorDescription(
         "SoC",
-        "FoxESS Battery SoC",
+        "Battery SoC",
         "battery_soc",
         SensorDeviceClass.BATTERY,
         "%",
@@ -916,7 +921,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "batChargePower",
-        "FoxESS Charge Rate",
+        "Charge Rate",
         "bat_charge_power",
         SensorDeviceClass.POWER,
         "kW",
@@ -925,7 +930,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "batDischargePower",
-        "FoxESS Discharge Rate",
+        "Discharge Rate",
         "bat_discharge_power",
         SensorDeviceClass.POWER,
         "kW",
@@ -934,7 +939,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "loadsPower",
-        "FoxESS House Load",
+        "House Load",
         "loads_power",
         SensorDeviceClass.POWER,
         "kW",
@@ -943,7 +948,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "pvPower",
-        "FoxESS Solar Power",
+        "Solar Power",
         "pv_power",
         SensorDeviceClass.POWER,
         "kW",
@@ -952,7 +957,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "ResidualEnergy",
-        "FoxESS Residual Energy",
+        "Residual Energy",
         "residual_energy",
         SensorDeviceClass.ENERGY_STORAGE,
         "kWh",
@@ -961,7 +966,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "batTemperature",
-        "FoxESS Battery Temperature",
+        "Battery Temperature",
         "bat_temperature",
         SensorDeviceClass.TEMPERATURE,
         "°C",
@@ -970,7 +975,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "gridConsumptionPower",
-        "FoxESS Grid Consumption",
+        "Grid Consumption",
         "grid_consumption",
         SensorDeviceClass.POWER,
         "kW",
@@ -979,7 +984,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "feedinPower",
-        "FoxESS Grid Feed-in",
+        "Grid Feed-in",
         "feedin_power",
         SensorDeviceClass.POWER,
         "kW",
@@ -988,7 +993,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "generationPower",
-        "FoxESS Generation",
+        "Generation",
         "generation_power",
         SensorDeviceClass.POWER,
         "kW",
@@ -997,7 +1002,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "batVolt",
-        "FoxESS Battery Voltage",
+        "Battery Voltage",
         "bat_volt",
         SensorDeviceClass.VOLTAGE,
         "V",
@@ -1006,7 +1011,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "batCurrent",
-        "FoxESS Battery Current",
+        "Battery Current",
         "bat_current",
         SensorDeviceClass.CURRENT,
         "A",
@@ -1015,7 +1020,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "pv1Power",
-        "FoxESS PV1 Power",
+        "PV1 Power",
         "pv1_power",
         SensorDeviceClass.POWER,
         "kW",
@@ -1024,7 +1029,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "pv2Power",
-        "FoxESS PV2 Power",
+        "PV2 Power",
         "pv2_power",
         SensorDeviceClass.POWER,
         "kW",
@@ -1033,7 +1038,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "ambientTemperation",
-        "FoxESS Ambient Temperature",
+        "Ambient Temperature",
         "ambient_temp",
         SensorDeviceClass.TEMPERATURE,
         "°C",
@@ -1042,7 +1047,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "invTemperation",
-        "FoxESS Inverter Temperature",
+        "Inverter Temperature",
         "inverter_temp",
         SensorDeviceClass.TEMPERATURE,
         "°C",
@@ -1052,7 +1057,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     # Cumulative energy counters (lifetime kWh)
     _PolledSensorDescription(
         "feedin",
-        "FoxESS Grid Feed-in Energy",
+        "Grid Feed-in Energy",
         "feedin_energy",
         SensorDeviceClass.ENERGY,
         "kWh",
@@ -1061,7 +1066,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "gridConsumption",
-        "FoxESS Grid Consumption Energy",
+        "Grid Consumption Energy",
         "grid_consumption_energy",
         SensorDeviceClass.ENERGY,
         "kWh",
@@ -1070,7 +1075,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "generation",
-        "FoxESS Solar Generation Energy",
+        "Solar Generation Energy",
         "generation_energy",
         SensorDeviceClass.ENERGY,
         "kWh",
@@ -1079,7 +1084,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "chargeEnergyToTal",
-        "FoxESS Battery Charge Energy",
+        "Battery Charge Energy",
         "charge_energy_total",
         SensorDeviceClass.ENERGY,
         "kWh",
@@ -1088,7 +1093,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "dischargeEnergyToTal",
-        "FoxESS Battery Discharge Energy",
+        "Battery Discharge Energy",
         "discharge_energy_total",
         SensorDeviceClass.ENERGY,
         "kWh",
@@ -1097,7 +1102,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "loads",
-        "FoxESS House Load Energy",
+        "House Load Energy",
         "loads_energy",
         SensorDeviceClass.ENERGY,
         "kWh",
@@ -1106,7 +1111,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "energyThroughput",
-        "FoxESS Battery Throughput",
+        "Battery Throughput",
         "energy_throughput",
         SensorDeviceClass.ENERGY,
         "kWh",
@@ -1116,7 +1121,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     # Grid connection
     _PolledSensorDescription(
         "meterPower",
-        "FoxESS Grid Meter Power",
+        "Grid Meter Power",
         "meter_power",
         SensorDeviceClass.POWER,
         "kW",
@@ -1125,7 +1130,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "RVolt",
-        "FoxESS Grid Voltage",
+        "Grid Voltage",
         "grid_voltage",
         SensorDeviceClass.VOLTAGE,
         "V",
@@ -1134,7 +1139,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "RCurrent",
-        "FoxESS Grid Current",
+        "Grid Current",
         "grid_current",
         SensorDeviceClass.CURRENT,
         "A",
@@ -1143,7 +1148,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     ),
     _PolledSensorDescription(
         "RFreq",
-        "FoxESS Grid Frequency",
+        "Grid Frequency",
         "grid_frequency",
         None,
         "Hz",
@@ -1153,7 +1158,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
     # EPS / backup
     _PolledSensorDescription(
         "epsPower",
-        "FoxESS EPS Power",
+        "EPS Power",
         "eps_power",
         SensorDeviceClass.POWER,
         "kW",
@@ -1166,7 +1171,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
 class FoxESSPolledSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity):
     """Sensor backed by the DataUpdateCoordinator."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -1200,7 +1205,7 @@ class FoxESSPolledSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity)
 class FoxESSWorkModeSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity):
     """Sensor showing the inverter's current work mode."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_icon = "mdi:state-machine"
 
     def __init__(
@@ -1210,7 +1215,7 @@ class FoxESSWorkModeSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntit
     ) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_work_mode"
-        self._attr_name = "FoxESS Work Mode"
+        self._attr_name = "Work Mode"
         self._attr_device_info = _device_info(entry)
 
     @property
