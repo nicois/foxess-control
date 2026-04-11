@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import uuid
 from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
@@ -952,11 +953,19 @@ def _setup_smart_charge_listeners(
     state = hass.data[DOMAIN]["_smart_charge_state"]
     end: datetime.datetime = state["end"]
     end_utc = dt_util.as_utc(end)
+    my_session_id: str = state["session_id"]
 
     async def _remove_charge_override() -> None:
         await _async_remove_override(hass, WorkMode.FORCE_CHARGE)
 
+    def _is_my_session() -> bool:
+        """Return True if our session is still the active one."""
+        cur = hass.data[DOMAIN].get("_smart_charge_state")
+        return cur is not None and cur.get("session_id") == my_session_id
+
     async def _on_charge_timer_expire(_now: datetime.datetime) -> None:
+        if not _is_my_session():
+            return
         _LOGGER.info("Smart charge: window ended, removing override")
         charging_started = (
             hass.data[DOMAIN]
@@ -971,7 +980,7 @@ def _setup_smart_charge_listeners(
         _now: datetime.datetime,
     ) -> None:
         cur_state = hass.data[DOMAIN].get("_smart_charge_state")
-        if cur_state is None:
+        if cur_state is None or cur_state.get("session_id") != my_session_id:
             return
 
         cur_soc = _get_current_soc(hass)
@@ -985,7 +994,7 @@ def _setup_smart_charge_listeners(
                     cur_state["soc_unavailable_count"],
                 )
                 charging_started = cur_state.get("charging_started", False)
-                if hass.data[DOMAIN].get("_smart_charge_state") is not None:
+                if _is_my_session():
                     _cancel_smart_charge(hass)
                     if charging_started:
                         await _remove_charge_override()
@@ -1017,7 +1026,7 @@ def _setup_smart_charge_listeners(
                 cur_soc,
                 cur_state["target_soc"],
             )
-            if hass.data[DOMAIN].get("_smart_charge_state") is not None:
+            if _is_my_session():
                 _cancel_smart_charge(hass)
             return
         if cur_state.get("soc_above_target_count", 0) > 0:
@@ -1035,7 +1044,7 @@ def _setup_smart_charge_listeners(
         if remaining <= 0:
             _LOGGER.info("Smart charge: window expired during adjustment, reverting")
             charging_started = cur_state.get("charging_started", False)
-            if hass.data[DOMAIN].get("_smart_charge_state") is not None:
+            if _is_my_session():
                 _cancel_smart_charge(hass)
                 if charging_started:
                     await _remove_charge_override()
@@ -1135,10 +1144,10 @@ def _setup_smart_charge_listeners(
                     return
                 await hass.async_add_executor_job(inverter.set_schedule, groups)
 
-            # Re-check state after await — may have been cancelled concurrently
-            cur_state = hass.data[DOMAIN].get("_smart_charge_state")
-            if cur_state is None:
+            # Re-check state after await — may have been replaced concurrently
+            if not _is_my_session():
                 return
+            cur_state = hass.data[DOMAIN]["_smart_charge_state"]
 
             cur_state["groups"] = groups
             cur_state["last_power_w"] = new_power
@@ -1262,8 +1271,8 @@ def _setup_smart_charge_listeners(
             if groups:
                 cur_state["groups"] = groups
                 await hass.async_add_executor_job(inverter.set_schedule, groups)
-            # Re-check state after await — may have been cancelled concurrently
-            if hass.data[DOMAIN].get("_smart_charge_state") is None:
+            # Re-check state after await — may have been replaced concurrently
+            if not _is_my_session():
                 return
         await _save_session(
             hass,
@@ -1292,11 +1301,19 @@ def _setup_smart_discharge_listeners(
     state = hass.data[DOMAIN]["_smart_discharge_state"]
     end: datetime.datetime = state["end"]
     end_utc = dt_util.as_utc(end)
+    my_session_id: str = state["session_id"]
 
     async def _remove_discharge_override() -> None:
         await _async_remove_override(hass, WorkMode.FORCE_DISCHARGE)
 
+    def _is_my_session() -> bool:
+        """Return True if our session is still the active one."""
+        cur = hass.data[DOMAIN].get("_smart_discharge_state")
+        return cur is not None and cur.get("session_id") == my_session_id
+
     async def _on_timer_expire(_now: datetime.datetime) -> None:
+        if not _is_my_session():
+            return
         _LOGGER.info("Smart discharge: window ended, removing override")
         _cancel_smart_discharge(hass)
         await _remove_discharge_override()
@@ -1304,7 +1321,7 @@ def _setup_smart_discharge_listeners(
     async def _check_discharge_soc(_now: datetime.datetime) -> None:
         """Periodic SoC and feed-in energy check from coordinator data."""
         cur_state = hass.data[DOMAIN].get("_smart_discharge_state")
-        if cur_state is None:
+        if cur_state is None or cur_state.get("session_id") != my_session_id:
             return
 
         # --- Check feed-in energy limit using cumulative counter ---
@@ -1336,7 +1353,7 @@ def _setup_smart_discharge_listeners(
                             exported,
                             feedin_limit,
                         )
-                        if hass.data[DOMAIN].get("_smart_discharge_state") is not None:
+                        if _is_my_session():
                             _cancel_smart_discharge(hass)
                             await _remove_discharge_override()
                         return
@@ -1381,16 +1398,14 @@ def _setup_smart_discharge_listeners(
                         async def _early_stop(
                             _now: datetime.datetime,
                         ) -> None:
+                            if not _is_my_session():
+                                return
                             _LOGGER.info(
                                 "Smart discharge: early stop triggered "
                                 "(feed-in target ~reached)"
                             )
-                            if (
-                                hass.data[DOMAIN].get("_smart_discharge_state")
-                                is not None
-                            ):
-                                _cancel_smart_discharge(hass)
-                                await _remove_discharge_override()
+                            _cancel_smart_discharge(hass)
+                            await _remove_discharge_override()
 
                         unsub = async_track_point_in_time(hass, _early_stop, stop_at)
                         hass.data[DOMAIN].setdefault(
@@ -1445,10 +1460,10 @@ def _setup_smart_discharge_listeners(
                             inverter.set_schedule,
                             cur_state["groups"],
                         )
-                    # Re-check state after await
-                    cur_state = hass.data[DOMAIN].get("_smart_discharge_state")
-                    if cur_state is None:
+                    # Re-check state after await — may have been replaced
+                    if not _is_my_session():
                         return
+                    cur_state = hass.data[DOMAIN]["_smart_discharge_state"]
                     await _save_session(
                         hass,
                         "smart_discharge",
@@ -1475,7 +1490,7 @@ def _setup_smart_discharge_listeners(
                 soc_value,
                 cur_state["min_soc"],
             )
-            if hass.data[DOMAIN].get("_smart_discharge_state") is not None:
+            if _is_my_session():
                 _cancel_smart_discharge(hass)
                 await _remove_discharge_override()
         else:
@@ -1610,6 +1625,7 @@ async def _recover_charge_session(
             last_power = max_power
 
         hass.data[DOMAIN]["_smart_charge_state"] = {
+            "session_id": str(uuid.uuid4()),
             "groups": [],
             "start": start,
             "end": end,
@@ -1736,6 +1752,7 @@ async def _recover_discharge_session(
                 )
 
         hass.data[DOMAIN]["_smart_discharge_state"] = {
+            "session_id": str(uuid.uuid4()),
             "groups": [],
             "start": start,
             "end": end,
@@ -2017,6 +2034,13 @@ def _register_services(hass: HomeAssistant) -> None:
     async def handle_clear_overrides(call: ServiceCall) -> None:
         mode_filter: str | None = call.data.get("mode")
 
+        # Cancel smart listeners BEFORE any awaits to prevent old callbacks
+        # from racing with the override removal.
+        if mode_filter is None or mode_filter == WorkMode.FORCE_CHARGE.value:
+            _cancel_smart_charge(hass)
+        if mode_filter is None or mode_filter == WorkMode.FORCE_DISCHARGE.value:
+            _cancel_smart_discharge(hass)
+
         if _is_entity_mode(hass):
             _LOGGER.info("Clearing overrides via entity backend, setting SelfUse")
             await _apply_mode_via_entities(hass, WorkMode.SELF_USE)
@@ -2047,12 +2071,6 @@ def _register_services(hass: HomeAssistant) -> None:
             else:
                 await hass.async_add_executor_job(inverter.self_use, min_soc_on_grid)
 
-        # Cancel smart listeners that correspond to cleared modes
-        if mode_filter is None or mode_filter == WorkMode.FORCE_CHARGE.value:
-            _cancel_smart_charge(hass)
-        if mode_filter is None or mode_filter == WorkMode.FORCE_DISCHARGE.value:
-            _cancel_smart_discharge(hass)
-
     async def handle_force_charge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
         power: int | None = call.data.get("power")
@@ -2068,6 +2086,10 @@ def _register_services(hass: HomeAssistant) -> None:
             end.minute,
             f"{power}W" if power else "max",
         )
+
+        # Cancel smart charge BEFORE any awaits to prevent old callbacks
+        # from racing with the schedule change.
+        _cancel_smart_charge(hass)
 
         if _is_entity_mode(hass):
             await _apply_mode_via_entities(hass, WorkMode.FORCE_CHARGE, power)
@@ -2094,7 +2116,6 @@ def _register_services(hass: HomeAssistant) -> None:
                 force,
             )
             await hass.async_add_executor_job(inverter.set_schedule, groups)
-        _cancel_smart_charge(hass)
 
     async def handle_force_discharge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
@@ -2111,6 +2132,10 @@ def _register_services(hass: HomeAssistant) -> None:
             end.minute,
             f"{power}W" if power else "max",
         )
+
+        # Cancel smart discharge BEFORE any awaits to prevent old callbacks
+        # from racing with the schedule change.
+        _cancel_smart_discharge(hass)
 
         if _is_entity_mode(hass):
             api_min_soc = _get_api_min_soc(hass)
@@ -2143,7 +2168,6 @@ def _register_services(hass: HomeAssistant) -> None:
                 force,
             )
             await hass.async_add_executor_job(inverter.set_schedule, groups)
-        _cancel_smart_discharge(hass)
 
     async def handle_feedin(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
@@ -2293,6 +2317,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
         # Store state for binary sensor and diagnostics
         hass.data[DOMAIN]["_smart_discharge_state"] = {
+            "session_id": str(uuid.uuid4()),
             "groups": groups,
             "start": start,
             "end": end,
@@ -2375,6 +2400,13 @@ def _register_services(hass: HomeAssistant) -> None:
                 WorkMode.FORCE_CHARGE,
                 force,
             )
+
+        # Cancel previous sessions before any schedule mutation to prevent
+        # old callbacks from racing with the new session's setup.
+        _cancel_smart_charge(hass)
+        if hass.data[DOMAIN].get("_smart_discharge_state") is not None:
+            _LOGGER.info("Smart charge: cancelling active smart discharge session")
+            _cancel_smart_discharge(hass)
 
         # Decide whether to start charging now or defer
         now = dt_util.now()
@@ -2464,18 +2496,11 @@ def _register_services(hass: HomeAssistant) -> None:
                     initial_groups,
                 )
 
-        # Cancel any previous smart charge listeners
-        _cancel_smart_charge(hass)
-
-        # Cancel any active smart discharge — the two sessions would conflict
-        if hass.data[DOMAIN].get("_smart_discharge_state") is not None:
-            _LOGGER.info("Smart charge: cancelling active smart discharge session")
-            _cancel_smart_discharge(hass)
-
         min_power_change = _get_min_power_change(hass)
 
         # Store state for periodic adjustments
         hass.data[DOMAIN]["_smart_charge_state"] = {
+            "session_id": str(uuid.uuid4()),
             "groups": initial_groups,
             "start": start,
             "end": end,
