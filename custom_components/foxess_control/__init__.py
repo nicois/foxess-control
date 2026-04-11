@@ -1994,21 +1994,28 @@ def _build_entity_map(opts: Any) -> dict[str, str]:
     return mapping
 
 
-_CARD_URL = f"/{DOMAIN}/foxess-control-card.js"
+_CARD_URLS = [
+    f"/{DOMAIN}/foxess-control-card.js",
+    f"/{DOMAIN}/foxess-overview-card.js",
+]
 
 
 async def _register_card_frontend(hass: HomeAssistant) -> None:
-    """Serve the custom Lovelace card JS and register it as a resource."""
+    """Serve the custom Lovelace card JS files and register them as resources."""
     import json
     from pathlib import Path
 
     from homeassistant.components.http import StaticPathConfig
 
     card_dir = Path(__file__).parent
-    card_path = card_dir / "www" / "foxess-control-card.js"
-    await hass.http.async_register_static_paths(
-        [StaticPathConfig(_CARD_URL, str(card_path), cache_headers=True)]
-    )
+    static_paths = []
+    for card_url in _CARD_URLS:
+        filename = card_url.rsplit("/", 1)[-1]
+        card_path = card_dir / "www" / filename
+        static_paths.append(
+            StaticPathConfig(card_url, str(card_path), cache_headers=True)
+        )
+    await hass.http.async_register_static_paths(static_paths)
 
     # Read version from manifest for cache-busting query parameter.
     try:
@@ -2016,9 +2023,8 @@ async def _register_card_frontend(hass: HomeAssistant) -> None:
         version = manifest.get("version", "0")
     except Exception:
         version = "0"
-    versioned_url = f"{_CARD_URL}?v={version}"
 
-    # Auto-register as a Lovelace resource (storage mode only).
+    # Auto-register as Lovelace resources (storage mode only).
     try:
         import importlib
 
@@ -2027,31 +2033,32 @@ async def _register_card_frontend(hass: HomeAssistant) -> None:
 
         ll_data = hass.data.get(LOVELACE_DATA)
         if ll_data is not None and hasattr(ll_data.resources, "async_create_item"):
-            # Remove any existing registration (may have old version query)
-            existing = [
-                r
-                for r in ll_data.resources.async_items()
-                if _CARD_URL in r.get("url", "")
-            ]
-            for r in existing:
-                if r.get("url") != versioned_url:
-                    await ll_data.resources.async_delete_item(r["id"])
-            # Register with versioned URL if not already present
-            current = [
-                r
-                for r in ll_data.resources.async_items()
-                if r.get("url") == versioned_url
-            ]
-            if not current:
-                await ll_data.resources.async_create_item(
-                    {"res_type": "module", "url": versioned_url}
-                )
-                _LOGGER.info("Registered Lovelace resource: %s", versioned_url)
+            for card_url in _CARD_URLS:
+                versioned_url = f"{card_url}?v={version}"
+                # Remove any existing registration (may have old version query)
+                existing = [
+                    r
+                    for r in ll_data.resources.async_items()
+                    if card_url in r.get("url", "")
+                ]
+                for r in existing:
+                    if r.get("url") != versioned_url:
+                        await ll_data.resources.async_delete_item(r["id"])
+                # Register with versioned URL if not already present
+                current = [
+                    r
+                    for r in ll_data.resources.async_items()
+                    if r.get("url") == versioned_url
+                ]
+                if not current:
+                    await ll_data.resources.async_create_item(
+                        {"res_type": "module", "url": versioned_url}
+                    )
+                    _LOGGER.info("Registered Lovelace resource: %s", versioned_url)
     except Exception:
         _LOGGER.debug(
-            "Could not auto-register Lovelace resource; "
-            "add %s manually as a module resource",
-            _CARD_URL,
+            "Could not auto-register Lovelace resources; "
+            "add them manually as module resources",
             exc_info=True,
         )
 

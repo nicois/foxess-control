@@ -475,11 +475,44 @@ forecast_entity: sensor.foxess_battery_forecast
 soc_entity: sensor.foxess_battery_soc
 ```
 
-> **YAML mode dashboards:** If you use YAML-mode Lovelace (not the default storage mode), add the resource manually to your `configuration.yaml`:
+### Overview card
+
+A second built-in card shows live energy flows between solar, battery, grid and house in a 2×2 layout with animated flow lines.
+
+```yaml
+type: custom:foxess-overview-card
+```
+
+No configuration required — all entities are auto-discovered. The card shows:
+
+- **Solar**: Total solar power with PV1/PV2 breakdown
+- **House**: Household consumption
+- **Grid**: Import/export power with voltage and frequency
+- **Battery**: SoC gauge, charge/discharge rate, temperature, residual energy
+- **Flow diagram**: Animated dots showing active energy flows through a centre hub
+- **Work mode**: Current inverter work mode badge in the header
+
+To override the default entity IDs:
+
+```yaml
+type: custom:foxess-overview-card
+solar_entity: sensor.foxess_solar_power
+house_entity: sensor.foxess_house_load
+grid_import_entity: sensor.foxess_grid_consumption
+grid_export_entity: sensor.foxess_grid_feed_in
+battery_charge_entity: sensor.foxess_charge_rate
+battery_discharge_entity: sensor.foxess_discharge_rate
+soc_entity: sensor.foxess_battery_soc
+work_mode_entity: sensor.foxess_work_mode
+```
+
+> **YAML mode dashboards:** If you use YAML-mode Lovelace (not the default storage mode), add the resources manually to your `configuration.yaml`:
 > ```yaml
 > lovelace:
 >   resources:
 >     - url: /foxess_control/foxess-control-card.js
+>       type: module
+>     - url: /foxess_control/foxess-overview-card.js
 >       type: module
 > ```
 

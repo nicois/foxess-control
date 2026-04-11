@@ -3,6 +3,7 @@
 ## 0.14.1
 
 - **Shorter entity names:** use `has_entity_name` so entity friendly names are compact (e.g. "FoxESS Battery SoC" instead of "FoxESS Inverter (serial) Battery SoC"); device views show just the suffix
+- **Overview card:** new built-in Lovelace card showing live energy flows between solar, battery, grid and house with animated flow diagram, power values and inverter stats
 - Binary sensors now grouped under the FoxESS device
 - Log total feed-in energy when smart discharge session ends
 
