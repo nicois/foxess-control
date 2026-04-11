@@ -1402,10 +1402,23 @@ def _setup_smart_discharge_listeners(
         cur = hass.data[DOMAIN].get("_smart_discharge_state")
         return cur is not None and cur.get("session_id") == my_session_id
 
+    def _log_session_end(reason: str) -> None:
+        """Log a summary when the discharge session ends."""
+        cur = hass.data[DOMAIN].get("_smart_discharge_state")
+        feedin_str = ""
+        if cur is not None:
+            feedin_start = cur.get("feedin_start_kwh")
+            if feedin_start is not None:
+                feedin_now = _get_feedin_energy_kwh(hass)
+                if feedin_now is not None:
+                    total = feedin_now - feedin_start
+                    feedin_str = f", fed in {total:.2f} kWh"
+        _LOGGER.info("Smart discharge: %s%s", reason, feedin_str)
+
     async def _on_timer_expire(_now: datetime.datetime) -> None:
         if not _is_my_session():
             return
-        _LOGGER.info("Smart discharge: window ended, removing override")
+        _log_session_end("window ended, removing override")
         _cancel_smart_discharge(hass)
         await _remove_discharge_override()
 
@@ -1440,13 +1453,12 @@ def _setup_smart_discharge_listeners(
                 else:
                     exported = feedin_now - feedin_start
                     if exported >= feedin_limit:
-                        _LOGGER.info(
-                            "Smart discharge: feed-in energy %.2f kWh "
-                            "reached limit %.2f kWh, removing override",
-                            exported,
-                            feedin_limit,
-                        )
                         if _is_my_session():
+                            _log_session_end(
+                                f"feed-in energy {exported:.2f} kWh "
+                                f"reached limit {feedin_limit:.2f} kWh, "
+                                "removing override"
+                            )
                             _cancel_smart_discharge(hass)
                             await _remove_discharge_override()
                         return
@@ -1494,9 +1506,8 @@ def _setup_smart_discharge_listeners(
                         ) -> None:
                             if not _is_my_session():
                                 return
-                            _LOGGER.info(
-                                "Smart discharge: early stop triggered "
-                                "(feed-in target ~reached)"
+                            _log_session_end(
+                                "early stop triggered (feed-in target ~reached)"
                             )
                             _cancel_smart_discharge(hass)
                             await _remove_discharge_override()
@@ -1588,13 +1599,11 @@ def _setup_smart_discharge_listeners(
                     cur_state["soc_below_min_count"],
                 )
                 return
-            _LOGGER.info(
-                "Smart discharge: SoC %.1f%% confirmed at/below "
-                "threshold %d%%, removing override",
-                soc_value,
-                cur_state["min_soc"],
-            )
             if _is_my_session():
+                _log_session_end(
+                    f"SoC {soc_value:.1f}% confirmed at/below "
+                    f"threshold {cur_state['min_soc']}%, removing override"
+                )
                 _cancel_smart_discharge(hass)
                 await _remove_discharge_override()
         else:
