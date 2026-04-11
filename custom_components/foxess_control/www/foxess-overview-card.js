@@ -6,7 +6,8 @@
  *
  * Usage:
  *   type: custom:foxess-overview-card
- *   # All entities auto-discovered; optional overrides:
+ *   # All entities auto-discovered from the foxess_control integration.
+ *   # Override any entity manually if needed:
  *   # solar_entity: sensor.foxess_solar_power
  *   # house_entity: sensor.foxess_house_load
  *   # grid_import_entity: sensor.foxess_grid_consumption
@@ -23,24 +24,25 @@
  *   # residual_entity: sensor.foxess_residual_energy
  */
 
-const OVERVIEW_VERSION = "1.1.0";
+const OVERVIEW_VERSION = "1.2.0";
 
-// Mapping: config key → list of candidate entity_id suffixes to try.
-const _ENTITY_CANDIDATES = {
-  solar_entity:             ["solar_power", "pv_power"],
-  house_entity:             ["house_load", "loads_power"],
-  grid_import_entity:       ["grid_consumption"],
-  grid_export_entity:       ["grid_feed_in", "feedin_power"],
-  battery_charge_entity:    ["charge_rate", "bat_charge_power"],
-  battery_discharge_entity: ["discharge_rate", "bat_discharge_power"],
-  soc_entity:               ["battery_soc"],
-  work_mode_entity:         ["work_mode"],
-  pv1_entity:               ["pv1_power"],
-  pv2_entity:               ["pv2_power"],
-  grid_voltage_entity:      ["grid_voltage"],
-  grid_frequency_entity:    ["grid_frequency"],
-  bat_temp_entity:          ["battery_temperature", "bat_temperature"],
-  residual_entity:          ["residual_energy"],
+// Config key → unique_id suffix used by the foxess_control integration.
+// Used to look up actual entity_ids from the HA entity registry.
+const _UNIQUE_ID_SUFFIXES = {
+  solar_entity:             "pv_power",
+  house_entity:             "loads_power",
+  grid_import_entity:       "grid_consumption",
+  grid_export_entity:       "feedin_power",
+  battery_charge_entity:    "bat_charge_power",
+  battery_discharge_entity: "bat_discharge_power",
+  soc_entity:               "battery_soc",
+  work_mode_entity:         "work_mode",
+  pv1_entity:               "pv1_power",
+  pv2_entity:               "pv2_power",
+  grid_voltage_entity:      "grid_voltage",
+  grid_frequency_entity:    "grid_frequency",
+  bat_temp_entity:          "bat_temperature",
+  residual_entity:          "residual_energy",
 };
 
 class FoxESSOverviewCard extends HTMLElement {
@@ -49,6 +51,7 @@ class FoxESSOverviewCard extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._userConfig = {};
     this._hass = null;
+    this._registryMap = null; // unique_id suffix → entity_id
   }
 
   setConfig(config) {
@@ -57,6 +60,7 @@ class FoxESSOverviewCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    this._buildRegistryMap();
     this._render();
   }
 
@@ -68,19 +72,48 @@ class FoxESSOverviewCard extends HTMLElement {
     return {};
   }
 
-  // -- Helpers ---------------------------------------------------------------
+  // -- Entity discovery -------------------------------------------------------
 
-  /** Resolve a config key to an entity_id by scanning hass.states. */
-  _resolve(key) {
-    if (this._userConfig[key]) return this._userConfig[key];
-    const suffixes = _ENTITY_CANDIDATES[key];
-    if (!suffixes) return null;
-    for (const suffix of suffixes) {
-      const eid = `sensor.foxess_${suffix}`;
-      if (eid in this._hass.states) return eid;
+  /** Build a map from unique_id suffix → entity_id using the HA entity registry. */
+  _buildRegistryMap() {
+    // hass.entities is the entity registry (available in modern HA).
+    // Each entry has: platform, unique_id, entity_id, device_id, etc.
+    if (!this._hass || !this._hass.entities) {
+      this._registryMap = null;
+      return;
     }
-    return `sensor.foxess_${suffixes[0]}`;
+    const map = {};
+    for (const [entityId, entry] of Object.entries(this._hass.entities)) {
+      if (entry.platform !== "foxess_control") continue;
+      if (!entry.unique_id) continue;
+      // unique_id format: "{config_entry_id}_{suffix}"
+      // Match against known suffixes
+      for (const suffix of Object.values(_UNIQUE_ID_SUFFIXES)) {
+        if (entry.unique_id.endsWith(`_${suffix}`)) {
+          map[suffix] = entityId;
+          break;
+        }
+      }
+    }
+    this._registryMap = map;
   }
+
+  /** Resolve a config key to an entity_id. Priority: user config > registry > fallback. */
+  _resolve(key) {
+    // 1. User explicitly set this entity
+    if (this._userConfig[key]) return this._userConfig[key];
+
+    // 2. Look up from entity registry by unique_id suffix
+    const suffix = _UNIQUE_ID_SUFFIXES[key];
+    if (suffix && this._registryMap && this._registryMap[suffix]) {
+      return this._registryMap[suffix];
+    }
+
+    // 3. Fallback: guess from suffix (for HA versions without hass.entities)
+    return suffix ? `sensor.foxess_${suffix}` : null;
+  }
+
+  // -- Helpers ---------------------------------------------------------------
 
   _exists(entityId) {
     return this._hass && entityId in this._hass.states;
@@ -114,9 +147,9 @@ class FoxESSOverviewCard extends HTMLElement {
   _render() {
     if (!this._hass) return;
 
-    // Resolve entity IDs fresh each render (entities may appear after first render)
+    // Resolve entity IDs fresh each render
     const eid = {};
-    for (const key of Object.keys(_ENTITY_CANDIDATES)) {
+    for (const key of Object.keys(_UNIQUE_ID_SUFFIXES)) {
       eid[key] = this._resolve(key);
     }
 
@@ -167,14 +200,12 @@ class FoxESSOverviewCard extends HTMLElement {
           <div class="title">FoxESS Overview</div>
           ${workMode ? `<span class="work-mode">${this._formatWorkMode(workMode)}</span>` : ""}
         </div>
-        <div class="flow-container">
+        <div class="flow-grid">
+          ${this._renderNode("solar", "☀️", "Solar", solarFound, this._formatKw(solar), solarActive, pv1 != null || pv2 != null ? this._pvDetail(pv1, pv2) : "", eid.solar_entity)}
+          ${this._renderNode("house", "🏠", "House", houseFound, this._formatKw(house), houseActive, "", eid.house_entity)}
+          ${this._renderNode("grid", "⚡", "Grid", gridFound, this._formatKw(Math.abs(gridNet)), gridImporting || gridExporting, this._gridSub(gridImporting, gridExporting, gridV, gridHz), eid.grid_import_entity)}
+          ${this._renderBatteryNode(soc, socPct, socColor, batNet, batCharging, batDischarging, batTemp, residual, batFound)}
           ${this._renderFlowLines(solarActive, houseActive, gridImporting, gridExporting, batCharging, batDischarging)}
-          <div class="flow-grid">
-            ${this._renderNode("solar", "☀️", "Solar", solarFound, this._formatKw(solar), solarActive, pv1 != null || pv2 != null ? this._pvDetail(pv1, pv2) : "", eid.solar_entity)}
-            ${this._renderNode("house", "🏠", "House", houseFound, this._formatKw(house), houseActive, "", eid.house_entity)}
-            ${this._renderNode("grid", "⚡", "Grid", gridFound, this._formatKw(Math.abs(gridNet)), gridImporting || gridExporting, this._gridSub(gridImporting, gridExporting, gridV, gridHz), eid.grid_import_entity)}
-            ${this._renderBatteryNode(soc, socPct, socColor, batNet, batCharging, batDischarging, batTemp, residual, batFound)}
-          </div>
         </div>
       </ha-card>
     `;
@@ -263,12 +294,9 @@ class FoxESSOverviewCard extends HTMLElement {
   }
 
   _renderFlowLines(solarActive, houseActive, gridImporting, gridExporting, batCharging, batDischarging) {
-    // Flow lines overlaid on the 2×2 grid using CSS Grid stacking.
-    // Node centres (percentage-based to match the grid layout):
-    //   solar=top-left(25%,25%)  house=top-right(75%,25%)
-    //   grid=bottom-left(25%,75%)  battery=bottom-right(75%,75%)
-    // Centre hub at (50%,50%).
-
+    // SVG placed as a 5th child of the 2×2 grid, spanning all cells.
+    // Node centres at grid cell centres: (25%,25%), (75%,25%), (25%,75%), (75%,75%).
+    // Hub at (50%,50%).
     const nodes = {
       solar:   { x: 25, y: 25 },
       house:   { x: 75, y: 25 },
@@ -280,23 +308,21 @@ class FoxESSOverviewCard extends HTMLElement {
     const flows = [];
 
     if (solarActive) {
-      flows.push({ from: nodes.solar, to: { x: cx, y: cy }, color: "var(--fo-solar)", cls: "flow-solar" });
+      flows.push({ from: nodes.solar, to: { x: cx, y: cy }, color: "var(--fo-solar)" });
     }
     if (houseActive) {
-      flows.push({ from: { x: cx, y: cy }, to: nodes.house, color: "var(--fo-house)", cls: "flow-house" });
+      flows.push({ from: { x: cx, y: cy }, to: nodes.house, color: "var(--fo-house)" });
     }
     if (gridImporting) {
-      flows.push({ from: nodes.grid, to: { x: cx, y: cy }, color: "var(--fo-grid-import)", cls: "flow-grid-in" });
+      flows.push({ from: nodes.grid, to: { x: cx, y: cy }, color: "var(--fo-grid-import)" });
     } else if (gridExporting) {
-      flows.push({ from: { x: cx, y: cy }, to: nodes.grid, color: "var(--fo-grid-export)", cls: "flow-grid-out" });
+      flows.push({ from: { x: cx, y: cy }, to: nodes.grid, color: "var(--fo-grid-export)" });
     }
     if (batCharging) {
-      flows.push({ from: { x: cx, y: cy }, to: nodes.battery, color: "var(--fo-bat-charge)", cls: "flow-bat-in" });
+      flows.push({ from: { x: cx, y: cy }, to: nodes.battery, color: "var(--fo-bat-charge)" });
     } else if (batDischarging) {
-      flows.push({ from: nodes.battery, to: { x: cx, y: cy }, color: "var(--fo-bat-discharge)", cls: "flow-bat-out" });
+      flows.push({ from: nodes.battery, to: { x: cx, y: cy }, color: "var(--fo-bat-discharge)" });
     }
-
-    if (flows.length === 0) return `<svg class="flow-overlay" viewBox="0 0 100 100"></svg>`;
 
     const lines = flows.map(f => {
       const dx = f.to.x - f.from.x;
@@ -305,7 +331,7 @@ class FoxESSOverviewCard extends HTMLElement {
       return `
         <line x1="${f.from.x}" y1="${f.from.y}" x2="${f.to.x}" y2="${f.to.y}"
               stroke="${f.color}" stroke-width="0.8" stroke-linecap="round" opacity="0.3"/>
-        <circle r="1.5" fill="${f.color}" class="${f.cls}">
+        <circle r="1.5" fill="${f.color}">
           <animateMotion dur="${(len / 20).toFixed(1)}s" repeatCount="indefinite"
             path="M${f.from.x},${f.from.y} L${f.to.x},${f.to.y}"/>
         </circle>
@@ -355,28 +381,22 @@ class FoxESSOverviewCard extends HTMLElement {
         white-space: nowrap;
       }
 
-      /* CSS Grid stacking: overlay and grid occupy the same cell */
-      .flow-container {
-        display: grid;
-        padding: 8px 16px 16px;
-      }
-      .flow-container > * {
-        grid-area: 1 / 1;
-      }
-
-      /* 2×2 node grid — on top of the flow overlay */
+      /* 2×2 node grid with flow overlay spanning all cells */
       .flow-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
+        grid-template-rows: auto auto;
         gap: 10px;
-        z-index: 1;
+        padding: 8px 16px 16px;
       }
 
-      /* Flow lines behind the node boxes */
+      /* Flow SVG spans the entire grid area, drawn on top with pointer-events:none */
       .flow-overlay {
+        grid-column: 1 / -1;
+        grid-row: 1 / -1;
         width: 100%;
         height: 100%;
-        z-index: 0;
+        z-index: 2;
         pointer-events: none;
       }
 
