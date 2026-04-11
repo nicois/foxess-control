@@ -3,6 +3,8 @@
   "name": "FoxESS Control",
   "codeowners": ["@nicois"],
   "config_flow": true,
+  "dependencies": ["http"],
+  "after_dependencies": ["lovelace"],
   "documentation": "https://github.com/nicois/foxess-control",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/nicois/foxess-control/issues",
