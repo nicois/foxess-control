@@ -1320,6 +1320,91 @@ class TestHandleSmartDischarge:
         # With less energy remaining and less time, power may differ
         assert new_power > 0
 
+    @pytest.mark.asyncio
+    async def test_smart_discharge_feedin_limit_constrains_pacing(self) -> None:
+        """Feed-in energy limit caps paced power to spread export budget."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=10.0,
+            coordinator_data={
+                "SoC": 80.0,
+                "loadsPower": 0.5,
+                "pvPower": 0.0,
+                "feedin": 100.0,
+            },
+        )
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            # With feedin limit: power should be lower than without
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 10,
+                        "feedin_energy_limit_kwh": 3.0,
+                    }
+                )
+            )
+
+        constrained = hass.data[DOMAIN]["_smart_discharge_state"]
+        constrained_power = constrained["last_power_w"]
+        assert constrained["feedin_energy_limit_kwh"] == 3.0
+
+        # Reset and run without feedin limit for comparison
+        hass.data[DOMAIN].pop("_smart_discharge_state", None)
+        hass.data[DOMAIN].pop("_smart_discharge_unsubs", None)
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 10,
+                    }
+                )
+            )
+
+        unconstrained_power = hass.data[DOMAIN]["_smart_discharge_state"][
+            "last_power_w"
+        ]
+        assert constrained_power < unconstrained_power
+
 
 class TestHandleSmartCharge:
     """Tests for handle_smart_charge service handler."""

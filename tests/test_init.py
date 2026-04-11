@@ -16,6 +16,7 @@ from custom_components.foxess_control import (
     _get_current_soc,
     _get_feedin_energy_kwh,
     _get_net_consumption,
+    _get_residual_energy_kwh,
     _groups_overlap,
     _is_expired,
     _is_placeholder,
@@ -1310,3 +1311,269 @@ class TestCalculateDischargePower:
         # Even with pacing, result should not exceed max_power_w
         result = _calculate_discharge_power(100.0, 0, 50.0, 1.0, 3000)
         assert result == 3000
+
+
+class TestDischargePowerFeedinConstraint:
+    """Tests for feedin_remaining_kwh in _calculate_discharge_power."""
+
+    def test_feedin_none_has_no_effect(self) -> None:
+        base = _calculate_discharge_power(80.0, 10, 10.0, 2.0, 10000)
+        with_none = _calculate_discharge_power(
+            80.0, 10, 10.0, 2.0, 10000, feedin_remaining_kwh=None
+        )
+        assert with_none == base
+
+    def test_generous_feedin_has_no_effect(self) -> None:
+        # feedin budget (20 kWh) > energy to drain (7 kWh) → no capping
+        base = _calculate_discharge_power(80.0, 10, 10.0, 2.0, 10000)
+        with_feedin = _calculate_discharge_power(
+            80.0, 10, 10.0, 2.0, 10000, feedin_remaining_kwh=20.0
+        )
+        assert with_feedin == base
+
+    def test_tight_feedin_reduces_power(self) -> None:
+        # 7 kWh to drain, only 3 kWh feedin budget, no house load
+        # max drain = 3 + 0*2 = 3 kWh < 7 → energy capped to 3
+        base = _calculate_discharge_power(80.0, 10, 10.0, 2.0, 10000)
+        constrained = _calculate_discharge_power(
+            80.0, 10, 10.0, 2.0, 10000, feedin_remaining_kwh=3.0
+        )
+        assert constrained < base
+
+    def test_house_load_increases_effective_budget(self) -> None:
+        # feedin=3 kWh, house load=1 kW, 2h → house absorbs 2 kWh
+        # max drain = 3 + 1*2 = 5 kWh
+        no_load = _calculate_discharge_power(
+            80.0,
+            10,
+            10.0,
+            2.0,
+            10000,
+            net_consumption_kw=0.0,
+            feedin_remaining_kwh=3.0,
+        )
+        with_load = _calculate_discharge_power(
+            80.0,
+            10,
+            10.0,
+            2.0,
+            10000,
+            net_consumption_kw=1.0,
+            feedin_remaining_kwh=3.0,
+        )
+        # With house load the effective budget is larger, but house load
+        # is also subtracted from power. Net result: more total drain
+        # is achievable so pacing can be more aggressive.
+        # The key test: both are less than the unconstrained base.
+        unconstrained = _calculate_discharge_power(80.0, 10, 10.0, 2.0, 10000)
+        assert no_load < unconstrained
+        assert with_load < unconstrained
+
+    def test_feedin_zero_with_no_load_returns_min(self) -> None:
+        # No feedin budget and no house load → can't drain anything → 100W
+        result = _calculate_discharge_power(
+            80.0, 10, 10.0, 2.0, 10000, feedin_remaining_kwh=0.0
+        )
+        assert result == 100
+
+    def test_feedin_zero_with_house_load(self) -> None:
+        # No feedin budget but house load absorbs energy
+        # max drain = 0 + 1.5*2 = 3 kWh; energy needed = 7 kWh → capped to 3
+        # Power = 3kWh / (2*0.9) * 1.1 - 1.5 kW = ~333W, small but >100
+        result = _calculate_discharge_power(
+            80.0,
+            10,
+            10.0,
+            2.0,
+            10000,
+            net_consumption_kw=1.5,
+            feedin_remaining_kwh=0.0,
+        )
+        assert result < 500  # significantly reduced from unconstrained
+        unconstrained = _calculate_discharge_power(
+            80.0,
+            10,
+            10.0,
+            2.0,
+            10000,
+            net_consumption_kw=1.5,
+        )
+        assert result < unconstrained
+
+    def test_feedin_exactly_energy_no_cap(self) -> None:
+        # feedin = energy to drain → no capping needed
+        # 7 kWh to drain, 7 kWh feedin budget
+        base = _calculate_discharge_power(80.0, 10, 10.0, 2.0, 10000)
+        at_limit = _calculate_discharge_power(
+            80.0, 10, 10.0, 2.0, 10000, feedin_remaining_kwh=7.0
+        )
+        assert at_limit == base
+
+    def test_feedin_with_house_load_reaches_budget(self) -> None:
+        # feedin=5, house_load=1kW, 4h → max drain = 5 + 4 = 9 kWh
+        # energy to drain (80→10% of 10kWh) = 7 kWh < 9 → no capping
+        base = _calculate_discharge_power(
+            80.0,
+            10,
+            10.0,
+            4.0,
+            10000,
+            net_consumption_kw=1.0,
+        )
+        with_feedin = _calculate_discharge_power(
+            80.0,
+            10,
+            10.0,
+            4.0,
+            10000,
+            net_consumption_kw=1.0,
+            feedin_remaining_kwh=5.0,
+        )
+        assert with_feedin == base
+
+
+class TestResidualEnergy:
+    """Tests for residual_energy_kwh precision path in power calculations."""
+
+    # -- _calculate_charge_power with residual energy --
+
+    def test_charge_residual_more_precise_than_soc(self) -> None:
+        # SoC 50% of 10kWh = 5kWh stored (integer SoC path)
+        # residual_energy_kwh = 5.3 → target 10kWh - 5.3 = 4.7kWh needed
+        # vs SoC path: (100-50)/100 * 10 = 5.0kWh needed
+        soc_result = _calculate_charge_power(50.0, 100, 10.0, 2.0, 10000)
+        residual_result = _calculate_charge_power(
+            50.0, 100, 10.0, 2.0, 10000, residual_energy_kwh=5.3
+        )
+        # Residual shows more energy stored → less to charge → lower power
+        assert residual_result < soc_result
+
+    def test_charge_residual_none_falls_back_to_soc(self) -> None:
+        soc_result = _calculate_charge_power(50.0, 100, 10.0, 2.0, 10000)
+        none_result = _calculate_charge_power(
+            50.0, 100, 10.0, 2.0, 10000, residual_energy_kwh=None
+        )
+        assert none_result == soc_result
+
+    def test_charge_residual_at_target(self) -> None:
+        # residual = target → no energy needed → 100W
+        result = _calculate_charge_power(
+            50.0, 100, 10.0, 2.0, 10000, residual_energy_kwh=10.0
+        )
+        assert result == 100
+
+    def test_charge_residual_above_target(self) -> None:
+        # residual exceeds target → no energy needed → 100W
+        result = _calculate_charge_power(
+            50.0, 100, 10.0, 2.0, 10000, residual_energy_kwh=10.5
+        )
+        assert result == 100
+
+    def test_charge_residual_zero_capacity_falls_back(self) -> None:
+        # capacity=0 → residual path skipped even if provided
+        result = _calculate_charge_power(
+            50.0, 100, 0.0, 2.0, 10000, residual_energy_kwh=5.0
+        )
+        assert result == 100  # 0 capacity → 0 energy → 100W
+
+    # -- _calculate_discharge_power with residual energy --
+
+    def test_discharge_residual_more_precise_than_soc(self) -> None:
+        # SoC 80% of 10kWh: (80-10)/100 * 10 = 7.0kWh to drain
+        # residual_energy_kwh = 7.5: 7.5 - (10/100*10) = 7.5 - 1.0 = 6.5kWh
+        soc_result = _calculate_discharge_power(80.0, 10, 10.0, 2.0, 10000)
+        residual_result = _calculate_discharge_power(
+            80.0, 10, 10.0, 2.0, 10000, residual_energy_kwh=7.5
+        )
+        # Less energy to drain → lower power
+        assert residual_result < soc_result
+
+    def test_discharge_residual_none_falls_back_to_soc(self) -> None:
+        soc_result = _calculate_discharge_power(80.0, 10, 10.0, 2.0, 10000)
+        none_result = _calculate_discharge_power(
+            80.0, 10, 10.0, 2.0, 10000, residual_energy_kwh=None
+        )
+        assert none_result == soc_result
+
+    def test_discharge_residual_at_min(self) -> None:
+        # residual = min_soc energy → nothing to drain → 100W
+        result = _calculate_discharge_power(
+            80.0, 10, 10.0, 2.0, 10000, residual_energy_kwh=1.0
+        )
+        assert result == 100
+
+    def test_discharge_residual_below_min(self) -> None:
+        # residual below min_soc energy → nothing to drain → 100W
+        result = _calculate_discharge_power(
+            80.0, 10, 10.0, 2.0, 10000, residual_energy_kwh=0.5
+        )
+        assert result == 100
+
+    # -- _calculate_deferred_start with residual energy --
+
+    def test_deferred_start_residual_more_precise(self) -> None:
+        end = datetime.datetime(2026, 4, 7, 6, 0, 0)
+        # SoC 20%→80% of 10kWh = 6kWh
+        soc_result = _calculate_deferred_start(20.0, 80, 10.0, 10500, end)
+        # residual = 2.3kWh → target 8kWh - 2.3 = 5.7kWh (less)
+        residual_result = _calculate_deferred_start(
+            20.0, 80, 10.0, 10500, end, residual_energy_kwh=2.3
+        )
+        # Less energy → later start (closer to end)
+        assert residual_result > soc_result
+
+    def test_deferred_start_residual_none_falls_back(self) -> None:
+        end = datetime.datetime(2026, 4, 7, 6, 0, 0)
+        soc_result = _calculate_deferred_start(20.0, 80, 10.0, 10500, end)
+        none_result = _calculate_deferred_start(
+            20.0, 80, 10.0, 10500, end, residual_energy_kwh=None
+        )
+        assert none_result == soc_result
+
+    def test_deferred_start_residual_at_target(self) -> None:
+        end = datetime.datetime(2026, 4, 7, 6, 0, 0)
+        # residual = target energy → no charge needed → returns end
+        result = _calculate_deferred_start(
+            20.0, 80, 10.0, 10500, end, residual_energy_kwh=8.0
+        )
+        assert result == end
+
+    # -- _get_residual_energy_kwh --
+
+    def test_get_residual_energy_kwh_returns_value(self) -> None:
+        coordinator = MagicMock()
+        coordinator.data = {"ResidualEnergy": 5.3}
+        hass = MagicMock()
+        hass.data = {DOMAIN: {"entry1": {"coordinator": coordinator}}}
+        assert _get_residual_energy_kwh(hass) == 5.3
+
+    def test_get_residual_energy_kwh_missing(self) -> None:
+        coordinator = MagicMock()
+        coordinator.data = {}
+        hass = MagicMock()
+        hass.data = {DOMAIN: {"entry1": {"coordinator": coordinator}}}
+        assert _get_residual_energy_kwh(hass) is None
+
+    def test_get_residual_energy_kwh_no_domain(self) -> None:
+        hass = MagicMock()
+        hass.data = {}
+        assert _get_residual_energy_kwh(hass) is None
+
+    def test_get_residual_energy_kwh_skips_underscore_keys(self) -> None:
+        coordinator = MagicMock()
+        coordinator.data = {"ResidualEnergy": 5.3}
+        hass = MagicMock()
+        hass.data = {
+            DOMAIN: {
+                "_internal_key": {"coordinator": coordinator},
+                "entry1": {"coordinator": coordinator},
+            }
+        }
+        assert _get_residual_energy_kwh(hass) == 5.3
+
+    def test_get_residual_energy_kwh_invalid_value(self) -> None:
+        coordinator = MagicMock()
+        coordinator.data = {"ResidualEnergy": "not-a-number"}
+        hass = MagicMock()
+        hass.data = {DOMAIN: {"entry1": {"coordinator": coordinator}}}
+        assert _get_residual_energy_kwh(hass) is None

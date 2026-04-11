@@ -451,6 +451,32 @@ def _get_feedin_energy_kwh(hass: HomeAssistant) -> float | None:
     return None
 
 
+def _get_residual_energy_kwh(hass: HomeAssistant) -> float | None:
+    """Return the battery's residual energy in kWh from the coordinator.
+
+    This is a direct measurement from the inverter, more precise than
+    deriving energy from integer SoC × configured capacity.  Returns
+    ``None`` when unavailable (e.g. entity mode without a mapped sensor).
+    """
+    domain_data = hass.data.get(DOMAIN)
+    if domain_data is None:
+        return None
+    for key in domain_data:
+        if not str(key).startswith("_"):
+            entry_data = domain_data.get(key)
+            if isinstance(entry_data, dict):
+                coordinator = entry_data.get("coordinator")
+                if coordinator is not None and coordinator.data:
+                    raw = coordinator.data.get("ResidualEnergy")
+                    if raw is None:
+                        return None
+                    try:
+                        return float(raw)
+                    except (ValueError, TypeError):
+                        return None
+    return None
+
+
 def _cancel_smart_discharge(hass: HomeAssistant, *, clear_storage: bool = True) -> None:
     """Cancel any active smart discharge listeners and clear stored session."""
     unsubs: list[Callable[[], None]] = hass.data[DOMAIN].get(
@@ -555,6 +581,7 @@ def _calculate_charge_power(
     max_power_w: int,
     net_consumption_kw: float = 0.0,
     headroom: float = 0.10,
+    residual_energy_kwh: float | None = None,
 ) -> int:
     """Calculate the charge power needed to reach target SoC in remaining time.
 
@@ -570,9 +597,18 @@ def _calculate_charge_power(
     battery gets a free boost — we don't subtract because the inverter
     will naturally absorb the surplus.
 
+    When *residual_energy_kwh* is provided (direct kWh measurement from
+    the inverter), it is used instead of ``current_soc × capacity`` for
+    higher precision.  The target is still derived from ``target_soc ×
+    capacity`` since we don't have a direct kWh target.
+
     Returns an integer power in watts, clamped to [100, max_power_w].
     """
-    energy_needed_kwh = (target_soc - current_soc) / 100.0 * battery_capacity_kwh
+    if residual_energy_kwh is not None and battery_capacity_kwh > 0:
+        target_energy_kwh = target_soc / 100.0 * battery_capacity_kwh
+        energy_needed_kwh = target_energy_kwh - residual_energy_kwh
+    else:
+        energy_needed_kwh = (target_soc - current_soc) / 100.0 * battery_capacity_kwh
     if energy_needed_kwh <= 0:
         return 100
     if remaining_hours <= 0:
@@ -600,6 +636,8 @@ def _calculate_discharge_power(
     max_power_w: int,
     net_consumption_kw: float = 0.0,
     headroom: float = 0.10,
+    residual_energy_kwh: float | None = None,
+    feedin_remaining_kwh: float | None = None,
 ) -> int:
     """Calculate the discharge power needed to reach min SoC by window end.
 
@@ -612,13 +650,54 @@ def _calculate_discharge_power(
     alone is enough to drain the battery at the needed rate, returns 100
     (minimum).
 
+    When *residual_energy_kwh* is provided (direct kWh measurement from
+    the inverter), it is used instead of ``current_soc × capacity`` for
+    higher precision.
+
+    When *feedin_remaining_kwh* is provided, the target energy is capped
+    so the grid export budget is spread evenly across the remaining window.
+    The maximum achievable battery drain within both time and export
+    constraints is ``feedin_remaining + house_load × remaining_hours``;
+    pacing to this cap ensures the export budget lasts the full window,
+    maximising the energy absorbed by household consumption.
+
     Returns an integer power in watts, clamped to [100, max_power_w].
     """
-    energy_kwh = (current_soc - min_soc) / 100.0 * battery_capacity_kwh
+    if residual_energy_kwh is not None and battery_capacity_kwh > 0:
+        min_energy_kwh = min_soc / 100.0 * battery_capacity_kwh
+        energy_kwh = residual_energy_kwh - min_energy_kwh
+    else:
+        energy_kwh = (current_soc - min_soc) / 100.0 * battery_capacity_kwh
     if energy_kwh <= 0:
         return 100
     if remaining_hours <= 0:
         return max_power_w
+    # When a feed-in energy limit constrains the session, cap the target
+    # energy so the export budget is spread across the full window.  At
+    # discharge power P with house load L, export rate = P − L and total
+    # battery drain = P × T.  The maximum drain that keeps total export
+    # within budget is feedin_remaining + L × T.  Using this cap means the
+    # pacing naturally sets P = L + feedin/T, which is the power level that
+    # maximises battery drain for a given export budget.
+    if (
+        feedin_remaining_kwh is not None
+        and feedin_remaining_kwh >= 0
+        and remaining_hours > 0
+    ):
+        house_absorption_kwh = max(0.0, net_consumption_kw) * remaining_hours
+        max_drain_kwh = feedin_remaining_kwh + house_absorption_kwh
+        if max_drain_kwh < energy_kwh:
+            _LOGGER.debug(
+                "Smart discharge: capping target energy %.2f kWh -> %.2f kWh "
+                "(feedin_remaining=%.2f kWh, house_absorption=%.2f kWh)",
+                energy_kwh,
+                max_drain_kwh,
+                feedin_remaining_kwh,
+                house_absorption_kwh,
+            )
+            energy_kwh = max_drain_kwh
+            if energy_kwh <= 0:
+                return 100
     effective_hours = remaining_hours * (1 - headroom)
     if effective_hours <= 0:
         effective_hours = remaining_hours
@@ -641,6 +720,7 @@ def _calculate_deferred_start(
     net_consumption_kw: float = 0.0,
     start: datetime.datetime | None = None,
     headroom: float = 0.10,
+    residual_energy_kwh: float | None = None,
 ) -> datetime.datetime:
     """Calculate the latest time to start charging to reach target SoC by *end*.
 
@@ -654,11 +734,18 @@ def _calculate_deferred_start(
     When *start* is provided the result is clamped so it never precedes
     the window opening time.
 
+    When *residual_energy_kwh* is provided it is used instead of
+    ``current_soc × capacity`` for higher precision.
+
     Returns *end* if no charging is needed (SoC already at target).
     Returns a time before *end* otherwise; may be in the past if the
     window is too short to reach the target.
     """
-    energy_needed_kwh = (target_soc - current_soc) / 100.0 * battery_capacity_kwh
+    if residual_energy_kwh is not None and battery_capacity_kwh > 0:
+        target_energy_kwh = target_soc / 100.0 * battery_capacity_kwh
+        energy_needed_kwh = target_energy_kwh - residual_energy_kwh
+    else:
+        energy_needed_kwh = (target_soc - current_soc) / 100.0 * battery_capacity_kwh
     if energy_needed_kwh <= 0:
         return end
     max_power_kw = max_power_w / 1000.0
@@ -1055,6 +1142,7 @@ def _setup_smart_charge_listeners(
         if not cur_state["charging_started"]:
             # Check if it's time to start deferred charging
             headroom = _get_smart_headroom(hass)
+            residual = _get_residual_energy_kwh(hass)
             deferred = _calculate_deferred_start(
                 cur_soc,
                 cur_state["target_soc"],
@@ -1064,6 +1152,7 @@ def _setup_smart_charge_listeners(
                 net_consumption_kw=net_consumption,
                 start=cur_state["start"],
                 headroom=headroom,
+                residual_energy_kwh=residual,
             )
             if now_dt < deferred:
                 _LOGGER.debug(
@@ -1085,6 +1174,7 @@ def _setup_smart_charge_listeners(
                 cur_state["max_power_w"],
                 net_consumption_kw=net_consumption,
                 headroom=headroom,
+                residual_energy_kwh=residual,
             )
             if _is_entity_mode(hass):
                 await _apply_mode_via_entities(
@@ -1173,6 +1263,7 @@ def _setup_smart_charge_listeners(
             cur_state["max_power_w"],
             net_consumption_kw=net_consumption,
             headroom=_get_smart_headroom(hass),
+            residual_energy_kwh=_get_residual_energy_kwh(hass),
         )
 
         if (
@@ -1325,6 +1416,7 @@ def _setup_smart_discharge_listeners(
             return
 
         # --- Check feed-in energy limit using cumulative counter ---
+        feedin_remaining_for_pacing: float | None = None
         feedin_limit = cur_state.get("feedin_energy_limit_kwh")
         if feedin_limit is not None:
             feedin_now = _get_feedin_energy_kwh(hass)
@@ -1337,6 +1429,7 @@ def _setup_smart_discharge_listeners(
                         feedin_now,
                     )
                     cur_state["feedin_start_kwh"] = feedin_now
+                    feedin_remaining_for_pacing = feedin_limit
                     hass.async_create_task(
                         _save_session(
                             hass,
@@ -1360,6 +1453,7 @@ def _setup_smart_discharge_listeners(
 
                     # --- Early stop to avoid overshoot ---
                     remaining_kwh = feedin_limit - exported
+                    feedin_remaining_for_pacing = remaining_kwh
                     poll_seconds = _get_polling_interval_seconds(hass)
                     poll_hours = poll_seconds / 3600
 
@@ -1429,11 +1523,13 @@ def _setup_smart_discharge_listeners(
                     cur_state["max_power_w"],
                     net_consumption_kw=_get_net_consumption(hass),
                     headroom=_get_smart_headroom(hass),
+                    residual_energy_kwh=_get_residual_energy_kwh(hass),
+                    feedin_remaining_kwh=feedin_remaining_for_pacing,
                 )
                 min_change = cur_state.get("min_power_change", DEFAULT_MIN_POWER_CHANGE)
+                power_delta = abs(new_power - cur_state["last_power_w"])
                 if (
-                    abs(new_power - cur_state["last_power_w"]) >= min_change
-                    or new_power == cur_state["max_power_w"]
+                    power_delta >= min_change or new_power == cur_state["max_power_w"]
                 ) and new_power != cur_state["last_power_w"]:
                     _LOGGER.info(
                         "Smart discharge: adjusting power %dW -> %dW "
@@ -1468,6 +1564,14 @@ def _setup_smart_discharge_listeners(
                         hass,
                         "smart_discharge",
                         _session_data_from_discharge_state(cur_state),
+                    )
+                else:
+                    _LOGGER.debug(
+                        "Smart discharge: power change %dW -> %dW "
+                        "below threshold %dW, skipping",
+                        cur_state["last_power_w"],
+                        new_power,
+                        min_change,
                     )
 
         # --- SoC threshold check ---
@@ -1620,6 +1724,7 @@ async def _recover_charge_session(
                 max_power,
                 net_consumption_kw=_get_net_consumption(hass),
                 headroom=_get_smart_headroom(hass),
+                residual_energy_kwh=_get_residual_energy_kwh(hass),
             )
         else:
             last_power = max_power
@@ -1740,6 +1845,16 @@ async def _recover_discharge_session(
         if pacing_enabled and battery_capacity_kwh > 0:
             current_soc = _get_current_soc(hass)
             remaining_h = (end - now).total_seconds() / 3600.0
+            # Compute remaining feedin budget for pacing
+            feedin_remaining: float | None = None
+            feedin_limit = discharge_data.get("feedin_energy_limit_kwh")
+            if feedin_limit is not None:
+                feedin_start = discharge_data.get("feedin_start_kwh")
+                feedin_now = _get_feedin_energy_kwh(hass)
+                if feedin_start is not None and feedin_now is not None:
+                    feedin_remaining = feedin_limit - (feedin_now - feedin_start)
+                else:
+                    feedin_remaining = feedin_limit
             if current_soc is not None and remaining_h > 0:
                 recovered_power = _calculate_discharge_power(
                     current_soc,
@@ -1749,6 +1864,8 @@ async def _recover_discharge_session(
                     max_power_w,
                     net_consumption_kw=_get_net_consumption(hass),
                     headroom=_get_smart_headroom(hass),
+                    residual_energy_kwh=_get_residual_energy_kwh(hass),
+                    feedin_remaining_kwh=feedin_remaining,
                 )
 
         hass.data[DOMAIN]["_smart_discharge_state"] = {
@@ -2270,6 +2387,8 @@ def _register_services(hass: HomeAssistant) -> None:
                 max_power_w,
                 net_consumption_kw=_get_net_consumption(hass),
                 headroom=_get_smart_headroom(hass),
+                residual_energy_kwh=_get_residual_energy_kwh(hass),
+                feedin_remaining_kwh=feedin_energy_limit,
             )
         else:
             initial_power = max_power_w
@@ -2412,6 +2531,7 @@ def _register_services(hass: HomeAssistant) -> None:
         now = dt_util.now()
         net_consumption = _get_net_consumption(hass)
         headroom = _get_smart_headroom(hass)
+        residual = _get_residual_energy_kwh(hass)
         should_defer = False
         if current_soc is not None:
             deferred_start = _calculate_deferred_start(
@@ -2423,6 +2543,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 net_consumption_kw=net_consumption,
                 start=start,
                 headroom=headroom,
+                residual_energy_kwh=residual,
             )
             should_defer = now < deferred_start
 
@@ -2453,6 +2574,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     effective_max_power,
                     net_consumption_kw=net_consumption,
                     headroom=headroom,
+                    residual_energy_kwh=residual,
                 )
 
             _LOGGER.info(
