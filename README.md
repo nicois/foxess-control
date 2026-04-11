@@ -2,7 +2,7 @@
 
 A Home Assistant custom integration for monitoring and controlling FoxESS inverter battery modes.
 
-FoxESS Control polls real-time inverter data (battery SoC, charge/discharge power, solar generation, house load, temperature) and provides actions for force charge, force discharge, smart charge/discharge with SoC targets, and feed-in management. It supports two backends: the **FoxESS Cloud API** and **local entity mode** via [foxess_modbus](https://github.com/nathanmarlor/foxess_modbus). It can run standalone or alongside the [foxess-ha](https://github.com/macxq/foxess-ha) integration.
+FoxESS Control polls real-time inverter data (battery SoC, charge/discharge power, solar generation, house load, temperature) and provides actions for force charge, force discharge, smart charge/discharge with SoC targets, and feed-in management. It supports two backends: the **FoxESS Cloud API** and **local entity mode** via [foxess_modbus](https://github.com/nathanmarlor/foxess_modbus). It includes comprehensive polled sensors and can fully replace the [foxess-ha](https://github.com/macxq/foxess-ha) integration — see [Migrating from foxess-ha](#migrating-from-foxess-ha).
 
 ## Gallery
 
@@ -63,7 +63,7 @@ After setup, click **Configure** on the integration entry to adjust:
 | Option | Default | Range | Description |
 |---|---|---|---|
 | Minimum SoC on Grid | 15% | 5-100% | The minimum battery state of charge to maintain when on grid. Applied to all schedule operations. |
-| API Polling Interval | 300 s (cloud) / 30 s (entity mode) | 60-600 s | How often to poll for real-time data. In cloud mode, defaults to 5 minutes to coexist with foxess-ha without exceeding API quota. In entity mode, defaults to 30 seconds since reads are local. |
+| API Polling Interval | 300 s (cloud) / 30 s (entity mode) | 60-600 s | How often to poll for real-time data. In cloud mode, defaults to 5 minutes to stay within the FoxESS API quota. In entity mode, defaults to 30 seconds since reads are local. |
 | Battery Capacity | 0.0 kWh | 0-100 kWh | Total usable battery capacity in kWh. Required for `smart_charge` power calculations. |
 | Min Power Change | 500 W | 0-5000 W | Minimum watt change before updating the charge schedule during `smart_charge`. Lower values improve SoC tracking, higher values reduce API calls. |
 | Minimum API fdSoc | 11% | 0-11% | The minimum `fdSoc` value sent to the FoxESS API. The API normally rejects values below 11 (errno 40257). Only lower this if you know your firmware supports it. |
@@ -288,8 +288,8 @@ The integration polls inverter data at a configurable interval and creates the f
 | `sensor.foxess_residual_energy` | Residual energy in battery | kWh |
 | `sensor.foxess_battery_temperature` | Battery temperature | °C |
 | `sensor.foxess_grid_consumption` | Power drawn from grid | kW |
-| `sensor.foxess_feedin_power` | Power fed to grid | kW |
-| `sensor.foxess_generation_power` | Total generation power | kW |
+| `sensor.foxess_grid_feed_in` | Power fed to grid | kW |
+| `sensor.foxess_generation` | Total generation power | kW |
 | `sensor.foxess_battery_voltage` | Battery voltage | V |
 | `sensor.foxess_battery_current` | Battery current | A |
 | `sensor.foxess_pv1_power` | PV string 1 power | kW |
@@ -585,11 +585,16 @@ automation:
 - **FoxESS Cloud API latency** (cloud mode only): All commands go through the FoxESS Cloud API, which throttles requests to one every 5 seconds. Actions are not instantaneous. For faster local control, enable [entity mode](#entity-mode-foxess_modbus-interop) with foxess_modbus.
 - **FoxESS mode scheduler bugs** (cloud mode only): The FoxESS Cloud API has known issues with schedule validation (e.g. rejecting its own saved schedules due to overlap detection on disabled groups). This integration works around known issues, but the API may introduce new ones.
 
-## Compatibility with foxess-ha
+## Migrating from foxess-ha
 
-This integration uses its own config entry and does not read configuration from the foxess-ha sensor integration. You will need to enter your API key and serial number separately. Both integrations can run side-by-side without conflict.
+FoxESS Control now includes all the polled sensors that foxess-ha provides (SoC, charge/discharge power, solar generation, house load, grid power, temperatures, cumulative energy counters, and more), so running both integrations doubles your API usage for no benefit. If you currently use foxess-ha, we recommend migrating:
 
-With the built-in polled sensors, FoxESS Control can operate standalone without foxess-ha. If you run both integrations, set the polling interval to 300 seconds (the default) to avoid exceeding the FoxESS API quota. If you remove foxess-ha, you can lower the polling interval for faster updates.
+1. **Check your automations and dashboards** for references to `sensor.foxess_*` entities from foxess-ha. The equivalent FoxESS Control sensors are listed in the [Sensors](#sensors) section.
+2. **Update entity references** to point to the FoxESS Control equivalents. Entity names are similar but may not be identical — check the table above.
+3. **Remove the foxess-ha integration** from Settings > Devices & Services once everything is migrated.
+4. **Lower the polling interval** if desired — without foxess-ha competing for quota, you can safely reduce it from the default 300 seconds.
+
+If you need to run both temporarily during migration, keep the polling interval at 300 seconds (the default) to avoid exceeding the FoxESS API quota.
 
 ## Support
 
