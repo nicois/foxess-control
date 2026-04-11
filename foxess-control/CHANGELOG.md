@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.4
+
+- Configurable smart charge headroom (default 10%, max 25%) — controls time buffer and power multiplier for deferred charge calculations
+- Add `http` and `lovelace` dependencies to manifest (fixes hassfest validation)
+
 ## 0.13.3
 
 - **Custom Lovelace card:** built-in card with battery gauge, smart charge/discharge status, progress indicators, and SVG forecast sparkline — zero-config, auto-discovers entities
