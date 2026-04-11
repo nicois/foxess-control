@@ -21,7 +21,6 @@ from .const import (
     CONF_API_KEY,
     CONF_API_MIN_SOC,
     CONF_BATTERY_CAPACITY_KWH,
-    CONF_CHARGE_HEADROOM,
     CONF_CHARGE_POWER_ENTITY,
     CONF_DEVICE_SERIAL,
     CONF_DISCHARGE_POWER_ENTITY,
@@ -30,14 +29,15 @@ from .const import (
     CONF_MIN_SOC_ENTITY,
     CONF_MIN_SOC_ON_GRID,
     CONF_POLLING_INTERVAL,
+    CONF_SMART_HEADROOM,
     CONF_WORK_MODE_ENTITY,
     DEFAULT_API_MIN_SOC,
-    DEFAULT_CHARGE_HEADROOM,
     DEFAULT_ENTITY_POLLING_INTERVAL,
     DEFAULT_INVERTER_POWER,
     DEFAULT_MIN_POWER_CHANGE,
     DEFAULT_MIN_SOC_ON_GRID,
     DEFAULT_POLLING_INTERVAL,
+    DEFAULT_SMART_HEADROOM,
     DOMAIN,
     MAX_OVERRIDE_HOURS,
     PLATFORMS,
@@ -185,10 +185,10 @@ def _get_first_entry(hass: HomeAssistant) -> ConfigEntry:
     return entry
 
 
-def _get_charge_headroom(hass: HomeAssistant) -> float:
+def _get_smart_headroom(hass: HomeAssistant) -> float:
     """Return the charge headroom as a fraction (e.g. 0.10 for 10%)."""
     entry = _get_first_entry(hass)
-    pct: int = entry.options.get(CONF_CHARGE_HEADROOM, DEFAULT_CHARGE_HEADROOM)
+    pct: int = entry.options.get(CONF_SMART_HEADROOM, DEFAULT_SMART_HEADROOM)
     return pct / 100.0
 
 
@@ -519,6 +519,10 @@ def _session_data_from_discharge_state(state: dict[str, Any]) -> dict[str, Any]:
         data["feedin_energy_limit_kwh"] = state["feedin_energy_limit_kwh"]
         if state.get("feedin_start_kwh") is not None:
             data["feedin_start_kwh"] = state["feedin_start_kwh"]
+    if state.get("pacing_enabled"):
+        data["pacing_enabled"] = True
+        data["battery_capacity_kwh"] = state["battery_capacity_kwh"]
+        data["min_power_change"] = state["min_power_change"]
     return data
 
 
@@ -584,6 +588,46 @@ def _calculate_charge_power(
     # required power, so it naturally shrinks as SoC approaches the target.
     total_power_kw *= 1 + headroom
     power_w = total_power_kw * 1000
+    return max(100, min(int(power_w), max_power_w))
+
+
+def _calculate_discharge_power(
+    current_soc: float,
+    min_soc: int,
+    battery_capacity_kwh: float,
+    remaining_hours: float,
+    max_power_w: int,
+    net_consumption_kw: float = 0.0,
+    headroom: float = 0.10,
+) -> int:
+    """Calculate the discharge power needed to reach min SoC by window end.
+
+    Mirrors ``_calculate_charge_power`` but for discharge.  *headroom* is
+    applied as both a time buffer and a power multiplier.
+
+    Unlike charge, household consumption *assists* discharge (the load
+    drains the battery alongside the inverter), so *net_consumption_kw*
+    is **subtracted** from the required discharge rate.  If the house load
+    alone is enough to drain the battery at the needed rate, returns 100
+    (minimum).
+
+    Returns an integer power in watts, clamped to [100, max_power_w].
+    """
+    energy_kwh = (current_soc - min_soc) / 100.0 * battery_capacity_kwh
+    if energy_kwh <= 0:
+        return 100
+    if remaining_hours <= 0:
+        return max_power_w
+    effective_hours = remaining_hours * (1 - headroom)
+    if effective_hours <= 0:
+        effective_hours = remaining_hours
+    battery_power_kw = energy_kwh / effective_hours
+    # House load assists discharge — subtract it from needed inverter power.
+    battery_power_kw -= max(0.0, net_consumption_kw)
+    if battery_power_kw <= 0:
+        return 100
+    battery_power_kw *= 1 + headroom
+    power_w = battery_power_kw * 1000
     return max(100, min(int(power_w), max_power_w))
 
 
@@ -1001,7 +1045,7 @@ def _setup_smart_charge_listeners(
 
         if not cur_state["charging_started"]:
             # Check if it's time to start deferred charging
-            headroom = _get_charge_headroom(hass)
+            headroom = _get_smart_headroom(hass)
             deferred = _calculate_deferred_start(
                 cur_soc,
                 cur_state["target_soc"],
@@ -1119,7 +1163,7 @@ def _setup_smart_charge_listeners(
             remaining,
             cur_state["max_power_w"],
             net_consumption_kw=net_consumption,
-            headroom=_get_charge_headroom(hass),
+            headroom=_get_smart_headroom(hass),
         )
 
         if (
@@ -1354,10 +1398,64 @@ def _setup_smart_discharge_listeners(
                         ).append(unsub)
                         cur_state["feedin_stop_scheduled"] = True
 
-        # --- SoC threshold check ---
+        # --- Power pacing ---
         soc_value = _get_current_soc(hass)
         if soc_value is None:
             return
+        if cur_state.get("pacing_enabled") and soc_value > cur_state["min_soc"]:
+            now_dt = dt_util.now()
+            remaining_h = (cur_state["end"] - now_dt).total_seconds() / 3600.0
+            if remaining_h > 0:
+                new_power = _calculate_discharge_power(
+                    soc_value,
+                    cur_state["min_soc"],
+                    cur_state["battery_capacity_kwh"],
+                    remaining_h,
+                    cur_state["max_power_w"],
+                    net_consumption_kw=_get_net_consumption(hass),
+                    headroom=_get_smart_headroom(hass),
+                )
+                min_change = cur_state.get("min_power_change", DEFAULT_MIN_POWER_CHANGE)
+                if (
+                    abs(new_power - cur_state["last_power_w"]) >= min_change
+                    or new_power == cur_state["max_power_w"]
+                ) and new_power != cur_state["last_power_w"]:
+                    _LOGGER.info(
+                        "Smart discharge: adjusting power %dW -> %dW "
+                        "(SoC=%.1f%%, remaining=%.2fh)",
+                        cur_state["last_power_w"],
+                        new_power,
+                        soc_value,
+                        remaining_h,
+                    )
+                    cur_state["last_power_w"] = new_power
+                    if _is_entity_mode(hass):
+                        await _apply_mode_via_entities(
+                            hass,
+                            WorkMode.FORCE_DISCHARGE,
+                            new_power,
+                            fd_soc=_get_api_min_soc(hass),
+                        )
+                    elif inverter is not None:
+                        for g in cur_state.get("groups") or []:
+                            if g.get("workMode") == WorkMode.FORCE_DISCHARGE.value:
+                                g["fdPwr"] = new_power
+                                break
+                        await hass.async_add_executor_job(
+                            inverter.set_schedule,
+                            cur_state["groups"],
+                        )
+                    # Re-check state after await
+                    cur_state = hass.data[DOMAIN].get("_smart_discharge_state")
+                    if cur_state is None:
+                        return
+                    await _save_session(
+                        hass,
+                        "smart_discharge",
+                        _session_data_from_discharge_state(cur_state),
+                    )
+
+        # --- SoC threshold check ---
         if soc_value <= cur_state["min_soc"]:
             cur_state["soc_below_min_count"] = (
                 cur_state.get("soc_below_min_count", 0) + 1
@@ -1506,7 +1604,7 @@ async def _recover_charge_session(
                 remaining,
                 max_power,
                 net_consumption_kw=_get_net_consumption(hass),
-                headroom=_get_charge_headroom(hass),
+                headroom=_get_smart_headroom(hass),
             )
         else:
             last_power = max_power
@@ -1618,16 +1716,40 @@ async def _recover_discharge_session(
             discharge_data.get("min_soc", 10),
         )
         recovered_power = discharge_data.get("last_power_w", 0)
+        pacing_enabled = discharge_data.get("pacing_enabled", False)
+        battery_capacity_kwh = discharge_data.get("battery_capacity_kwh", 0.0)
+        min_soc = discharge_data.get("min_soc", 10)
+        max_power_w = discharge_data.get("max_power_w", recovered_power)
+
+        if pacing_enabled and battery_capacity_kwh > 0:
+            current_soc = _get_current_soc(hass)
+            remaining_h = (end - now).total_seconds() / 3600.0
+            if current_soc is not None and remaining_h > 0:
+                recovered_power = _calculate_discharge_power(
+                    current_soc,
+                    min_soc,
+                    battery_capacity_kwh,
+                    remaining_h,
+                    max_power_w,
+                    net_consumption_kw=_get_net_consumption(hass),
+                    headroom=_get_smart_headroom(hass),
+                )
+
         hass.data[DOMAIN]["_smart_discharge_state"] = {
             "groups": [],
             "start": start,
             "end": end,
-            "min_soc": discharge_data.get("min_soc", 10),
-            "max_power_w": discharge_data.get("max_power_w", recovered_power),
+            "min_soc": min_soc,
+            "max_power_w": max_power_w,
             "last_power_w": recovered_power,
             "soc_below_min_count": 0,
             "feedin_energy_limit_kwh": discharge_data.get("feedin_energy_limit_kwh"),
             "feedin_start_kwh": discharge_data.get("feedin_start_kwh"),
+            "pacing_enabled": pacing_enabled,
+            "battery_capacity_kwh": battery_capacity_kwh,
+            "min_power_change": discharge_data.get(
+                "min_power_change", DEFAULT_MIN_POWER_CHANGE
+            ),
         }
         _setup_smart_discharge_listeners(hass, inverter)
     else:
@@ -2099,12 +2221,41 @@ def _register_services(hass: HomeAssistant) -> None:
             feedin_str,
         )
 
+        # Cancel any previous smart discharge listeners
+        _cancel_smart_discharge(hass)
+
+        # Cancel any active smart charge — the two sessions would conflict
+        if hass.data[DOMAIN].get("_smart_charge_state") is not None:
+            _LOGGER.info("Smart discharge: cancelling active smart charge session")
+            _cancel_smart_charge(hass)
+
+        max_power_w = power if power is not None else _get_max_power_w(hass)
+        battery_capacity_kwh = _get_battery_capacity_kwh(hass)
+        pacing_enabled = battery_capacity_kwh > 0
+
+        # Calculate paced initial power when capacity is configured
+        current_soc = _get_current_soc(hass)
+        if pacing_enabled and current_soc is not None:
+            now = dt_util.now()
+            remaining = (end - now).total_seconds() / 3600.0
+            initial_power = _calculate_discharge_power(
+                current_soc,
+                min_soc,
+                battery_capacity_kwh,
+                remaining,
+                max_power_w,
+                net_consumption_kw=_get_net_consumption(hass),
+                headroom=_get_smart_headroom(hass),
+            )
+        else:
+            initial_power = max_power_w
+
         groups: list[ScheduleGroup] = []
         if _is_entity_mode(hass):
             await _apply_mode_via_entities(
                 hass,
                 WorkMode.FORCE_DISCHARGE,
-                power,
+                initial_power,
                 fd_soc=api_min_soc,
             )
         else:
@@ -2117,7 +2268,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 inverter,
                 min_soc_on_grid,
                 fd_soc=api_min_soc,
-                fd_pwr=power,
+                fd_pwr=initial_power,
                 api_min_soc=api_min_soc,
             )
             groups = await hass.async_add_executor_job(
@@ -2140,27 +2291,20 @@ def _register_services(hass: HomeAssistant) -> None:
             " OR ".join(conditions),
         )
 
-        # Cancel any previous smart discharge listeners
-        _cancel_smart_discharge(hass)
-
-        # Cancel any active smart charge — the two sessions would conflict
-        if hass.data[DOMAIN].get("_smart_charge_state") is not None:
-            _LOGGER.info("Smart discharge: cancelling active smart charge session")
-            _cancel_smart_charge(hass)
-
-        effective_power = power if power is not None else _get_max_power_w(hass)
-
         # Store state for binary sensor and diagnostics
         hass.data[DOMAIN]["_smart_discharge_state"] = {
             "groups": groups,
             "start": start,
             "end": end,
             "min_soc": min_soc,
-            "max_power_w": effective_power,
-            "last_power_w": effective_power,
+            "max_power_w": max_power_w,
+            "last_power_w": initial_power,
             "soc_below_min_count": 0,
             "feedin_energy_limit_kwh": feedin_energy_limit,
             "feedin_start_kwh": _get_feedin_energy_kwh(hass),
+            "battery_capacity_kwh": battery_capacity_kwh,
+            "min_power_change": _get_min_power_change(hass),
+            "pacing_enabled": pacing_enabled,
         }
 
         _setup_smart_discharge_listeners(hass, inverter)
@@ -2235,7 +2379,7 @@ def _register_services(hass: HomeAssistant) -> None:
         # Decide whether to start charging now or defer
         now = dt_util.now()
         net_consumption = _get_net_consumption(hass)
-        headroom = _get_charge_headroom(hass)
+        headroom = _get_smart_headroom(hass)
         should_defer = False
         if current_soc is not None:
             deferred_start = _calculate_deferred_start(

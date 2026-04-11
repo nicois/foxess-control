@@ -16,9 +16,9 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_BATTERY_CAPACITY_KWH,
-    CONF_CHARGE_HEADROOM,
     CONF_DEVICE_SERIAL,
-    DEFAULT_CHARGE_HEADROOM,
+    CONF_SMART_HEADROOM,
+    DEFAULT_SMART_HEADROOM,
     DOMAIN,
 )
 from .coordinator import FoxESSDataCoordinator, get_coordinator_soc
@@ -138,20 +138,20 @@ def _get_battery_capacity_kwh(hass: HomeAssistant) -> float:
     return 0.0
 
 
-def _get_charge_headroom_fraction(hass: HomeAssistant) -> float:
+def _get_smart_headroom_fraction(hass: HomeAssistant) -> float:
     """Read charge headroom from the first config entry's options as a fraction."""
     domain_data = hass.data.get(DOMAIN)
     if domain_data is None:
-        return DEFAULT_CHARGE_HEADROOM / 100.0
+        return DEFAULT_SMART_HEADROOM / 100.0
     for key in domain_data:
         if not str(key).startswith("_"):
             entry = hass.config_entries.async_get_entry(str(key))
             if entry is not None:
                 pct: int = entry.options.get(
-                    CONF_CHARGE_HEADROOM, DEFAULT_CHARGE_HEADROOM
+                    CONF_SMART_HEADROOM, DEFAULT_SMART_HEADROOM
                 )
                 return pct / 100.0
-    return DEFAULT_CHARGE_HEADROOM / 100.0
+    return DEFAULT_SMART_HEADROOM / 100.0
 
 
 def _deferred_power_fraction(hass: HomeAssistant) -> float:
@@ -160,7 +160,7 @@ def _deferred_power_fraction(hass: HomeAssistant) -> float:
     Derived from the configured charge headroom: accounts for both the
     time buffer and the power reservation.
     """
-    h = _get_charge_headroom_fraction(hass)
+    h = _get_smart_headroom_fraction(hass)
     return (1 - h) * (1 - h)
 
 

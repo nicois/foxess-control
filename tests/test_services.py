@@ -23,9 +23,11 @@ from custom_components.foxess_control.const import (
     CONF_DEVICE_SERIAL,
     CONF_MIN_POWER_CHANGE,
     CONF_MIN_SOC_ON_GRID,
+    CONF_SMART_HEADROOM,
     DEFAULT_API_MIN_SOC,
     DEFAULT_MIN_POWER_CHANGE,
     DEFAULT_MIN_SOC_ON_GRID,
+    DEFAULT_SMART_HEADROOM,
     DOMAIN,
 )
 from custom_components.foxess_control.foxess.inverter import Inverter
@@ -38,6 +40,7 @@ def _make_hass(
     battery_capacity_kwh: float = 0.0,
     min_power_change: int = DEFAULT_MIN_POWER_CHANGE,
     api_min_soc: int = DEFAULT_API_MIN_SOC,
+    smart_headroom: int = DEFAULT_SMART_HEADROOM,
     coordinator_data: dict[str, Any] | None = None,
 ) -> MagicMock:
     """Create a mock hass with DOMAIN data populated.
@@ -80,6 +83,7 @@ def _make_hass(
         CONF_BATTERY_CAPACITY_KWH: battery_capacity_kwh,
         CONF_MIN_POWER_CHANGE: min_power_change,
         CONF_API_MIN_SOC: api_min_soc,
+        CONF_SMART_HEADROOM: smart_headroom,
     }
     hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
 
@@ -1109,6 +1113,212 @@ class TestHandleSmartDischarge:
         await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
 
         inv.self_use.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_smart_discharge_paced_initial_power(self) -> None:
+        """With battery capacity configured, initial power is paced."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=10.0,
+            coordinator_data={"SoC": 80.0, "loadsPower": 0.0, "pvPower": 0.0},
+        )
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 10,
+                    }
+                )
+            )
+
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state["pacing_enabled"] is True
+        # Paced power should be less than max
+        assert state["last_power_w"] < 10500
+        assert state["last_power_w"] > 0
+        assert state["max_power_w"] == 10500
+
+    @pytest.mark.asyncio
+    async def test_smart_discharge_no_pacing_without_capacity(self) -> None:
+        """Without battery capacity, falls back to max power."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=0.0,
+            coordinator_data={"SoC": 80.0},
+        )
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 10,
+                    }
+                )
+            )
+
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state["pacing_enabled"] is False
+        assert state["last_power_w"] == 10500
+
+    @pytest.mark.asyncio
+    async def test_smart_discharge_explicit_power_caps_pacing(self) -> None:
+        """User-provided power acts as ceiling for paced discharge."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=10.0,
+            coordinator_data={"SoC": 80.0, "loadsPower": 0.0, "pvPower": 0.0},
+        )
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 10,
+                        "power": 2000,
+                    }
+                )
+            )
+
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state["max_power_w"] == 2000
+        assert state["last_power_w"] <= 2000
+
+    @pytest.mark.asyncio
+    async def test_smart_discharge_pacing_callback_adjusts_power(self) -> None:
+        """The interval callback recalculates and applies paced power."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=10.0,
+            coordinator_data={"SoC": 80.0, "loadsPower": 0.0, "pvPower": 0.0},
+        )
+
+        captured_interval = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval
+            captured_interval = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 10,
+                    }
+                )
+            )
+
+        assert captured_interval is not None
+
+        # Simulate SoC dropping after 1 hour — power should change
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 50.0,
+            "loadsPower": 0.0,
+            "pvPower": 0.0,
+        }
+
+        with patch(
+            "custom_components.foxess_control.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 18, 0, 0),
+        ):
+            await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
+
+        new_power = hass.data[DOMAIN]["_smart_discharge_state"]["last_power_w"]
+        # With less energy remaining and less time, power may differ
+        assert new_power > 0
 
 
 class TestHandleSmartCharge:

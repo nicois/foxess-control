@@ -11,6 +11,7 @@ from custom_components.foxess_control import (
     _build_override_group,
     _calculate_charge_power,
     _calculate_deferred_start,
+    _calculate_discharge_power,
     _check_schedule_safe,
     _get_current_soc,
     _get_feedin_energy_kwh,
@@ -1230,3 +1231,82 @@ class TestCheckScheduleSafe:
         ]
         with pytest.raises(ServiceValidationError, match="Backup"):
             _check_schedule_safe(groups)
+
+
+class TestCalculateDischargePower:
+    """Tests for _calculate_discharge_power."""
+
+    def test_basic_calculation(self) -> None:
+        # 80% -> 10% of 10 kWh in 2h; energy=7kWh, effective=1.8h → 3889W
+        # × 1.1 headroom = 4278W
+        result = _calculate_discharge_power(80.0, 10, 10.0, 2.0, 10000)
+        assert result == 4277
+
+    def test_result_is_int(self) -> None:
+        result = _calculate_discharge_power(80.0, 10, 10.0, 3.0, 10000)
+        assert isinstance(result, int)
+
+    def test_clamped_to_min(self) -> None:
+        # Very small energy to discharge → clamped to 100W
+        result = _calculate_discharge_power(11.0, 10, 10.0, 4.0, 10000)
+        assert result == 100
+
+    def test_clamped_to_max(self) -> None:
+        # Large energy in short time → clamped to max_power_w
+        result = _calculate_discharge_power(100.0, 10, 20.0, 0.5, 5000)
+        assert result == 5000
+
+    def test_zero_remaining_hours(self) -> None:
+        result = _calculate_discharge_power(80.0, 10, 10.0, 0.0, 8000)
+        assert result == 8000
+
+    def test_negative_remaining_hours(self) -> None:
+        result = _calculate_discharge_power(80.0, 10, 10.0, -1.0, 8000)
+        assert result == 8000
+
+    def test_soc_at_min(self) -> None:
+        # energy <= 0, returns 100
+        result = _calculate_discharge_power(10.0, 10, 10.0, 2.0, 10000)
+        assert result == 100
+
+    def test_soc_below_min(self) -> None:
+        result = _calculate_discharge_power(5.0, 10, 10.0, 2.0, 10000)
+        assert result == 100
+
+    def test_consumption_decreases_power(self) -> None:
+        # House load assists discharge: net consumption is subtracted
+        base = _calculate_discharge_power(80.0, 10, 10.0, 2.0, 10000)
+        with_load = _calculate_discharge_power(
+            80.0, 10, 10.0, 2.0, 10000, net_consumption_kw=1.5
+        )
+        assert with_load < base
+
+    def test_consumption_exceeds_needed_returns_min(self) -> None:
+        # House load alone drains battery fast enough → return 100
+        result = _calculate_discharge_power(
+            20.0, 10, 10.0, 2.0, 10000, net_consumption_kw=5.0
+        )
+        assert result == 100
+
+    def test_negative_consumption_ignored(self) -> None:
+        # Solar surplus → net negative; should not increase discharge power
+        base = _calculate_discharge_power(80.0, 10, 10.0, 2.0, 10000)
+        with_solar = _calculate_discharge_power(
+            80.0, 10, 10.0, 2.0, 10000, net_consumption_kw=-3.0
+        )
+        assert with_solar == base
+
+    def test_custom_headroom(self) -> None:
+        # Higher headroom → shorter effective time → higher power
+        low_headroom = _calculate_discharge_power(
+            80.0, 10, 10.0, 2.0, 10000, headroom=0.05
+        )
+        high_headroom = _calculate_discharge_power(
+            80.0, 10, 10.0, 2.0, 10000, headroom=0.20
+        )
+        assert high_headroom > low_headroom
+
+    def test_explicit_power_as_ceiling(self) -> None:
+        # Even with pacing, result should not exceed max_power_w
+        result = _calculate_discharge_power(100.0, 0, 50.0, 1.0, 3000)
+        assert result == 3000
