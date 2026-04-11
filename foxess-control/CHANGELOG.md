@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.0-beta.2
+
+- **Smart discharge power pacing:** discharge rate is calculated to reach `min_soc` at the end of the window, recalculated every 5 minutes — mirrors smart charge behaviour. House load assists discharge (subtracted from required power). Requires `battery_capacity_kwh` in options; falls back to max power without it.
+- Rename "Smart Charge Headroom" to **Smart Headroom** — now applies to both smart charge and smart discharge
+- User-specified `power` acts as a ceiling for paced discharge (pacing still operates below it)
+- **Fix race conditions:** move smart session cancellation before any awaits in `force_charge`, `force_discharge`, `clear_overrides`, and `smart_charge` handlers — prevents old callbacks from racing with schedule changes
+- **Session identity tokens:** callbacks verify they belong to the current session before taking action — prevents stale timers from destroying replacement sessions
+- Smart discharge sessions persist pacing state (`battery_capacity_kwh`, `min_power_change`, `pacing_enabled`) and recalculate power on recovery
+
 ## 0.13.4
 
 - Configurable smart charge headroom (default 10%, max 25%) — controls time buffer and power multiplier for deferred charge calculations
