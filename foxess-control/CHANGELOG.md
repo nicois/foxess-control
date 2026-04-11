@@ -1,9 +1,10 @@
 # Changelog
 
-## 0.14.1-beta.1
+## 0.14.1-beta.2
 
 - **Shorter entity names:** use `has_entity_name` so entity friendly names are compact (e.g. "FoxESS Battery SoC" instead of "FoxESS Inverter (serial) Battery SoC"); device views show just the suffix
 - Binary sensors now grouped under the FoxESS device
+- Log total feed-in energy when smart discharge session ends
 
 ## 0.14.0
 
