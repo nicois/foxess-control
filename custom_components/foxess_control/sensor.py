@@ -14,7 +14,13 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_BATTERY_CAPACITY_KWH, CONF_DEVICE_SERIAL, DOMAIN
+from .const import (
+    CONF_BATTERY_CAPACITY_KWH,
+    CONF_CHARGE_HEADROOM,
+    CONF_DEVICE_SERIAL,
+    DEFAULT_CHARGE_HEADROOM,
+    DOMAIN,
+)
 from .coordinator import FoxESSDataCoordinator, get_coordinator_soc
 
 if TYPE_CHECKING:
@@ -132,6 +138,32 @@ def _get_battery_capacity_kwh(hass: HomeAssistant) -> float:
     return 0.0
 
 
+def _get_charge_headroom_fraction(hass: HomeAssistant) -> float:
+    """Read charge headroom from the first config entry's options as a fraction."""
+    domain_data = hass.data.get(DOMAIN)
+    if domain_data is None:
+        return DEFAULT_CHARGE_HEADROOM / 100.0
+    for key in domain_data:
+        if not str(key).startswith("_"):
+            entry = hass.config_entries.async_get_entry(str(key))
+            if entry is not None:
+                pct: int = entry.options.get(
+                    CONF_CHARGE_HEADROOM, DEFAULT_CHARGE_HEADROOM
+                )
+                return pct / 100.0
+    return DEFAULT_CHARGE_HEADROOM / 100.0
+
+
+def _deferred_power_fraction(hass: HomeAssistant) -> float:
+    """Fraction of max power assumed during deferred start estimation.
+
+    Derived from the configured charge headroom: accounts for both the
+    time buffer and the power reservation.
+    """
+    h = _get_charge_headroom_fraction(hass)
+    return (1 - h) * (1 - h)
+
+
 def _get_coordinator_value(hass: HomeAssistant, key: str) -> float | None:
     """Read a numeric value from the first available coordinator."""
     domain_data = hass.data.get(DOMAIN)
@@ -196,10 +228,6 @@ def _estimate_discharge_remaining(
     return _format_duration(window_remaining)
 
 
-# Fraction of max power used to plan deferred start (mirrors __init__.py).
-_DEFERRED_POWER_FRACTION = 0.8
-
-
 def _format_duration(td: datetime.timedelta) -> str:
     """Format a timedelta as a compact human-readable string."""
     total_minutes = int(td.total_seconds() / 60)
@@ -246,7 +274,7 @@ def _estimate_charge_remaining(
             and soc < target_soc
         ):
             energy_kwh = (target_soc - soc) / 100.0 * capacity_kwh
-            charge_kw = max_power_w * _DEFERRED_POWER_FRACTION / 1000.0
+            charge_kw = max_power_w * _deferred_power_fraction(hass) / 1000.0
             charge_hours = energy_kwh / charge_kw
             deferred_start = end - datetime.timedelta(hours=charge_hours)
             # Never show a start time before the window opens
@@ -299,7 +327,8 @@ def _build_forecast(
         deferred_start = now
         if not charging_started and max_power_w > 0:
             energy_kwh = (target_soc - soc) / 100.0 * capacity_kwh
-            charge_kw = max_power_w * _DEFERRED_POWER_FRACTION / 1000.0
+            dpf = _deferred_power_fraction(hass)
+            charge_kw = max_power_w * dpf / 1000.0
             if charge_kw > 0:
                 charge_hours = energy_kwh / charge_kw
                 deferred_start = end - datetime.timedelta(hours=charge_hours)
@@ -307,7 +336,7 @@ def _build_forecast(
                     deferred_start = now
             # Use planned power rate for projection after deferred start
             if capacity_kwh > 0:
-                planned_power = max_power_w * _DEFERRED_POWER_FRACTION
+                planned_power = max_power_w * dpf
                 charge_rate = (planned_power / 1000.0) / capacity_kwh * 100.0 / 3600.0
 
         t = now

@@ -143,7 +143,8 @@
           "battery_capacity_kwh": "Battery Capacity (kWh)",
           "min_power_change": "Minimum Power Change for Smart Charge (W)",
           "api_min_soc": "Minimum API fdSoc (%) — ⚠️ Values below 11 may not work with all firmware versions",
-          "polling_interval": "API Polling Interval (seconds)"
+          "polling_interval": "API Polling Interval (seconds)",
+          "charge_headroom": "Smart Charge Headroom (%)"
         }
       },
       "modbus": {

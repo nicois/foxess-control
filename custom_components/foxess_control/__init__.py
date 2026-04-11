@@ -21,6 +21,7 @@ from .const import (
     CONF_API_KEY,
     CONF_API_MIN_SOC,
     CONF_BATTERY_CAPACITY_KWH,
+    CONF_CHARGE_HEADROOM,
     CONF_CHARGE_POWER_ENTITY,
     CONF_DEVICE_SERIAL,
     CONF_DISCHARGE_POWER_ENTITY,
@@ -31,6 +32,7 @@ from .const import (
     CONF_POLLING_INTERVAL,
     CONF_WORK_MODE_ENTITY,
     DEFAULT_API_MIN_SOC,
+    DEFAULT_CHARGE_HEADROOM,
     DEFAULT_ENTITY_POLLING_INTERVAL,
     DEFAULT_INVERTER_POWER,
     DEFAULT_MIN_POWER_CHANGE,
@@ -181,6 +183,13 @@ def _get_first_entry(hass: HomeAssistant) -> ConfigEntry:
     if entry is None:
         raise ServiceValidationError("No FoxESS Control integration configured")
     return entry
+
+
+def _get_charge_headroom(hass: HomeAssistant) -> float:
+    """Return the charge headroom as a fraction (e.g. 0.10 for 10%)."""
+    entry = _get_first_entry(hass)
+    pct: int = entry.options.get(CONF_CHARGE_HEADROOM, DEFAULT_CHARGE_HEADROOM)
+    return pct / 100.0
 
 
 def _get_polling_interval_seconds(hass: HomeAssistant) -> int:
@@ -540,11 +549,14 @@ def _calculate_charge_power(
     remaining_hours: float,
     max_power_w: int,
     net_consumption_kw: float = 0.0,
+    headroom: float = 0.10,
 ) -> int:
     """Calculate the charge power needed to reach target SoC in remaining time.
 
-    Aims to finish with a 10% time buffer so the inverter doesn't have to
-    run at full capacity.  This matches the headroom used by
+    *headroom* is a fraction (e.g. 0.10 for 10%) controlling how much
+    spare capacity to reserve.  It is applied both as a time buffer (plan
+    to finish in ``1 - headroom`` of the remaining time) and as a power
+    multiplier (``1 + headroom``).  This matches the headroom used by
     ``_calculate_deferred_start`` so the two stay in agreement.
 
     When *net_consumption_kw* is positive the house is drawing power that
@@ -560,9 +572,9 @@ def _calculate_charge_power(
         return 100
     if remaining_hours <= 0:
         return max_power_w
-    # Plan to finish in 90% of the remaining time so there is a buffer
-    # if consumption spikes or the inverter can't sustain full power.
-    effective_hours = remaining_hours * (1 - DEFERRED_START_MIN_HEADROOM)
+    # Plan to finish in (1 - headroom) of the remaining time so there is
+    # a buffer if consumption spikes or the inverter can't sustain full power.
+    effective_hours = remaining_hours * (1 - headroom)
     if effective_hours <= 0:
         effective_hours = remaining_hours
     battery_power_kw = energy_needed_kwh / effective_hours
@@ -570,19 +582,9 @@ def _calculate_charge_power(
     # Over-provision the charge rate so unexpected load doesn't prevent
     # reaching the target.  The absolute headroom scales linearly with the
     # required power, so it naturally shrinks as SoC approaches the target.
-    total_power_kw *= _CHARGE_POWER_HEADROOM
+    total_power_kw *= 1 + headroom
     power_w = total_power_kw * 1000
     return max(100, min(int(power_w), max_power_w))
-
-
-# Minimum fraction of max power reserved as headroom when calculating
-# the deferred start time.  Even when measured net consumption is zero
-# we still plan with at least 10% spare capacity for transient loads.
-DEFERRED_START_MIN_HEADROOM = 0.10
-
-# Multiplier applied to the calculated charge power to absorb unexpected
-# household load.  e.g. 1.1 means a 9kW calculation becomes ~10kW.
-_CHARGE_POWER_HEADROOM = 1.10
 
 
 def _calculate_deferred_start(
@@ -593,12 +595,16 @@ def _calculate_deferred_start(
     end: datetime.datetime,
     net_consumption_kw: float = 0.0,
     start: datetime.datetime | None = None,
+    headroom: float = 0.10,
 ) -> datetime.datetime:
     """Calculate the latest time to start charging to reach target SoC by *end*.
 
+    *headroom* is a fraction (e.g. 0.10 for 10%) controlling how much
+    spare capacity to reserve for transient loads.
+
     Uses *net_consumption_kw* (house load minus solar) to estimate how
     much inverter capacity is available for charging.  A minimum headroom
-    of 10% of *max_power_w* is always reserved for transient loads.
+    of *headroom* × *max_power_w* is always reserved.
 
     When *start* is provided the result is clamped so it never precedes
     the window opening time.
@@ -612,16 +618,16 @@ def _calculate_deferred_start(
         return end
     max_power_kw = max_power_w / 1000.0
     consumption_headroom_kw = max(0.0, net_consumption_kw)
-    min_headroom_kw = max_power_kw * DEFERRED_START_MIN_HEADROOM
+    min_headroom_kw = max_power_kw * headroom
     headroom_kw = max(consumption_headroom_kw, min_headroom_kw)
     effective_charge_kw = max_power_kw - headroom_kw
     if effective_charge_kw <= 0:
-        effective_charge_kw = max_power_kw * DEFERRED_START_MIN_HEADROOM
+        effective_charge_kw = max_power_kw * headroom
     charge_hours = energy_needed_kwh / effective_charge_kw
     # Add a time buffer so that transient load spikes don't prevent
-    # reaching the target.  This matches the 10% headroom used by
+    # reaching the target.  This matches the headroom used by
     # _calculate_charge_power when sizing the charge rate.
-    buffered_hours = charge_hours / (1 - DEFERRED_START_MIN_HEADROOM)
+    buffered_hours = charge_hours / (1 - headroom)
     deferred = end - datetime.timedelta(hours=buffered_hours)
     if start is not None and deferred < start:
         deferred = start
@@ -995,6 +1001,7 @@ def _setup_smart_charge_listeners(
 
         if not cur_state["charging_started"]:
             # Check if it's time to start deferred charging
+            headroom = _get_charge_headroom(hass)
             deferred = _calculate_deferred_start(
                 cur_soc,
                 cur_state["target_soc"],
@@ -1003,6 +1010,7 @@ def _setup_smart_charge_listeners(
                 cur_state["end"],
                 net_consumption_kw=net_consumption,
                 start=cur_state["start"],
+                headroom=headroom,
             )
             if now_dt < deferred:
                 _LOGGER.debug(
@@ -1023,6 +1031,7 @@ def _setup_smart_charge_listeners(
                 remaining,
                 cur_state["max_power_w"],
                 net_consumption_kw=net_consumption,
+                headroom=headroom,
             )
             if _is_entity_mode(hass):
                 await _apply_mode_via_entities(
@@ -1110,6 +1119,7 @@ def _setup_smart_charge_listeners(
             remaining,
             cur_state["max_power_w"],
             net_consumption_kw=net_consumption,
+            headroom=_get_charge_headroom(hass),
         )
 
         if (
@@ -1496,6 +1506,7 @@ async def _recover_charge_session(
                 remaining,
                 max_power,
                 net_consumption_kw=_get_net_consumption(hass),
+                headroom=_get_charge_headroom(hass),
             )
         else:
             last_power = max_power
@@ -2224,6 +2235,7 @@ def _register_services(hass: HomeAssistant) -> None:
         # Decide whether to start charging now or defer
         now = dt_util.now()
         net_consumption = _get_net_consumption(hass)
+        headroom = _get_charge_headroom(hass)
         should_defer = False
         if current_soc is not None:
             deferred_start = _calculate_deferred_start(
@@ -2234,6 +2246,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 end,
                 net_consumption_kw=net_consumption,
                 start=start,
+                headroom=headroom,
             )
             should_defer = now < deferred_start
 
@@ -2263,6 +2276,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     remaining,
                     effective_max_power,
                     net_consumption_kw=net_consumption,
+                    headroom=headroom,
                 )
 
             _LOGGER.info(

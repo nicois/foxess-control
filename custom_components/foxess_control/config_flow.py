@@ -27,6 +27,7 @@ from .const import (
     CONF_API_KEY,
     CONF_API_MIN_SOC,
     CONF_BATTERY_CAPACITY_KWH,
+    CONF_CHARGE_HEADROOM,
     CONF_CHARGE_POWER_ENTITY,
     CONF_DEVICE_SERIAL,
     CONF_DISCHARGE_POWER_ENTITY,
@@ -41,6 +42,7 @@ from .const import (
     CONF_SOC_ENTITY,
     CONF_WORK_MODE_ENTITY,
     DEFAULT_API_MIN_SOC,
+    DEFAULT_CHARGE_HEADROOM,
     DEFAULT_INVERTER_POWER,
     DEFAULT_MIN_POWER_CHANGE,
     DEFAULT_MIN_SOC_ON_GRID,
@@ -188,6 +190,9 @@ class FoxessControlOptionsFlow(OptionsFlow):
         current_polling = self._config_entry.options.get(
             CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL
         )
+        current_headroom = self._config_entry.options.get(
+            CONF_CHARGE_HEADROOM, DEFAULT_CHARGE_HEADROOM
+        )
 
         return self.async_show_form(
             step_id="init",
@@ -237,6 +242,17 @@ class FoxessControlOptionsFlow(OptionsFlow):
                             max=600,
                             step=10,
                             unit_of_measurement="s",
+                            mode=NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_CHARGE_HEADROOM, default=current_headroom
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0,
+                            max=25,
+                            step=1,
+                            unit_of_measurement="%",
                             mode=NumberSelectorMode.BOX,
                         )
                     ),
