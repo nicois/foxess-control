@@ -1323,7 +1323,6 @@ class DebugLogSensor(SensorEntity):
     _attr_has_entity_name = True
     _attr_icon = "mdi:math-log"
     _attr_entity_registry_enabled_default = True
-    _attr_should_poll = True
 
     def __init__(
         self,
@@ -1342,9 +1341,6 @@ class DebugLogSensor(SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {"entries": list(self._buffer)}
-
-    async def async_update(self) -> None:
-        """No-op — properties read from the live buffer each poll cycle."""
 
 
 def setup_debug_log(
