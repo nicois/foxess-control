@@ -4,6 +4,10 @@
 
 - **Smart charge trajectory catch-up:** when charging falls behind the ideal headroom-adjusted trajectory, charge power temporarily jumps to maximum until the trajectory is regained. A tolerance derived from the Min Power Change setting prevents premature bursting from minor measurement fluctuations.
 - **Overview card:** WebSocket-based entity discovery replaces hardcoded entity names; direction indicators on grid and battery nodes replace SVG flow animation
+- **Fix deferred-to-charging transition:** sensors now detect when the deferred start time has passed even before the 5-minute callback fires, preventing stale "Charge Scheduled" display and 0W power readings
+- **Remove unreliable ResidualEnergy:** the FoxESS API returns ResidualEnergy in undocumented units that caused deferred charge to miscalculate timing; all calculations now use SoC × configured capacity
+- Fix blocking `read_text()` call in Lovelace card frontend registration
+- Diagnostic context (capacity, max power, headroom) added to smart charge log messages
 
 ## 0.14.1
 
