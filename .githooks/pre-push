@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Pre-push hook: block tag pushes unless all CI checks have passed
+# on the tagged commit.
+#
+# Setup (one-time):  git config core.hooksPath .githooks
+
+set -euo pipefail
+
+if ! command -v gh &>/dev/null; then
+  echo "⚠  gh CLI not found — skipping tag CI check"
+  exit 0
+fi
+
+while read -r local_ref local_oid remote_ref remote_oid; do
+  # Only check tag pushes
+  case "$local_ref" in
+    refs/tags/v*) ;;
+    *) continue ;;
+  esac
+
+  tag="${local_ref#refs/tags/}"
+  commit=$(git rev-list -n1 "$tag" 2>/dev/null || echo "$local_oid")
+
+  echo "Checking CI status for $tag ($commit)..."
+
+  # Get check status — gh returns non-zero if any check failed
+  status=$(gh run list --commit "$commit" --json status,conclusion \
+    --jq '[.[] | select(.status == "completed")] | length' 2>/dev/null || echo "0")
+
+  if [ "$status" = "0" ]; then
+    echo "❌ No completed CI runs found for commit $commit"
+    echo "   Push the commit first and wait for CI to pass before tagging."
+    exit 1
+  fi
+
+  # Check if any run failed
+  failed=$(gh run list --commit "$commit" --json status,conclusion \
+    --jq '[.[] | select(.status == "completed" and .conclusion != "success")] | length' 2>/dev/null || echo "0")
+
+  if [ "$failed" != "0" ]; then
+    echo "❌ CI checks failed for commit $commit"
+    echo "   Fix the failures before pushing tag $tag."
+    exit 1
+  fi
+
+  # Check the four required workflows completed
+  completed=$(gh run list --commit "$commit" --json workflowName,conclusion \
+    --jq '[.[] | select(.conclusion == "success")] | [.[].workflowName] | unique | sort | .[]' 2>/dev/null)
+
+  missing=""
+  for workflow in "HACS" "Hassfest" "Lint & Test"; do
+    if ! echo "$completed" | grep -qxF "$workflow"; then
+      missing="$missing  - $workflow"$'\n'
+    fi
+  done
+
+  if [ -n "$missing" ]; then
+    echo "❌ Required workflows not yet passed for $commit:"
+    echo "$missing"
+    echo "   Wait for all CI checks to complete before pushing tag $tag."
+    exit 1
+  fi
+
+  echo "✅ All CI checks passed for $tag"
+done
+
+exit 0
