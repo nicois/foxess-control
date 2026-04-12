@@ -5,11 +5,13 @@ A Home Assistant custom integration for monitoring and controlling FoxESS invert
 FoxESS Control polls real-time inverter data (battery SoC, charge/discharge power, solar generation, house load, temperature) and provides actions for force charge, force discharge, smart charge/discharge with SoC targets, and feed-in management. It supports two backends: the **FoxESS Cloud API** and **local entity mode** via [foxess_modbus](https://github.com/nathanmarlor/foxess_modbus). It includes comprehensive polled sensors and can fully replace the [foxess-ha](https://github.com/macxq/foxess-ha) integration — see [Migrating from foxess-ha](#migrating-from-foxess-ha).
 
 ## Gallery
+### A dashboard overview card
+<img width="512" height="332" alt="image" src="https://github.com/user-attachments/assets/d31eda08-ca11-49df-8163-989c6a8271f3" />
 
 ### Smart charge: optimally ensure SoC is reached at a given time
 <img width="481" height="746" alt="image" src="https://github.com/user-attachments/assets/998b4aec-d923-4188-b669-28b56fccf73a" />
 
-### Smart discharge: feed in during a time window, optionally limiting total energy, reverting to self-use afterwards
+### Smart discharge: feed in during a time window, optionally limiting total energy, reverting to self-use afterwards. If minimum SoC will be reached, throttle discharge rate to not reach it prematurely
 <img width="481" height="873" alt="image" src="https://github.com/user-attachments/assets/1272ba4a-111f-45d4-a53e-6a3e7918efc9" />
 
 ### A dashboard card showing the state of the current smart operation
