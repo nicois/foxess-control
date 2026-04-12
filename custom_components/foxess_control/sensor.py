@@ -508,7 +508,8 @@ class InverterOverrideStatusSensor(SensorEntity):
             target = cs.get("target_soc", "?")
             if not _is_effectively_charging(self.hass, cs):
                 return f"Wait→{target}%"
-            power = _format_power(cs.get("last_power_w", 0))
+            power_w = cs.get("last_power_w", 0) or cs.get("max_power_w", 0)
+            power = _format_power(power_w)
             return f"Chg {power}→{target}%"
 
         ds = _get_discharge_state(self.hass)
@@ -654,7 +655,10 @@ class SmartOperationsOverviewSensor(SensorEntity):
             attrs.update(
                 {
                     "charge_phase": "charging" if charging else "deferred",
-                    "charge_power_w": cs.get("last_power_w", 0),
+                    "charge_power_w": (
+                        cs.get("last_power_w", 0)
+                        or (cs.get("max_power_w", 0) if charging else 0)
+                    ),
                     "charge_max_power_w": cs.get("max_power_w"),
                     "charge_target_soc": cs.get("target_soc"),
                     "charge_current_soc": soc,
@@ -715,6 +719,8 @@ class ChargePowerSensor(SensorEntity):
         if cs is None:
             return _STATE_UNAVAILABLE
         power: int = cs.get("last_power_w", 0)
+        if power == 0 and _is_effectively_charging(self.hass, cs):
+            power = cs.get("max_power_w", 0)
         return power
 
     @property
