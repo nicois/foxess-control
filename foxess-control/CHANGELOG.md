@@ -1,9 +1,14 @@
 # Changelog
 
+## 0.14.2
+
+- **Smart charge trajectory catch-up:** when charging falls behind the ideal headroom-adjusted trajectory, charge power temporarily jumps to maximum until the trajectory is regained. A tolerance derived from the Min Power Change setting prevents premature bursting from minor measurement fluctuations.
+- **Overview card:** WebSocket-based entity discovery replaces hardcoded entity names; direction indicators on grid and battery nodes replace SVG flow animation
+
 ## 0.14.1
 
 - **Shorter entity names:** use `has_entity_name` so entity friendly names are compact (e.g. "FoxESS Battery SoC" instead of "FoxESS Inverter (serial) Battery SoC"); device views show just the suffix
-- **Overview card:** new built-in Lovelace card showing live energy flows between solar, battery, grid and house with animated flow diagram, power values and inverter stats
+- **Overview card:** new built-in Lovelace card showing live energy flows between solar, battery, grid and house with power values and inverter stats
 - Binary sensors now grouped under the FoxESS device
 - Log total feed-in energy when smart discharge session ends
 

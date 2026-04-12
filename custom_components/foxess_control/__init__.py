@@ -527,6 +527,12 @@ def _session_data_from_charge_state(state: dict[str, Any]) -> dict[str, Any]:
         "api_min_soc": state.get("api_min_soc", DEFAULT_API_MIN_SOC),
         "force": state.get("force", False),
         "charging_started": state["charging_started"],
+        "charging_started_at": (
+            state["charging_started_at"].isoformat()
+            if state.get("charging_started_at")
+            else None
+        ),
+        "charging_started_energy_kwh": state.get("charging_started_energy_kwh"),
     }
 
 
@@ -582,6 +588,10 @@ def _calculate_charge_power(
     net_consumption_kw: float = 0.0,
     headroom: float = 0.10,
     residual_energy_kwh: float | None = None,
+    charging_started_energy_kwh: float | None = None,
+    elapsed_since_charge_started: float = 0.0,
+    effective_charge_window: float = 0.0,
+    min_power_change_w: int = 0,
 ) -> int:
     """Calculate the charge power needed to reach target SoC in remaining time.
 
@@ -590,6 +600,19 @@ def _calculate_charge_power(
     to finish in ``1 - headroom`` of the remaining time) and as a power
     multiplier (``1 + headroom``).  This matches the headroom used by
     ``_calculate_deferred_start`` so the two stay in agreement.
+
+    When *charging_started_energy_kwh* and *elapsed_since_charge_started*
+    are provided, the function checks whether the current energy is behind
+    the ideal headroom-adjusted trajectory.  The ideal trajectory is a
+    linear ramp from the starting energy to the target energy, completing
+    in ``effective_charge_window * (1 - headroom)`` hours.  If the actual
+    energy is below the ideal by more than a tolerance, *max_power_w* is
+    returned to catch up.  Once the trajectory is regained, normal pacing
+    resumes.  The tolerance equals ``min_power_change_w / 1000 ×
+    remaining_hours`` — the energy a minimum-meaningful power bump would
+    recover over the remaining window.  This prevents premature bursting
+    from minor measurement fluctuations while still catching up promptly
+    as the window closes.
 
     When *net_consumption_kw* is positive the house is drawing power that
     competes with the battery for inverter capacity, so we add it to the
@@ -608,11 +631,48 @@ def _calculate_charge_power(
         target_energy_kwh = target_soc / 100.0 * battery_capacity_kwh
         energy_needed_kwh = target_energy_kwh - residual_energy_kwh
     else:
+        target_energy_kwh = target_soc / 100.0 * battery_capacity_kwh
         energy_needed_kwh = (target_soc - current_soc) / 100.0 * battery_capacity_kwh
     if energy_needed_kwh <= 0:
         return 100
     if remaining_hours <= 0:
         return max_power_w
+
+    # Check if we're behind the ideal headroom-adjusted trajectory.
+    if (
+        charging_started_energy_kwh is not None
+        and elapsed_since_charge_started > 0
+        and effective_charge_window > 0
+        and headroom > 0
+    ):
+        effective_window = effective_charge_window * (1 - headroom)
+        if effective_window > 0:
+            energy_to_add = target_energy_kwh - charging_started_energy_kwh
+            if energy_to_add > 0:
+                progress = min(elapsed_since_charge_started / effective_window, 1.0)
+                ideal_energy_now = (
+                    charging_started_energy_kwh + progress * energy_to_add
+                )
+                actual_energy = (
+                    residual_energy_kwh
+                    if residual_energy_kwh is not None and battery_capacity_kwh > 0
+                    else current_soc / 100.0 * battery_capacity_kwh
+                )
+                tolerance_kwh = min_power_change_w / 1000.0 * remaining_hours
+                deficit = ideal_energy_now - actual_energy
+                if deficit > tolerance_kwh:
+                    _LOGGER.debug(
+                        "Smart charge: behind schedule "
+                        "(%.2f kWh < ideal %.2f kWh, "
+                        "deficit %.3f > tolerance %.3f), "
+                        "charging at max power",
+                        actual_energy,
+                        ideal_energy_now,
+                        deficit,
+                        tolerance_kwh,
+                    )
+                    return max_power_w
+
     # Plan to finish in (1 - headroom) of the remaining time so there is
     # a buffer if consumption spikes or the inverter can't sustain full power.
     effective_hours = remaining_hours * (1 - headroom)
@@ -1242,6 +1302,13 @@ def _setup_smart_charge_listeners(
             cur_state["groups"] = groups
             cur_state["last_power_w"] = new_power
             cur_state["charging_started"] = True
+            cur_state["charging_started_at"] = now_dt
+            residual_at_start = _get_residual_energy_kwh(hass)
+            cur_state["charging_started_energy_kwh"] = (
+                residual_at_start
+                if residual_at_start is not None
+                else cur_soc / 100.0 * cur_state["battery_capacity_kwh"]
+            )
             _LOGGER.info(
                 "Smart charge: deferred charge started (SoC=%.1f%%, power=%dW)",
                 cur_soc,
@@ -1255,6 +1322,13 @@ def _setup_smart_charge_listeners(
             return
 
         # Already charging — adjust power as needed
+        started_at = cur_state.get("charging_started_at")
+        if started_at is not None:
+            elapsed_since_start = (now_dt - started_at).total_seconds() / 3600.0
+            window_from_start = (cur_state["end"] - started_at).total_seconds() / 3600.0
+        else:
+            elapsed_since_start = 0.0
+            window_from_start = 0.0
         new_power = _calculate_charge_power(
             cur_soc,
             cur_state["target_soc"],
@@ -1264,6 +1338,10 @@ def _setup_smart_charge_listeners(
             net_consumption_kw=net_consumption,
             headroom=_get_smart_headroom(hass),
             residual_energy_kwh=_get_residual_energy_kwh(hass),
+            charging_started_energy_kwh=cur_state.get("charging_started_energy_kwh"),
+            elapsed_since_charge_started=elapsed_since_start,
+            effective_charge_window=window_from_start,
+            min_power_change_w=cur_state["min_power_change"],
         )
 
         if (
@@ -1722,9 +1800,18 @@ async def _recover_charge_session(
         max_power = charge_data.get("max_power_w", 10000)
         target_soc = charge_data.get("target_soc", 100)
         capacity = charge_data.get("battery_capacity_kwh", 0.0)
+        started_at_str = charge_data.get("charging_started_at")
+        started_at = dt_util.parse_datetime(started_at_str) if started_at_str else None
+        started_energy = charge_data.get("charging_started_energy_kwh")
         if not charge_data.get("charging_started", False):
             last_power = 0
         elif current_soc is not None:
+            if started_at is not None:
+                elapsed_since_start = (now - started_at).total_seconds() / 3600.0
+                window_from_start = (end - started_at).total_seconds() / 3600.0
+            else:
+                elapsed_since_start = 0.0
+                window_from_start = 0.0
             last_power = _calculate_charge_power(
                 current_soc,
                 target_soc,
@@ -1734,6 +1821,12 @@ async def _recover_charge_session(
                 net_consumption_kw=_get_net_consumption(hass),
                 headroom=_get_smart_headroom(hass),
                 residual_energy_kwh=_get_residual_energy_kwh(hass),
+                charging_started_energy_kwh=started_energy,
+                elapsed_since_charge_started=elapsed_since_start,
+                effective_charge_window=window_from_start,
+                min_power_change_w=charge_data.get(
+                    "min_power_change", DEFAULT_MIN_POWER_CHANGE
+                ),
             )
         else:
             last_power = max_power
@@ -1755,6 +1848,8 @@ async def _recover_charge_session(
             ),
             "api_min_soc": charge_data.get("api_min_soc", DEFAULT_API_MIN_SOC),
             "charging_started": charge_data.get("charging_started", False),
+            "charging_started_at": started_at,
+            "charging_started_energy_kwh": started_energy,
             "force": charge_data.get("force", False),
             "soc_unavailable_count": 0,
             "soc_above_target_count": 0,
@@ -2721,6 +2816,20 @@ def _register_services(hass: HomeAssistant) -> None:
             "min_power_change": min_power_change,
             "api_min_soc": api_min_soc,
             "charging_started": not should_defer,
+            "charging_started_at": None if should_defer else now,
+            "charging_started_energy_kwh": (
+                None
+                if should_defer
+                else (
+                    residual
+                    if residual is not None
+                    else (
+                        current_soc / 100.0 * battery_capacity_kwh
+                        if current_soc is not None
+                        else None
+                    )
+                )
+            ),
             "force": force,
             "soc_unavailable_count": 0,
             "soc_above_target_count": 0,

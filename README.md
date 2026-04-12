@@ -191,7 +191,7 @@ Charges the battery within a time window, deferring grid charging as long as pos
 1. Calculates the latest possible start time by estimating the effective charge rate — inverter max power minus current household consumption (read from the polled `loadsPower` and `pvPower` data), with a minimum headroom (configurable via **Smart Headroom**, default 10%) reserved for transient loads. This consumption-aware calculation means the deferral adapts to real-time site conditions rather than using a fixed buffer.
 2. **Deferred phase:** Until the calculated start time, no `ForceCharge` schedule is set. The inverter stays in its current mode (typically self-use), allowing solar generation to charge the battery naturally.
 3. **Charging phase:** When the deferred start time arrives, sets a `ForceCharge` schedule with `fdSoc` set high (100%) so the inverter never stops charging on its own — HA is the sole authority for stopping. Charge power targets finishing within the configured headroom buffer and accounts for current household consumption, so the inverter typically runs below full capacity.
-4. Every 5 minutes, re-reads the current SoC, household consumption, and solar generation, then recalculates. When available, the inverter's `ResidualEnergy` sensor (direct kWh measurement) is used for higher precision than integer SoC% × capacity. During the deferred phase, if solar has raised the SoC, the start time is pushed later. During the charging phase, power is adjusted up or down based on both the remaining energy deficit and current net consumption. If the power change is below the configured **Min Power Change** threshold, the update is skipped to avoid unnecessary API calls.
+4. Every 5 minutes, re-reads the current SoC, household consumption, and solar generation, then recalculates. When available, the inverter's `ResidualEnergy` sensor (direct kWh measurement) is used for higher precision than integer SoC% × capacity. During the deferred phase, if solar has raised the SoC, the start time is pushed later. During the charging phase, power is adjusted up or down based on both the remaining energy deficit and current net consumption. If the power change is below the configured **Min Power Change** threshold, the update is skipped to avoid unnecessary API calls. If the actual energy stored is significantly behind the ideal headroom-adjusted trajectory (a linear ramp from the starting energy to the target, completing within the headroom-shortened window), the charge rate temporarily jumps to full power until the trajectory is regained. The deficit must exceed a tolerance derived from the **Min Power Change** setting to avoid premature bursting from minor measurement fluctuations.
 5. When the SoC reaches the target (whether from solar during the deferred phase or grid charging), the `ForceCharge` group is removed from the schedule immediately to stop unnecessary charging. The session continues monitoring for one more reading: if the SoC is confirmed at or above target, the session ends; if it drops back below, the charge override is re-applied. This prevents a single SoC spike from prematurely ending the session while avoiding overcharging during the confirmation period. Other modes' schedule groups (e.g. a standing `ForceDischarge` window) are preserved.
 6. When the time window ends, the `ForceCharge` group is removed from the schedule and listeners are cancelled. This prevents the schedule from replaying the next day.
 
@@ -477,7 +477,7 @@ soc_entity: sensor.foxess_battery_soc
 
 ### Overview card
 
-A second built-in card shows live energy flows between solar, battery, grid and house in a 2×2 layout with animated flow lines.
+A second built-in card shows live energy flows between solar, battery, grid and house in a 2×2 layout.
 
 ```yaml
 type: custom:foxess-overview-card
@@ -487,9 +487,8 @@ No configuration required — all entities are auto-discovered. The card shows:
 
 - **Solar**: Total solar power with PV1/PV2 breakdown
 - **House**: Household consumption
-- **Grid**: Import/export power with voltage and frequency
-- **Battery**: SoC gauge, charge/discharge rate, temperature, residual energy
-- **Flow diagram**: Animated dots showing active energy flows through a centre hub
+- **Grid**: Import/export power with direction indicator, voltage and frequency
+- **Battery**: SoC gauge, charge/discharge rate with direction indicator, temperature, residual energy
 - **Work mode**: Current inverter work mode badge in the header
 
 To override the default entity IDs:

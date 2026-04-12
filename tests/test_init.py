@@ -1089,6 +1089,184 @@ class TestCalculateChargePowerEdgeCases:
         assert result == 10000
 
 
+class TestCalculateChargePowerTrajectory:
+    """Tests for trajectory catch-up logic in _calculate_charge_power."""
+
+    def test_behind_trajectory_returns_max_power(self) -> None:
+        """When actual energy is behind the ideal trajectory, charge at max."""
+        # 10 kWh battery, target 100%, started at 5 kWh (50%)
+        # 4-hour window with 10% headroom → effective 3.6h
+        # Energy to add = 10 - 5 = 5 kWh
+        # 1h elapsed → progress = 1/3.6 = 0.278 → ideal = 5 + 0.278*5 = 6.39 kWh
+        # Actual = 5.5 kWh (55%) < 6.39 → behind schedule → max power
+        result = _calculate_charge_power(
+            55.0,
+            100,
+            10.0,
+            3.0,
+            10000,
+            headroom=0.10,
+            charging_started_energy_kwh=5.0,
+            elapsed_since_charge_started=1.0,
+            effective_charge_window=4.0,
+        )
+        assert result == 10000
+
+    def test_ahead_of_trajectory_uses_normal_pacing(self) -> None:
+        """When actual energy is ahead of trajectory, use normal pacing."""
+        # Same setup but actual = 7 kWh (70%) > ideal 6.39 → normal pacing
+        result = _calculate_charge_power(
+            70.0,
+            100,
+            10.0,
+            3.0,
+            10000,
+            headroom=0.10,
+            charging_started_energy_kwh=5.0,
+            elapsed_since_charge_started=1.0,
+            effective_charge_window=4.0,
+        )
+        assert result < 10000
+
+    def test_on_trajectory_uses_normal_pacing(self) -> None:
+        """When exactly on trajectory, use normal pacing (not max)."""
+        # ideal at 1h = 5 + (1/3.6)*5 = 6.389 kWh → soc ~63.89%
+        # Set actual just above ideal
+        result = _calculate_charge_power(
+            64.0,
+            100,
+            10.0,
+            3.0,
+            10000,
+            headroom=0.10,
+            charging_started_energy_kwh=5.0,
+            elapsed_since_charge_started=1.0,
+            effective_charge_window=4.0,
+        )
+        assert result < 10000
+
+    def test_no_started_energy_skips_trajectory_check(self) -> None:
+        """When charging_started_energy_kwh is None, no trajectory check."""
+        result = _calculate_charge_power(
+            55.0,
+            100,
+            10.0,
+            3.0,
+            10000,
+            headroom=0.10,
+            charging_started_energy_kwh=None,
+            elapsed_since_charge_started=1.0,
+            effective_charge_window=4.0,
+        )
+        # Normal pacing, not max power
+        assert result < 10000
+
+    def test_zero_elapsed_skips_trajectory_check(self) -> None:
+        """At the very start (elapsed=0), no trajectory check."""
+        result = _calculate_charge_power(
+            50.0,
+            100,
+            10.0,
+            4.0,
+            10000,
+            headroom=0.10,
+            charging_started_energy_kwh=5.0,
+            elapsed_since_charge_started=0.0,
+            effective_charge_window=4.0,
+        )
+        assert result < 10000
+
+    def test_trajectory_with_residual_energy(self) -> None:
+        """Trajectory check uses residual_energy_kwh when available."""
+        # Started at 5 kWh, now residual says 5.5 kWh, ideal is ~6.39
+        result = _calculate_charge_power(
+            99.0,
+            100,
+            10.0,
+            3.0,
+            10000,  # SoC misleading (99%)
+            headroom=0.10,
+            residual_energy_kwh=5.5,  # actual energy from inverter
+            charging_started_energy_kwh=5.0,
+            elapsed_since_charge_started=1.0,
+            effective_charge_window=4.0,
+        )
+        # 5.5 < 6.39, should return max power despite high SoC
+        assert result == 10000
+
+    def test_trajectory_regained_resumes_normal(self) -> None:
+        """Once ahead of trajectory again, reverts to normal pacing."""
+        # Started at 5 kWh, now residual says 7 kWh, ideal is ~6.39
+        result = _calculate_charge_power(
+            70.0,
+            100,
+            10.0,
+            3.0,
+            10000,
+            headroom=0.10,
+            residual_energy_kwh=7.0,
+            charging_started_energy_kwh=5.0,
+            elapsed_since_charge_started=1.0,
+            effective_charge_window=4.0,
+        )
+        assert result < 10000
+
+    def test_small_deficit_within_tolerance_uses_normal_pacing(self) -> None:
+        """A deficit smaller than the tolerance does not trigger max power."""
+        # ideal = 6.39, actual = 6.2 → deficit = 0.19 kWh
+        # tolerance = 100W / 1000 * 3h = 0.3 kWh → deficit < tolerance
+        result = _calculate_charge_power(
+            62.0,
+            100,
+            10.0,
+            3.0,
+            10000,
+            headroom=0.10,
+            charging_started_energy_kwh=5.0,
+            elapsed_since_charge_started=1.0,
+            effective_charge_window=4.0,
+            min_power_change_w=100,
+        )
+        assert result < 10000
+
+    def test_large_deficit_exceeding_tolerance_returns_max(self) -> None:
+        """A deficit larger than the tolerance triggers max power."""
+        # ideal = 6.39, actual = 5.5 → deficit = 0.89 kWh
+        # tolerance = 100W / 1000 * 3h = 0.3 kWh → deficit > tolerance
+        result = _calculate_charge_power(
+            55.0,
+            100,
+            10.0,
+            3.0,
+            10000,
+            headroom=0.10,
+            charging_started_energy_kwh=5.0,
+            elapsed_since_charge_started=1.0,
+            effective_charge_window=4.0,
+            min_power_change_w=100,
+        )
+        assert result == 10000
+
+    def test_tolerance_shrinks_as_window_closes(self) -> None:
+        """With little time remaining, tolerance is smaller → easier to burst."""
+        # ideal at 3.5h elapsed (of 3.6 effective) ≈ 97% progress
+        # ideal = 5 + 0.972*5 = 9.86 kWh; actual = 9.5 → deficit = 0.36 kWh
+        # tolerance = 100W / 1000 * 0.5h = 0.05 kWh → deficit > tolerance
+        result = _calculate_charge_power(
+            95.0,
+            100,
+            10.0,
+            0.5,
+            10000,
+            headroom=0.10,
+            charging_started_energy_kwh=5.0,
+            elapsed_since_charge_started=3.5,
+            effective_charge_window=4.0,
+            min_power_change_w=100,
+        )
+        assert result == 10000
+
+
 class TestCalculateDeferredStartEdgeCases:
     """Edge case tests for _calculate_deferred_start with consumption."""
 
