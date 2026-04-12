@@ -661,6 +661,8 @@ class SmartOperationsOverviewSensor(SensorEntity):
                 now = now.replace(tzinfo=None)
             if now < start:
                 return f"Discharge scheduled at {_format_time(start)}"
+            if ds.get("suspended"):
+                return "Discharge suspended (high consumption)"
             feedin_limit = ds.get("feedin_energy_limit_kwh")
             if feedin_limit is not None:
                 return f"Discharging {feedin_limit} kWh feed-in"

@@ -655,6 +655,40 @@ def _calculate_charge_power(
     return max(100, min(int(power_w), max_power_w))
 
 
+def _should_suspend_discharge(
+    current_soc: float,
+    min_soc: int,
+    battery_capacity_kwh: float,
+    remaining_hours: float,
+    net_consumption_kw: float,
+    headroom: float = 0.10,
+) -> bool:
+    """Return True if forced discharge should be suspended.
+
+    Suspension protects the min SoC target.  If household consumption
+    alone would drain the battery to (or past) min SoC within the
+    remaining window, adding *any* forced discharge power risks
+    breaching the floor.  In that case the inverter should revert to
+    SelfUse so that only unavoidable house load draws from the battery.
+
+    A headroom factor is applied so suspension triggers slightly early,
+    giving the system time to react.
+    """
+    if remaining_hours <= 0 or battery_capacity_kwh <= 0:
+        return False
+    energy_kwh = (current_soc - min_soc) / 100.0 * battery_capacity_kwh
+    if energy_kwh <= 0:
+        return True  # already at or below min SoC
+    consumption = max(0.0, net_consumption_kw)
+    if consumption <= 0:
+        return False  # no house load — no risk from forced discharge
+    # Time until house load alone drains to min SoC
+    hours_to_min = energy_kwh / consumption
+    # Suspend if house load would reach min SoC within the window
+    # (with headroom so we suspend slightly early)
+    return hours_to_min <= remaining_hours * (1 + headroom)
+
+
 def _calculate_discharge_power(
     current_soc: float,
     min_soc: int,
@@ -1566,22 +1600,77 @@ def _setup_smart_discharge_listeners(
         if cur_state.get("pacing_enabled") and soc_value > cur_state["min_soc"]:
             now_dt = dt_util.now()
             remaining_h = (cur_state["end"] - now_dt).total_seconds() / 3600.0
-            if remaining_h > 0:
+            net_consumption = _get_net_consumption(hass)
+            headroom = _get_smart_headroom(hass)
+
+            # --- Suspend / resume ---
+            # If house consumption alone would drain to min SoC within
+            # the window, suspend forced discharge to protect the floor.
+            should_suspend = remaining_h > 0 and _should_suspend_discharge(
+                soc_value,
+                cur_state["min_soc"],
+                cur_state["battery_capacity_kwh"],
+                remaining_h,
+                net_consumption,
+                headroom=headroom,
+            )
+            was_suspended = cur_state.get("suspended", False)
+
+            if should_suspend and not was_suspended:
+                _LOGGER.info(
+                    "Smart discharge: suspending — house consumption "
+                    "(%.2f kW) would breach min SoC %d%% "
+                    "(SoC=%.1f%%, remaining=%.2fh)",
+                    net_consumption,
+                    cur_state["min_soc"],
+                    soc_value,
+                    remaining_h,
+                )
+                cur_state["suspended"] = True
+                await _remove_discharge_override()
+                if not _is_my_session():
+                    return
+                cur_state = hass.data[DOMAIN]["_smart_discharge_state"]
+                await _save_session(
+                    hass,
+                    "smart_discharge",
+                    _session_data_from_discharge_state(cur_state),
+                )
+            elif was_suspended and not should_suspend:
+                _LOGGER.info(
+                    "Smart discharge: resuming — conditions improved "
+                    "(consumption=%.2f kW, SoC=%.1f%%, remaining=%.2fh)",
+                    net_consumption,
+                    soc_value,
+                    remaining_h,
+                )
+                cur_state["suspended"] = False
+                # Fall through to pacing to re-apply the override
+
+            if cur_state.get("suspended"):
+                # Still suspended — skip pacing, let SoC check handle
+                # the case where SoC has already dropped to min.
+                pass
+            elif remaining_h > 0:
                 new_power = _calculate_discharge_power(
                     soc_value,
                     cur_state["min_soc"],
                     cur_state["battery_capacity_kwh"],
                     remaining_h,
                     cur_state["max_power_w"],
-                    net_consumption_kw=_get_net_consumption(hass),
-                    headroom=_get_smart_headroom(hass),
+                    net_consumption_kw=net_consumption,
+                    headroom=headroom,
                     feedin_remaining_kwh=feedin_remaining_for_pacing,
                 )
                 min_change = cur_state.get("min_power_change", DEFAULT_MIN_POWER_CHANGE)
                 power_delta = abs(new_power - cur_state["last_power_w"])
-                if (
+                should_update = (
                     power_delta >= min_change or new_power == cur_state["max_power_w"]
-                ) and new_power != cur_state["last_power_w"]:
+                ) and new_power != cur_state["last_power_w"]
+                # Always re-apply when resuming from suspension
+                if was_suspended and not cur_state.get("suspended"):
+                    should_update = True
+                if should_update:
                     _LOGGER.info(
                         "Smart discharge: adjusting power %dW -> %dW "
                         "(SoC=%.1f%%, remaining=%.2fh)",

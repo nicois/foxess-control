@@ -24,6 +24,7 @@ from custom_components.foxess_control import (
     _resolve_start_end,
     _resolve_start_end_explicit,
     _sanitize_group,
+    _should_suspend_discharge,
 )
 from custom_components.foxess_control.const import DOMAIN
 from custom_components.foxess_control.foxess.inverter import (
@@ -1705,3 +1706,46 @@ class TestDischargePowerFeedinConstraint:
             feedin_remaining_kwh=5.0,
         )
         assert with_feedin == base
+
+
+class TestShouldSuspendDischarge:
+    """Tests for _should_suspend_discharge."""
+
+    def test_no_consumption_never_suspends(self) -> None:
+        # No house load — forced discharge can't breach min SoC
+        assert not _should_suspend_discharge(80.0, 30, 42.0, 2.0, 0.0)
+
+    def test_high_consumption_suspends(self) -> None:
+        # 60% SoC, min 30%, 42kWh battery → 12.6kWh above floor
+        # 5kW consumption over 3h → 15kWh drain, exceeds buffer
+        # hours_to_min = 12.6/5 = 2.52, window*1.1 = 3.3 → suspend
+        assert _should_suspend_discharge(60.0, 30, 42.0, 3.0, 5.0)
+
+    def test_low_consumption_does_not_suspend(self) -> None:
+        # 80% SoC, min 30%, 42kWh → 21kWh buffer
+        # 1kW consumption over 2h → 2kWh drain, well within buffer
+        assert not _should_suspend_discharge(80.0, 30, 42.0, 2.0, 1.0)
+
+    def test_soc_at_min_suspends(self) -> None:
+        # Already at min SoC — should suspend regardless
+        assert _should_suspend_discharge(30.0, 30, 42.0, 2.0, 1.0)
+
+    def test_soc_below_min_suspends(self) -> None:
+        assert _should_suspend_discharge(25.0, 30, 42.0, 2.0, 0.5)
+
+    def test_exact_boundary_suspends(self) -> None:
+        # energy = (60-30)/100 * 10 = 3kWh, consumption=1kW, remaining=3h
+        # hours_to_min = 3.0, window * (1+0.1) = 3.3 → 3.0 <= 3.3 → suspend
+        assert _should_suspend_discharge(60.0, 30, 10.0, 3.0, 1.0, headroom=0.10)
+
+    def test_just_outside_boundary_does_not_suspend(self) -> None:
+        # energy = 3kWh, consumption=1kW, remaining=2.5h
+        # hours_to_min = 3.0, window * 1.1 = 2.75 → 3.0 > 2.75 → no suspend
+        assert not _should_suspend_discharge(60.0, 30, 10.0, 2.5, 1.0, headroom=0.10)
+
+    def test_zero_remaining_hours(self) -> None:
+        assert not _should_suspend_discharge(80.0, 30, 42.0, 0.0, 5.0)
+
+    def test_negative_consumption_never_suspends(self) -> None:
+        # Negative consumption (solar surplus) — battery is charging
+        assert not _should_suspend_discharge(50.0, 30, 42.0, 2.0, -3.0)
