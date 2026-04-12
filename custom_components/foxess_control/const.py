@@ -36,7 +36,6 @@ POLLED_VARIABLES = [
     "batDischargePower",
     "loadsPower",
     "pvPower",
-    "ResidualEnergy",
     "batTemperature",
     "gridConsumptionPower",
     "feedinPower",

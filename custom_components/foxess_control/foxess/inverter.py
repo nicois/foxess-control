@@ -108,7 +108,6 @@ class Inverter:
             "batTemperature",
             "batVolt",
             "batCurrent",
-            "ResidualEnergy",
         ]
         result: Any = self.client.post(
             "/op/v0/device/real/query",
@@ -298,7 +297,6 @@ class Inverter:
             "charge_power_kw": battery.get("batChargePower"),
             "discharge_power_kw": battery.get("batDischargePower"),
             "temperature_c": battery.get("batTemperature"),
-            "residual_energy_kwh": battery.get("ResidualEnergy"),
             "min_soc": min_soc.get("minSoc"),
             "min_soc_on_grid": min_soc.get("minSocOnGrid"),
         }

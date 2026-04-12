@@ -989,15 +989,6 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "mdi:solar-power",
     ),
     _PolledSensorDescription(
-        "ResidualEnergy",
-        "Residual Energy",
-        "residual_energy",
-        SensorDeviceClass.ENERGY_STORAGE,
-        "kWh",
-        SensorStateClass.MEASUREMENT,
-        "mdi:battery-heart-variant",
-    ),
-    _PolledSensorDescription(
         "batTemperature",
         "Battery Temperature",
         "bat_temperature",
