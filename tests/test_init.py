@@ -579,6 +579,44 @@ class TestIsPlaceholder:
     def test_disabled_real_mode_is_not_placeholder(self) -> None:
         assert not _is_placeholder({"workMode": "ForceCharge", "enable": 0})
 
+    def test_zero_duration_selfuse_is_placeholder(self) -> None:
+        """SelfUse groups with 00:00-00:00 are API fillers, not real entries."""
+        assert _is_placeholder(
+            {
+                "workMode": "SelfUse",
+                "enable": 1,
+                "startHour": 0,
+                "startMinute": 0,
+                "endHour": 0,
+                "endMinute": 0,
+            }
+        )
+
+    def test_zero_duration_any_mode_is_placeholder(self) -> None:
+        """Any zero-duration group (e.g. 14:00-14:00) is a placeholder."""
+        assert _is_placeholder(
+            {
+                "workMode": "ForceCharge",
+                "enable": 1,
+                "startHour": 14,
+                "startMinute": 0,
+                "endHour": 14,
+                "endMinute": 0,
+            }
+        )
+
+    def test_nonzero_duration_is_not_placeholder(self) -> None:
+        assert not _is_placeholder(
+            {
+                "workMode": "SelfUse",
+                "enable": 1,
+                "startHour": 0,
+                "startMinute": 0,
+                "endHour": 23,
+                "endMinute": 59,
+            }
+        )
+
 
 class TestIsExpired:
     """Tests for _is_expired."""
@@ -956,6 +994,66 @@ class TestRemoveModeFromSchedule:
 
         inv.set_schedule.assert_not_called()
         inv.self_use.assert_not_called()
+
+    def test_skips_zero_duration_selfuse_placeholders(self) -> None:
+        """API returns 8 groups; unused slots are 00:00-00:00 SelfUse.
+
+        After removing ForceDischarge, these must be filtered out to
+        avoid API error 42023 (Time overlap).
+        """
+        filler = {
+            "enable": 1,
+            "startHour": 0,
+            "startMinute": 0,
+            "endHour": 0,
+            "endMinute": 0,
+            "workMode": "SelfUse",
+            "minSocOnGrid": 11,
+            "fdSoc": 11,
+            "fdPwr": 0,
+        }
+        inv = MagicMock(spec=Inverter)
+        inv.get_schedule.return_value = {
+            "groups": [
+                self._make_group("ForceDischarge", 17, 20),
+                *[filler.copy() for _ in range(7)],
+            ]
+        }
+
+        _remove_mode_from_schedule(inv, WorkMode.FORCE_DISCHARGE, 15)
+
+        # All groups were either the target mode or placeholders — self_use fallback
+        inv.self_use.assert_called_once_with(15)
+        inv.set_schedule.assert_not_called()
+
+    def test_keeps_real_groups_alongside_zero_duration_fillers(self) -> None:
+        """Real groups survive even when surrounded by zero-duration fillers."""
+        filler = {
+            "enable": 1,
+            "startHour": 0,
+            "startMinute": 0,
+            "endHour": 0,
+            "endMinute": 0,
+            "workMode": "SelfUse",
+            "minSocOnGrid": 11,
+            "fdSoc": 11,
+            "fdPwr": 0,
+        }
+        inv = MagicMock(spec=Inverter)
+        inv.get_schedule.return_value = {
+            "groups": [
+                self._make_group("ForceCharge", 2, 6),
+                self._make_group("ForceDischarge", 17, 20),
+                *[filler.copy() for _ in range(6)],
+            ]
+        }
+
+        _remove_mode_from_schedule(inv, WorkMode.FORCE_DISCHARGE, 15)
+
+        inv.set_schedule.assert_called_once()
+        groups = inv.set_schedule.call_args.args[0]
+        assert len(groups) == 1
+        assert groups[0]["workMode"] == "ForceCharge"
 
 
 class TestGetCurrentSoc:

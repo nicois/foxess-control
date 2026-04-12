@@ -877,8 +877,24 @@ _PLACEHOLDER_MODES = {"Invalid", ""}
 
 
 def _is_placeholder(group: dict[str, Any]) -> bool:
-    """Check if a group is an API placeholder (not a real schedule entry)."""
-    return group.get("workMode", "") in _PLACEHOLDER_MODES
+    """Check if a group is an API placeholder (not a real schedule entry).
+
+    The FoxESS API always returns 8 groups.  Unused slots come back as
+    either ``workMode: "Invalid"`` / ``""`` **or** as zero-duration
+    ``SelfUse`` groups (00:00–00:00).  Both forms must be filtered out
+    when re-writing the schedule; leaving the zero-duration SelfUse
+    groups in causes API error 42023 ("Time overlap").
+    """
+    if group.get("workMode", "") in _PLACEHOLDER_MODES:
+        return True
+    # Zero-duration window — start and end are identical.  Only check when
+    # at least one time key is present (test dicts may omit them).
+    if any(k in group for k in ("startHour", "startMinute", "endHour", "endMinute")):
+        start = group.get("startHour", 0) * 60 + group.get("startMinute", 0)
+        end = group.get("endHour", 0) * 60 + group.get("endMinute", 0)
+        if start == end:
+            return True
+    return False
 
 
 def _sanitize_group(raw: dict[str, Any]) -> ScheduleGroup:

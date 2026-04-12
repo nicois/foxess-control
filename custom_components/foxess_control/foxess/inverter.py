@@ -279,12 +279,15 @@ class Inverter:
                     return WorkMode(group.get("workMode", ""))
                 except ValueError:
                     return None
+            # Handle midnight-wrapping windows (e.g. 22:00-06:00)
+            if start > end and (cur_minutes >= start or cur_minutes < end):
+                try:
+                    return WorkMode(group.get("workMode", ""))
+                except ValueError:
+                    return None
 
-        # No group covers the current time — fall back to first enabled
-        try:
-            return WorkMode(enabled[0].get("workMode", ""))
-        except ValueError:
-            return None
+        # No enabled group covers the current time — inverter is in SelfUse
+        return None
 
     def get_status_summary(self) -> dict[str, Any]:
         """Get a combined summary of current mode, SoC, and battery state."""
