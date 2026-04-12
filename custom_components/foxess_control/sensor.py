@@ -160,6 +160,39 @@ def _deferred_power_fraction(hass: HomeAssistant) -> float:
     return (1 - h) * (1 - h)
 
 
+def _is_effectively_charging(hass: HomeAssistant, cs: dict[str, Any]) -> bool:
+    """Return True if the charge session should be considered active.
+
+    The ``charging_started`` flag in the state dict is only flipped by
+    the 5-minute callback.  Between the calculated deferred start time
+    and the next callback fire, the flag is still False even though
+    charging should have started.  This helper bridges the gap by
+    recalculating the deferred start time and checking whether it has
+    already passed.
+    """
+    if cs.get("charging_started", True):
+        return True
+    # charging_started is False — check if deferred time has passed
+    soc = _get_soc_value(hass)
+    capacity_kwh = _get_battery_capacity_kwh(hass)
+    target_soc: int = cs.get("target_soc", 100)
+    max_power_w: int = cs.get("max_power_w", 0)
+    end: datetime.datetime = cs["end"]
+    start: datetime.datetime | None = cs.get("start")
+    if soc is not None and capacity_kwh > 0 and max_power_w > 0 and soc < target_soc:
+        energy_kwh = (target_soc - soc) / 100.0 * capacity_kwh
+        charge_kw = max_power_w * _deferred_power_fraction(hass) / 1000.0
+        charge_hours = energy_kwh / charge_kw
+        deferred_start = end - datetime.timedelta(hours=charge_hours)
+        if start is not None and deferred_start < start:
+            deferred_start = start
+        now = dt_util.now()
+        if end.tzinfo is None and now.tzinfo is not None:
+            now = now.replace(tzinfo=None)
+        return (deferred_start - now).total_seconds() <= 0
+    return False
+
+
 def _get_coordinator_value(hass: HomeAssistant, key: str) -> float | None:
     """Read a numeric value from the first available coordinator."""
     domain_data = hass.data.get(DOMAIN)
@@ -255,40 +288,28 @@ def _estimate_charge_remaining(
     if window_remaining.total_seconds() <= 0:
         return "ending"
 
+    if _is_effectively_charging(hass, cs):
+        # Actively charging — window remaining is the best estimate.
+        return _format_duration(window_remaining)
+
+    # Deferred — estimate when charging will begin
     soc = _get_soc_value(hass)
     capacity_kwh = _get_battery_capacity_kwh(hass)
     target_soc: int = cs.get("target_soc", 100)
     max_power_w: int = cs.get("max_power_w", 0)
-
-    if not cs.get("charging_started", True):
-        # Deferred — estimate when charging will begin
-        start: datetime.datetime | None = cs.get("start")
-        if (
-            soc is not None
-            and capacity_kwh > 0
-            and max_power_w > 0
-            and soc < target_soc
-        ):
-            energy_kwh = (target_soc - soc) / 100.0 * capacity_kwh
-            charge_kw = max_power_w * _deferred_power_fraction(hass) / 1000.0
-            charge_hours = energy_kwh / charge_kw
-            deferred_start = end - datetime.timedelta(hours=charge_hours)
-            # Never show a start time before the window opens
-            if start is not None and deferred_start < start:
-                deferred_start = start
-            wait = deferred_start - now
-            if wait.total_seconds() <= 0:
-                # The callback hasn't fired yet to flip charging_started;
-                # show window remaining instead of a stale "starting" label.
-                return _format_duration(window_remaining)
-            return f"starts in {_format_duration(wait)}"
-        return _format_remaining(end)
-
-    # Actively charging — the session is designed to finish by end, so
-    # window remaining is the best estimate.  The inverter power includes
-    # household load headroom that doesn't reach the battery, making a
-    # power-based SoC estimate unreliable.
-    return _format_duration(window_remaining)
+    start: datetime.datetime | None = cs.get("start")
+    if soc is not None and capacity_kwh > 0 and max_power_w > 0 and soc < target_soc:
+        energy_kwh = (target_soc - soc) / 100.0 * capacity_kwh
+        charge_kw = max_power_w * _deferred_power_fraction(hass) / 1000.0
+        charge_hours = energy_kwh / charge_kw
+        deferred_start = end - datetime.timedelta(hours=charge_hours)
+        if start is not None and deferred_start < start:
+            deferred_start = start
+        wait = deferred_start - now
+        if wait.total_seconds() <= 0:
+            return _format_duration(window_remaining)
+        return f"starts in {_format_duration(wait)}"
+    return _format_remaining(end)
 
 
 def _build_forecast(
@@ -314,7 +335,7 @@ def _build_forecast(
         target_soc: int = cs.get("target_soc", 100)
         max_power_w: int = cs.get("max_power_w", 0)
         power_w: int = cs.get("last_power_w", 0)
-        charging_started: bool = cs.get("charging_started", True)
+        effectively_charging: bool = _is_effectively_charging(hass, cs)
 
         # Rate of SoC change per second while charging
         charge_rate = 0.0
@@ -323,7 +344,7 @@ def _build_forecast(
 
         # Deferred: compute when charging will start
         deferred_start = now
-        if not charging_started and max_power_w > 0:
+        if not effectively_charging and max_power_w > 0:
             energy_kwh = (target_soc - soc) / 100.0 * capacity_kwh
             dpf = _deferred_power_fraction(hass)
             charge_kw = max_power_w * dpf / 1000.0
@@ -343,7 +364,7 @@ def _build_forecast(
             epoch_ms = int(t.timestamp() * 1000)
             raw_points.append({"time": epoch_ms, "soc": round(cur_soc, 1)})
             t += _FORECAST_STEP
-            if not charging_started and t < deferred_start:
+            if not effectively_charging and t < deferred_start:
                 # Still waiting — SoC stays flat
                 continue
             step_secs = _FORECAST_STEP.total_seconds()
@@ -485,7 +506,7 @@ class InverterOverrideStatusSensor(SensorEntity):
         cs = _get_charge_state(self.hass)
         if cs is not None:
             target = cs.get("target_soc", "?")
-            if not cs.get("charging_started", True):
+            if not _is_effectively_charging(self.hass, cs):
                 return f"Wait→{target}%"
             power = _format_power(cs.get("last_power_w", 0))
             return f"Chg {power}→{target}%"
@@ -515,7 +536,7 @@ class InverterOverrideStatusSensor(SensorEntity):
         """Return an icon based on the current override state."""
         cs = _get_charge_state(self.hass)
         if cs is not None:
-            if not cs.get("charging_started", True):
+            if not _is_effectively_charging(self.hass, cs):
                 return _ICON_DEFERRED
             return _ICON_CHARGING
 
@@ -529,7 +550,9 @@ class InverterOverrideStatusSensor(SensorEntity):
         """Return session details as attributes."""
         cs = _get_charge_state(self.hass)
         if cs is not None:
-            phase = "charging" if cs.get("charging_started", True) else "deferred"
+            phase = (
+                "charging" if _is_effectively_charging(self.hass, cs) else "deferred"
+            )
             return {
                 "mode": "smart_charge",
                 "phase": phase,
@@ -580,7 +603,7 @@ class SmartOperationsOverviewSensor(SensorEntity):
 
         if cs is not None:
             target = cs.get("target_soc", "?")
-            if not cs.get("charging_started", True):
+            if not _is_effectively_charging(self.hass, cs):
                 return f"Deferred charge to {target}%"
             return f"Charging to {target}%"
 
@@ -607,7 +630,7 @@ class SmartOperationsOverviewSensor(SensorEntity):
         """Return an icon based on the current state."""
         cs = _get_charge_state(self.hass)
         if cs is not None:
-            if not cs.get("charging_started", True):
+            if not _is_effectively_charging(self.hass, cs):
                 return _ICON_DEFERRED
             return _ICON_CHARGING
         if _get_discharge_state(self.hass) is not None:
@@ -626,7 +649,7 @@ class SmartOperationsOverviewSensor(SensorEntity):
         }
 
         if cs is not None:
-            charging = cs.get("charging_started", True)
+            charging = _is_effectively_charging(self.hass, cs)
             soc = _get_soc_value(self.hass)
             attrs.update(
                 {
@@ -702,7 +725,9 @@ class ChargePowerSensor(SensorEntity):
         return {
             "target_soc": cs.get("target_soc"),
             "max_power_w": cs.get("max_power_w"),
-            "phase": ("charging" if cs.get("charging_started", True) else "deferred"),
+            "phase": (
+                "charging" if _is_effectively_charging(self.hass, cs) else "deferred"
+            ),
         }
 
 

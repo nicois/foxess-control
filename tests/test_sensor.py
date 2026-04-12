@@ -122,6 +122,35 @@ class TestInverterOverrideStatusSensor:
         assert sensor.native_value == "Wait→80%"
         assert sensor.icon == "mdi:battery-clock"
 
+    def test_deferred_past_start_shows_charging(self) -> None:
+        """When deferred start has passed, show charging not waiting."""
+        hass = _make_hass(
+            smart_charge_state=_charge_state(
+                last_power_w=0,
+                charging_started=False,
+                max_power_w=10500,
+                target_soc=80,
+            )
+        )
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 20.0}
+        hass.data[DOMAIN]["entry1"] = {
+            "inverter": MagicMock(),
+            "coordinator": mock_coordinator,
+        }
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        sensor = InverterOverrideStatusSensor(hass, _make_entry())
+        # At 05:50, deferred start (~05:17) has passed
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 5, 50, 0),
+        ):
+            assert sensor.native_value == "Chg 0W→80%"
+            assert sensor.icon == "mdi:battery-charging"
+
     def test_discharging(self) -> None:
         hass = _make_hass(smart_discharge_state=_discharge_state())
         sensor = InverterOverrideStatusSensor(hass, _make_entry())
@@ -213,6 +242,36 @@ class TestSmartOperationsOverviewSensor:
         assert sensor.native_value == "Deferred charge to 80%"
         assert sensor.icon == "mdi:battery-clock"
         assert sensor.extra_state_attributes["charge_phase"] == "deferred"
+
+    def test_deferred_past_start_shows_charging(self) -> None:
+        """When deferred start has passed, show charging state not deferred."""
+        hass = _make_hass(
+            smart_charge_state=_charge_state(
+                last_power_w=0,
+                charging_started=False,
+                max_power_w=10500,
+                target_soc=80,
+            )
+        )
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 20.0}
+        hass.data[DOMAIN]["entry1"] = {
+            "inverter": MagicMock(),
+            "coordinator": mock_coordinator,
+        }
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 5, 50, 0),
+        ):
+            assert sensor.native_value == "Charging to 80%"
+            assert sensor.icon == "mdi:battery-charging"
+            attrs = sensor.extra_state_attributes
+            assert attrs["charge_phase"] == "charging"
 
     def test_discharging(self) -> None:
         hass = _make_hass(smart_discharge_state=_discharge_state())
