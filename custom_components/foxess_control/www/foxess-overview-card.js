@@ -16,7 +16,7 @@
  *   # etc.
  */
 
-const OVERVIEW_VERSION = "2.0.0";
+const OVERVIEW_VERSION = "2.1.0";
 
 // Config key → role name returned by the foxess_control/entity_map WS command.
 const _ROLE_MAP = {
@@ -180,9 +180,8 @@ class FoxESSOverviewCard extends HTMLElement {
         <div class="flow-grid">
           ${this._renderNode("solar", "☀️", "Solar", solarFound, this._formatKw(solar), solarActive, pv1 != null || pv2 != null ? this._pvDetail(pv1, pv2) : "", eid.solar_entity)}
           ${this._renderNode("house", "🏠", "House", houseFound, this._formatKw(house), houseActive, "", eid.house_entity)}
-          ${this._renderNode("grid", "⚡", "Grid", gridFound, this._formatKw(Math.abs(gridNet)), gridImporting || gridExporting, this._gridSub(gridImporting, gridExporting, gridV, gridHz), eid.grid_import_entity)}
+          ${this._renderGridNode(gridFound, gridNet, gridImporting, gridExporting, gridV, gridHz, eid.grid_import_entity)}
           ${this._renderBatteryNode(soc, socPct, socColor, batNet, batCharging, batDischarging, batTemp, residual, batFound)}
-          ${this._renderFlowLines(solarActive, houseActive, gridImporting, gridExporting, batCharging, batDischarging)}
         </div>
       </ha-card>
     `;
@@ -202,13 +201,30 @@ class FoxESSOverviewCard extends HTMLElement {
     return parts.join(" · ");
   }
 
-  _gridSub(importing, exporting, voltage, freq) {
-    const parts = [];
-    if (importing) parts.push("Import");
-    else if (exporting) parts.push("Export");
-    if (voltage != null) parts.push(`${voltage.toFixed(0)}V`);
-    if (freq != null) parts.push(`${freq.toFixed(1)}Hz`);
-    return parts.join(" · ");
+  _renderGridNode(found, gridNet, importing, exporting, voltage, freq, entityId) {
+    if (!found) {
+      return `
+        <div class="node grid not-found">
+          <div class="node-icon">⚡</div>
+          <div class="node-value">—</div>
+          <div class="node-label">Grid</div>
+          <div class="node-sub">${entityId ? entityId + " not found" : "not discovered"}</div>
+        </div>
+      `;
+    }
+    const active = importing || exporting;
+    const direction = importing ? "Importing ↓" : exporting ? "Exporting ↑" : "";
+    const sub = [];
+    if (voltage != null) sub.push(`${voltage.toFixed(0)}V`);
+    if (freq != null) sub.push(`${freq.toFixed(1)}Hz`);
+    return `
+      <div class="node grid ${active ? "active" : "inactive"}">
+        <div class="node-icon">⚡</div>
+        <div class="node-value">${active ? this._formatKw(Math.abs(gridNet)) : "—"}</div>
+        <div class="node-label">Grid${direction ? " · " + direction : ""}</div>
+        ${sub.length ? `<div class="node-sub">${sub.join(" · ")}</div>` : ""}
+      </div>
+    `;
   }
 
   _renderNode(cls, icon, label, found, value, active, sub, entityId) {
@@ -270,55 +286,10 @@ class FoxESSOverviewCard extends HTMLElement {
     `;
   }
 
-  _renderFlowLines(solarActive, houseActive, gridImporting, gridExporting, batCharging, batDischarging) {
-    // SVG absolutely positioned over the grid.
-    // Node centres at (25%,25%), (75%,25%), (25%,75%), (75%,75%).
-    const nodes = {
-      solar:   { x: 25, y: 25 },
-      house:   { x: 75, y: 25 },
-      grid:    { x: 25, y: 75 },
-      battery: { x: 75, y: 75 },
-    };
-    const cx = 50, cy = 50;
-
-    const flows = [];
-    if (solarActive) flows.push({ from: nodes.solar, to: { x: cx, y: cy }, color: "var(--fo-solar)" });
-    if (houseActive) flows.push({ from: { x: cx, y: cy }, to: nodes.house, color: "var(--fo-house)" });
-    if (gridImporting) flows.push({ from: nodes.grid, to: { x: cx, y: cy }, color: "var(--fo-grid-import)" });
-    else if (gridExporting) flows.push({ from: { x: cx, y: cy }, to: nodes.grid, color: "var(--fo-grid-export)" });
-    if (batCharging) flows.push({ from: { x: cx, y: cy }, to: nodes.battery, color: "var(--fo-bat-charge)" });
-    else if (batDischarging) flows.push({ from: nodes.battery, to: { x: cx, y: cy }, color: "var(--fo-bat-discharge)" });
-
-    const lines = flows.map(f => {
-      const dx = f.to.x - f.from.x;
-      const dy = f.to.y - f.from.y;
-      const len = Math.sqrt(dx * dx + dy * dy);
-      return `
-        <line x1="${f.from.x}" y1="${f.from.y}" x2="${f.to.x}" y2="${f.to.y}"
-              stroke="${f.color}" stroke-width="0.8" stroke-linecap="round" opacity="0.3"/>
-        <circle r="1.5" fill="${f.color}">
-          <animateMotion dur="${(len / 20).toFixed(1)}s" repeatCount="indefinite"
-            path="M${f.from.x},${f.from.y} L${f.to.x},${f.to.y}"/>
-        </circle>
-      `;
-    }).join("");
-
-    return `<svg class="flow-overlay" viewBox="0 0 100 100" preserveAspectRatio="none">${lines}</svg>`;
-  }
-
   // -- Styles ----------------------------------------------------------------
 
   static _styles() {
     return `
-      :host {
-        --fo-solar: #f9a825;
-        --fo-house: #42a5f5;
-        --fo-grid-import: #ef5350;
-        --fo-grid-export: #66bb6a;
-        --fo-bat-charge: #66bb6a;
-        --fo-bat-discharge: #ff9800;
-      }
-
       ha-card { overflow: hidden; }
 
       .header {
@@ -347,16 +318,6 @@ class FoxESSOverviewCard extends HTMLElement {
         grid-template-columns: 1fr 1fr;
         gap: 10px;
         padding: 8px 16px 16px;
-        position: relative;
-      }
-
-      .flow-overlay {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        pointer-events: none;
       }
 
       .node {
