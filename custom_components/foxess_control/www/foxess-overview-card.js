@@ -175,7 +175,7 @@ class FoxESSOverviewCard extends HTMLElement {
       <ha-card>
         <div class="header">
           <div class="title">FoxESS Overview</div>
-          ${workMode ? `<span class="work-mode">${this._formatWorkMode(workMode)}</span>` : ""}
+          ${workMode && workMode !== "SelfUse" ? `<span class="work-mode">${this._formatWorkMode(workMode)}</span>` : ""}
         </div>
         <div class="flow-grid">
           ${this._renderNode("solar", "☀️", "Solar", solarFound, this._formatKw(solar), solarActive, pv1 != null || pv2 != null ? this._pvDetail(pv1, pv2) : "", eid.solar_entity)}
