@@ -531,7 +531,9 @@ These sensors are useful for:
 - Automation conditions (e.g. suppress other actions while a smart charge is in progress)
 - Template sensors that expose session attributes like remaining time or current power
 
-## Automation example
+## Automation examples
+
+> **New to FoxESS Control?** See [EXAMPLES.md](EXAMPLES.md) for a quick-start guide with copy-pasteable automations and dashboard setup.
 
 Smart charge during off-peak hours to 80%, then smart discharge during the evening peak down to 30%:
 
