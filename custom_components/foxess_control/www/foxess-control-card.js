@@ -194,11 +194,10 @@ class FoxESSControlCard extends HTMLElement {
     const beforeStart = remaining.startsWith && remaining.startsWith("starts");
     const scheduled = beforeStart || remaining.startsWith("scheduled");
 
-    // Feed-in energy progress (from the overview state text)
-    const opsState = this._state(this._config.operations_entity) || "";
-    const feedinMatch = opsState.match(/Discharging ([\d.]+) kWh/);
-    let feedinLimit = null;
-    if (feedinMatch) feedinLimit = parseFloat(feedinMatch[1]);
+    // Feed-in energy progress
+    const feedinLimit = a.discharge_feedin_limit_kwh;
+    const feedinUsed = a.discharge_feedin_used_kwh;
+    const feedinProjected = a.discharge_feedin_projected_kwh;
 
     return `
       <div class="section discharge">
@@ -225,8 +224,8 @@ class FoxESSControlCard extends HTMLElement {
           </div>
           ${feedinLimit != null ? `
           <div class="detail-row">
-            <span class="detail-label">Feed-in limit</span>
-            <span class="detail-value">${feedinLimit} kWh</span>
+            <span class="detail-label">Feed-in</span>
+            <span class="detail-value">${feedinUsed != null ? feedinUsed : "—"} / ${feedinLimit} kWh${feedinProjected != null ? ` (→${feedinProjected})` : ""}</span>
           </div>` : ""}
         </div>
       </div>

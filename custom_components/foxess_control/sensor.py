@@ -737,6 +737,18 @@ class SmartOperationsOverviewSensor(SensorEntity):
                 if now < ds_start
                 else _get_actual_discharge_power_w(self.hass, requested)
             )
+            feedin_limit = ds.get("feedin_energy_limit_kwh")
+            feedin_used: float | None = None
+            feedin_projected: float | None = None
+            if feedin_limit is not None:
+                feedin_start = ds.get("feedin_start_kwh")
+                feedin_now = _get_coordinator_value(self.hass, "feedin")
+                if feedin_start is not None and feedin_now is not None:
+                    feedin_used = round(feedin_now - feedin_start, 2)
+                    elapsed = (now - ds_start).total_seconds()
+                    total_secs = (ds["end"] - ds_start).total_seconds()
+                    if elapsed > 0 and total_secs > 0:
+                        feedin_projected = round(feedin_used / elapsed * total_secs, 2)
             attrs.update(
                 {
                     "discharge_power_w": ds_power,
@@ -747,6 +759,9 @@ class SmartOperationsOverviewSensor(SensorEntity):
                     ),
                     "discharge_remaining": _estimate_discharge_remaining(self.hass, ds),
                     "discharge_end_time": ds["end"].isoformat(),
+                    "discharge_feedin_limit_kwh": feedin_limit,
+                    "discharge_feedin_used_kwh": feedin_used,
+                    "discharge_feedin_projected_kwh": feedin_projected,
                 }
             )
 
