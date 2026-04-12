@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.14.3
+
+- **Discharge suspension:** smart discharge automatically reverts to SelfUse when house consumption alone would drain the battery to min SoC within the remaining window, resuming forced discharge when conditions improve
+- **Smart charge monitoring:** when target SoC is reached early (e.g. high solar), the session stays alive and resumes charging if SoC drops back below target
+- **Feed-in energy progress on card:** discharge card row now shows energy exported so far, the limit, and a projected total (e.g. "0.85 / 2.0 kWh (→1.92)")
+- **Opt-in debug log sensor:** enable `input_boolean.foxess_control_debug_log` to expose recent integration log entries via `sensor.foxess_control_debug_log` — readable via the REST API without SSH
+- **Forecast improvements:** time axis anchored at session start for a stable "now" marker; discharge SoC projection capped by feed-in energy budget
+- Fix schedule cleanup API error 42023 caused by zero-duration placeholder groups
+- Fix `get_current_mode` fallback returning wrong mode; add midnight-wrapping support
+- Show actual discharge power from the inverter instead of the requested rate
+- Hide work mode badge on overview card when idle (SelfUse)
+- Code cleanup: extract shared forecast projection helper, use existing `_soc_energy_kwh` in discharge functions, make debug log handler attributes proper fields
+
 ## 0.14.2
 
 - **Smart charge trajectory catch-up:** when charging falls behind the ideal headroom-adjusted trajectory, charge power temporarily jumps to maximum until the trajectory is regained. A tolerance derived from the Min Power Change setting prevents premature bursting from minor measurement fluctuations.
