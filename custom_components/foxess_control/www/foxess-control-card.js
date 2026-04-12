@@ -244,6 +244,8 @@ class FoxESSControlCard extends HTMLElement {
     const window = a.discharge_window || "";
     const beforeStart = remaining.startsWith && remaining.startsWith("starts");
     const scheduled = beforeStart || remaining.startsWith("scheduled");
+    const opsState = this._state(this._config.operations_entity) || "";
+    const suspended = opsState.includes("suspended");
 
     // Feed-in energy progress
     const feedinLimit = a.discharge_feedin_limit_kwh;
@@ -254,8 +256,8 @@ class FoxESSControlCard extends HTMLElement {
       <div class="section discharge">
         <div class="section-header">
           <div class="section-icon-group">
-            <span class="dot ${scheduled ? "dot-waiting" : "dot-active dot-discharge"}"></span>
-            <span class="section-title">${scheduled ? "Discharge Scheduled" : "Smart Discharge"}</span>
+            <span class="dot ${scheduled || suspended ? "dot-waiting" : "dot-active dot-discharge"}"></span>
+            <span class="section-title">${scheduled ? "Discharge Scheduled" : suspended ? "Discharge Suspended" : "Smart Discharge"}</span>
           </div>
           <span class="section-badge discharge-badge">${remaining}</span>
         </div>
