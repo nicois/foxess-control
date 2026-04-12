@@ -676,7 +676,7 @@ def _should_suspend_discharge(
     """
     if remaining_hours <= 0 or battery_capacity_kwh <= 0:
         return False
-    energy_kwh = (current_soc - min_soc) / 100.0 * battery_capacity_kwh
+    energy_kwh = _soc_energy_kwh(current_soc - min_soc, battery_capacity_kwh)
     if energy_kwh <= 0:
         return True  # already at or below min SoC
     consumption = max(0.0, net_consumption_kw)
@@ -719,7 +719,7 @@ def _calculate_discharge_power(
 
     Returns an integer power in watts, clamped to [100, max_power_w].
     """
-    energy_kwh = (current_soc - min_soc) / 100.0 * battery_capacity_kwh
+    energy_kwh = _soc_energy_kwh(current_soc - min_soc, battery_capacity_kwh)
     if energy_kwh <= 0:
         return 100
     if remaining_hours <= 0:
@@ -1175,7 +1175,6 @@ def _setup_smart_charge_listeners(
                 cur_soc,
                 cur_state["target_soc"],
             )
-        cur_state.pop("soc_above_target_count", None)
 
         now_dt = dt_util.now()
         remaining = (cur_state["end"] - now_dt).total_seconds() / 3600.0
@@ -1639,10 +1638,8 @@ def _setup_smart_discharge_listeners(
                 # Fall through to pacing to re-apply the override
 
             if cur_state.get("suspended"):
-                # Still suspended — skip pacing, let SoC check handle
-                # the case where SoC has already dropped to min.
-                pass
-            elif remaining_h > 0:
+                return
+            if remaining_h > 0:
                 new_power = _calculate_discharge_power(
                     soc_value,
                     cur_state["min_soc"],
@@ -2360,7 +2357,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         fox_logger = logging.getLogger("custom_components.foxess_control")
         for handler in hass.data[DOMAIN].get("_debug_log_handlers", []):
             fox_logger.removeHandler(handler)
-            original = getattr(handler, "_original_level", logging.NOTSET)
+            original = getattr(handler, "original_level", logging.NOTSET)
             fox_logger.setLevel(original)
         hass.data.pop(DOMAIN)
         hass.services.async_remove(DOMAIN, SERVICE_CLEAR_OVERRIDES)

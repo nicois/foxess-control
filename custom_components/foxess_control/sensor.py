@@ -340,6 +340,54 @@ def _estimate_charge_remaining(
     return _format_remaining(end)
 
 
+def _power_to_soc_rate(power_w: float, capacity_kwh: float) -> float:
+    """Convert watts to SoC-percentage change per second."""
+    if capacity_kwh <= 0:
+        return 0.0
+    return (power_w / 1000.0) / capacity_kwh * 100.0 / 3600.0
+
+
+def _project_soc_series(
+    start: datetime.datetime,
+    end: datetime.datetime,
+    now: datetime.datetime,
+    soc: float,
+    rate_per_sec: float,
+    target: float,
+    *,
+    flat_until: datetime.datetime | None = None,
+    direction: int = 1,
+) -> list[dict[str, Any]]:
+    """Project a SoC series from *start* to *end*.
+
+    *direction* is +1 for charge (SoC increases) or -1 for discharge
+    (SoC decreases).  *target* is the ceiling (charge) or floor
+    (discharge).  Points before *now* (and optionally before
+    *flat_until*) hold at the current *soc*.
+    """
+    points: list[dict[str, Any]] = []
+    t = min(start, now)
+    cur_soc = soc
+    step_secs = _FORECAST_STEP.total_seconds()
+    while t <= end:
+        epoch_ms = int(t.timestamp() * 1000)
+        if t <= now or (flat_until is not None and t < flat_until):
+            points.append({"time": epoch_ms, "soc": round(soc, 1)})
+            t += _FORECAST_STEP
+            continue
+        points.append({"time": epoch_ms, "soc": round(cur_soc, 1)})
+        t += _FORECAST_STEP
+        if direction > 0:
+            cur_soc = min(cur_soc + rate_per_sec * step_secs, target)
+        else:
+            cur_soc = max(cur_soc - rate_per_sec * step_secs, target)
+    # Final point at end
+    end_ms = int(end.timestamp() * 1000)
+    if points and points[-1]["time"] < end_ms:
+        points.append({"time": end_ms, "soc": round(cur_soc, 1)})
+    return _deduplicate_forecast(points)
+
+
 def _build_forecast(
     hass: HomeAssistant,
     cs: dict[str, Any] | None,
@@ -352,7 +400,6 @@ def _build_forecast(
     """
     now = dt_util.now()
     capacity_kwh = _get_battery_capacity_kwh(hass)
-    raw_points: list[dict[str, Any]] = []
 
     if cs is not None:
         soc = _get_soc_value(hass)
@@ -367,56 +414,30 @@ def _build_forecast(
         effectively_charging: bool = _is_effectively_charging(hass, cs)
 
         # Rate of SoC change per second while charging
-        charge_rate = 0.0
-        if power_w > 0 and capacity_kwh > 0:
-            charge_rate = (power_w / 1000.0) / capacity_kwh * 100.0 / 3600.0
+        charge_rate = _power_to_soc_rate(power_w, capacity_kwh)
 
         # Deferred: compute when charging will start
-        deferred_start = now
+        deferred_start: datetime.datetime | None = None
         if not effectively_charging and max_power_w > 0:
             energy_kwh = (target_soc - soc) / 100.0 * capacity_kwh
             dpf = _deferred_power_fraction(hass)
             charge_kw = max_power_w * dpf / 1000.0
             if charge_kw > 0:
                 charge_hours = energy_kwh / charge_kw
-                deferred_start = end - datetime.timedelta(hours=charge_hours)
-                if deferred_start < now:
-                    deferred_start = now
-            # Use planned power rate for projection after deferred start
-            if capacity_kwh > 0:
-                planned_power = max_power_w * dpf
-                charge_rate = (planned_power / 1000.0) / capacity_kwh * 100.0 / 3600.0
+                ds_calc = end - datetime.timedelta(hours=charge_hours)
+                deferred_start = ds_calc if ds_calc > now else now
+            charge_rate = _power_to_soc_rate(max_power_w * dpf, capacity_kwh)
 
-        # Anchor at session start (or now if earlier) so the time axis is
-        # stable once charging begins and the "now" marker progresses smoothly.
-        t = min(session_start, now)
-        cur_soc = soc
-        while t <= end:
-            epoch_ms = int(t.timestamp() * 1000)
-            if t <= now:
-                # Historical/current: hold at current SoC
-                raw_points.append({"time": epoch_ms, "soc": round(soc, 1)})
-                t += _FORECAST_STEP
-                continue
-            if not effectively_charging and t < deferred_start:
-                # Still waiting — SoC stays flat
-                raw_points.append({"time": epoch_ms, "soc": round(cur_soc, 1)})
-                t += _FORECAST_STEP
-                continue
-            raw_points.append({"time": epoch_ms, "soc": round(cur_soc, 1)})
-            t += _FORECAST_STEP
-            step_secs = _FORECAST_STEP.total_seconds()
-            cur_soc = min(cur_soc + charge_rate * step_secs, target_soc)
-
-        # Final point at end
-        if raw_points and raw_points[-1]["time"] < int(end.timestamp() * 1000):
-            raw_points.append(
-                {
-                    "time": int(end.timestamp() * 1000),
-                    "soc": round(cur_soc, 1),
-                }
-            )
-        return _deduplicate_forecast(raw_points)
+        return _project_soc_series(
+            session_start,
+            end,
+            now,
+            soc,
+            charge_rate,
+            target_soc,
+            flat_until=deferred_start if not effectively_charging else None,
+            direction=1,
+        )
 
     if ds is not None:
         soc = _get_soc_value(hass)
@@ -428,9 +449,7 @@ def _build_forecast(
         min_soc: int = ds.get("min_soc", 0)
         power_w = ds.get("last_power_w", 0)
 
-        discharge_rate = 0.0
-        if power_w > 0 and capacity_kwh > 0:
-            discharge_rate = (power_w / 1000.0) / capacity_kwh * 100.0 / 3600.0
+        discharge_rate = _power_to_soc_rate(power_w, capacity_kwh)
 
         # Energy limit tracking — the limit constrains *grid export*, not
         # total battery discharge, so we cap the projected SoC drop to the
@@ -454,30 +473,16 @@ def _build_forecast(
             max_soc_drop = energy_remaining_kwh / capacity_kwh * 100.0
             soc_floor = max(soc_floor, soc - max_soc_drop)
 
-        # Anchor at session start (or now if earlier) so the time axis is
-        # stable once discharging begins and the "now" marker progresses.
-        t = min(discharge_start, now)
-        cur_soc = soc
-        while t <= end:
-            epoch_ms = int(t.timestamp() * 1000)
-            if t <= now or t < discharge_start:
-                # Before now or before discharge starts — hold at current SoC
-                raw_points.append({"time": epoch_ms, "soc": round(soc, 1)})
-                t += _FORECAST_STEP
-                continue
-            raw_points.append({"time": epoch_ms, "soc": round(cur_soc, 1)})
-            t += _FORECAST_STEP
-            step_secs = _FORECAST_STEP.total_seconds()
-            cur_soc = max(cur_soc - discharge_rate * step_secs, soc_floor)
-
-        if raw_points and raw_points[-1]["time"] < int(end.timestamp() * 1000):
-            raw_points.append(
-                {
-                    "time": int(end.timestamp() * 1000),
-                    "soc": round(cur_soc, 1),
-                }
-            )
-        return _deduplicate_forecast(raw_points)
+        return _project_soc_series(
+            discharge_start,
+            end,
+            now,
+            soc,
+            discharge_rate,
+            soc_floor,
+            flat_until=discharge_start,
+            direction=-1,
+        )
 
     return []
 
@@ -1311,9 +1316,14 @@ class FoxESSWorkModeSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntit
 class _DebugLogHandler(logging.Handler):
     """Logging handler that captures records into a bounded deque."""
 
-    def __init__(self, buffer: collections.deque[dict[str, str]]) -> None:
+    def __init__(
+        self,
+        buffer: collections.deque[dict[str, str]],
+        original_level: int = logging.NOTSET,
+    ) -> None:
         super().__init__()
         self._buffer = buffer
+        self.original_level = original_level
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -1380,13 +1390,10 @@ def setup_debug_log(
     buf: collections.deque[dict[str, str]] = collections.deque(
         maxlen=_DEBUG_LOG_BUFFER_SIZE
     )
-    handler = _DebugLogHandler(buf)
+    logger = logging.getLogger("custom_components.foxess_control")
+    handler = _DebugLogHandler(buf, original_level=logger.level)
     handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
     handler.setLevel(logging.DEBUG)
-    # Capture all messages from the integration's top-level package.
-    logger = logging.getLogger("custom_components.foxess_control")
-    # Save the original level so unload can restore it.
-    handler._original_level = logger.level  # type: ignore[attr-defined]
     logger.addHandler(handler)
     # Ensure messages reach the handler even if HA hasn't set the level.
     # getEffectiveLevel() walks up to the root logger; we need DEBUG locally.
