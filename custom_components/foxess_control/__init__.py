@@ -1217,11 +1217,17 @@ def _setup_smart_charge_listeners(
             if now_dt < deferred:
                 _LOGGER.debug(
                     "Smart charge: deferring until ~%02d:%02d "
-                    "(SoC=%.1f%%, net_consumption=%.2fkW)",
+                    "(SoC=%.1f%%, net_consumption=%.2fkW, "
+                    "capacity=%.1fkWh, max_power=%dW, "
+                    "residual=%.2fkWh, headroom=%.0f%%)",
                     deferred.hour,
                     deferred.minute,
                     cur_soc,
                     net_consumption,
+                    cur_state["battery_capacity_kwh"],
+                    cur_state["max_power_w"],
+                    residual if residual is not None else -1,
+                    headroom * 100,
                 )
                 return
 
@@ -2733,7 +2739,8 @@ def _register_services(hass: HomeAssistant) -> None:
         if should_defer:
             _LOGGER.info(
                 "Smart charge %02d:%02d - %02d:%02d deferred until ~%02d:%02d "
-                "(target_soc=%d%%, SoC=%.1f%%)",
+                "(target_soc=%d%%, SoC=%.1f%%, capacity=%.1fkWh, "
+                "max_power=%dW, residual=%.2fkWh, headroom=%.0f%%)",
                 start.hour,
                 start.minute,
                 end.hour,
@@ -2742,6 +2749,10 @@ def _register_services(hass: HomeAssistant) -> None:
                 deferred_start.minute,
                 target_soc,
                 current_soc,
+                battery_capacity_kwh,
+                effective_max_power,
+                residual if residual is not None else -1,
+                headroom * 100,
             )
             initial_groups: list[ScheduleGroup] | None = None
             initial_power = 0
@@ -2761,13 +2772,17 @@ def _register_services(hass: HomeAssistant) -> None:
                 )
 
             _LOGGER.info(
-                "Smart charge %02d:%02d - %02d:%02d (power=%dW, target_soc=%d%%)",
+                "Smart charge %02d:%02d - %02d:%02d (power=%dW, target_soc=%d%%, "
+                "SoC=%.1f%%, capacity=%.1fkWh, residual=%.2fkWh)",
                 start.hour,
                 start.minute,
                 end.hour,
                 end.minute,
                 initial_power,
                 target_soc,
+                current_soc if current_soc is not None else -1,
+                battery_capacity_kwh,
+                residual if residual is not None else -1,
             )
 
             if entity_mode:
