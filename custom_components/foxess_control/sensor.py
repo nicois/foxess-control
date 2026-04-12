@@ -360,6 +360,7 @@ def _build_forecast(
             return []
 
         end: datetime.datetime = cs["end"]
+        session_start: datetime.datetime = cs.get("start", now)
         target_soc: int = cs.get("target_soc", 100)
         max_power_w: int = cs.get("max_power_w", 0)
         power_w: int = cs.get("last_power_w", 0)
@@ -386,15 +387,24 @@ def _build_forecast(
                 planned_power = max_power_w * dpf
                 charge_rate = (planned_power / 1000.0) / capacity_kwh * 100.0 / 3600.0
 
-        t = now
+        # Anchor at session start (or now if earlier) so the time axis is
+        # stable once charging begins and the "now" marker progresses smoothly.
+        t = min(session_start, now)
         cur_soc = soc
         while t <= end:
             epoch_ms = int(t.timestamp() * 1000)
-            raw_points.append({"time": epoch_ms, "soc": round(cur_soc, 1)})
-            t += _FORECAST_STEP
+            if t <= now:
+                # Historical/current: hold at current SoC
+                raw_points.append({"time": epoch_ms, "soc": round(soc, 1)})
+                t += _FORECAST_STEP
+                continue
             if not effectively_charging and t < deferred_start:
                 # Still waiting — SoC stays flat
+                raw_points.append({"time": epoch_ms, "soc": round(cur_soc, 1)})
+                t += _FORECAST_STEP
                 continue
+            raw_points.append({"time": epoch_ms, "soc": round(cur_soc, 1)})
+            t += _FORECAST_STEP
             step_secs = _FORECAST_STEP.total_seconds()
             cur_soc = min(cur_soc + charge_rate * step_secs, target_soc)
 
@@ -415,8 +425,6 @@ def _build_forecast(
 
         end = ds["end"]
         discharge_start: datetime.datetime = ds.get("start", now)
-        if discharge_start < now:
-            discharge_start = now
         min_soc: int = ds.get("min_soc", 0)
         power_w = ds.get("last_power_w", 0)
 
@@ -446,15 +454,19 @@ def _build_forecast(
             max_soc_drop = energy_remaining_kwh / capacity_kwh * 100.0
             soc_floor = max(soc_floor, soc - max_soc_drop)
 
-        t = now
+        # Anchor at session start (or now if earlier) so the time axis is
+        # stable once discharging begins and the "now" marker progresses.
+        t = min(discharge_start, now)
         cur_soc = soc
         while t <= end:
             epoch_ms = int(t.timestamp() * 1000)
+            if t <= now or t < discharge_start:
+                # Before now or before discharge starts — hold at current SoC
+                raw_points.append({"time": epoch_ms, "soc": round(soc, 1)})
+                t += _FORECAST_STEP
+                continue
             raw_points.append({"time": epoch_ms, "soc": round(cur_soc, 1)})
             t += _FORECAST_STEP
-            if t < discharge_start:
-                # Before discharge starts — SoC stays flat
-                continue
             step_secs = _FORECAST_STEP.total_seconds()
             cur_soc = max(cur_soc - discharge_rate * step_secs, soc_floor)
 
