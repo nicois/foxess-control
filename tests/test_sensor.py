@@ -896,6 +896,38 @@ class TestBatteryForecastSensor:
             # Points after start should decrease
             assert forecast[-1]["soc"] < 60.0
 
+    def test_discharge_forecast_capped_by_feedin_limit(self) -> None:
+        """Forecast SoC drop is capped by the feed-in energy limit."""
+        # 60% SoC, 10kWh battery, 1kWh feedin limit → max 10% SoC drop
+        hass = _make_hass(
+            smart_discharge_state=_discharge_state(
+                last_power_w=5000,
+                min_soc=10,
+                feedin_energy_limit_kwh=1.0,
+            )
+        )
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 60.0}
+        hass.data[DOMAIN]["entry1"] = {
+            "inverter": MagicMock(),
+            "coordinator": mock_coordinator,
+        }
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        sensor = BatteryForecastSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 17, 30, 0),
+        ):
+            attrs = sensor.extra_state_attributes
+            forecast = attrs["forecast"]
+            # 1kWh / 10kWh = 10% max drop → floor at 50%
+            assert all(p["soc"] >= 50.0 for p in forecast)
+            # Should still show some discharge
+            assert forecast[-1]["soc"] < 60.0
+
     def test_forecast_points_have_time_and_soc(self) -> None:
         """Each forecast point has 'time' (epoch ms) and 'soc' keys."""
         hass = _make_hass(smart_discharge_state=_discharge_state(last_power_w=5000))

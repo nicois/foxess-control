@@ -424,7 +424,11 @@ def _build_forecast(
         if power_w > 0 and capacity_kwh > 0:
             discharge_rate = (power_w / 1000.0) / capacity_kwh * 100.0 / 3600.0
 
-        # Energy limit tracking
+        # Energy limit tracking — the limit constrains *grid export*, not
+        # total battery discharge, so we cap the projected SoC drop to the
+        # energy-limit equivalent in SoC points.  This is simpler and more
+        # accurate than step-wise export-rate tracking (which would need
+        # net consumption data the forecast doesn't have).
         energy_limit = ds.get("feedin_energy_limit_kwh")
         energy_used = 0.0
         if energy_limit is not None:
@@ -432,9 +436,15 @@ def _build_forecast(
             feedin_now = _get_coordinator_value(hass, "feedin")
             if feedin_start is not None and feedin_now is not None:
                 energy_used = feedin_now - feedin_start
-        energy_remaining = (
+        energy_remaining_kwh = (
             energy_limit - energy_used if energy_limit is not None else None
         )
+        # Floor SoC: don't project below min_soc or below what the
+        # feed-in energy budget allows.
+        soc_floor = float(min_soc)
+        if energy_remaining_kwh is not None and capacity_kwh > 0:
+            max_soc_drop = energy_remaining_kwh / capacity_kwh * 100.0
+            soc_floor = max(soc_floor, soc - max_soc_drop)
 
         t = now
         cur_soc = soc
@@ -445,14 +455,8 @@ def _build_forecast(
             if t < discharge_start:
                 # Before discharge starts — SoC stays flat
                 continue
-            if energy_remaining is not None and energy_remaining <= 0:
-                # Energy limit reached — SoC stays flat
-                continue
             step_secs = _FORECAST_STEP.total_seconds()
-            step_energy_kwh = power_w / 1000.0 * step_secs / 3600.0
-            cur_soc = max(cur_soc - discharge_rate * step_secs, min_soc)
-            if energy_remaining is not None:
-                energy_remaining -= step_energy_kwh
+            cur_soc = max(cur_soc - discharge_rate * step_secs, soc_floor)
 
         if raw_points and raw_points[-1]["time"] < int(end.timestamp() * 1000):
             raw_points.append(
