@@ -1701,8 +1701,8 @@ class TestHandleSmartCharge:
         prev_unsub.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_soc_at_target_triggers_cancel(self) -> None:
-        """SoC reaching target via periodic check cancels the session."""
+    async def test_soc_at_target_monitors_until_window_ends(self) -> None:
+        """SoC reaching target keeps session alive for monitoring."""
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
@@ -1757,18 +1757,18 @@ class TestHandleSmartCharge:
             "custom_components.foxess_control.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 5, 0, 0),
         ):
-            # First reading: registers as count=1, doesn't cancel yet
             await captured_interval(datetime.datetime(2026, 4, 7, 5, 0, 0))
-            assert hass.data[DOMAIN].get("_smart_charge_state") is not None
+            # Session stays alive with target_reached flag
+            state = hass.data[DOMAIN].get("_smart_charge_state")
+            assert state is not None
+            assert state.get("target_reached") is True
 
-            # Second consecutive reading: confirms and cancels
+            # Simulate SoC dropping below target (consumption spike)
+            hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 75.0}
             await captured_interval(datetime.datetime(2026, 4, 7, 5, 5, 0))
-
-        # Charging was deferred (10kWh, small battery), so no override to remove
-        inv.self_use.assert_not_called()
-        inv.set_schedule.assert_not_called()
-        # Listeners should be cancelled
-        assert hass.data[DOMAIN]["_smart_charge_unsubs"] == []
+            state = hass.data[DOMAIN].get("_smart_charge_state")
+            assert state is not None
+            assert state.get("target_reached") is not True
 
     @pytest.mark.asyncio
     async def test_periodic_adjustment_updates_schedule(self) -> None:
@@ -2971,10 +2971,10 @@ class TestSocStabilityCounters:
         ):
             await captured_interval(datetime.datetime(2026, 4, 7, 4, 0, 0))
 
-        # Session should still be active after one reading
+        # Session should still be active with target_reached flag
         state = hass.data[DOMAIN].get("_smart_charge_state")
         assert state is not None
-        assert state["soc_above_target_count"] == 1
+        assert state.get("target_reached") is True
 
     @pytest.mark.asyncio
     async def test_charge_soc_drops_below_target_resets_counter(self) -> None:
@@ -3034,9 +3034,9 @@ class TestSocStabilityCounters:
         ):
             await captured_interval(datetime.datetime(2026, 4, 7, 4, 0, 0))
 
-        assert hass.data[DOMAIN]["_smart_charge_state"]["soc_above_target_count"] == 1
+        assert hass.data[DOMAIN]["_smart_charge_state"].get("target_reached") is True
 
-        # SoC drops back → counter resets
+        # SoC drops back → target_reached clears, session resumes
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 78.0}
         with patch(
             "custom_components.foxess_control.dt_util.now",
@@ -3044,7 +3044,8 @@ class TestSocStabilityCounters:
         ):
             await captured_interval(datetime.datetime(2026, 4, 7, 4, 5, 0))
 
-        assert hass.data[DOMAIN]["_smart_charge_state"]["soc_above_target_count"] == 0
+        state = hass.data[DOMAIN]["_smart_charge_state"]
+        assert state.get("target_reached") is not True
 
     @pytest.mark.asyncio
     async def test_discharge_single_below_threshold_no_cancel(self) -> None:

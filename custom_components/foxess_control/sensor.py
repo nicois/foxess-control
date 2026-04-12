@@ -650,6 +650,8 @@ class SmartOperationsOverviewSensor(SensorEntity):
 
         if cs is not None:
             target = cs.get("target_soc", "?")
+            if cs.get("target_reached"):
+                return f"Charged to {target}% (monitoring)"
             if not _is_effectively_charging(self.hass, cs):
                 return f"Deferred charge to {target}%"
             return f"Charging to {target}%"

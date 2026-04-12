@@ -1151,40 +1151,31 @@ def _setup_smart_charge_listeners(
         cur_state["soc_unavailable_count"] = 0
 
         if cur_soc >= cur_state["target_soc"]:
-            cur_state["soc_above_target_count"] = (
-                cur_state.get("soc_above_target_count", 0) + 1
-            )
-            if cur_state["soc_above_target_count"] < 2:
+            if not cur_state.get("target_reached"):
                 # Remove the ForceCharge override immediately to stop
-                # unnecessary charging, but keep monitoring in case SoC
-                # drops back below target on the next reading.
+                # unnecessary charging, but keep the session alive so we
+                # can resume if SoC drops back below target (e.g. due to
+                # household consumption or clouds reducing solar).
                 if cur_state.get("charging_started", False):
                     await _remove_charge_override()
                     cur_state["groups"] = []
+                cur_state["target_reached"] = True
                 _LOGGER.info(
                     "Smart charge: SoC %.1f%% >= target %d%%, "
-                    "charge stopped, waiting for confirmation",
+                    "charge stopped, monitoring until window ends",
                     cur_soc,
                     cur_state["target_soc"],
                 )
-                return
-            _LOGGER.info(
-                "Smart charge: SoC %.1f%% confirmed at/above target %d%%, reverting",
-                cur_soc,
-                cur_state["target_soc"],
-            )
-            if _is_my_session():
-                _cancel_smart_charge(hass)
             return
-        if cur_state.get("soc_above_target_count", 0) > 0:
-            # SoC dropped back below target after a tentative stop —
-            # re-apply the charge override.
+        if cur_state.get("target_reached"):
+            # SoC dropped back below target — resume charging.
+            cur_state["target_reached"] = False
             _LOGGER.info(
                 "Smart charge: SoC %.1f%% dropped below target %d%%, resuming",
                 cur_soc,
                 cur_state["target_soc"],
             )
-        cur_state["soc_above_target_count"] = 0
+        cur_state.pop("soc_above_target_count", None)
 
         now_dt = dt_util.now()
         remaining = (cur_state["end"] - now_dt).total_seconds() / 3600.0
