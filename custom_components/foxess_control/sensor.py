@@ -193,6 +193,20 @@ def _is_effectively_charging(hass: HomeAssistant, cs: dict[str, Any]) -> bool:
     return False
 
 
+def _get_actual_discharge_power_w(hass: HomeAssistant, requested_w: int) -> int:
+    """Return observed discharge power, falling back to the requested value.
+
+    The inverter may discharge at less than the requested rate due to
+    hardware export limits.  When the polled ``batDischargePower`` is
+    available and non-zero, return it (converted from kW to W) capped at
+    the requested value.  Otherwise return the requested value.
+    """
+    polled_kw = _get_coordinator_value(hass, "batDischargePower")
+    if polled_kw is not None and polled_kw > 0:
+        return min(int(polled_kw * 1000), requested_w)
+    return requested_w
+
+
 def _get_coordinator_value(hass: HomeAssistant, key: str) -> float | None:
     """Read a numeric value from the first available coordinator."""
     domain_data = hass.data.get(DOMAIN)
@@ -520,7 +534,9 @@ class InverterOverrideStatusSensor(SensorEntity):
                 now = now.replace(tzinfo=None)
             if now < start:
                 return f"Dchg@{_format_time(start)}"
-            power = _format_power(ds.get("last_power_w", 0))
+            power = _format_power(
+                _get_actual_discharge_power_w(self.hass, ds.get("last_power_w", 0))
+            )
             feedin_limit = ds.get("feedin_energy_limit_kwh")
             if feedin_limit is not None:
                 return f"Dchg {power} {feedin_limit}kWh"
@@ -676,7 +692,12 @@ class SmartOperationsOverviewSensor(SensorEntity):
             ds_start = ds.get("start", now)
             if ds_start.tzinfo is None and now.tzinfo is not None:
                 now = now.replace(tzinfo=None)
-            ds_power = 0 if now < ds_start else ds.get("last_power_w", 0)
+            requested = ds.get("last_power_w", 0)
+            ds_power = (
+                0
+                if now < ds_start
+                else _get_actual_discharge_power_w(self.hass, requested)
+            )
             attrs.update(
                 {
                     "discharge_power_w": ds_power,
@@ -807,8 +828,7 @@ class DischargePowerSensor(SensorEntity):
             now = now.replace(tzinfo=None)
         if now < start:
             return 0
-        power: int = ds.get("last_power_w", 0)
-        return power
+        return _get_actual_discharge_power_w(self.hass, ds.get("last_power_w", 0))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
