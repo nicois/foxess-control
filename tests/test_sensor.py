@@ -148,7 +148,7 @@ class TestInverterOverrideStatusSensor:
             "custom_components.foxess_control.sensor.dt_util.now",
             return_value=datetime.datetime(2026, 4, 8, 5, 50, 0),
         ):
-            assert sensor.native_value == "Chg 0W→80%"
+            assert sensor.native_value == "Chg 10.5kW→80%"
             assert sensor.icon == "mdi:battery-charging"
 
     def test_discharging(self) -> None:
@@ -188,7 +188,10 @@ class TestInverterOverrideStatusSensor:
         assert attrs is not None
         assert attrs["mode"] == "smart_charge"
         assert attrs["phase"] == "charging"
+        assert attrs["power_w"] == 6000
+        assert attrs["max_power_w"] == 10500
         assert attrs["target_soc"] == 80
+        assert attrs["end_time"] == "2026-04-08T06:00:00"
 
     def test_attributes_discharging(self) -> None:
         hass = _make_hass(smart_discharge_state=_discharge_state())
@@ -196,7 +199,9 @@ class TestInverterOverrideStatusSensor:
         attrs = sensor.extra_state_attributes
         assert attrs is not None
         assert attrs["mode"] == "smart_discharge"
+        assert attrs["power_w"] == 5000
         assert attrs["min_soc"] == 30
+        assert attrs["end_time"] == "2026-04-08T20:00:00"
 
     def test_domain_data_missing(self) -> None:
         hass = MagicMock()
@@ -241,7 +246,9 @@ class TestSmartOperationsOverviewSensor:
         sensor = SmartOperationsOverviewSensor(hass, _make_entry())
         assert sensor.native_value == "Deferred charge to 80%"
         assert sensor.icon == "mdi:battery-clock"
-        assert sensor.extra_state_attributes["charge_phase"] == "deferred"
+        attrs = sensor.extra_state_attributes
+        assert attrs["charge_phase"] == "deferred"
+        assert attrs["charge_power_w"] == 0
 
     def test_deferred_past_start_shows_charging(self) -> None:
         """When deferred start has passed, show charging state not deferred."""
@@ -272,15 +279,22 @@ class TestSmartOperationsOverviewSensor:
             assert sensor.icon == "mdi:battery-charging"
             attrs = sensor.extra_state_attributes
             assert attrs["charge_phase"] == "charging"
+            assert attrs["charge_power_w"] == 10500
 
     def test_discharging(self) -> None:
         hass = _make_hass(smart_discharge_state=_discharge_state())
         sensor = SmartOperationsOverviewSensor(hass, _make_entry())
-        assert sensor.native_value == "Discharging until 20:00"
-        assert sensor.icon == "mdi:battery-arrow-down"
-        attrs = sensor.extra_state_attributes
-        assert attrs["discharge_active"] is True
-        assert attrs["discharge_window"] == "17:00 – 20:00"
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 18, 0, 0),
+        ):
+            assert sensor.native_value == "Discharging until 20:00"
+            assert sensor.icon == "mdi:battery-arrow-down"
+            attrs = sensor.extra_state_attributes
+            assert attrs["discharge_active"] is True
+            assert attrs["discharge_power_w"] == 5000
+            assert attrs["discharge_min_soc"] == 30
+            assert attrs["discharge_window"] == "17:00 – 20:00"
 
     def test_discharging_with_feedin_limit(self) -> None:
         hass = _make_hass(
@@ -363,7 +377,35 @@ class TestChargePowerSensor:
         attrs = sensor.extra_state_attributes
         assert attrs is not None
         assert attrs["target_soc"] == 80
+        assert attrs["max_power_w"] == 10500
         assert attrs["phase"] == "charging"
+
+    def test_transition_shows_max_power(self) -> None:
+        """Before callback fires, show max_power_w not 0."""
+        hass = _make_hass(
+            smart_charge_state=_charge_state(
+                last_power_w=0,
+                charging_started=False,
+                max_power_w=10500,
+                target_soc=80,
+            )
+        )
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 20.0}
+        hass.data[DOMAIN]["entry1"] = {
+            "inverter": MagicMock(),
+            "coordinator": mock_coordinator,
+        }
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        sensor = ChargePowerSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 5, 50, 0),
+        ):
+            assert sensor.native_value == 10500
 
     def test_unit(self) -> None:
         sensor = ChargePowerSensor(_make_hass(), _make_entry())
@@ -524,7 +566,21 @@ class TestDischargePowerSensor:
     def test_value_when_active(self) -> None:
         hass = _make_hass(smart_discharge_state=_discharge_state())
         sensor = DischargePowerSensor(hass, _make_entry())
-        assert sensor.native_value == 5000
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 18, 0, 0),
+        ):
+            assert sensor.native_value == 5000
+
+    def test_before_start_shows_zero(self) -> None:
+        """Before the discharge window opens, power should be 0."""
+        hass = _make_hass(smart_discharge_state=_discharge_state())
+        sensor = DischargePowerSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 15, 0, 0),
+        ):
+            assert sensor.native_value == 0
 
     def test_none_when_idle(self) -> None:
         sensor = DischargePowerSensor(_make_hass(), _make_entry())
@@ -720,8 +776,8 @@ class TestBatteryForecastSensor:
             assert len(forecast) > 0
             # First point is current SoC
             assert forecast[0]["soc"] == 40.0
-            # SoC should rise over time
-            assert forecast[-1]["soc"] > forecast[0]["soc"]
+            # Should reach the target SoC by end of window
+            assert forecast[-1]["soc"] == 80.0
             # Should not exceed target
             assert all(p["soc"] <= 80.0 for p in forecast)
 
@@ -788,8 +844,8 @@ class TestBatteryForecastSensor:
             # Early points should be flat (deferred)
             assert forecast[0]["soc"] == 20.0
             assert forecast[1]["soc"] == 20.0
-            # Last point should be higher
-            assert forecast[-1]["soc"] > 20.0
+            # Should reach or approach the target (80%) by end of window
+            assert forecast[-1]["soc"] >= 75.0
 
     def test_no_forecast_without_capacity(self) -> None:
         """Without battery capacity configured, forecast is empty."""
