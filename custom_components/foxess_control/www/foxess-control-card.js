@@ -37,6 +37,7 @@ class FoxESSControlCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    this._fetchSocHistory();
     this._render();
   }
 
@@ -46,6 +47,56 @@ class FoxESSControlCard extends HTMLElement {
 
   static getStubConfig() {
     return {};
+  }
+
+  // -- SoC history -----------------------------------------------------------
+
+  _fetchSocHistory() {
+    if (!this._hass) return;
+    const ops = this._attr(this._config.operations_entity);
+    // Only fetch when a session is active
+    const active = ops.charge_active === true || ops.discharge_active === true;
+    if (!active) {
+      this._socHistory = null;
+      return;
+    }
+    // Determine session window from the forecast entity
+    const fAttrs = this._attr(this._config.forecast_entity);
+    const forecast = fAttrs.forecast;
+    if (!forecast || !forecast.length) return;
+    const startMs = forecast[0].time;
+
+    // Throttle: re-fetch at most once per 60 seconds for the same window
+    const now = Date.now();
+    if (
+      this._socHistoryStart === startMs &&
+      this._socHistory &&
+      this._socHistoryFetched &&
+      now - this._socHistoryFetched < 60000
+    ) return;
+
+    const startIso = new Date(startMs).toISOString();
+    const endIso = new Date().toISOString();
+    const socEntity = this._config.soc_entity;
+
+    this._hass.callApi(
+      "GET",
+      `history/period/${startIso}?filter_entity_id=${socEntity}&minimal_response&end_time=${endIso}`
+    ).then((data) => {
+      if (data && data[0]) {
+        this._socHistory = data[0]
+          .map((s) => ({
+            time: new Date(s.last_updated || s.last_changed).getTime(),
+            soc: parseFloat(s.state),
+          }))
+          .filter((p) => !isNaN(p.soc));
+        this._socHistoryStart = startMs;
+        this._socHistoryFetched = Date.now();
+        this._render();
+      }
+    }).catch(() => {
+      // Silently ignore — history is optional
+    });
   }
 
   // -- Helpers ---------------------------------------------------------------
@@ -267,8 +318,11 @@ class FoxESSControlCard extends HTMLElement {
     const padBottom = 14; // room for time labels
     const padX = 4;
     const chartHeight = height - padTop - padBottom;
-    // Scale Y-axis to the data extent with some padding
+    // Scale Y-axis to the data extent (including history) with some padding
     const socValues = points.map((p) => p.soc);
+    if (this._socHistory) {
+      for (const h of this._socHistory) socValues.push(h.soc);
+    }
     const rawMin = Math.min(...socValues);
     const rawMax = Math.max(...socValues);
     const socMargin = Math.max(5, (rawMax - rawMin) * 0.1);
@@ -290,12 +344,24 @@ class FoxESSControlCard extends HTMLElement {
     );
     const linePath = pathParts.join(" ");
 
-    // Area fill
+    // Area fill (forecast only — future portion)
     const chartBottom = padTop + chartHeight;
     const areaPath =
       linePath +
       ` L${toX(times[times.length - 1]).toFixed(1)},${chartBottom.toFixed(1)}` +
       ` L${toX(times[0]).toFixed(1)},${chartBottom.toFixed(1)} Z`;
+
+    // History line — actual SoC values from HA recorder
+    let historyPath = "";
+    if (this._socHistory && this._socHistory.length >= 2) {
+      const hParts = this._socHistory
+        .filter((p) => p.time >= tMin && p.time <= now)
+        .map(
+          (p, i) =>
+            `${i === 0 ? "M" : "L"}${toX(p.time).toFixed(1)},${toY(p.soc).toFixed(1)}`
+        );
+      if (hParts.length >= 2) historyPath = hParts.join(" ");
+    }
 
     // Now marker
     const nowX = toX(now);
@@ -322,7 +388,7 @@ class FoxESSControlCard extends HTMLElement {
 
     return `
       <div class="forecast">
-        <div class="forecast-label">Forecast</div>
+        <div class="forecast-label">Battery SoC</div>
         <svg class="forecast-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
           <defs>
             <linearGradient id="fg" x1="0" y1="0" x2="0" y2="1">
@@ -331,8 +397,9 @@ class FoxESSControlCard extends HTMLElement {
             </linearGradient>
           </defs>
           <path d="${areaPath}" fill="url(#fg)"/>
+          ${historyPath ? `<path d="${historyPath}" fill="none" stroke="var(--primary-color)" stroke-width="2" stroke-linejoin="round" opacity="0.9"/>` : ""}
           <path d="${linePath}" fill="none" stroke="var(--primary-color)"
-                stroke-width="1.5" stroke-linejoin="round"/>
+                stroke-width="1.5" stroke-linejoin="round" ${historyPath ? 'stroke-dasharray="4,3" opacity="0.6"' : ""}/>
           ${showNow ? `<line x1="${nowX.toFixed(1)}" y1="${padTop}" x2="${nowX.toFixed(1)}" y2="${chartBottom}" stroke="var(--primary-text-color)" stroke-width="0.5" stroke-dasharray="2,2" opacity="0.4"/>` : ""}
           <!-- Y-axis labels -->
           <text x="${padX}" y="${padTop + 6}" font-size="7"
