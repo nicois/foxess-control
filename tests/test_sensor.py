@@ -394,7 +394,7 @@ class TestChargeRemainingSensor:
             assert result.startswith("starts in 3h")
 
     def test_deferred_about_to_start(self) -> None:
-        """When deferred start time has passed, show 'starting'."""
+        """When deferred start time has passed, show window remaining."""
         hass = _make_hass(
             smart_charge_state=_charge_state(
                 last_power_w=0,
@@ -414,12 +414,13 @@ class TestChargeRemainingSensor:
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
 
         sensor = ChargeRemainingSensor(hass, _make_entry())
-        # At 05:50, deferred start (~05:17) has passed
+        # At 05:50, deferred start (~05:17) has passed but callback
+        # hasn't fired yet — show window remaining instead of "starting"
         with patch(
             "custom_components.foxess_control.sensor.dt_util.now",
             return_value=datetime.datetime(2026, 4, 8, 5, 50, 0),
         ):
-            assert sensor.native_value == "starting"
+            assert sensor.native_value == "10m"
 
     def test_deferred_clamps_to_window_start(self) -> None:
         """Deferred start never shows a time before the window opens."""

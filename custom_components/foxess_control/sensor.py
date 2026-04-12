@@ -278,7 +278,9 @@ def _estimate_charge_remaining(
                 deferred_start = start
             wait = deferred_start - now
             if wait.total_seconds() <= 0:
-                return "starting"
+                # The callback hasn't fired yet to flip charging_started;
+                # show window remaining instead of a stale "starting" label.
+                return _format_duration(window_remaining)
             return f"starts in {_format_duration(wait)}"
         return _format_remaining(end)
 
