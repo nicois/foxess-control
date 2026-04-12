@@ -2276,6 +2276,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Preserve persisted sessions so recovery works after options reload
         _cancel_smart_discharge(hass, clear_storage=False)
         _cancel_smart_charge(hass, clear_storage=False)
+        # Detach debug log handlers and restore logger level
+        fox_logger = logging.getLogger("custom_components.foxess_control")
+        for handler in hass.data[DOMAIN].get("_debug_log_handlers", []):
+            fox_logger.removeHandler(handler)
+            original = getattr(handler, "_original_level", logging.NOTSET)
+            fox_logger.setLevel(original)
         hass.data.pop(DOMAIN)
         hass.services.async_remove(DOMAIN, SERVICE_CLEAR_OVERRIDES)
         hass.services.async_remove(DOMAIN, SERVICE_FEEDIN)

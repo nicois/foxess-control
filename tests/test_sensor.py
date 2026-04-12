@@ -15,6 +15,7 @@ from custom_components.foxess_control.sensor import (
     ChargePowerSensor,
     ChargeRemainingSensor,
     ChargeWindowSensor,
+    DebugLogSensor,
     DischargePowerSensor,
     DischargeRemainingSensor,
     DischargeWindowSensor,
@@ -24,6 +25,7 @@ from custom_components.foxess_control.sensor import (
     SmartOperationsOverviewSensor,
     _get_soc_value,
     async_setup_entry,
+    setup_debug_log,
 )
 
 
@@ -1124,3 +1126,99 @@ class TestAsyncSetupEntry:
         assert len(polled) == 27
         work_mode = [e for e in added if isinstance(e, FoxESSWorkModeSensor)]
         assert len(work_mode) == 1
+
+
+# ---------------------------------------------------------------------------
+# Debug log capture
+# ---------------------------------------------------------------------------
+
+
+class TestDebugLog:
+    """Tests for the opt-in debug log handler and sensor."""
+
+    def test_setup_returns_none_when_entity_missing(self) -> None:
+        hass = MagicMock()
+        hass.states.get.return_value = None
+        assert setup_debug_log(hass, _make_entry()) is None
+
+    def test_setup_returns_none_when_entity_off(self) -> None:
+        hass = MagicMock()
+        state = MagicMock()
+        state.state = "off"
+        hass.states.get.return_value = state
+        assert setup_debug_log(hass, _make_entry()) is None
+
+    def test_setup_returns_sensor_and_handler_when_on(self) -> None:
+        hass = MagicMock()
+        state = MagicMock()
+        state.state = "on"
+        hass.states.get.return_value = state
+        result = setup_debug_log(hass, _make_entry())
+        assert result is not None
+        sensor, handler = result
+        assert isinstance(sensor, DebugLogSensor)
+
+    def test_handler_captures_log_messages(self) -> None:
+        import logging
+
+        hass = MagicMock()
+        state = MagicMock()
+        state.state = "on"
+        hass.states.get.return_value = state
+        sensor, handler = setup_debug_log(hass, _make_entry())  # type: ignore[misc]
+
+        logger = logging.getLogger("custom_components.foxess_control")
+        try:
+            logger.info("test message %d", 42)
+            assert sensor.native_value >= 1
+            entries = sensor.extra_state_attributes["entries"]
+            assert any("test message 42" in e["msg"] for e in entries)
+            assert entries[-1]["level"] == "INFO"
+        finally:
+            logger.removeHandler(handler)
+
+    def test_buffer_is_bounded(self) -> None:
+        import collections
+        import logging
+
+        from custom_components.foxess_control.sensor import (
+            _DEBUG_LOG_BUFFER_SIZE,
+            _DebugLogHandler,
+        )
+
+        buf: collections.deque[dict[str, str]] = collections.deque(
+            maxlen=_DEBUG_LOG_BUFFER_SIZE
+        )
+        handler = _DebugLogHandler(buf)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        logger = logging.getLogger("test.bounded")
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+        try:
+            for i in range(_DEBUG_LOG_BUFFER_SIZE + 50):
+                logger.info("msg %d", i)
+            assert len(buf) == _DEBUG_LOG_BUFFER_SIZE
+            # Oldest messages are evicted
+            assert "msg 0" not in buf[0]["msg"]
+        finally:
+            logger.removeHandler(handler)
+
+    @pytest.mark.asyncio
+    async def test_async_setup_entry_adds_debug_sensor_when_enabled(self) -> None:
+        hass = _make_hass()
+        entry = _make_entry()
+        state = MagicMock()
+        state.state = "on"
+        hass.states.get.return_value = state
+
+        added: list[Any] = []
+
+        def mock_add(entities: Any, update_before_add: bool = False) -> None:
+            added.extend(entities)
+
+        await async_setup_entry(hass, entry, mock_add)  # type: ignore[arg-type]
+
+        # 37 base + 1 debug log sensor = 38
+        assert len(added) == 38
+        debug_sensors = [e for e in added if isinstance(e, DebugLogSensor)]
+        assert len(debug_sensors) == 1

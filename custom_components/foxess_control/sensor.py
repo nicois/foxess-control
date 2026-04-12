@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import collections
 import datetime
+import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.sensor import (
@@ -28,6 +30,11 @@ if TYPE_CHECKING:
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 SCAN_INTERVAL = datetime.timedelta(seconds=30)
+
+# If this input_boolean exists and is "on", the integration captures log
+# messages into a sensor entity queryable via the HA REST API.
+DEBUG_LOG_ENTITY = "input_boolean.foxess_control_debug_log"
+_DEBUG_LOG_BUFFER_SIZE = 200
 
 _ICON_CHARGING = "mdi:battery-charging"
 _ICON_DEFERRED = "mdi:battery-clock"
@@ -79,6 +86,13 @@ async def async_setup_entry(
             for desc in POLLED_SENSOR_DESCRIPTIONS
         )
         entities.append(FoxESSWorkModeSensor(coordinator, entry))
+
+    # Opt-in debug log capture
+    result = setup_debug_log(hass, entry)
+    if result is not None:
+        sensor, handler = result
+        entities.append(sensor)
+        hass.data[DOMAIN].setdefault("_debug_log_handlers", []).append(handler)
 
     async_add_entities(entities)
 
@@ -1267,3 +1281,97 @@ class FoxESSWorkModeSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntit
         if self.coordinator.data is None:
             return None
         return self.coordinator.data.get("_work_mode")
+
+
+# ---------------------------------------------------------------------------
+# Debug log capture — opt-in via input_boolean.foxess_control_debug_log
+# ---------------------------------------------------------------------------
+
+
+class _DebugLogHandler(logging.Handler):
+    """Logging handler that captures records into a bounded deque."""
+
+    def __init__(self, buffer: collections.deque[dict[str, str]]) -> None:
+        super().__init__()
+        self._buffer = buffer
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self._buffer.append(
+                {
+                    "t": datetime.datetime.fromtimestamp(
+                        record.created, tz=datetime.UTC
+                    ).isoformat(timespec="seconds"),
+                    "level": record.levelname,
+                    "msg": self.format(record),
+                }
+            )
+        except Exception:  # noqa: BLE001
+            self.handleError(record)
+
+
+class DebugLogSensor(SensorEntity):
+    """Sensor exposing recent foxess_control log entries as attributes.
+
+    Created only when ``input_boolean.foxess_control_debug_log`` exists
+    and is on.  The ``state`` is the number of buffered entries; the full
+    log ring is in the ``entries`` attribute, readable via the REST API::
+
+        GET /api/states/sensor.foxess_control_debug_log
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:math-log"
+    _attr_entity_registry_enabled_default = True
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        buffer: collections.deque[dict[str, str]],
+    ) -> None:
+        self._buffer = buffer
+        self._attr_unique_id = f"{entry.entry_id}_debug_log"
+        self._attr_name = "Debug Log"
+        self._attr_device_info = _device_info(entry)
+
+    @property
+    def native_value(self) -> int:
+        return len(self._buffer)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"entries": list(self._buffer)}
+
+
+def setup_debug_log(
+    hass: Any,
+    entry: ConfigEntry,
+) -> tuple[DebugLogSensor, _DebugLogHandler] | None:
+    """Attach a log handler and return a sensor if debug logging is opted-in.
+
+    Returns ``None`` when the opt-in entity does not exist or is off.
+    The caller is responsible for adding the sensor entity and storing
+    the handler reference for cleanup on unload.
+    """
+    state = hass.states.get(DEBUG_LOG_ENTITY)
+    if state is None or state.state != "on":
+        return None
+
+    buf: collections.deque[dict[str, str]] = collections.deque(
+        maxlen=_DEBUG_LOG_BUFFER_SIZE
+    )
+    handler = _DebugLogHandler(buf)
+    handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+    handler.setLevel(logging.DEBUG)
+    # Capture all messages from the integration's top-level package.
+    logger = logging.getLogger("custom_components.foxess_control")
+    # Save the original level so unload can restore it.
+    handler._original_level = logger.level  # type: ignore[attr-defined]
+    logger.addHandler(handler)
+    # Ensure messages reach the handler even if HA hasn't set the level.
+    # getEffectiveLevel() walks up to the root logger; we need DEBUG locally.
+    if logger.getEffectiveLevel() > logging.DEBUG:
+        logger.setLevel(logging.DEBUG)
+
+    sensor = DebugLogSensor(entry, buf)
+    return sensor, handler
