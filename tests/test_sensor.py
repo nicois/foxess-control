@@ -863,8 +863,8 @@ class TestBatteryForecastSensor:
             assert attrs["forecast"] == []
 
     def test_discharge_forecast_defers_until_start(self) -> None:
-        """Discharge forecast holds SoC flat until the start time."""
-        # Discharge starts at 17:00, now is 16:00 — first hour should be flat
+        """Discharge forecast starts at the configured interval, not now."""
+        # Discharge starts at 17:00, now is 16:00 — graph should start at 17:00
         hass = _make_hass(smart_discharge_state=_discharge_state(last_power_w=5000))
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 60.0}
@@ -885,14 +885,13 @@ class TestBatteryForecastSensor:
             assert attrs is not None
             forecast = attrs["forecast"]
             assert len(forecast) > 2
-            # Points before 17:00 should all be flat at 60.0
+            # No points before the configured start time
             start_epoch = int(
                 datetime.datetime(2026, 4, 8, 17, 0, 0).timestamp() * 1000
             )
-            flat_points = [p for p in forecast if p["time"] < start_epoch]
-            assert len(flat_points) > 0
-            for p in flat_points:
-                assert p["soc"] == 60.0
+            assert forecast[0]["time"] >= start_epoch
+            # First point at current SoC (flat_until holds at start)
+            assert forecast[0]["soc"] == 60.0
             # Points after start should decrease
             assert forecast[-1]["soc"] < 60.0
 

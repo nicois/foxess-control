@@ -366,7 +366,7 @@ def _project_soc_series(
     *flat_until*) hold at the current *soc*.
     """
     points: list[dict[str, Any]] = []
-    t = min(start, now)
+    t = start
     cur_soc = soc
     step_secs = _FORECAST_STEP.total_seconds()
     while t <= end:
