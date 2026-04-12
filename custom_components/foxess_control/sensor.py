@@ -748,7 +748,9 @@ class SmartOperationsOverviewSensor(SensorEntity):
                     elapsed = (now - ds_start).total_seconds()
                     total_secs = (ds["end"] - ds_start).total_seconds()
                     if elapsed > 0 and total_secs > 0:
-                        feedin_projected = round(feedin_used / elapsed * total_secs, 2)
+                        feedin_projected = round(
+                            min(feedin_used / elapsed * total_secs, feedin_limit), 2
+                        )
             attrs.update(
                 {
                     "discharge_power_w": ds_power,
