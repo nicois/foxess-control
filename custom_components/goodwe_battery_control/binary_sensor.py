@@ -1,8 +1,7 @@
-"""Binary sensors for FoxESS Control smart charge/discharge status."""
+"""GoodWe Battery Control binary sensor platform."""
 
 from __future__ import annotations
 
-import datetime
 from typing import TYPE_CHECKING
 
 from .const import DOMAIN
@@ -19,18 +18,16 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-SCAN_INTERVAL = datetime.timedelta(seconds=30)
-
 
 class SmartChargeActiveSensor(_SmartChargeActiveSensor):
-    """FoxESS smart charge active binary sensor."""
+    """GoodWe smart charge active binary sensor."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(hass, entry, DOMAIN, _device_info(entry))
 
 
 class SmartDischargeActiveSensor(_SmartDischargeActiveSensor):
-    """FoxESS smart discharge active binary sensor."""
+    """GoodWe smart discharge active binary sensor."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(hass, entry, DOMAIN, _device_info(entry))
@@ -41,7 +38,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up FoxESS Control binary sensors."""
+    """Set up GoodWe Battery Control binary sensors."""
     async_add_entities(
         [
             SmartChargeActiveSensor(hass, entry),

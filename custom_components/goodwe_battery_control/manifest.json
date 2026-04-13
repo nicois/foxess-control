@@ -1,12 +1,12 @@
 {
-  "domain": "foxess_control",
-  "name": "FoxESS Control",
+  "domain": "goodwe_battery_control",
+  "name": "GoodWe Battery Control",
   "after_dependencies": ["lovelace"],
   "codeowners": ["@nicois"],
   "config_flow": true,
   "dependencies": ["http"],
   "documentation": "https://github.com/nicois/foxess-control",
-  "iot_class": "cloud_polling",
+  "iot_class": "local_polling",
   "issue_tracker": "https://github.com/nicois/foxess-control/issues",
   "version": "1.0.0-beta.1"
 }

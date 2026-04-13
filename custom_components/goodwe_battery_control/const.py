@@ -1,11 +1,5 @@
-"""Constants for the FoxESS Control integration.
+"""Constants for the GoodWe Battery Control integration."""
 
-Brand-agnostic constants are re-exported from ``smart_battery.const``
-so existing imports within foxess_control continue to work unchanged.
-"""
-
-# Re-export shared constants — these are used by __init__.py, config_flow.py,
-# coordinator.py, sensor.py, and tests via ``from .const import ...``.
 from .smart_battery.const import (
     CONF_API_MIN_SOC as CONF_API_MIN_SOC,
 )
@@ -79,40 +73,7 @@ from .smart_battery.const import (
     PLATFORMS as PLATFORMS,
 )
 
-# --- FoxESS-specific constants ---
-DOMAIN = "foxess_control"
-CONF_API_KEY = "api_key"
-CONF_DEVICE_SERIAL = "device_serial"
+DOMAIN = "goodwe_battery_control"
 
-POLLED_VARIABLES = [
-    "SoC",
-    "batChargePower",
-    "batDischargePower",
-    "loadsPower",
-    "pvPower",
-    "batTemperature",
-    "gridConsumptionPower",
-    "feedinPower",
-    "generationPower",
-    "batVolt",
-    "batCurrent",
-    "pv1Power",
-    "pv2Power",
-    "ambientTemperation",
-    "invTemperation",
-    # Cumulative energy counters (lifetime kWh)
-    "feedin",
-    "gridConsumption",
-    "generation",
-    "chargeEnergyToTal",
-    "dischargeEnergyToTal",
-    "loads",
-    "energyThroughput",
-    # Grid connection
-    "meterPower",
-    "RVolt",
-    "RCurrent",
-    "RFreq",
-    # EPS / backup
-    "epsPower",
-]
+# Default inverter power for GoodWe ET/EH/BT/BH series (W)
+DEFAULT_GOODWE_INVERTER_POWER = 5000

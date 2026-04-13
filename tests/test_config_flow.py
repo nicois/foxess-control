@@ -302,9 +302,11 @@ class TestDetectFoxessModbusEntities:
         unrelated.entity_id = "sensor.foxess_inv1_inverter_temp"
 
         with (
-            patch("custom_components.foxess_control.config_flow.er.async_get"),
             patch(
-                "custom_components.foxess_control.config_flow.er.async_entries_for_config_entry",
+                "custom_components.foxess_control.smart_battery.config_flow_base.er.async_get"
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.config_flow_base.er.async_entries_for_config_entry",
                 return_value=[work_mode, soc, charge_power, unrelated],
             ),
         ):

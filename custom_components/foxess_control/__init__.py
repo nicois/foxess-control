@@ -40,7 +40,6 @@ from .const import (
     DEFAULT_POLLING_INTERVAL,
     DEFAULT_SMART_HEADROOM,
     DOMAIN,
-    MAX_OVERRIDE_HOURS,
     PLATFORMS,
 )
 from .coordinator import (
@@ -49,6 +48,37 @@ from .coordinator import (
     get_coordinator_soc,
 )
 from .foxess import FoxESSClient, Inverter, WorkMode
+from .smart_battery.algorithms import (
+    calculate_charge_power as _calculate_charge_power,
+)
+from .smart_battery.algorithms import (
+    calculate_deferred_start as _calculate_deferred_start,
+)
+from .smart_battery.algorithms import (
+    calculate_discharge_power as _calculate_discharge_power,
+)
+from .smart_battery.algorithms import (
+    should_suspend_discharge as _should_suspend_discharge,
+)
+from .smart_battery.config_flow_base import build_entity_map as _build_entity_map
+from .smart_battery.services import (
+    resolve_start_end as _resolve_start_end,
+)
+from .smart_battery.services import (
+    resolve_start_end_explicit as _resolve_start_end_explicit,
+)
+from .smart_battery.session import (
+    clear_stored_session as _sb_clear_stored_session,
+)
+from .smart_battery.session import (
+    save_session as _sb_save_session,
+)
+from .smart_battery.session import (
+    session_data_from_charge_state as _session_data_from_charge_state,
+)
+from .smart_battery.session import (
+    session_data_from_discharge_state as _session_data_from_discharge_state,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -301,91 +331,6 @@ def _get_api_min_soc(hass: HomeAssistant) -> int:
     return val
 
 
-def _resolve_start_end(
-    duration: datetime.timedelta,
-    start_time: datetime.time | None = None,
-) -> tuple[datetime.datetime, datetime.datetime]:
-    """Validate duration and resolve start/end datetimes.
-
-    If *start_time* is ``None`` the override begins now, otherwise it
-    begins at *start_time* today.
-
-    Raises ServiceValidationError if duration exceeds MAX_OVERRIDE_HOURS
-    or the window would extend past midnight.
-    """
-    max_delta = datetime.timedelta(hours=MAX_OVERRIDE_HOURS)
-    if duration <= datetime.timedelta(0):
-        raise ServiceValidationError("Duration must be positive")
-    if duration > max_delta:
-        raise ServiceValidationError(
-            f"Duration must not exceed {MAX_OVERRIDE_HOURS} hours"
-        )
-
-    now = dt_util.now()
-
-    if start_time is not None:
-        start = now.replace(
-            hour=start_time.hour,
-            minute=start_time.minute,
-            second=0,
-            microsecond=0,
-        )
-    else:
-        start = now
-
-    end = start + duration
-
-    if end.date() != start.date():
-        raise ServiceValidationError("Override must not extend past midnight")
-
-    return start, end
-
-
-def _resolve_start_end_explicit(
-    start_time: datetime.time,
-    end_time: datetime.time,
-) -> tuple[datetime.datetime, datetime.datetime]:
-    """Validate and resolve explicit start/end times to datetimes (today).
-
-    Raises ServiceValidationError if end <= start, window exceeds
-    MAX_OVERRIDE_HOURS, or the window would cross midnight.
-    """
-    now = dt_util.now()
-    start = now.replace(
-        hour=start_time.hour,
-        minute=start_time.minute,
-        second=0,
-        microsecond=0,
-    )
-    end = now.replace(
-        hour=end_time.hour,
-        minute=end_time.minute,
-        second=0,
-        microsecond=0,
-    )
-
-    if end <= start:
-        raise ServiceValidationError("End time must be after start time")
-
-    max_delta = datetime.timedelta(hours=MAX_OVERRIDE_HOURS)
-    if (end - start) > max_delta:
-        raise ServiceValidationError(
-            f"Window must not exceed {MAX_OVERRIDE_HOURS} hours"
-        )
-
-    if start < now:
-        _LOGGER.warning(
-            "Start time %02d:%02d is in the past (now %02d:%02d); "
-            "the inverter will begin immediately",
-            start.hour,
-            start.minute,
-            now.hour,
-            now.minute,
-        )
-
-    return start, end
-
-
 def _get_current_soc(hass: HomeAssistant) -> float | None:
     """Get current battery SoC from the coordinator.
 
@@ -451,11 +396,6 @@ def _get_feedin_energy_kwh(hass: HomeAssistant) -> float | None:
     return None
 
 
-def _soc_energy_kwh(soc: float, capacity_kwh: float) -> float:
-    """Convert a SoC percentage to energy in kWh."""
-    return soc / 100.0 * capacity_kwh
-
-
 def _cancel_smart_discharge(hass: HomeAssistant, *, clear_storage: bool = True) -> None:
     """Cancel any active smart discharge listeners and clear stored session."""
     unsubs: list[Callable[[], None]] = hass.data[DOMAIN].get(
@@ -472,70 +412,13 @@ def _cancel_smart_discharge(hass: HomeAssistant, *, clear_storage: bool = True) 
 async def _save_session(hass: HomeAssistant, key: str, data: dict[str, Any]) -> None:
     """Persist a smart session to storage."""
     store: Store[dict[str, Any]] = hass.data[DOMAIN].get("_store")
-    if store is None:
-        return
-    stored: dict[str, Any] = await store.async_load() or {}
-    stored[key] = data
-    await store.async_save(stored)
+    await _sb_save_session(store, key, data)
 
 
 async def _clear_stored_session(hass: HomeAssistant, key: str) -> None:
     """Remove a smart session from storage."""
     store: Store[dict[str, Any]] | None = hass.data.get(DOMAIN, {}).get("_store")
-    if store is None:
-        return
-    stored: dict[str, Any] = await store.async_load() or {}
-    if key in stored:
-        del stored[key]
-        await store.async_save(stored)
-
-
-def _session_data_from_charge_state(state: dict[str, Any]) -> dict[str, Any]:
-    """Build a serialisable dict from a smart charge state dict."""
-    return {
-        "date": state["start"].strftime("%Y-%m-%d"),
-        "start_hour": state["start"].hour,
-        "start_minute": state["start"].minute,
-        "end_hour": state["end"].hour,
-        "end_minute": state["end"].minute,
-        "target_soc": state["target_soc"],
-        "max_power_w": state["max_power_w"],
-        "battery_capacity_kwh": state["battery_capacity_kwh"],
-        "min_soc_on_grid": state["min_soc_on_grid"],
-        "min_power_change": state["min_power_change"],
-        "api_min_soc": state.get("api_min_soc", DEFAULT_API_MIN_SOC),
-        "force": state.get("force", False),
-        "charging_started": state["charging_started"],
-        "charging_started_at": (
-            state["charging_started_at"].isoformat()
-            if state.get("charging_started_at")
-            else None
-        ),
-        "charging_started_energy_kwh": state.get("charging_started_energy_kwh"),
-    }
-
-
-def _session_data_from_discharge_state(state: dict[str, Any]) -> dict[str, Any]:
-    """Build a serialisable dict from a smart discharge state dict."""
-    data: dict[str, Any] = {
-        "date": state["start"].strftime("%Y-%m-%d"),
-        "start_hour": state["start"].hour,
-        "start_minute": state["start"].minute,
-        "end_hour": state["end"].hour,
-        "end_minute": state["end"].minute,
-        "min_soc": state["min_soc"],
-        "max_power_w": state.get("max_power_w", state["last_power_w"]),
-        "last_power_w": state["last_power_w"],
-    }
-    if state.get("feedin_energy_limit_kwh") is not None:
-        data["feedin_energy_limit_kwh"] = state["feedin_energy_limit_kwh"]
-        if state.get("feedin_start_kwh") is not None:
-            data["feedin_start_kwh"] = state["feedin_start_kwh"]
-    if state.get("pacing_enabled"):
-        data["pacing_enabled"] = True
-        data["battery_capacity_kwh"] = state["battery_capacity_kwh"]
-        data["min_power_change"] = state["min_power_change"]
-    return data
+    await _sb_clear_stored_session(store, key)
 
 
 def _get_battery_capacity_kwh(hass: HomeAssistant) -> float:
@@ -556,258 +439,6 @@ def _get_min_power_change(hass: HomeAssistant) -> int:
         return DEFAULT_MIN_POWER_CHANGE
     val: int = int(entry.options.get(CONF_MIN_POWER_CHANGE, DEFAULT_MIN_POWER_CHANGE))
     return val
-
-
-def _calculate_charge_power(
-    current_soc: float,
-    target_soc: int,
-    battery_capacity_kwh: float,
-    remaining_hours: float,
-    max_power_w: int,
-    net_consumption_kw: float = 0.0,
-    headroom: float = 0.10,
-    charging_started_energy_kwh: float | None = None,
-    elapsed_since_charge_started: float = 0.0,
-    effective_charge_window: float = 0.0,
-    min_power_change_w: int = 0,
-) -> int:
-    """Calculate the charge power needed to reach target SoC in remaining time.
-
-    *headroom* is a fraction (e.g. 0.10 for 10%) controlling how much
-    spare capacity to reserve.  It is applied both as a time buffer (plan
-    to finish in ``1 - headroom`` of the remaining time) and as a power
-    multiplier (``1 + headroom``).  This matches the headroom used by
-    ``_calculate_deferred_start`` so the two stay in agreement.
-
-    When *charging_started_energy_kwh* and *elapsed_since_charge_started*
-    are provided, the function checks whether the current energy is behind
-    the ideal headroom-adjusted trajectory.  The ideal trajectory is a
-    linear ramp from the starting energy to the target energy, completing
-    in ``effective_charge_window * (1 - headroom)`` hours.  If the actual
-    energy is below the ideal by more than a tolerance, *max_power_w* is
-    returned to catch up.  Once the trajectory is regained, normal pacing
-    resumes.  The tolerance equals ``min_power_change_w / 1000 ×
-    remaining_hours`` — the energy a minimum-meaningful power bump would
-    recover over the remaining window.  This prevents premature bursting
-    from minor measurement fluctuations while still catching up promptly
-    as the window closes.
-
-    When *net_consumption_kw* is positive the house is drawing power that
-    competes with the battery for inverter capacity, so we add it to the
-    required charge rate.  When negative (solar exceeds consumption) the
-    battery gets a free boost — we don't subtract because the inverter
-    will naturally absorb the surplus.
-
-    Returns an integer power in watts, clamped to [100, max_power_w].
-    """
-    target_energy_kwh = _soc_energy_kwh(target_soc, battery_capacity_kwh)
-    energy_needed_kwh = target_energy_kwh - _soc_energy_kwh(
-        current_soc, battery_capacity_kwh
-    )
-    if energy_needed_kwh <= 0:
-        return 100
-    if remaining_hours <= 0:
-        return max_power_w
-
-    # Check if we're behind the ideal headroom-adjusted trajectory.
-    if (
-        charging_started_energy_kwh is not None
-        and elapsed_since_charge_started > 0
-        and effective_charge_window > 0
-        and headroom > 0
-    ):
-        effective_window = effective_charge_window * (1 - headroom)
-        if effective_window > 0:
-            energy_to_add = target_energy_kwh - charging_started_energy_kwh
-            if energy_to_add > 0:
-                progress = min(elapsed_since_charge_started / effective_window, 1.0)
-                ideal_energy_now = (
-                    charging_started_energy_kwh + progress * energy_to_add
-                )
-                actual_energy = _soc_energy_kwh(current_soc, battery_capacity_kwh)
-                tolerance_kwh = min_power_change_w / 1000.0 * remaining_hours
-                deficit = ideal_energy_now - actual_energy
-                if deficit > tolerance_kwh:
-                    _LOGGER.debug(
-                        "Smart charge: behind schedule "
-                        "(%.2f kWh < ideal %.2f kWh, "
-                        "deficit %.3f > tolerance %.3f), "
-                        "charging at max power",
-                        actual_energy,
-                        ideal_energy_now,
-                        deficit,
-                        tolerance_kwh,
-                    )
-                    return max_power_w
-
-    # Plan to finish in (1 - headroom) of the remaining time so there is
-    # a buffer if consumption spikes or the inverter can't sustain full power.
-    effective_hours = remaining_hours * (1 - headroom)
-    if effective_hours <= 0:
-        effective_hours = remaining_hours
-    battery_power_kw = energy_needed_kwh / effective_hours
-    total_power_kw = battery_power_kw + max(0.0, net_consumption_kw)
-    # Over-provision the charge rate so unexpected load doesn't prevent
-    # reaching the target.  The absolute headroom scales linearly with the
-    # required power, so it naturally shrinks as SoC approaches the target.
-    total_power_kw *= 1 + headroom
-    power_w = total_power_kw * 1000
-    return max(100, min(int(power_w), max_power_w))
-
-
-def _should_suspend_discharge(
-    current_soc: float,
-    min_soc: int,
-    battery_capacity_kwh: float,
-    remaining_hours: float,
-    net_consumption_kw: float,
-    headroom: float = 0.10,
-) -> bool:
-    """Return True if forced discharge should be suspended.
-
-    Suspension protects the min SoC target.  If household consumption
-    alone would drain the battery to (or past) min SoC within the
-    remaining window, adding *any* forced discharge power risks
-    breaching the floor.  In that case the inverter should revert to
-    SelfUse so that only unavoidable house load draws from the battery.
-
-    A headroom factor is applied so suspension triggers slightly early,
-    giving the system time to react.
-    """
-    if remaining_hours <= 0 or battery_capacity_kwh <= 0:
-        return False
-    energy_kwh = _soc_energy_kwh(current_soc - min_soc, battery_capacity_kwh)
-    if energy_kwh <= 0:
-        return True  # already at or below min SoC
-    consumption = max(0.0, net_consumption_kw)
-    if consumption <= 0:
-        return False  # no house load — no risk from forced discharge
-    # Time until house load alone drains to min SoC
-    hours_to_min = energy_kwh / consumption
-    # Suspend if house load would reach min SoC within the window
-    # (with headroom so we suspend slightly early)
-    return hours_to_min <= remaining_hours * (1 + headroom)
-
-
-def _calculate_discharge_power(
-    current_soc: float,
-    min_soc: int,
-    battery_capacity_kwh: float,
-    remaining_hours: float,
-    max_power_w: int,
-    net_consumption_kw: float = 0.0,
-    headroom: float = 0.10,
-    feedin_remaining_kwh: float | None = None,
-) -> int:
-    """Calculate the discharge power needed to reach min SoC by window end.
-
-    Mirrors ``_calculate_charge_power`` but for discharge.  *headroom* is
-    applied as both a time buffer and a power multiplier.
-
-    Unlike charge, household consumption *assists* discharge (the load
-    drains the battery alongside the inverter), so *net_consumption_kw*
-    is **subtracted** from the required discharge rate.  If the house load
-    alone is enough to drain the battery at the needed rate, returns 100
-    (minimum).
-
-    When *feedin_remaining_kwh* is provided, the target energy is capped
-    so the grid export budget is spread evenly across the remaining window.
-    The maximum achievable battery drain within both time and export
-    constraints is ``feedin_remaining + house_load × remaining_hours``;
-    pacing to this cap ensures the export budget lasts the full window,
-    maximising the energy absorbed by household consumption.
-
-    Returns an integer power in watts, clamped to [100, max_power_w].
-    """
-    energy_kwh = _soc_energy_kwh(current_soc - min_soc, battery_capacity_kwh)
-    if energy_kwh <= 0:
-        return 100
-    if remaining_hours <= 0:
-        return max_power_w
-    # When a feed-in energy limit constrains the session, cap the target
-    # energy so the export budget is spread across the full window.  At
-    # discharge power P with house load L, export rate = P − L and total
-    # battery drain = P × T.  The maximum drain that keeps total export
-    # within budget is feedin_remaining + L × T.  Using this cap means the
-    # pacing naturally sets P = L + feedin/T, which is the power level that
-    # maximises battery drain for a given export budget.
-    if (
-        feedin_remaining_kwh is not None
-        and feedin_remaining_kwh >= 0
-        and remaining_hours > 0
-    ):
-        house_absorption_kwh = max(0.0, net_consumption_kw) * remaining_hours
-        max_drain_kwh = feedin_remaining_kwh + house_absorption_kwh
-        if max_drain_kwh < energy_kwh:
-            _LOGGER.debug(
-                "Smart discharge: capping target energy %.2f kWh -> %.2f kWh "
-                "(feedin_remaining=%.2f kWh, house_absorption=%.2f kWh)",
-                energy_kwh,
-                max_drain_kwh,
-                feedin_remaining_kwh,
-                house_absorption_kwh,
-            )
-            energy_kwh = max_drain_kwh
-            if energy_kwh <= 0:
-                return 100
-    effective_hours = remaining_hours * (1 - headroom)
-    if effective_hours <= 0:
-        effective_hours = remaining_hours
-    battery_power_kw = energy_kwh / effective_hours
-    # House load assists discharge — subtract it from needed inverter power.
-    battery_power_kw -= max(0.0, net_consumption_kw)
-    if battery_power_kw <= 0:
-        return 100
-    battery_power_kw *= 1 + headroom
-    power_w = battery_power_kw * 1000
-    return max(100, min(int(power_w), max_power_w))
-
-
-def _calculate_deferred_start(
-    current_soc: float,
-    target_soc: int,
-    battery_capacity_kwh: float,
-    max_power_w: int,
-    end: datetime.datetime,
-    net_consumption_kw: float = 0.0,
-    start: datetime.datetime | None = None,
-    headroom: float = 0.10,
-) -> datetime.datetime:
-    """Calculate the latest time to start charging to reach target SoC by *end*.
-
-    *headroom* is a fraction (e.g. 0.10 for 10%) controlling how much
-    spare capacity to reserve for transient loads.
-
-    Uses *net_consumption_kw* (house load minus solar) to estimate how
-    much inverter capacity is available for charging.  A minimum headroom
-    of *headroom* × *max_power_w* is always reserved.
-
-    When *start* is provided the result is clamped so it never precedes
-    the window opening time.
-
-    Returns *end* if no charging is needed (SoC already at target).
-    Returns a time before *end* otherwise; may be in the past if the
-    window is too short to reach the target.
-    """
-    energy_needed_kwh = (target_soc - current_soc) / 100.0 * battery_capacity_kwh
-    if energy_needed_kwh <= 0:
-        return end
-    max_power_kw = max_power_w / 1000.0
-    consumption_headroom_kw = max(0.0, net_consumption_kw)
-    min_headroom_kw = max_power_kw * headroom
-    headroom_kw = max(consumption_headroom_kw, min_headroom_kw)
-    effective_charge_kw = max_power_kw - headroom_kw
-    if effective_charge_kw <= 0:
-        effective_charge_kw = max_power_kw * headroom
-    charge_hours = energy_needed_kwh / effective_charge_kw
-    # Add a time buffer so that transient load spikes don't prevent
-    # reaching the target.  This matches the headroom used by
-    # _calculate_charge_power when sizing the charge rate.
-    buffered_hours = charge_hours / (1 - headroom)
-    deferred = end - datetime.timedelta(hours=buffered_hours)
-    if start is not None and deferred < start:
-        deferred = start
-    return deferred
 
 
 def _remove_mode_from_schedule(
@@ -2093,37 +1724,6 @@ async def _recover_sessions(
 
     if changed:
         await store.async_save(stored)
-
-
-def _build_entity_map(opts: Any) -> dict[str, str]:
-    """Build a {polled_variable: entity_id} map from config options.
-
-    Returns an empty dict when entity mode is not configured.
-    """
-    from .const import (
-        CONF_FEEDIN_ENERGY_ENTITY,
-        CONF_LOADS_POWER_ENTITY,
-        CONF_PV_POWER_ENTITY,
-        CONF_SOC_ENTITY,
-    )
-
-    if not opts.get(CONF_WORK_MODE_ENTITY):
-        return {}
-
-    mapping: dict[str, str] = {}
-    # Map config option → polled variable name
-    _ENTITY_VAR_MAP: list[tuple[str, str]] = [
-        (CONF_SOC_ENTITY, "SoC"),
-        (CONF_LOADS_POWER_ENTITY, "loadsPower"),
-        (CONF_PV_POWER_ENTITY, "pvPower"),
-        (CONF_FEEDIN_ENERGY_ENTITY, "feedin"),
-        (CONF_WORK_MODE_ENTITY, "_work_mode"),
-    ]
-    for conf_key, var_name in _ENTITY_VAR_MAP:
-        entity_id = opts.get(conf_key, "")
-        if entity_id:
-            mapping[var_name] = entity_id
-    return mapping
 
 
 # -- WebSocket API for Lovelace cards ----------------------------------------
