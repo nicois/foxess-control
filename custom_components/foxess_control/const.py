@@ -84,6 +84,10 @@ DOMAIN = "foxess_control"
 CONF_API_KEY = "api_key"
 CONF_DEVICE_SERIAL = "device_serial"
 
+# Web portal credentials (optional, for WebSocket real-time data)
+CONF_WEB_USERNAME = "web_username"
+CONF_WEB_PASSWORD = "web_password"
+
 POLLED_VARIABLES = [
     "SoC",
     "batChargePower",

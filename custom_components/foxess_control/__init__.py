@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import time as _time
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -31,6 +32,8 @@ from .const import (
     CONF_MIN_SOC_ON_GRID,
     CONF_POLLING_INTERVAL,
     CONF_SMART_HEADROOM,
+    CONF_WEB_PASSWORD,
+    CONF_WEB_USERNAME,
     CONF_WORK_MODE_ENTITY,
     DEFAULT_API_MIN_SOC,
     DEFAULT_ENTITY_POLLING_INTERVAL,
@@ -47,7 +50,7 @@ from .coordinator import (
     FoxESSEntityCoordinator,
     get_coordinator_soc,
 )
-from .foxess import FoxESSClient, Inverter, WorkMode
+from .foxess import FoxESSClient, FoxESSRealtimeWS, FoxESSWebSession, Inverter, WorkMode
 from .smart_battery.algorithms import (
     PEAK_DECAY_PER_TICK,
 )
@@ -447,6 +450,9 @@ def _cancel_smart_discharge(hass: HomeAssistant, *, clear_storage: bool = True) 
         unsub()
     hass.data[DOMAIN]["_smart_discharge_unsubs"] = []
     hass.data[DOMAIN].pop("_smart_discharge_state", None)
+    hass.data[DOMAIN].pop("_ws_discharge_callback", None)
+    # Disconnect WebSocket — no active discharge session needs it
+    hass.async_create_task(_stop_realtime_ws(hass))
     if clear_storage and hass.data.get(DOMAIN, {}).get("_store") is not None:
         hass.async_create_task(_clear_stored_session(hass, "smart_discharge"))
 
@@ -1278,6 +1284,7 @@ def _setup_smart_discharge_listeners(
                     soc_value,
                     new_power,
                 )
+                await _maybe_start_realtime_ws(hass)
                 await _save_session(
                     hass,
                     "smart_discharge",
@@ -1435,6 +1442,8 @@ def _setup_smart_discharge_listeners(
                 if not _is_my_session():
                     return
                 cur_state = hass.data[DOMAIN]["_smart_discharge_state"]
+                # Stop WebSocket — suspended discharge is in self-use
+                await _stop_realtime_ws(hass)
                 await _save_session(
                     hass,
                     "smart_discharge",
@@ -1449,6 +1458,7 @@ def _setup_smart_discharge_listeners(
                     remaining_h,
                 )
                 cur_state["suspended"] = False
+                await _maybe_start_realtime_ws(hass)
                 # Fall through to pacing to re-apply the override
 
             if cur_state.get("suspended"):
@@ -1551,6 +1561,8 @@ def _setup_smart_discharge_listeners(
     ]
 
     hass.data[DOMAIN]["_smart_discharge_unsubs"] = unsubs
+    # Store callback reference for WebSocket push-triggered evaluation
+    hass.data[DOMAIN]["_ws_discharge_callback"] = _check_discharge_soc
 
 
 def _has_matching_schedule_group(
@@ -2061,6 +2073,122 @@ async def _register_card_frontend(hass: HomeAssistant) -> None:
         )
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate config entry to a new version."""
+    if entry.version < 2:
+        # v1 -> v2: no web credentials, WebSocket disabled (safe default)
+        _LOGGER.info("Migrating config entry from version %s to 2", entry.version)
+        hass.config_entries.async_update_entry(entry, version=2)
+    return True
+
+
+# ---------------------------------------------------------------------------
+# WebSocket real-time data lifecycle
+# ---------------------------------------------------------------------------
+
+_WS_DEBOUNCE_SECONDS = 10.0
+
+
+def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
+    """Return True if the WebSocket should be active right now.
+
+    Criteria: cloud mode, web credentials configured, active forced discharge
+    with min_soc < 100 (i.e. discharge is actually paced/constrained).
+    """
+    if _is_entity_mode(hass):
+        return False
+    try:
+        entry = _get_first_entry(hass)
+    except (ServiceValidationError, KeyError):
+        return False
+    if not entry.data.get(CONF_WEB_USERNAME):
+        return False
+    ds = hass.data.get(DOMAIN, {}).get("_smart_discharge_state")
+    if ds is None:
+        return False
+    if not ds.get("discharging_started", False):
+        return False
+    return not ds.get("min_soc", 0) >= 100
+
+
+async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
+    """Start the WebSocket if conditions are met and it's not running."""
+    if not _should_start_realtime_ws(hass):
+        return
+    domain_data = hass.data[DOMAIN]
+    if domain_data.get("_realtime_ws") is not None:
+        return  # already running
+
+    entry = _get_first_entry(hass)
+    username = entry.data[CONF_WEB_USERNAME]
+    password_md5 = entry.data[CONF_WEB_PASSWORD]  # stored as MD5 hash
+
+    # Get or create web session (reused across discharge sessions)
+    web_session: FoxESSWebSession | None = domain_data.get("_web_session")
+    if web_session is None:
+        web_session = FoxESSWebSession(username, password_md5)
+        domain_data["_web_session"] = web_session
+
+    # Discover plantId (cached after first call)
+    plant_id: str | None = domain_data.get("_plant_id")
+    if plant_id is None:
+        inverter = _get_inverter(hass)
+        try:
+            plant_id = await hass.async_add_executor_job(inverter.get_plant_id)
+        except Exception:
+            _LOGGER.warning(
+                "Could not discover plantId for WebSocket, "
+                "continuing with REST polling",
+                exc_info=True,
+            )
+            return
+        domain_data["_plant_id"] = plant_id
+
+    # Get coordinator for data injection
+    entry_id = _first_entry_id(hass)
+    coordinator = domain_data[entry_id]["coordinator"]
+
+    async def on_data(ws_data: dict[str, Any]) -> None:
+        coordinator.inject_realtime_data(ws_data)
+        _trigger_discharge_listener(hass)
+
+    def on_disconnect() -> None:
+        _LOGGER.warning("FoxESS WebSocket disconnected, falling back to REST polling")
+        domain_data.pop("_realtime_ws", None)
+
+    ws = FoxESSRealtimeWS(plant_id, web_session, on_data, on_disconnect)
+    try:
+        await ws.async_connect()
+        domain_data["_realtime_ws"] = ws
+        _LOGGER.info("FoxESS WebSocket real-time data stream active")
+    except Exception:
+        _LOGGER.warning(
+            "Failed to start WebSocket, continuing with REST polling",
+            exc_info=True,
+        )
+
+
+async def _stop_realtime_ws(hass: HomeAssistant) -> None:
+    """Disconnect the WebSocket if running."""
+    domain_data = hass.data.get(DOMAIN, {})
+    ws: FoxESSRealtimeWS | None = domain_data.pop("_realtime_ws", None)
+    if ws is not None:
+        await ws.async_disconnect()
+        _LOGGER.info("FoxESS WebSocket real-time data stream stopped")
+
+
+def _trigger_discharge_listener(hass: HomeAssistant) -> None:
+    """Invoke the discharge listener immediately (debounced)."""
+    domain_data = hass.data.get(DOMAIN, {})
+    now = _time.monotonic()
+    if now - domain_data.get("_ws_last_trigger", 0) < _WS_DEBOUNCE_SECONDS:
+        return
+    domain_data["_ws_last_trigger"] = now
+    cb = domain_data.get("_ws_discharge_callback")
+    if cb is not None:
+        hass.async_create_task(cb(dt_util.now()))
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up FoxESS Control from a config entry."""
     hass.data.setdefault(DOMAIN, {})
@@ -2158,6 +2286,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Preserve persisted sessions so recovery works after options reload
         _cancel_smart_discharge(hass, clear_storage=False)
         _cancel_smart_charge(hass, clear_storage=False)
+        # Close web session used for WebSocket auth
+        web_session: FoxESSWebSession | None = hass.data[DOMAIN].pop(
+            "_web_session", None
+        )
+        if web_session is not None:
+            await web_session.async_close()
         # Detach debug log handlers and restore logger level
         fox_logger = logging.getLogger("custom_components.foxess_control")
         for handler in hass.data[DOMAIN].get("_debug_log_handlers", []):
@@ -2524,6 +2658,10 @@ def _register_services(hass: HomeAssistant) -> None:
                 hass.data[DOMAIN]["_smart_discharge_state"]
             ),
         )
+
+        # Start WebSocket if discharge is immediately active (not deferred)
+        if not should_defer:
+            await _maybe_start_realtime_ws(hass)
 
     async def handle_smart_charge(call: ServiceCall) -> None:
         start_time_val: datetime.time = call.data["start_time"]

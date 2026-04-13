@@ -25,11 +25,14 @@ from .const import (
     CONF_MIN_SOC_ENTITY,
     CONF_PV_POWER_ENTITY,
     CONF_SOC_ENTITY,
+    CONF_WEB_PASSWORD,
+    CONF_WEB_USERNAME,
     CONF_WORK_MODE_ENTITY,
     DOMAIN,
 )
-from .foxess import FoxESSClient, Inverter
+from .foxess import FoxESSClient, FoxESSRealtimeWS, FoxESSWebSession, Inverter
 from .foxess.client import FoxESSApiError
+from .foxess.web_session import FoxESSWebAuthError, ensure_password_hash
 from .smart_battery.config_flow_base import (
     ENTITY_KEYS,
     battery_options_schema,
@@ -70,7 +73,11 @@ def _validate_credentials(api_key: str, device_serial: str) -> None:
 class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for FoxESS Control."""
 
-    VERSION = 1
+    VERSION = 2
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._api_data: dict[str, Any] = {}
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -94,10 +101,8 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 await self.async_set_unique_id(user_input[CONF_DEVICE_SERIAL])
                 self._abort_if_unique_id_configured()
-                return self.async_create_entry(
-                    title=f"FoxESS {user_input[CONF_DEVICE_SERIAL]}",
-                    data=user_input,
-                )
+                self._api_data = user_input
+                return await self.async_step_web_credentials()
 
         return self.async_show_form(
             step_id="user",
@@ -105,6 +110,86 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
                 {
                     vol.Required(CONF_API_KEY): str,
                     vol.Required(CONF_DEVICE_SERIAL): str,
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_web_credentials(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Optional step: web portal credentials for real-time data.
+
+        The password is hashed (MD5) before storage.  If the user pastes
+        an MD5 hex string directly, it is stored as-is.
+        """
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            username = user_input.get(CONF_WEB_USERNAME, "").strip()
+            raw_password = user_input.get(CONF_WEB_PASSWORD, "").strip()
+
+            if username and raw_password:
+                password_hash = ensure_password_hash(raw_password)
+                # 1. Validate web login
+                session = FoxESSWebSession(username, password_hash)
+                try:
+                    await session.async_login()
+                except FoxESSWebAuthError as err:
+                    _LOGGER.warning("FoxESS web login failed: %s", err)
+                    errors["base"] = "web_auth_failed"
+                except Exception as err:
+                    _LOGGER.warning("FoxESS web login error: %s", err)
+                    errors["base"] = "web_auth_failed"
+
+                if not errors:
+                    # 2. Discover plantId and test WebSocket
+                    plant_id: str | None = None
+                    try:
+                        client = FoxESSClient(self._api_data[CONF_API_KEY])
+                        inverter = Inverter(client, self._api_data[CONF_DEVICE_SERIAL])
+                        plant_id = await self.hass.async_add_executor_job(
+                            inverter.get_plant_id
+                        )
+                    except Exception as err:
+                        _LOGGER.warning("Could not discover plantId: %s", err)
+                        errors["base"] = "ws_connect_failed"
+
+                if not errors and plant_id is not None:
+                    # 3. Test WebSocket connection
+                    ws = FoxESSRealtimeWS(
+                        plant_id,
+                        session,
+                        on_data=lambda _: None,  # type: ignore[arg-type,return-value]
+                        on_disconnect=lambda: None,
+                    )
+                    try:
+                        await ws.async_connect()
+                    except Exception as err:
+                        _LOGGER.warning("WebSocket test connection failed: %s", err)
+                        errors["base"] = "ws_connect_failed"
+                    finally:
+                        await ws.async_disconnect()
+
+                await session.async_close()
+
+            if not errors:
+                full_data = {**self._api_data}
+                if username and raw_password:
+                    full_data[CONF_WEB_USERNAME] = username
+                    # Store only the MD5 hash — never the raw password
+                    full_data[CONF_WEB_PASSWORD] = password_hash
+                return self.async_create_entry(
+                    title=f"FoxESS {self._api_data[CONF_DEVICE_SERIAL]}",
+                    data=full_data,
+                )
+
+        return self.async_show_form(
+            step_id="web_credentials",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_WEB_USERNAME, default=""): str,
+                    vol.Optional(CONF_WEB_PASSWORD, default=""): str,
                 }
             ),
             errors=errors,

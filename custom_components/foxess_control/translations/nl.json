@@ -186,11 +186,21 @@
           "api_key": "API-sleutel",
           "device_serial": "Serienummer apparaat"
         }
+      },
+      "web_credentials": {
+        "title": "Real-Time Data (Optional)",
+        "description": "Provide your FoxESS Cloud web login for ~5-second real-time data during forced discharge. This reduces the risk of accidental grid import from load spikes. Leave blank to use standard 5-minute polling. You may enter your password or its MD5 hash.",
+        "data": {
+          "web_username": "Web Username",
+          "web_password": "Web Password (or MD5 hash)"
+        }
       }
     },
     "error": {
       "cannot_connect": "Kan geen verbinding maken met de FoxESS Cloud API. Controleer uw netwerkverbinding.",
-      "invalid_auth": "Authenticatie mislukt. Controleer uw API-sleutel en serienummer."
+      "invalid_auth": "Authenticatie mislukt. Controleer uw API-sleutel en serienummer.",
+      "web_auth_failed": "Web portal login failed. Check your username and password.",
+      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable."
     }
   },
   "options": {

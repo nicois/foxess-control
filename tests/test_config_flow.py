@@ -35,7 +35,8 @@ class TestConfigFlow:
     """Tests for FoxessControlConfigFlow."""
 
     @pytest.mark.asyncio
-    async def test_successful_setup(self) -> None:
+    async def test_successful_setup_skipping_web_creds(self) -> None:
+        """API key step → web credentials step (skip) → entry created."""
         flow = FoxessControlConfigFlow()
         flow.hass = _make_hass()
         flow.async_set_unique_id = AsyncMock()
@@ -43,17 +44,30 @@ class TestConfigFlow:
         flow.async_create_entry = MagicMock(
             return_value={"type": "create_entry"},
         )
+        flow.async_show_form = MagicMock(
+            return_value={"type": "form"},
+        )
 
         user_input = {CONF_API_KEY: "key123", CONF_DEVICE_SERIAL: "SN001"}
 
         with patch(
             "custom_components.foxess_control.config_flow._validate_credentials"
         ):
+            # Step 1: API credentials — redirects to web_credentials step
             await flow.async_step_user(user_input)
+
+        # Step 1 shows the web_credentials form
+        flow.async_show_form.assert_called_once()
+        assert flow.async_show_form.call_args.kwargs["step_id"] == "web_credentials"
+
+        # Step 2: Skip web credentials (empty fields)
+        flow.async_show_form.reset_mock()
+        await flow.async_step_web_credentials({"web_username": "", "web_password": ""})
 
         flow.async_create_entry.assert_called_once()
         call_kwargs = flow.async_create_entry.call_args
         assert call_kwargs.kwargs["title"] == "FoxESS SN001"
+        # Data should have API key and serial but no web credentials
         assert call_kwargs.kwargs["data"] == user_input
 
     @pytest.mark.asyncio

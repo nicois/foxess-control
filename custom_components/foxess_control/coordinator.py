@@ -68,6 +68,23 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"Error fetching FoxESS data: {err}") from err
         return data
 
+    def inject_realtime_data(self, ws_data: dict[str, Any]) -> None:
+        """Merge WebSocket real-time data into the current coordinator data.
+
+        Only overlays the subset of variables the WebSocket provides
+        (SoC, power values).  The full REST-polled dataset remains the
+        base, so variables not in the WebSocket stream (cumulative energy
+        counters, temperatures, etc.) stay current from the last REST poll.
+        """
+        if self.data is None:
+            return
+        # Skip if nothing actually changed (avoids redundant entity updates)
+        if all(self.data.get(k) == v for k, v in ws_data.items()):
+            return
+        merged = dict(self.data)
+        merged.update(ws_data)
+        self.async_set_updated_data(merged)
+
 
 class FoxESSEntityCoordinator(_EntityCoordinator):
     """Read inverter state from external HA entities (foxess_modbus interop).

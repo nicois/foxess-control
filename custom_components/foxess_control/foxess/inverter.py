@@ -304,7 +304,17 @@ class Inverter:
             "min_soc_on_grid": min_soc.get("minSocOnGrid"),
         }
 
-    # --- Device Info ---
+    # --- Plant / Device Info ---
+
+    def get_plant_id(self) -> str:
+        """Discover the plantId for this device via the Open API."""
+        result: Any = self.client.post(
+            "/op/v0/plant/list", {"currentPage": 1, "pageSize": 10}
+        )
+        plants: list[dict[str, Any]] = result.get("data", [])
+        if not plants:
+            raise RuntimeError("No plants found on this account")
+        return str(plants[0]["stationID"])
 
     def get_detail(self) -> dict[str, Any]:
         """Get device detail including battery model and capacity."""
