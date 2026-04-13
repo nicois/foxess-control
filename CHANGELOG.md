@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0-beta.14
+## 1.0.0
 
 ### Added
 - **Adaptive BMS taper model**: learns actual charge/discharge acceptance at each SoC level via exponential moving average, improving time estimates and power pacing at high/low SoC where BMS limits throughput
