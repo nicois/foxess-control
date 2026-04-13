@@ -6,16 +6,24 @@ FoxESS Control polls real-time inverter data (battery SoC, charge/discharge powe
 
 ## Gallery
 ### A dashboard overview card
-<img width="512" height="332" alt="image" src="https://github.com/user-attachments/assets/d31eda08-ca11-49df-8163-989c6a8271f3" />
+
+| English | 简体中文 |
+| ------- | ------- |
+| <img width="512" height="332" alt="image" src="https://github.com/user-attachments/assets/d31eda08-ca11-49df-8163-989c6a8271f3" /> | <img width="517" height="335" alt="image" src="https://github.com/user-attachments/assets/cddc1941-bd21-44b5-ba33-c0dbd8c6cad8" /> |
 
 ### Smart charge: optimally ensure SoC is reached at a given time
-<img width="481" height="746" alt="image" src="https://github.com/user-attachments/assets/998b4aec-d923-4188-b669-28b56fccf73a" />
+<img width="508" height="891" alt="image" src="https://github.com/user-attachments/assets/16f47ed2-2656-4ec8-92ec-40474f852d62" />
 
 ### Smart discharge: feed in during a time window, optionally limiting total energy, reverting to self-use afterwards. If minimum SoC will be reached, throttle discharge rate to not reach it prematurely
-<img width="481" height="873" alt="image" src="https://github.com/user-attachments/assets/1272ba4a-111f-45d4-a53e-6a3e7918efc9" />
+<img width="510" height="1038" alt="image" src="https://github.com/user-attachments/assets/471f6ce7-55dc-4a84-972d-83b8b58775ea" />
+
 
 ### A dashboard card showing the state of the current smart operation
-<img width="517" height="313" alt="image" src="https://github.com/user-attachments/assets/713e2a6e-9f57-42fa-bc9a-bf1344acb16a" />
+| Before | During |
+| ------ | ------ |
+| Before a smart charge or discharge operations begins, a countdown is shown along with a few details | Despite the inverter being capable of 5kW export, the smart discharge operation lowers the export rate to spread out the 3kW discharge over the discharge period |
+| <img width="475" height="377" alt="image" src="https://github.com/user-attachments/assets/997135c5-cbcf-4a4f-b223-b102564a3c1f" /> | <img width="477" height="407" alt="image" src="https://github.com/user-attachments/assets/ab05c800-cace-48a8-993d-f57be56f6768" /> |
+
 
 
 
