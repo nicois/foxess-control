@@ -260,6 +260,28 @@ class FoxESSControlCard extends HTMLElement {
     `;
   }
 
+  _energyScheduleBar(label, value, actualPct, expectedPct) {
+    // Show energy progress with a coloured gap segment indicating
+    // whether discharge is ahead of or behind the ideal schedule.
+    const lo = Math.min(actualPct, expectedPct);
+    const hi = Math.max(actualPct, expectedPct);
+    const gapWidth = hi - lo;
+    const ahead = actualPct >= expectedPct;
+    const gapClass = ahead ? "energy-ahead" : "energy-behind";
+
+    return `
+      <div class="progress-row">
+        <div class="detail-row">
+          <span class="detail-label">${label}</span>
+          <span class="detail-value">${value}</span>
+        </div>
+        <div class="progress-track">
+          <div class="energy-fill" style="width:${lo}%"></div>${gapWidth > 0.5 ? `<div class="${gapClass}" style="width:${gapWidth}%"></div>` : ""}
+        </div>
+      </div>
+    `;
+  }
+
   _timeProgress(startIso, endIso, now) {
     const startTime = startIso ? new Date(startIso).getTime() : null;
     const endTime = endIso ? new Date(endIso).getTime() : null;
@@ -309,14 +331,15 @@ class FoxESSControlCard extends HTMLElement {
 
       bars += this._progressBar("SoC", socLabel, socPct, "discharge-fill");
 
+      const time = this._timeProgress(a.discharge_start_time, a.discharge_end_time, now);
+
       const feedinLimit = a.discharge_feedin_limit_kwh;
       if (feedinLimit != null && feedinLimit > 0) {
         const used = a.discharge_feedin_used_kwh ?? 0;
         const energyPct = Math.min(100, Math.max(0, (used / feedinLimit) * 100));
-        bars += this._progressBar("Energy", `${used} / ${feedinLimit} kWh`, energyPct, "energy-fill");
+        bars += this._energyScheduleBar("Energy", `${used} / ${feedinLimit} kWh`, energyPct, time.pct);
       }
 
-      const time = this._timeProgress(a.discharge_start_time, a.discharge_end_time, now);
       bars += this._progressBar("Time", time.label, time.pct, "time-fill");
     }
 
@@ -504,6 +527,7 @@ class FoxESSControlCard extends HTMLElement {
         margin-bottom: 0;
       }
       .progress-track {
+        display: flex;
         height: 6px;
         background: rgba(0, 0, 0, 0.08);
         border-radius: 3px;
@@ -512,7 +536,6 @@ class FoxESSControlCard extends HTMLElement {
       }
       .progress-fill {
         height: 100%;
-        border-radius: 3px;
         transition: width 0.6s ease;
       }
       .charge-fill {
@@ -523,6 +546,16 @@ class FoxESSControlCard extends HTMLElement {
       }
       .energy-fill {
         background: linear-gradient(90deg, var(--fc-energy), #64b5f6);
+      }
+      .energy-ahead {
+        height: 100%;
+        background: rgba(76, 175, 80, 0.55);
+        transition: width 0.6s ease;
+      }
+      .energy-behind {
+        height: 100%;
+        background: rgba(244, 67, 54, 0.55);
+        transition: width 0.6s ease;
       }
       .time-fill {
         background: linear-gradient(90deg, rgba(0,0,0,0.25), rgba(0,0,0,0.15));
