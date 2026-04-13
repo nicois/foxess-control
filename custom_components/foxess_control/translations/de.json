@@ -136,7 +136,7 @@
     },
     "smart_charge": {
       "name": "Intelligentes Laden",
-      "description": "Batterie innerhalb eines Zeitfensters laden und die Ladeleistung periodisch anpassen, um den Ziel-SoC am Ende des Intervalls zu erreichen.",
+      "description": "Batterie innerhalb eines Zeitfensters laden und die Ladeleistung so anpassen, dass der Ziel-SoC am Ende des Intervalls erreicht wird. Der Ladevorgang kann verspätet beginnen, wenn das Ziel in kürzerer Zeit erreichbar ist.",
       "fields": {
         "start_time": { "name": "Startzeit", "description": "Tageszeit für den Beginn des Ladens." },
         "end_time": { "name": "Endzeit", "description": "Tageszeit für das Ende des Ladens. Muss nach der Startzeit liegen, innerhalb von 4 Stunden." },
@@ -147,7 +147,7 @@
     },
     "smart_discharge": {
       "name": "Intelligentes Entladen",
-      "description": "Batterie innerhalb eines Zeitfensters entladen und automatisch zum Eigenverbrauch zurückkehren, wenn ein minimaler SoC erreicht wird.",
+      "description": "Batterie innerhalb eines Zeitfensters entladen und die Entladeleistung so anpassen, dass die Energieabgabe gleichmäßig verteilt wird. Kehrt zum Eigenverbrauch zurück, wenn der minimale SoC oder das Einspeise-Energielimit erreicht wird.",
       "fields": {
         "start_time": {
           "name": "Startzeit",

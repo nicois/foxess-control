@@ -136,7 +136,7 @@
     },
     "smart_charge": {
       "name": "Slim laden",
-      "description": "Laad de batterij binnen een tijdvenster, met periodieke aanpassing van de laadsnelheid om een doel-SoC te bereiken aan het einde van het interval.",
+      "description": "Laad de batterij binnen een tijdvenster, met aanpassing van de laadsnelheid om een doel-SoC te bereiken aan het einde van het interval. Het laden kan later starten als het doel in minder tijd bereikt kan worden.",
       "fields": {
         "start_time": { "name": "Starttijd", "description": "Tijdstip om het laden te starten." },
         "end_time": { "name": "Eindtijd", "description": "Tijdstip om het laden te stoppen. Moet na de starttijd zijn, binnen 4 uur." },
@@ -147,7 +147,7 @@
     },
     "smart_discharge": {
       "name": "Slim ontladen",
-      "description": "Ontlaad de batterij binnen een tijdvenster, met automatische terugkeer naar eigenverbruik wanneer een minimum SoC is bereikt.",
+      "description": "Ontlaad de batterij binnen een tijdvenster, met aanpassing van de ontlaadsnelheid om de energielevering gelijkmatig te spreiden. Keert terug naar eigenverbruik wanneer de minimum SoC of de terugleveringslimiet is bereikt.",
       "fields": {
         "start_time": {
           "name": "Starttijd",

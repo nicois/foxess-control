@@ -136,7 +136,7 @@
     },
     "smart_charge": {
       "name": "Inteligentne ładowanie",
-      "description": "Ładować baterię w oknie czasowym, okresowo dostosowując moc ładowania, aby osiągnąć docelowy SoC na końcu interwału.",
+      "description": "Ładować baterię w oknie czasowym, regulując moc ładowania, aby osiągnąć docelowy SoC na końcu interwału. Ładowanie może rozpocząć się później, jeśli cel można osiągnąć w krótszym czasie.",
       "fields": {
         "start_time": { "name": "Godzina rozpoczęcia", "description": "Godzina rozpoczęcia ładowania." },
         "end_time": { "name": "Godzina zakończenia", "description": "Godzina zakończenia ładowania. Musi być po godzinie rozpoczęcia, w ciągu 4 godzin." },
@@ -147,7 +147,7 @@
     },
     "smart_discharge": {
       "name": "Inteligentne rozładowanie",
-      "description": "Rozładowywać baterię w oknie czasowym, automatycznie wracając do autokonsumpcji po osiągnięciu minimalnego SoC.",
+      "description": "Rozładowywać baterię w oknie czasowym, regulując moc rozładowania, aby równomiernie rozłożyć dostarczanie energii. Wraca do autokonsumpcji po osiągnięciu minimalnego SoC lub limitu energii oddanej do sieci.",
       "fields": {
         "start_time": {
           "name": "Godzina rozpoczęcia",

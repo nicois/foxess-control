@@ -136,7 +136,7 @@
     },
     "smart_charge": {
       "name": "Carga inteligente",
-      "description": "Carregar a bateria numa janela de tempo, ajustando periodicamente a taxa de carga para atingir um SoC alvo no final do intervalo.",
+      "description": "Carregar a bateria numa janela de tempo, regulando a taxa de carga para atingir um SoC alvo no final do intervalo. A carga pode iniciar mais tarde se o objetivo puder ser alcançado em menos tempo.",
       "fields": {
         "start_time": { "name": "Hora de início", "description": "Hora do dia para iniciar a carga." },
         "end_time": { "name": "Hora de fim", "description": "Hora do dia para terminar a carga. Deve ser depois da hora de início, dentro de 4 horas." },
@@ -147,7 +147,7 @@
     },
     "smart_discharge": {
       "name": "Descarga inteligente",
-      "description": "Descarregar a bateria numa janela de tempo, revertendo automaticamente para autoconsumo quando um SoC mínimo é atingido.",
+      "description": "Descarregar a bateria numa janela de tempo, regulando a taxa de descarga para distribuir a energia de forma uniforme. Reverte para autoconsumo quando o SoC mínimo ou o limite de energia injetada é atingido.",
       "fields": {
         "start_time": {
           "name": "Hora de início",
