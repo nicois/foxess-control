@@ -1,0 +1,209 @@
+{
+  "entity": {
+    "sensor": {
+      "battery_soc": { "name": "SoC de batería" },
+      "bat_charge_power": { "name": "Potencia de carga" },
+      "bat_discharge_power": { "name": "Potencia de descarga" },
+      "loads_power": { "name": "Consumo del hogar" },
+      "pv_power": { "name": "Potencia solar" },
+      "bat_temperature": { "name": "Temperatura de batería" },
+      "grid_consumption": { "name": "Consumo de red" },
+      "feedin_power": { "name": "Inyección a red" },
+      "generation_power": { "name": "Generación" },
+      "bat_volt": { "name": "Voltaje de batería" },
+      "bat_current": { "name": "Corriente de batería" },
+      "pv1_power": { "name": "Potencia PV1" },
+      "pv2_power": { "name": "Potencia PV2" },
+      "ambient_temp": { "name": "Temperatura ambiente" },
+      "inverter_temp": { "name": "Temperatura del inversor" },
+      "feedin_energy": { "name": "Energía inyectada a red" },
+      "grid_consumption_energy": { "name": "Energía consumida de red" },
+      "generation_energy": { "name": "Energía solar generada" },
+      "charge_energy_total": { "name": "Energía de carga de batería" },
+      "discharge_energy_total": { "name": "Energía de descarga de batería" },
+      "loads_energy": { "name": "Energía consumida del hogar" },
+      "energy_throughput": { "name": "Rendimiento de batería" },
+      "meter_power": { "name": "Potencia del medidor de red" },
+      "grid_voltage": { "name": "Voltaje de red" },
+      "grid_current": { "name": "Corriente de red" },
+      "grid_frequency": { "name": "Frecuencia de red" },
+      "eps_power": { "name": "Potencia EPS" },
+      "work_mode": { "name": "Modo de trabajo" },
+      "debug_log": { "name": "Registro de depuración" },
+      "override_status": { "name": "Estado" },
+      "smart_operations": {
+        "name": "Operaciones inteligentes",
+        "state": {
+          "idle": "Inactivo",
+          "charging": "Cargando",
+          "deferred": "Diferida",
+          "target_reached": "Objetivo alcanzado",
+          "discharging": "Descargando",
+          "discharge_scheduled": "Descarga programada",
+          "discharge_suspended": "Suspendida",
+          "charge_discharge_active": "Carga + Descarga"
+        }
+      },
+      "charge_power": { "name": "Potencia de carga (Smart)" },
+      "charge_window": { "name": "Ventana de carga" },
+      "charge_remaining": { "name": "Carga restante" },
+      "discharge_power": { "name": "Potencia de descarga (Smart)" },
+      "discharge_window": { "name": "Ventana de descarga" },
+      "discharge_remaining": { "name": "Descarga restante" },
+      "battery_forecast": { "name": "Previsión de batería" }
+    },
+    "binary_sensor": {
+      "smart_charge_active": { "name": "Carga inteligente activa" },
+      "smart_discharge_active": { "name": "Descarga inteligente activa" }
+    }
+  },
+  "services": {
+    "clear_overrides": {
+      "name": "Borrar anulaciones",
+      "description": "Devolver el inversor al modo de autoconsumo, borrando todas o las anulaciones seleccionadas.",
+      "fields": {
+        "mode": {
+          "name": "Modo",
+          "description": "Solo borrar anulaciones de este modo. Si no se especifica, se borran todas."
+        }
+      }
+    },
+    "feedin": {
+      "name": "Inyección a red",
+      "description": "Inyectar el excedente solar a la red durante un periodo definido, opcionalmente en un horario y límite de potencia específicos.",
+      "fields": {
+        "duration": {
+          "name": "Duración",
+          "description": "Duración de la inyección (máx. 4 horas, no debe cruzar la medianoche)."
+        },
+        "power": {
+          "name": "Límite de potencia",
+          "description": "Límite de potencia de inyección en vatios. Por defecto: potencia nominal del inversor."
+        },
+        "start_time": {
+          "name": "Hora de inicio",
+          "description": "Hora del día para iniciar la anulación. Por defecto: ahora."
+        },
+        "replace_conflicts": {
+          "name": "Eliminar anulaciones en conflicto en vez de abortar",
+          "description": "Si está activado, elimina silenciosamente las anulaciones existentes superpuestas en vez de abortar."
+        }
+      }
+    },
+    "force_charge": {
+      "name": "Carga forzada",
+      "description": "Cargar la batería durante un periodo definido, opcionalmente en un horario y límite de potencia específicos. El inversor vuelve automáticamente al autoconsumo.",
+      "fields": {
+        "duration": {
+          "name": "Duración",
+          "description": "Duración de la carga forzada (máx. 4 horas, no debe cruzar la medianoche)."
+        },
+        "power": {
+          "name": "Límite de potencia",
+          "description": "Límite de potencia de carga en vatios. Por defecto: potencia nominal del inversor."
+        },
+        "start_time": {
+          "name": "Hora de inicio",
+          "description": "Hora del día para iniciar la anulación. Por defecto: ahora."
+        },
+        "replace_conflicts": {
+          "name": "Eliminar anulaciones en conflicto en vez de abortar",
+          "description": "Si está activado, elimina silenciosamente las anulaciones existentes superpuestas en vez de abortar."
+        }
+      }
+    },
+    "force_discharge": {
+      "name": "Descarga forzada",
+      "description": "Descargar la batería durante un periodo definido, opcionalmente en un horario y límite de potencia específicos. El inversor vuelve automáticamente al autoconsumo.",
+      "fields": {
+        "duration": {
+          "name": "Duración",
+          "description": "Duración de la descarga forzada (máx. 4 horas, no debe cruzar la medianoche)."
+        },
+        "power": {
+          "name": "Límite de potencia",
+          "description": "Límite de potencia de descarga en vatios. Por defecto: potencia nominal del inversor."
+        },
+        "start_time": {
+          "name": "Hora de inicio",
+          "description": "Hora del día para iniciar la anulación. Por defecto: ahora."
+        },
+        "replace_conflicts": {
+          "name": "Eliminar anulaciones en conflicto en vez de abortar",
+          "description": "Si está activado, elimina silenciosamente las anulaciones existentes superpuestas en vez de abortar."
+        }
+      }
+    },
+    "smart_charge": {
+      "name": "Carga inteligente",
+      "description": "Cargar la batería en una ventana de tiempo, ajustando periódicamente la tasa de carga para alcanzar un SoC objetivo al final del intervalo.",
+      "fields": {
+        "start_time": { "name": "Hora de inicio", "description": "Hora del día para iniciar la carga." },
+        "end_time": { "name": "Hora de fin", "description": "Hora del día para detener la carga. Debe ser después de la hora de inicio, dentro de 4 horas." },
+        "target_soc": { "name": "SoC objetivo", "description": "Cargar la batería hasta este nivel de SoC. La carga se detiene y vuelve al autoconsumo cuando se alcanza." },
+        "power": { "name": "Potencia máxima", "description": "Potencia de carga máxima en vatios. La potencia real puede ser menor para distribuir la carga a lo largo del tiempo." },
+        "replace_conflicts": { "name": "Eliminar anulaciones en conflicto en vez de abortar", "description": "Si está activado, elimina silenciosamente las anulaciones existentes superpuestas en vez de abortar." }
+      }
+    },
+    "smart_discharge": {
+      "name": "Descarga inteligente",
+      "description": "Descargar la batería en una ventana de tiempo, volviendo automáticamente al autoconsumo cuando se alcanza un SoC mínimo.",
+      "fields": {
+        "start_time": {
+          "name": "Hora de inicio",
+          "description": "Hora del día para iniciar la descarga."
+        },
+        "end_time": {
+          "name": "Hora de fin",
+          "description": "Hora del día para detener la descarga. Debe ser después de la hora de inicio, dentro de 4 horas."
+        },
+        "power": {
+          "name": "Límite de potencia",
+          "description": "Límite de potencia de descarga en vatios. Por defecto: potencia nominal del inversor."
+        },
+        "min_soc": {
+          "name": "SoC mínimo para detener la descarga",
+          "description": "Detener la descarga y volver al autoconsumo cuando la batería alcance este nivel."
+        },
+        "feedin_energy_limit_kwh": {
+          "name": "Límite de energía inyectada",
+          "description": "Detener la descarga después de inyectar esta cantidad de energía (kWh) a la red, sin contar el autoconsumo del hogar."
+        },
+        "replace_conflicts": {
+          "name": "Eliminar anulaciones en conflicto en vez de abortar",
+          "description": "Si está activado, elimina silenciosamente las anulaciones existentes superpuestas en vez de abortar."
+        }
+      }
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "FoxESS Control",
+        "description": "Introduzca sus credenciales de la API FoxESS Cloud.",
+        "data": {
+          "api_key": "Clave API",
+          "device_serial": "Número de serie del dispositivo"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "No se puede conectar a la API FoxESS Cloud. Verifique su conexión de red.",
+      "invalid_auth": "Autenticación fallida. Verifique su clave API y número de serie del dispositivo."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opciones de FoxESS Control",
+        "data": {
+          "min_soc_on_grid": "SoC mínimo en red (%)",
+          "battery_capacity_kwh": "Capacidad de batería (kWh)",
+          "min_power_change": "Cambio mínimo de potencia para carga inteligente (W)",
+          "api_min_soc": "fdSoc API mínimo (%) — ⚠️ Valores por debajo de 11 pueden no funcionar con todas las versiones de firmware",
+          "polling_interval": "Intervalo de consulta de API (segundos)"
+        }
+      }
+    }
+  }
+}

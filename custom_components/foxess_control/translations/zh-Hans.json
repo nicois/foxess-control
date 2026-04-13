@@ -1,0 +1,209 @@
+{
+  "entity": {
+    "sensor": {
+      "battery_soc": { "name": "电池电量" },
+      "bat_charge_power": { "name": "充电功率" },
+      "bat_discharge_power": { "name": "放电功率" },
+      "loads_power": { "name": "家庭负载" },
+      "pv_power": { "name": "光伏功率" },
+      "bat_temperature": { "name": "电池温度" },
+      "grid_consumption": { "name": "电网用电" },
+      "feedin_power": { "name": "馈网功率" },
+      "generation_power": { "name": "发电功率" },
+      "bat_volt": { "name": "电池电压" },
+      "bat_current": { "name": "电池电流" },
+      "pv1_power": { "name": "PV1 功率" },
+      "pv2_power": { "name": "PV2 功率" },
+      "ambient_temp": { "name": "环境温度" },
+      "inverter_temp": { "name": "逆变器温度" },
+      "feedin_energy": { "name": "馈网电量" },
+      "grid_consumption_energy": { "name": "电网用电量" },
+      "generation_energy": { "name": "光伏发电量" },
+      "charge_energy_total": { "name": "电池充电量" },
+      "discharge_energy_total": { "name": "电池放电量" },
+      "loads_energy": { "name": "家庭用电量" },
+      "energy_throughput": { "name": "电池吞吐量" },
+      "meter_power": { "name": "电网表功率" },
+      "grid_voltage": { "name": "电网电压" },
+      "grid_current": { "name": "电网电流" },
+      "grid_frequency": { "name": "电网频率" },
+      "eps_power": { "name": "EPS 功率" },
+      "work_mode": { "name": "工作模式" },
+      "debug_log": { "name": "调试日志" },
+      "override_status": { "name": "状态" },
+      "smart_operations": {
+        "name": "智能运行",
+        "state": {
+          "idle": "空闲",
+          "charging": "充电中",
+          "deferred": "延迟中",
+          "target_reached": "已达目标",
+          "discharging": "放电中",
+          "discharge_scheduled": "放电已计划",
+          "discharge_suspended": "放电暂停",
+          "charge_discharge_active": "充电 + 放电"
+        }
+      },
+      "charge_power": { "name": "智能充电功率" },
+      "charge_window": { "name": "充电时段" },
+      "charge_remaining": { "name": "充电剩余时间" },
+      "discharge_power": { "name": "智能放电功率" },
+      "discharge_window": { "name": "放电时段" },
+      "discharge_remaining": { "name": "放电剩余时间" },
+      "battery_forecast": { "name": "电池预测" }
+    },
+    "binary_sensor": {
+      "smart_charge_active": { "name": "智能充电进行中" },
+      "smart_discharge_active": { "name": "智能放电进行中" }
+    }
+  },
+  "services": {
+    "clear_overrides": {
+      "name": "清除覆盖",
+      "description": "将逆变器恢复为自用模式，清除所有或选定的覆盖设置。",
+      "fields": {
+        "mode": {
+          "name": "模式",
+          "description": "仅清除此模式的覆盖。若未设置，则清除全部。"
+        }
+      }
+    },
+    "feedin": {
+      "name": "馈网",
+      "description": "在设定时间内将多余的光伏电力馈入电网，可选择指定时间和功率限制。",
+      "fields": {
+        "duration": {
+          "name": "持续时间",
+          "description": "馈网持续时间（最长 4 小时，不得跨越午夜）。"
+        },
+        "power": {
+          "name": "功率限制",
+          "description": "馈网功率限制（瓦）。默认为逆变器额定功率。"
+        },
+        "start_time": {
+          "name": "开始时间",
+          "description": "开始覆盖的时刻。默认为当前时间。"
+        },
+        "replace_conflicts": {
+          "name": "替换冲突的覆盖而非中止",
+          "description": "启用后，将静默移除与新时段重叠的现有覆盖，而非中止操作。"
+        }
+      }
+    },
+    "force_charge": {
+      "name": "强制充电",
+      "description": "在设定时间内对电池充电，可选择指定时间和功率限制。时段结束后自动恢复自用模式。",
+      "fields": {
+        "duration": {
+          "name": "持续时间",
+          "description": "强制充电持续时间（最长 4 小时，不得跨越午夜）。"
+        },
+        "power": {
+          "name": "功率限制",
+          "description": "充电功率限制（瓦）。默认为逆变器额定功率。"
+        },
+        "start_time": {
+          "name": "开始时间",
+          "description": "开始覆盖的时刻。默认为当前时间。"
+        },
+        "replace_conflicts": {
+          "name": "替换冲突的覆盖而非中止",
+          "description": "启用后，将静默移除与新时段重叠的现有覆盖，而非中止操作。"
+        }
+      }
+    },
+    "force_discharge": {
+      "name": "强制放电",
+      "description": "在设定时间内对电池放电，可选择指定时间和功率限制。时段结束后自动恢复自用模式。",
+      "fields": {
+        "duration": {
+          "name": "持续时间",
+          "description": "强制放电持续时间（最长 4 小时，不得跨越午夜）。"
+        },
+        "power": {
+          "name": "功率限制",
+          "description": "放电功率限制（瓦）。默认为逆变器额定功率。"
+        },
+        "start_time": {
+          "name": "开始时间",
+          "description": "开始覆盖的时刻。默认为当前时间。"
+        },
+        "replace_conflicts": {
+          "name": "替换冲突的覆盖而非中止",
+          "description": "启用后，将静默移除与新时段重叠的现有覆盖，而非中止操作。"
+        }
+      }
+    },
+    "smart_charge": {
+      "name": "智能充电",
+      "description": "在时间窗口内对电池充电，定期调整充电速率以在时段结束时达到目标电量。",
+      "fields": {
+        "start_time": { "name": "开始时间", "description": "开始充电的时刻。" },
+        "end_time": { "name": "结束时间", "description": "停止充电的时刻。必须在开始时间之后，且在 4 小时内。" },
+        "target_soc": { "name": "目标电量", "description": "将电池充至此电量水平。达到后停止充电并恢复自用模式。" },
+        "power": { "name": "最大功率", "description": "最大充电功率（瓦）。实际功率可能更低，以便在整个时段内均匀充电。" },
+        "replace_conflicts": { "name": "替换冲突的覆盖而非中止", "description": "启用后，将静默移除与新时段重叠的现有覆盖，而非中止操作。" }
+      }
+    },
+    "smart_discharge": {
+      "name": "智能放电",
+      "description": "在时间窗口内放电，当达到最低电量时自动恢复自用模式。",
+      "fields": {
+        "start_time": {
+          "name": "开始时间",
+          "description": "开始放电的时刻。"
+        },
+        "end_time": {
+          "name": "结束时间",
+          "description": "停止放电的时刻。必须在开始时间之后，且在 4 小时内。"
+        },
+        "power": {
+          "name": "功率限制",
+          "description": "放电功率限制（瓦）。默认为逆变器额定功率。"
+        },
+        "min_soc": {
+          "name": "最低电量停止放电",
+          "description": "当电池达到此水平时停止放电并恢复自用模式。"
+        },
+        "feedin_energy_limit_kwh": {
+          "name": "馈网电量限制",
+          "description": "当馈入电网的电量（千瓦时）达到此值后停止放电，不包括家庭自用部分。"
+        },
+        "replace_conflicts": {
+          "name": "替换冲突的覆盖而非中止",
+          "description": "启用后，将静默移除与新时段重叠的现有覆盖，而非中止操作。"
+        }
+      }
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "FoxESS Control",
+        "description": "输入您的 FoxESS Cloud API 凭据。",
+        "data": {
+          "api_key": "API 密钥",
+          "device_serial": "设备序列号"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "无法连接到 FoxESS Cloud API。请检查您的网络连接。",
+      "invalid_auth": "认证失败。请检查您的 API 密钥和设备序列号。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "FoxESS Control 选项",
+        "data": {
+          "min_soc_on_grid": "并网最低电量 (%)",
+          "battery_capacity_kwh": "电池容量 (kWh)",
+          "min_power_change": "智能充电最小功率变化 (W)",
+          "api_min_soc": "API 最低 fdSoc (%) — ⚠️ 低于 11 的值可能不适用于所有固件版本",
+          "polling_interval": "API 轮询间隔（秒）"
+        }
+      }
+    }
+  }
+}

@@ -125,6 +125,32 @@ const _OV_TRANSLATIONS = {
     not_found: "não encontrado",
     not_discovered: "não detetado",
   },
+  "zh-hans": {
+    title: "FoxESS 概览",
+    solar: "光伏",
+    house: "家庭",
+    grid: "电网",
+    battery: "电池",
+    importing: "用电 ↓",
+    exporting: "馈电 ↑",
+    charging: "充电中",
+    discharging: "放电中",
+    not_found: "未找到",
+    not_discovered: "未发现",
+  },
+  ja: {
+    title: "FoxESS 概要",
+    solar: "太陽光",
+    house: "家庭",
+    grid: "系統",
+    battery: "バッテリー",
+    importing: "買電 ↓",
+    exporting: "売電 ↑",
+    charging: "充電中",
+    discharging: "放電中",
+    not_found: "見つかりません",
+    not_discovered: "未検出",
+  },
 };
 
 function _ovGetStrings(lang) {

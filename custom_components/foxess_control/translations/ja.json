@@ -1,0 +1,209 @@
+{
+  "entity": {
+    "sensor": {
+      "battery_soc": { "name": "バッテリー残量" },
+      "bat_charge_power": { "name": "充電電力" },
+      "bat_discharge_power": { "name": "放電電力" },
+      "loads_power": { "name": "家庭消費電力" },
+      "pv_power": { "name": "太陽光発電電力" },
+      "bat_temperature": { "name": "バッテリー温度" },
+      "grid_consumption": { "name": "系統消費電力" },
+      "feedin_power": { "name": "売電電力" },
+      "generation_power": { "name": "発電電力" },
+      "bat_volt": { "name": "バッテリー電圧" },
+      "bat_current": { "name": "バッテリー電流" },
+      "pv1_power": { "name": "PV1 電力" },
+      "pv2_power": { "name": "PV2 電力" },
+      "ambient_temp": { "name": "外気温" },
+      "inverter_temp": { "name": "パワコン温度" },
+      "feedin_energy": { "name": "売電量" },
+      "grid_consumption_energy": { "name": "系統消費電力量" },
+      "generation_energy": { "name": "太陽光発電量" },
+      "charge_energy_total": { "name": "バッテリー充電量" },
+      "discharge_energy_total": { "name": "バッテリー放電量" },
+      "loads_energy": { "name": "家庭消費電力量" },
+      "energy_throughput": { "name": "バッテリースループット" },
+      "meter_power": { "name": "系統メーター電力" },
+      "grid_voltage": { "name": "系統電圧" },
+      "grid_current": { "name": "系統電流" },
+      "grid_frequency": { "name": "系統周波数" },
+      "eps_power": { "name": "EPS 電力" },
+      "work_mode": { "name": "動作モード" },
+      "debug_log": { "name": "デバッグログ" },
+      "override_status": { "name": "ステータス" },
+      "smart_operations": {
+        "name": "スマート運転",
+        "state": {
+          "idle": "待機中",
+          "charging": "充電中",
+          "deferred": "待機予定",
+          "target_reached": "目標達成",
+          "discharging": "放電中",
+          "discharge_scheduled": "放電予定",
+          "discharge_suspended": "放電一時停止",
+          "charge_discharge_active": "充電 + 放電"
+        }
+      },
+      "charge_power": { "name": "スマート充電電力" },
+      "charge_window": { "name": "充電時間帯" },
+      "charge_remaining": { "name": "充電残り時間" },
+      "discharge_power": { "name": "スマート放電電力" },
+      "discharge_window": { "name": "放電時間帯" },
+      "discharge_remaining": { "name": "放電残り時間" },
+      "battery_forecast": { "name": "バッテリー予測" }
+    },
+    "binary_sensor": {
+      "smart_charge_active": { "name": "スマート充電動作中" },
+      "smart_discharge_active": { "name": "スマート放電動作中" }
+    }
+  },
+  "services": {
+    "clear_overrides": {
+      "name": "オーバーライド解除",
+      "description": "インバーターを自家消費モードに戻し、すべてまたは選択したオーバーライドを解除します。",
+      "fields": {
+        "mode": {
+          "name": "モード",
+          "description": "このモードのオーバーライドのみ解除。未設定の場合はすべて解除します。"
+        }
+      }
+    },
+    "feedin": {
+      "name": "売電",
+      "description": "設定した時間、余剰太陽光を系統に売電します。開始時刻と電力制限をオプションで指定できます。",
+      "fields": {
+        "duration": {
+          "name": "時間",
+          "description": "売電時間（最大 4 時間、日をまたがないこと）。"
+        },
+        "power": {
+          "name": "電力制限",
+          "description": "売電電力制限（ワット）。未設定時はインバーター定格電力。"
+        },
+        "start_time": {
+          "name": "開始時刻",
+          "description": "オーバーライドを開始する時刻。未設定時は現在時刻。"
+        },
+        "replace_conflicts": {
+          "name": "競合するオーバーライドを中止せず置換",
+          "description": "有効にすると、新しい時間帯と重複する既存のオーバーライドを中止せず静かに削除します。"
+        }
+      }
+    },
+    "force_charge": {
+      "name": "強制充電",
+      "description": "設定した時間、バッテリーを充電します。時間帯終了後は自動的に自家消費モードに戻ります。",
+      "fields": {
+        "duration": {
+          "name": "時間",
+          "description": "強制充電時間（最大 4 時間、日をまたがないこと）。"
+        },
+        "power": {
+          "name": "電力制限",
+          "description": "充電電力制限（ワット）。未設定時はインバーター定格電力。"
+        },
+        "start_time": {
+          "name": "開始時刻",
+          "description": "オーバーライドを開始する時刻。未設定時は現在時刻。"
+        },
+        "replace_conflicts": {
+          "name": "競合するオーバーライドを中止せず置換",
+          "description": "有効にすると、新しい時間帯と重複する既存のオーバーライドを中止せず静かに削除します。"
+        }
+      }
+    },
+    "force_discharge": {
+      "name": "強制放電",
+      "description": "設定した時間、バッテリーを放電します。時間帯終了後は自動的に自家消費モードに戻ります。",
+      "fields": {
+        "duration": {
+          "name": "時間",
+          "description": "強制放電時間（最大 4 時間、日をまたがないこと）。"
+        },
+        "power": {
+          "name": "電力制限",
+          "description": "放電電力制限（ワット）。未設定時はインバーター定格電力。"
+        },
+        "start_time": {
+          "name": "開始時刻",
+          "description": "オーバーライドを開始する時刻。未設定時は現在時刻。"
+        },
+        "replace_conflicts": {
+          "name": "競合するオーバーライドを中止せず置換",
+          "description": "有効にすると、新しい時間帯と重複する既存のオーバーライドを中止せず静かに削除します。"
+        }
+      }
+    },
+    "smart_charge": {
+      "name": "スマート充電",
+      "description": "時間帯内でバッテリーを充電し、定期的に充電速度を調整して時間帯終了までに目標残量に達するようにします。",
+      "fields": {
+        "start_time": { "name": "開始時刻", "description": "充電を開始する時刻。" },
+        "end_time": { "name": "終了時刻", "description": "充電を停止する時刻。開始時刻より後、4 時間以内。" },
+        "target_soc": { "name": "目標残量", "description": "バッテリーをこの残量まで充電。達成後は自家消費モードに戻ります。" },
+        "power": { "name": "最大電力", "description": "最大充電電力（ワット）。時間帯全体に充電を分散するため、実際の電力は低くなる場合があります。" },
+        "replace_conflicts": { "name": "競合するオーバーライドを中止せず置換", "description": "有効にすると、新しい時間帯と重複する既存のオーバーライドを中止せず静かに削除します。" }
+      }
+    },
+    "smart_discharge": {
+      "name": "スマート放電",
+      "description": "時間帯内でバッテリーを放電し、最低残量に達すると自動的に自家消費モードに戻ります。",
+      "fields": {
+        "start_time": {
+          "name": "開始時刻",
+          "description": "放電を開始する時刻。"
+        },
+        "end_time": {
+          "name": "終了時刻",
+          "description": "放電を停止する時刻。開始時刻より後、4 時間以内。"
+        },
+        "power": {
+          "name": "電力制限",
+          "description": "放電電力制限（ワット）。未設定時はインバーター定格電力。"
+        },
+        "min_soc": {
+          "name": "放電停止の最低残量",
+          "description": "バッテリーがこのレベルに達すると放電を停止し、自家消費モードに戻ります。"
+        },
+        "feedin_energy_limit_kwh": {
+          "name": "売電量制限",
+          "description": "系統に売電した電力量（kWh）がこの値に達すると放電を停止します（家庭消費分は除く）。"
+        },
+        "replace_conflicts": {
+          "name": "競合するオーバーライドを中止せず置換",
+          "description": "有効にすると、新しい時間帯と重複する既存のオーバーライドを中止せず静かに削除します。"
+        }
+      }
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "FoxESS Control",
+        "description": "FoxESS Cloud API の認証情報を入力してください。",
+        "data": {
+          "api_key": "API キー",
+          "device_serial": "デバイスシリアル番号"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "FoxESS Cloud API に接続できません。ネットワーク接続を確認してください。",
+      "invalid_auth": "認証に失敗しました。API キーとデバイスシリアル番号を確認してください。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "FoxESS Control オプション",
+        "data": {
+          "min_soc_on_grid": "系統接続時の最低残量 (%)",
+          "battery_capacity_kwh": "バッテリー容量 (kWh)",
+          "min_power_change": "スマート充電の最小電力変化 (W)",
+          "api_min_soc": "API 最低 fdSoc (%) — ⚠️ 11 未満の値は一部のファームウェアで動作しない場合があります",
+          "polling_interval": "API ポーリング間隔（秒）"
+        }
+      }
+    }
+  }
+}

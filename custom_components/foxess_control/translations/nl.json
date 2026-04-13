@@ -1,0 +1,209 @@
+{
+  "entity": {
+    "sensor": {
+      "battery_soc": { "name": "Batterij SoC" },
+      "bat_charge_power": { "name": "Laadvermogen" },
+      "bat_discharge_power": { "name": "Ontlaadvermogen" },
+      "loads_power": { "name": "Huisverbruik" },
+      "pv_power": { "name": "Zonne-energie" },
+      "bat_temperature": { "name": "Batterijtemperatuur" },
+      "grid_consumption": { "name": "Netverbruik" },
+      "feedin_power": { "name": "Teruglevering" },
+      "generation_power": { "name": "Opwekking" },
+      "bat_volt": { "name": "Batterijspanning" },
+      "bat_current": { "name": "Batterijstroom" },
+      "pv1_power": { "name": "PV1-vermogen" },
+      "pv2_power": { "name": "PV2-vermogen" },
+      "ambient_temp": { "name": "Omgevingstemperatuur" },
+      "inverter_temp": { "name": "Omvormertemperatuur" },
+      "feedin_energy": { "name": "Teruggeleverde energie" },
+      "grid_consumption_energy": { "name": "Netverbruiksenergie" },
+      "generation_energy": { "name": "Opgewekte zonne-energie" },
+      "charge_energy_total": { "name": "Batterij laadenergie" },
+      "discharge_energy_total": { "name": "Batterij ontlaadenergie" },
+      "loads_energy": { "name": "Huisverbruiksenergie" },
+      "energy_throughput": { "name": "Batterijdoorvoer" },
+      "meter_power": { "name": "Netmetervermogen" },
+      "grid_voltage": { "name": "Netspanning" },
+      "grid_current": { "name": "Netstroom" },
+      "grid_frequency": { "name": "Netfrequentie" },
+      "eps_power": { "name": "EPS-vermogen" },
+      "work_mode": { "name": "Werkstand" },
+      "debug_log": { "name": "Debug-logboek" },
+      "override_status": { "name": "Status" },
+      "smart_operations": {
+        "name": "Slimme bewerkingen",
+        "state": {
+          "idle": "Inactief",
+          "charging": "Laden",
+          "deferred": "Uitgesteld",
+          "target_reached": "Doel bereikt",
+          "discharging": "Ontladen",
+          "discharge_scheduled": "Ontladen gepland",
+          "discharge_suspended": "Gepauzeerd",
+          "charge_discharge_active": "Laden + Ontladen"
+        }
+      },
+      "charge_power": { "name": "Slim laadvermogen" },
+      "charge_window": { "name": "Laadvenster" },
+      "charge_remaining": { "name": "Laden resterend" },
+      "discharge_power": { "name": "Slim ontlaadvermogen" },
+      "discharge_window": { "name": "Ontlaadvenster" },
+      "discharge_remaining": { "name": "Ontladen resterend" },
+      "battery_forecast": { "name": "Batterijvoorspelling" }
+    },
+    "binary_sensor": {
+      "smart_charge_active": { "name": "Slim laden actief" },
+      "smart_discharge_active": { "name": "Slim ontladen actief" }
+    }
+  },
+  "services": {
+    "clear_overrides": {
+      "name": "Overschrijvingen wissen",
+      "description": "Zet de omvormer terug naar eigenverbruik en wis alle of geselecteerde overschrijvingen.",
+      "fields": {
+        "mode": {
+          "name": "Modus",
+          "description": "Wis alleen overschrijvingen van deze modus. Indien niet ingesteld, worden alle gewist."
+        }
+      }
+    },
+    "feedin": {
+      "name": "Teruglevering",
+      "description": "Lever overtollige zonne-energie terug aan het net voor een ingestelde duur, optioneel op een specifiek tijdstip en vermogenslimiet.",
+      "fields": {
+        "duration": {
+          "name": "Duur",
+          "description": "Hoe lang terugleveren (max. 4 uur, mag niet over middernacht)."
+        },
+        "power": {
+          "name": "Vermogenslimiet",
+          "description": "Vermogenslimiet voor teruglevering in watt. Standaard: nominaal vermogen omvormer."
+        },
+        "start_time": {
+          "name": "Starttijd",
+          "description": "Tijdstip om de overschrijving te starten. Standaard: nu."
+        },
+        "replace_conflicts": {
+          "name": "Conflicterende overschrijvingen verwijderen in plaats van afbreken",
+          "description": "Indien ingeschakeld, worden bestaande overlappende overschrijvingen stilzwijgend verwijderd in plaats van afgebroken."
+        }
+      }
+    },
+    "force_charge": {
+      "name": "Geforceerd laden",
+      "description": "Laad de batterij voor een ingestelde duur, optioneel op een specifiek tijdstip en vermogenslimiet. De omvormer schakelt automatisch terug naar eigenverbruik.",
+      "fields": {
+        "duration": {
+          "name": "Duur",
+          "description": "Hoe lang geforceerd laden (max. 4 uur, mag niet over middernacht)."
+        },
+        "power": {
+          "name": "Vermogenslimiet",
+          "description": "Laadvermogenslimiet in watt. Standaard: nominaal vermogen omvormer."
+        },
+        "start_time": {
+          "name": "Starttijd",
+          "description": "Tijdstip om de overschrijving te starten. Standaard: nu."
+        },
+        "replace_conflicts": {
+          "name": "Conflicterende overschrijvingen verwijderen in plaats van afbreken",
+          "description": "Indien ingeschakeld, worden bestaande overlappende overschrijvingen stilzwijgend verwijderd in plaats van afgebroken."
+        }
+      }
+    },
+    "force_discharge": {
+      "name": "Geforceerd ontladen",
+      "description": "Ontlaad de batterij voor een ingestelde duur, optioneel op een specifiek tijdstip en vermogenslimiet. De omvormer schakelt automatisch terug naar eigenverbruik.",
+      "fields": {
+        "duration": {
+          "name": "Duur",
+          "description": "Hoe lang geforceerd ontladen (max. 4 uur, mag niet over middernacht)."
+        },
+        "power": {
+          "name": "Vermogenslimiet",
+          "description": "Ontlaadvermogenslimiet in watt. Standaard: nominaal vermogen omvormer."
+        },
+        "start_time": {
+          "name": "Starttijd",
+          "description": "Tijdstip om de overschrijving te starten. Standaard: nu."
+        },
+        "replace_conflicts": {
+          "name": "Conflicterende overschrijvingen verwijderen in plaats van afbreken",
+          "description": "Indien ingeschakeld, worden bestaande overlappende overschrijvingen stilzwijgend verwijderd in plaats van afgebroken."
+        }
+      }
+    },
+    "smart_charge": {
+      "name": "Slim laden",
+      "description": "Laad de batterij binnen een tijdvenster, met periodieke aanpassing van de laadsnelheid om een doel-SoC te bereiken aan het einde van het interval.",
+      "fields": {
+        "start_time": { "name": "Starttijd", "description": "Tijdstip om het laden te starten." },
+        "end_time": { "name": "Eindtijd", "description": "Tijdstip om het laden te stoppen. Moet na de starttijd zijn, binnen 4 uur." },
+        "target_soc": { "name": "Doel-SoC", "description": "Laad de batterij tot dit SoC-niveau. Het laden stopt en keert terug naar eigenverbruik wanneer bereikt." },
+        "power": { "name": "Maximaal vermogen", "description": "Maximaal laadvermogen in watt. Het werkelijke vermogen kan lager zijn om het laden over het tijdvenster te spreiden." },
+        "replace_conflicts": { "name": "Conflicterende overschrijvingen verwijderen in plaats van afbreken", "description": "Indien ingeschakeld, worden bestaande overlappende overschrijvingen stilzwijgend verwijderd in plaats van afgebroken." }
+      }
+    },
+    "smart_discharge": {
+      "name": "Slim ontladen",
+      "description": "Ontlaad de batterij binnen een tijdvenster, met automatische terugkeer naar eigenverbruik wanneer een minimum SoC is bereikt.",
+      "fields": {
+        "start_time": {
+          "name": "Starttijd",
+          "description": "Tijdstip om het ontladen te starten."
+        },
+        "end_time": {
+          "name": "Eindtijd",
+          "description": "Tijdstip om het ontladen te stoppen. Moet na de starttijd zijn, binnen 4 uur."
+        },
+        "power": {
+          "name": "Vermogenslimiet",
+          "description": "Ontlaadvermogenslimiet in watt. Standaard: nominaal vermogen omvormer."
+        },
+        "min_soc": {
+          "name": "Minimum SoC om ontladen te stoppen",
+          "description": "Stop het ontladen en keer terug naar eigenverbruik wanneer de batterij dit niveau bereikt."
+        },
+        "feedin_energy_limit_kwh": {
+          "name": "Terugleveringslimiet",
+          "description": "Stop het ontladen nadat deze hoeveelheid energie (kWh) aan het net is teruggeleverd, exclusief huishoudelijk verbruik."
+        },
+        "replace_conflicts": {
+          "name": "Conflicterende overschrijvingen verwijderen in plaats van afbreken",
+          "description": "Indien ingeschakeld, worden bestaande overlappende overschrijvingen stilzwijgend verwijderd in plaats van afgebroken."
+        }
+      }
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "FoxESS Control",
+        "description": "Voer uw FoxESS Cloud API-inloggegevens in.",
+        "data": {
+          "api_key": "API-sleutel",
+          "device_serial": "Serienummer apparaat"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Kan geen verbinding maken met de FoxESS Cloud API. Controleer uw netwerkverbinding.",
+      "invalid_auth": "Authenticatie mislukt. Controleer uw API-sleutel en serienummer."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "FoxESS Control Opties",
+        "data": {
+          "min_soc_on_grid": "Minimum SoC op net (%)",
+          "battery_capacity_kwh": "Batterijcapaciteit (kWh)",
+          "min_power_change": "Minimale vermogenswijziging voor slim laden (W)",
+          "api_min_soc": "Minimum API fdSoc (%) — ⚠️ Waarden onder 11 werken mogelijk niet met alle firmwareversies",
+          "polling_interval": "API-polling-interval (seconden)"
+        }
+      }
+    }
+  }
+}
