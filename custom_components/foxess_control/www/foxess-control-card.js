@@ -34,6 +34,12 @@ const TRANSLATIONS = {
     soc: "SoC",
     time: "Time",
     energy: "Energy",
+    starts_in: "starts in {0}",
+    ending: "ending",
+    kwh_left: "{0} kWh left",
+    dur_hm: "{0}h {1}m",
+    dur_h: "{0}h",
+    dur_m: "{0}m",
   },
   de: {
     title: "FoxESS Steuerung",
@@ -53,6 +59,12 @@ const TRANSLATIONS = {
     soc: "SoC",
     time: "Zeit",
     energy: "Energie",
+    starts_in: "startet in {0}",
+    ending: "endet",
+    kwh_left: "{0} kWh verbl.",
+    dur_hm: "{0} Std. {1} Min.",
+    dur_h: "{0} Std.",
+    dur_m: "{0} Min.",
   },
   fr: {
     title: "FoxESS Contrôle",
@@ -72,6 +84,12 @@ const TRANSLATIONS = {
     soc: "SoC",
     time: "Temps",
     energy: "Énergie",
+    starts_in: "commence dans {0}",
+    ending: "fin",
+    kwh_left: "{0} kWh restants",
+    dur_hm: "{0}h {1}min",
+    dur_h: "{0}h",
+    dur_m: "{0}min",
   },
   nl: {
     title: "FoxESS Besturing",
@@ -91,6 +109,12 @@ const TRANSLATIONS = {
     soc: "SoC",
     time: "Tijd",
     energy: "Energie",
+    starts_in: "start over {0}",
+    ending: "eindigt",
+    kwh_left: "{0} kWh over",
+    dur_hm: "{0}u {1}m",
+    dur_h: "{0}u",
+    dur_m: "{0}m",
   },
   es: {
     title: "FoxESS Control",
@@ -110,6 +134,12 @@ const TRANSLATIONS = {
     soc: "SoC",
     time: "Tiempo",
     energy: "Energía",
+    starts_in: "comienza en {0}",
+    ending: "finalizando",
+    kwh_left: "{0} kWh restantes",
+    dur_hm: "{0}h {1}min",
+    dur_h: "{0}h",
+    dur_m: "{0}min",
   },
   it: {
     title: "FoxESS Controllo",
@@ -129,6 +159,62 @@ const TRANSLATIONS = {
     soc: "SoC",
     time: "Tempo",
     energy: "Energia",
+    starts_in: "inizia tra {0}",
+    ending: "in chiusura",
+    kwh_left: "{0} kWh rimasti",
+    dur_hm: "{0}h {1}min",
+    dur_h: "{0}h",
+    dur_m: "{0}min",
+  },
+  pl: {
+    title: "FoxESS Sterowanie",
+    smart_charge: "Inteligentne ładowanie",
+    charge_scheduled: "Ładowanie zaplanowane",
+    smart_discharge: "Inteligentne rozładowanie",
+    discharge_scheduled: "Rozładowanie zaplanowane",
+    discharge_suspended: "Rozładowanie wstrzymane",
+    window: "Okno czasowe",
+    power: "Moc",
+    target: "Cel",
+    min_soc: "Min. SoC",
+    feedin: "Oddawanie",
+    no_active: "Brak aktywnych operacji",
+    idle_hint: "Wywołaj <b>smart_charge</b> lub <b>smart_discharge</b>, aby rozpocząć",
+    progress: "Postęp",
+    soc: "SoC",
+    time: "Czas",
+    energy: "Energia",
+    starts_in: "start za {0}",
+    ending: "kończy się",
+    kwh_left: "{0} kWh pozostało",
+    dur_hm: "{0} godz. {1} min",
+    dur_h: "{0} godz.",
+    dur_m: "{0} min",
+  },
+  pt: {
+    title: "FoxESS Controlo",
+    smart_charge: "Carga inteligente",
+    charge_scheduled: "Carga agendada",
+    smart_discharge: "Descarga inteligente",
+    discharge_scheduled: "Descarga agendada",
+    discharge_suspended: "Descarga suspensa",
+    window: "Janela",
+    power: "Potência",
+    target: "Objetivo",
+    min_soc: "SoC mín",
+    feedin: "Injeção",
+    no_active: "Sem operações ativas",
+    idle_hint: "Chame <b>smart_charge</b> ou <b>smart_discharge</b> para iniciar",
+    progress: "Progresso",
+    soc: "SoC",
+    time: "Tempo",
+    energy: "Energia",
+    starts_in: "começa em {0}",
+    ending: "terminando",
+    kwh_left: "{0} kWh restantes",
+    dur_hm: "{0}h {1}min",
+    dur_h: "{0}h",
+    dur_m: "{0}min",
   },
 };
 
@@ -205,13 +291,43 @@ class FoxESSControlCard extends HTMLElement {
   }
 
   _formatDuration(ms) {
-    if (ms <= 0) return "0m";
+    if (ms <= 0) return this._t("dur_m").replace("{0}", "0");
     const totalMin = Math.round(ms / 60000);
     const h = Math.floor(totalMin / 60);
     const m = totalMin % 60;
-    if (h === 0) return `${m}m`;
-    if (m === 0) return `${h}h`;
-    return `${h}h ${m}m`;
+    if (h === 0) return this._t("dur_m").replace("{0}", m);
+    if (m === 0) return this._t("dur_h").replace("{0}", h);
+    return this._t("dur_hm").replace("{0}", h).replace("{1}", m);
+  }
+
+  _translateRemaining(text) {
+    if (!text) return "";
+    // "starts in Xh Ym" / "starts in Xm"
+    const startsMatch = text.match(/^starts in (.+)$/);
+    if (startsMatch) {
+      const dur = this._translateDurationStr(startsMatch[1]);
+      return this._t("starts_in").replace("{0}", dur);
+    }
+    // "ending"
+    if (text === "ending") return this._t("ending");
+    // "X.X kWh left"
+    const kwhMatch = text.match(/^([\d.]+) kWh left$/);
+    if (kwhMatch) return this._t("kwh_left").replace("{0}", kwhMatch[1]);
+    // bare duration "Xh Ym" / "Xm" / "Xh"
+    return this._translateDurationStr(text);
+  }
+
+  _translateDurationStr(text) {
+    // "Xh Ym"
+    const hm = text.match(/^(\d+)h (\d+)m$/);
+    if (hm) return this._t("dur_hm").replace("{0}", hm[1]).replace("{1}", hm[2]);
+    // "Xh"
+    const ho = text.match(/^(\d+)h$/);
+    if (ho) return this._t("dur_h").replace("{0}", ho[1]);
+    // "Xm"
+    const mo = text.match(/^(\d+)m$/);
+    if (mo) return this._t("dur_m").replace("{0}", mo[1]);
+    return text;
   }
 
   // -- Rendering -------------------------------------------------------------
@@ -293,7 +409,7 @@ class FoxESSControlCard extends HTMLElement {
             <span class="dot ${deferred ? "dot-waiting" : "dot-active"}"></span>
             <span class="section-title">${deferred ? this._t("charge_scheduled") : this._t("smart_charge")}</span>
           </div>
-          <span class="section-badge charge-badge">${remaining}</span>
+          <span class="section-badge charge-badge">${this._translateRemaining(remaining)}</span>
         </div>
         <div class="section-body">
           <div class="detail-row">
@@ -337,7 +453,7 @@ class FoxESSControlCard extends HTMLElement {
             <span class="dot ${scheduled || suspended ? "dot-waiting" : "dot-active dot-discharge"}"></span>
             <span class="section-title">${scheduled ? this._t("discharge_scheduled") : suspended ? this._t("discharge_suspended") : this._t("smart_discharge")}</span>
           </div>
-          <span class="section-badge discharge-badge">${remaining}</span>
+          <span class="section-badge discharge-badge">${this._translateRemaining(remaining)}</span>
         </div>
         <div class="section-body">
           <div class="detail-row">
@@ -661,7 +777,7 @@ class FoxESSControlCard extends HTMLElement {
       .progress-track {
         display: flex;
         height: 6px;
-        background: rgba(0, 0, 0, 0.08);
+        background: var(--secondary-background-color, rgba(0, 0, 0, 0.08));
         border-radius: 3px;
         overflow: hidden;
         margin-top: 4px;
@@ -690,7 +806,8 @@ class FoxESSControlCard extends HTMLElement {
         transition: width 0.6s ease;
       }
       .time-fill {
-        background: linear-gradient(90deg, rgba(0,0,0,0.25), rgba(0,0,0,0.15));
+        background: linear-gradient(90deg, var(--primary-text-color, #666), var(--secondary-text-color, #999));
+        opacity: 0.3;
       }
 
       /* Idle state */

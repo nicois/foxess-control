@@ -99,6 +99,32 @@ const _OV_TRANSLATIONS = {
     not_found: "non trovato",
     not_discovered: "non rilevato",
   },
+  pl: {
+    title: "FoxESS Przegląd",
+    solar: "Solar",
+    house: "Dom",
+    grid: "Sieć",
+    battery: "Bateria",
+    importing: "Pobieranie ↓",
+    exporting: "Oddawanie ↑",
+    charging: "Ładowanie",
+    discharging: "Rozładowanie",
+    not_found: "nie znaleziono",
+    not_discovered: "nie wykryto",
+  },
+  pt: {
+    title: "FoxESS Visão geral",
+    solar: "Solar",
+    house: "Casa",
+    grid: "Rede",
+    battery: "Bateria",
+    importing: "Importação ↓",
+    exporting: "Exportação ↑",
+    charging: "Carregando",
+    discharging: "Descarregando",
+    not_found: "não encontrado",
+    not_discovered: "não detetado",
+  },
 };
 
 function _ovGetStrings(lang) {
