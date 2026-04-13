@@ -11,7 +11,7 @@
  *   # soc_entity: sensor.foxess_battery_soc
  */
 
-const CARD_VERSION = "1.2.0";
+const CARD_VERSION = "1.3.0";
 
 // -- i18n --------------------------------------------------------------------
 
@@ -47,6 +47,11 @@ const TRANSLATIONS = {
     tip_energy: "{0} of {1} kWh — {2} kWh remaining",
     tip_energy_ahead: "{0} kWh ahead of schedule",
     tip_energy_behind: "{0} kWh behind schedule",
+    tip_power_active: "{0} of {1} max",
+    tip_power_deferred: "Self-use — no forced export",
+    tip_power_suspended: "Suspended — protecting min SoC",
+    tip_power_charge_deferred: "Deferred — waiting for optimal time",
+    self_use: "Self-use",
   },
   de: {
     title: "FoxESS Steuerung",
@@ -79,6 +84,11 @@ const TRANSLATIONS = {
     tip_energy: "{0} von {1} kWh — {2} kWh verbleibend",
     tip_energy_ahead: "{0} kWh vor dem Zeitplan",
     tip_energy_behind: "{0} kWh hinter dem Zeitplan",
+    tip_power_active: "{0} von {1} max.",
+    tip_power_deferred: "Eigenverbrauch — kein Zwangsexport",
+    tip_power_suspended: "Pausiert — min. SoC schützen",
+    tip_power_charge_deferred: "Verzögert — optimale Zeit abwarten",
+    self_use: "Eigenverbr.",
   },
   fr: {
     title: "FoxESS Contrôle",
@@ -111,6 +121,11 @@ const TRANSLATIONS = {
     tip_energy: "{0} sur {1} kWh — {2} kWh restants",
     tip_energy_ahead: "{0} kWh en avance",
     tip_energy_behind: "{0} kWh en retard",
+    tip_power_active: "{0} sur {1} max",
+    tip_power_deferred: "Auto-consommation — pas d'export forcé",
+    tip_power_suspended: "Suspendu — protection SoC min.",
+    tip_power_charge_deferred: "Différée — en attente du moment optimal",
+    self_use: "Auto-conso.",
   },
   nl: {
     title: "FoxESS Besturing",
@@ -143,6 +158,11 @@ const TRANSLATIONS = {
     tip_energy: "{0} van {1} kWh — {2} kWh resterend",
     tip_energy_ahead: "{0} kWh voor op schema",
     tip_energy_behind: "{0} kWh achter op schema",
+    tip_power_active: "{0} van {1} max.",
+    tip_power_deferred: "Eigenverbruik — geen gedwongen export",
+    tip_power_suspended: "Onderbroken — min. SoC beschermen",
+    tip_power_charge_deferred: "Uitgesteld — wachten op optimaal moment",
+    self_use: "Eigenverbr.",
   },
   es: {
     title: "FoxESS Control",
@@ -175,6 +195,11 @@ const TRANSLATIONS = {
     tip_energy: "{0} de {1} kWh — {2} kWh restantes",
     tip_energy_ahead: "{0} kWh adelantado",
     tip_energy_behind: "{0} kWh atrasado",
+    tip_power_active: "{0} de {1} máx.",
+    tip_power_deferred: "Autoconsumo — sin exportación forzada",
+    tip_power_suspended: "Suspendido — protegiendo SoC mín.",
+    tip_power_charge_deferred: "Diferida — esperando momento óptimo",
+    self_use: "Autocons.",
   },
   it: {
     title: "FoxESS Controllo",
@@ -207,6 +232,11 @@ const TRANSLATIONS = {
     tip_energy: "{0} di {1} kWh — {2} kWh rimanenti",
     tip_energy_ahead: "{0} kWh in anticipo",
     tip_energy_behind: "{0} kWh in ritardo",
+    tip_power_active: "{0} di {1} max",
+    tip_power_deferred: "Autoconsumo — nessun export forzato",
+    tip_power_suspended: "Sospeso — protezione SoC min.",
+    tip_power_charge_deferred: "Differita — in attesa del momento ottimale",
+    self_use: "Autocons.",
   },
   pl: {
     title: "FoxESS Sterowanie",
@@ -239,6 +269,11 @@ const TRANSLATIONS = {
     tip_energy: "{0} z {1} kWh — {2} kWh pozostało",
     tip_energy_ahead: "{0} kWh przed harmonogramem",
     tip_energy_behind: "{0} kWh za harmonogramem",
+    tip_power_active: "{0} z {1} maks.",
+    tip_power_deferred: "Autokonsumpcja — brak wymuszonego eksportu",
+    tip_power_suspended: "Wstrzymany — ochrona min. SoC",
+    tip_power_charge_deferred: "Odroczone — oczekiwanie na optymalny czas",
+    self_use: "Autokons.",
   },
   pt: {
     title: "FoxESS Controlo",
@@ -271,6 +306,11 @@ const TRANSLATIONS = {
     tip_energy: "{0} de {1} kWh — {2} kWh restantes",
     tip_energy_ahead: "{0} kWh adiantado",
     tip_energy_behind: "{0} kWh atrasado",
+    tip_power_active: "{0} de {1} máx.",
+    tip_power_deferred: "Autoconsumo — sem exportação forçada",
+    tip_power_suspended: "Suspenso — protegendo SoC mín.",
+    tip_power_charge_deferred: "Adiado — aguardando momento ideal",
+    self_use: "Autocons.",
   },
   "zh-hans": {
     title: "FoxESS 控制",
@@ -303,6 +343,11 @@ const TRANSLATIONS = {
     tip_energy: "{0} / {1} kWh — 剩余 {2} kWh",
     tip_energy_ahead: "超前计划 {0} kWh",
     tip_energy_behind: "落后计划 {0} kWh",
+    tip_power_active: "{0} / 最大 {1}",
+    tip_power_deferred: "自用模式 — 无强制输出",
+    tip_power_suspended: "暂停 — 保护最低电量",
+    tip_power_charge_deferred: "延迟 — 等待最佳时间",
+    self_use: "自用",
   },
   ja: {
     title: "FoxESS コントロール",
@@ -335,6 +380,11 @@ const TRANSLATIONS = {
     tip_energy: "{0} / {1} kWh — 残り {2} kWh",
     tip_energy_ahead: "スケジュールより {0} kWh 先行",
     tip_energy_behind: "スケジュールより {0} kWh 遅延",
+    tip_power_active: "{0} / 最大 {1}",
+    tip_power_deferred: "自家消費モード — 強制輸出なし",
+    tip_power_suspended: "一時停止 — 最低SoC保護中",
+    tip_power_charge_deferred: "遅延中 — 最適なタイミングを待機",
+    self_use: "自家消費",
   },
 };
 
@@ -351,6 +401,21 @@ class FoxESSControlCard extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._config = {};
     this._hass = null;
+    this._expandedTips = new Set();
+    this.shadowRoot.addEventListener("click", (e) => {
+      const row = e.target.closest(".progress-row.has-tip");
+      if (!row) return;
+      const key = row.dataset.tipKey;
+      if (key) {
+        if (this._expandedTips.has(key)) {
+          this._expandedTips.delete(key);
+          row.classList.remove("expanded");
+        } else {
+          this._expandedTips.add(key);
+          row.classList.add("expanded");
+        }
+      }
+    });
   }
 
   // -- Lovelace lifecycle ----------------------------------------------------
@@ -581,11 +646,10 @@ class FoxESSControlCard extends HTMLElement {
             <span class="detail-label">${this._t("window")}</span>
             <span class="detail-value">${window}</span>
           </div>
-          ${!scheduled && !deferred ? `
           <div class="detail-row">
             <span class="detail-label">${this._t("power")}</span>
-            <span class="detail-value">${this._formatPower(power)}</span>
-          </div>` : ""}
+            <span class="detail-value">${deferred ? this._t("self_use") : scheduled ? "—" : this._formatPower(power)}</span>
+          </div>
           <div class="detail-row">
             <span class="detail-label">${this._t("min_soc")}</span>
             <span class="detail-value">${minSoc != null ? minSoc + "%" : "—"}</span>
@@ -615,10 +679,11 @@ class FoxESSControlCard extends HTMLElement {
     `;
   }
 
-  _progressBar(label, value, pct, fillClass, tooltip) {
-    const tip = tooltip ? ` title="${tooltip}"` : "";
+  _progressBar(label, value, pct, fillClass, tooltip, tipKey) {
+    const hasTip = !!tooltip;
+    const expanded = hasTip && tipKey && this._expandedTips.has(tipKey);
     return `
-      <div class="progress-row"${tip}>
+      <div class="progress-row${hasTip ? " has-tip" : ""}${expanded ? " expanded" : ""}"${tipKey ? ` data-tip-key="${tipKey}"` : ""}>
         <div class="detail-row">
           <span class="detail-label">${label}</span>
           <span class="detail-value">${value}</span>
@@ -626,11 +691,12 @@ class FoxESSControlCard extends HTMLElement {
         <div class="progress-track">
           <div class="progress-fill ${fillClass}" style="width:${pct}%"></div>
         </div>
+        ${hasTip ? `<div class="progress-tip">${tooltip}</div>` : ""}
       </div>
     `;
   }
 
-  _energyScheduleBar(label, value, actualPct, expectedPct, tooltip) {
+  _energyScheduleBar(label, value, actualPct, expectedPct, tooltip, tipKey) {
     // Show energy progress with a coloured gap segment indicating
     // whether discharge is ahead of or behind the ideal schedule.
     const lo = Math.min(actualPct, expectedPct);
@@ -638,10 +704,11 @@ class FoxESSControlCard extends HTMLElement {
     const gapWidth = hi - lo;
     const ahead = actualPct >= expectedPct;
     const gapClass = ahead ? "energy-ahead" : "energy-behind";
-    const tip = tooltip ? ` title="${tooltip}"` : "";
+    const hasTip = !!tooltip;
+    const expanded = hasTip && tipKey && this._expandedTips.has(tipKey);
 
     return `
-      <div class="progress-row"${tip}>
+      <div class="progress-row${hasTip ? " has-tip" : ""}${expanded ? " expanded" : ""}"${tipKey ? ` data-tip-key="${tipKey}"` : ""}>
         <div class="detail-row">
           <span class="detail-label">${label}</span>
           <span class="detail-value">${value}</span>
@@ -649,6 +716,7 @@ class FoxESSControlCard extends HTMLElement {
         <div class="progress-track">
           <div class="energy-fill" style="width:${lo}%"></div>${gapWidth > 0.5 ? `<div class="${gapClass}" style="width:${gapWidth}%"></div>` : ""}
         </div>
+        ${hasTip ? `<div class="progress-tip">${tooltip}</div>` : ""}
       </div>
     `;
   }
@@ -697,8 +765,17 @@ class FoxESSControlCard extends HTMLElement {
         ? this._t("tip_time").replace("{0}", this._formatDuration(now - new Date(a.charge_start_time).getTime())).replace("{1}", this._formatDuration(new Date(a.charge_end_time).getTime() - new Date(a.charge_start_time).getTime())).replace("{2}", this._formatDuration(time.remaining))
         : "";
 
-      bars += this._progressBar(this._t("soc"), socLabel, socPct, "charge-fill", socTip);
-      bars += this._progressBar(this._t("time"), time.label, time.pct, "time-fill", timeTip);
+      const chargePower = a.charge_power_w || 0;
+      const chargeMax = a.charge_max_power_w || 1;
+      const chargePowerPct = Math.min(100, Math.max(0, (chargePower / chargeMax) * 100));
+      const chargePhase = a.charge_phase;
+      const chargePowerTip = chargePhase === "deferred"
+        ? this._t("tip_power_charge_deferred")
+        : this._t("tip_power_active").replace("{0}", this._formatPower(chargePower)).replace("{1}", this._formatPower(chargeMax));
+
+      bars += this._progressBar(this._t("soc"), socLabel, socPct, "charge-fill", socTip, "charge-soc");
+      bars += this._progressBar(this._t("power"), this._formatPower(chargePower), chargePowerPct, "charge-fill", chargePowerTip, "charge-power");
+      bars += this._progressBar(this._t("time"), time.label, time.pct, "time-fill", timeTip, "charge-time");
     }
 
     if (dischargeActive) {
@@ -719,7 +796,22 @@ class FoxESSControlCard extends HTMLElement {
       const socTip = current != null && minSoc != null
         ? this._t("tip_soc_discharge").replace("{0}", Math.round(current)).replace("{1}", minSoc).replace("{2}", Math.max(0, Math.round(current) - minSoc))
         : "";
-      bars += this._progressBar(this._t("soc"), socLabel, socPct, "discharge-fill", socTip);
+      bars += this._progressBar(this._t("soc"), socLabel, socPct, "discharge-fill", socTip, "discharge-soc");
+
+      const dischPower = a.discharge_power_w || 0;
+      const dischMax = a.discharge_max_power_w || 1;
+      const dischPowerPct = Math.min(100, Math.max(0, (dischPower / dischMax) * 100));
+      const dischPhase = a.discharge_phase;
+      let dischPowerTip;
+      if (dischPhase === "deferred") {
+        dischPowerTip = this._t("tip_power_deferred");
+      } else if (dischPhase === "suspended") {
+        dischPowerTip = this._t("tip_power_suspended");
+      } else {
+        dischPowerTip = this._t("tip_power_active").replace("{0}", this._formatPower(dischPower)).replace("{1}", this._formatPower(dischMax));
+      }
+      const dischPowerLabel = dischPhase === "deferred" ? this._t("self_use") : this._formatPower(dischPower);
+      bars += this._progressBar(this._t("power"), dischPowerLabel, dischPowerPct, "discharge-fill", dischPowerTip, "discharge-power");
 
       const time = this._timeProgress(a.discharge_start_time, a.discharge_end_time, now);
 
@@ -735,13 +827,13 @@ class FoxESSControlCard extends HTMLElement {
             ? this._t("tip_energy_ahead").replace("{0}", diff.toFixed(1))
             : this._t("tip_energy_behind").replace("{0}", diff.toFixed(1)));
         }
-        bars += this._energyScheduleBar(this._t("energy"), `${used} / ${feedinLimit} kWh`, energyPct, time.pct, energyTip);
+        bars += this._energyScheduleBar(this._t("energy"), `${used} / ${feedinLimit} kWh`, energyPct, time.pct, energyTip, "discharge-energy");
       }
 
       const timeTip = time.label
         ? this._t("tip_time").replace("{0}", this._formatDuration(now - new Date(a.discharge_start_time).getTime())).replace("{1}", this._formatDuration(new Date(a.discharge_end_time).getTime() - new Date(a.discharge_start_time).getTime())).replace("{2}", this._formatDuration(time.remaining))
         : "";
-      bars += this._progressBar(this._t("time"), time.label, time.pct, "time-fill", timeTip);
+      bars += this._progressBar(this._t("time"), time.label, time.pct, "time-fill", timeTip, "discharge-time");
     }
 
     return `
@@ -926,6 +1018,24 @@ class FoxESSControlCard extends HTMLElement {
       }
       .progress-row:last-child {
         margin-bottom: 0;
+      }
+      .progress-row.has-tip {
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .progress-tip {
+        max-height: 0;
+        overflow: hidden;
+        font-size: 0.78em;
+        color: var(--secondary-text-color, #888);
+        line-height: 1.4;
+        transition: max-height 0.2s ease, margin-top 0.2s ease, opacity 0.2s ease;
+        opacity: 0;
+      }
+      .progress-row.expanded .progress-tip {
+        max-height: 3em;
+        margin-top: 4px;
+        opacity: 1;
       }
       .progress-track {
         display: flex;
