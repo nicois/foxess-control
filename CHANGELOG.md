@@ -1,11 +1,12 @@
 # Changelog
 
-## 1.0.1-beta.2
+## 1.0.1-beta.3
 
 ### Added
 - **Deferred self-use for smart discharge**: stays in self-use mode as long as possible, then switches to forced discharge only when a calculated deadline requires it — prevents accidental grid import when paced discharge power would be below house load. Two independent deadlines: SoC target (standard headroom) and feed-in energy target (doubled headroom to account for variable household consumption reducing net export). The Lovelace card shows "Discharge Deferred" during the self-use phase.
 
 ### Fixed
+- **Discharge power floor at house consumption**: during forced discharge, power is now floored at house load to prevent grid import. Previously, near the end of the window when pacing reduced power below house consumption, the shortfall was drawn from the grid.
 - GitHub release page empty for v1.0.0 — release workflow was reading changelog from wrong path
 
 ## 1.0.0
