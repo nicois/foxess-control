@@ -2,576 +2,581 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Deferred Smart Discharge Simulation</title>
+<title>Priority-Weighted Smart Discharge Simulation</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 20px; }
-  h1 { text-align: center; margin-bottom: 8px; color: #00d4ff; font-size: 1.5em; }
-  .subtitle { text-align: center; margin-bottom: 24px; color: #888; font-size: 0.9em; }
-  .params { text-align: center; margin-bottom: 20px; color: #aaa; font-size: 0.85em; }
+  h1 { text-align: center; margin-bottom: 4px; color: #00d4ff; font-size: 1.5em; }
+  h2 { text-align: center; margin: 24px 0 12px; color: #888; font-size: 1.1em; border-bottom: 1px solid #333; padding-bottom: 8px; max-width: 1400px; margin-left: auto; margin-right: auto; }
+  .subtitle { text-align: center; margin-bottom: 16px; color: #888; font-size: 0.9em; }
+  .params { text-align: center; margin-bottom: 8px; color: #aaa; font-size: 0.85em; }
   .params span { color: #00d4ff; font-weight: bold; }
+  .priorities { text-align: center; margin-bottom: 20px; font-size: 0.82em; color: #ccc; }
+  .priorities .p1 { color: #f44336; font-weight: bold; }
+  .priorities .p2 { color: #ff9800; font-weight: bold; }
+  .priorities .p3 { color: #4caf50; font-weight: bold; }
+  .priorities .p4 { color: #2196f3; font-weight: bold; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1400px; margin: 0 auto; }
   .scenario { background: #16213e; border-radius: 12px; padding: 16px; border: 1px solid #0f3460; }
-  .scenario.old-approach { border-color: #5c2020; background: #1a1520; }
+  .scenario.comparison { border-color: #5c2020; background: #1a1520; }
   .scenario h3 { color: #00d4ff; margin-bottom: 4px; font-size: 1em; }
   .scenario .desc { color: #888; font-size: 0.8em; margin-bottom: 10px; }
-  .scenario .result { font-size: 0.85em; margin-top: 8px; padding: 8px; border-radius: 6px; }
-  .result.ok { background: rgba(0, 200, 100, 0.15); border: 1px solid rgba(0, 200, 100, 0.3); }
-  .result.fail { background: rgba(255, 60, 60, 0.15); border: 1px solid rgba(255, 60, 60, 0.3); }
   canvas { width: 100%; border-radius: 6px; background: #0a0a1a; }
-  .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; font-size: 0.75em; }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; font-size: 0.72em; }
   .legend-item { display: flex; align-items: center; gap: 4px; }
   .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; font-size: 0.78em; }
   .stat { text-align: center; padding: 4px; background: rgba(255,255,255,0.03); border-radius: 4px; }
-  .stat .val { color: #00d4ff; font-weight: bold; font-size: 1.1em; }
+  .stat .val { font-weight: bold; font-size: 1.1em; }
   .stat .lbl { color: #888; }
+  .prio-board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 6px; font-size: 0.72em; }
+  .prio-cell { text-align: center; padding: 4px 2px; border-radius: 4px; }
+  .prio-cell .prio-label { font-weight: bold; margin-bottom: 2px; }
+  .prio-cell .prio-val { font-size: 1.05em; }
+  .prio-ok { background: rgba(76, 175, 80, 0.15); border: 1px solid rgba(76, 175, 80, 0.3); }
+  .prio-warn { background: rgba(255, 152, 0, 0.15); border: 1px solid rgba(255, 152, 0, 0.3); }
+  .prio-fail { background: rgba(244, 67, 54, 0.15); border: 1px solid rgba(244, 67, 54, 0.3); }
+  .chart-label { color: #555; font-size: 0.68em; margin-top: 6px; }
 </style>
 </head>
 <body>
-<h1>Deferred Smart Discharge Simulation</h1>
-<p class="subtitle">Validates that deferred self-use + full-power burst achieves feed-in targets without grid import</p>
+<h1>Priority-Weighted Smart Discharge</h1>
+<p class="subtitle">Deferred self-use + peak-tracked safety floor — optimised for arbitrage windows</p>
 <p class="params">
-  Inverter: <span>15 kW</span> &nbsp;|&nbsp;
-  Window: <span>18:00 - 20:00</span> &nbsp;|&nbsp;
-  Feed-in target: <span>10 kWh</span> &nbsp;|&nbsp;
-  Min SoC: <span>30%</span> &nbsp;|&nbsp;
-  Battery: <span>20 kWh</span> &nbsp;|&nbsp;
-  Headroom: <span>10% (20% for feed-in)</span> &nbsp;|&nbsp;
-  Tick: <span>60s</span>
+  Inverter: <span>15 kW</span> |
+  Window: <span>18:00–20:00</span> |
+  Feed-in target: <span>10 kWh</span> |
+  Min SoC: <span>30%</span> |
+  Battery: <span>20 kWh</span> |
+  Headroom: <span>10%</span> |
+  Safety factor: <span>1.5×</span> |
+  Peak decay: <span>0.85/poll</span>
 </p>
-<div class="grid" id="scenarios"></div>
+<div class="priorities">
+  <span class="p1">P1 No grid import</span> ≫
+  <span class="p2">P2 Protect min SoC</span> ≫
+  <span class="p3">P3 Meet energy target</span> &gt;
+  <span class="p4">P4 Maximise feed-in</span>
+</div>
+<div id="scenarios"></div>
 
 <script>
-// ── Simulation parameters ──────────────────────────────────────────
+// ── Parameters ─────────────────────────────────────────────────────
 const MAX_POWER_W = 15000;
-const BATTERY_CAP_KWH = 20;
+const CAP_KWH = 20;
 const MIN_SOC = 30;
-const FEEDIN_LIMIT_KWH = 10;
+const FEEDIN_LIMIT = 10;
 const HEADROOM = 0.10;
-const FEEDIN_HEADROOM = 0.20; // doubled for feed-in deadline
+const FEEDIN_HEADROOM = 0.20;
+const SAFETY_FACTOR = 1.5;
+const PEAK_DECAY = 0.85;     // per 5-min poll
 const TICK_S = 60;
-const WINDOW_START_H = 18, WINDOW_END_H = 20;
-const TOTAL_TICKS = (WINDOW_END_H - WINDOW_START_H) * 3600 / TICK_S; // 120
+const POLL_TICKS = 5;         // update peak every 5 ticks (5 min)
+const W_START = 18, W_END = 20;
+const TOTAL_TICKS = (W_END - W_START) * 3600 / TICK_S;
+const TICK_DECAY = Math.pow(PEAK_DECAY, 1 / POLL_TICKS);
 
-// ── House load profiles ────────────────────────────────────────────
-function steadyLoad(kw) {
-  return (_tick) => kw;
-}
-function burstyLoad(baseKw, spikeKw, spikeIntervalTicks, spikeDurationTicks) {
+// ── Load profiles ──────────────────────────────────────────────────
+const steady = (kw) => () => kw;
+const bursty = (base, spike, intervalMin, durationMin) => {
+  const iT = intervalMin, dT = durationMin;
   return (tick) => {
-    const cycle = tick % spikeIntervalTicks;
-    return cycle < spikeDurationTicks ? spikeKw : baseKw;
+    const min = tick * TICK_S / 60;
+    return (min % iT) < dT ? spike : base;
   };
-}
-function rampLoad(startKw, endKw) {
-  return (tick) => startKw + (endKw - startKw) * (tick / TOTAL_TICKS);
-}
+};
+const ramp = (s, e) => (tick) => s + (e - s) * tick / TOTAL_TICKS;
 
-// ── Algorithm: calculate_discharge_deferred_start ──────────────────
-function calcDeferredStart(currentSoc, minSoc, capKwh, maxPowerW,
-                            remainingTicks, netConsumptionKw, feedinLimitKwh) {
-  const maxPowerKw = maxPowerW / 1000;
-  if (maxPowerKw <= 0) return TOTAL_TICKS; // never start
+// ── Deferred start calculation ─────────────────────────────────────
+function calcDeferredStart(soc, remainTicks, consumption, peakCons, feedinRemKwh) {
+  const maxKw = MAX_POWER_W / 1000;
+  if (maxKw <= 0) return TOTAL_TICKS;
 
-  // SoC deadline
-  let socDeadlineTicks = TOTAL_TICKS;
-  const energyToDischKwh = (currentSoc - minSoc) / 100 * capKwh;
-  if (energyToDischKwh > 0) {
-    const consumption = Math.max(0, netConsumptionKw);
-    let effectiveKw = maxPowerKw - consumption;
-    if (effectiveKw <= 0) {
-      // house load alone drains battery — no forced discharge needed for SoC
-      effectiveKw = 0;
-    }
-    if (effectiveKw > 0) {
-      const dischHours = energyToDischKwh / effectiveKw;
-      const bufferedHours = dischHours / (1 - HEADROOM);
-      const bufferedTicks = bufferedHours * 3600 / TICK_S;
-      socDeadlineTicks = remainingTicks - bufferedTicks;
+  // SoC deadline — how long to drain to min at max power
+  let socDL = TOTAL_TICKS;
+  const energy = (soc - MIN_SOC) / 100 * CAP_KWH;
+  if (energy > 0) {
+    const cons = Math.max(0, consumption);
+    let eff = maxKw - cons;
+    if (eff <= 0) eff = 0;
+    if (eff > 0) {
+      const hrs = energy / eff / (1 - HEADROOM);
+      socDL = remainTicks - hrs * 3600 / TICK_S;
     }
   }
 
-  // Feed-in energy deadline (use doubled headroom)
-  let feedinDeadlineTicks = TOTAL_TICKS;
-  if (feedinLimitKwh != null && feedinLimitKwh > 0) {
-    const consumption = Math.max(0, netConsumptionKw);
-    let effectiveExportKw = maxPowerKw - consumption;
-    if (effectiveExportKw <= 0) {
-      effectiveExportKw = maxPowerKw * 0.1;
-    }
-    const feedinHours = feedinLimitKwh / effectiveExportKw;
-    const bufferedHours = feedinHours / (1 - FEEDIN_HEADROOM);
-    const bufferedTicks = bufferedHours * 3600 / TICK_S;
-    feedinDeadlineTicks = remainingTicks - bufferedTicks;
+  // Feed-in deadline — use peak for conservative export rate estimate
+  let feedDL = TOTAL_TICKS;
+  if (feedinRemKwh != null && feedinRemKwh > 0) {
+    const peakClamped = Math.max(Math.max(0, consumption), peakCons || 0);
+    let effExport = maxKw - peakClamped;
+    if (effExport <= 0) effExport = maxKw * 0.1;
+    const hrs = feedinRemKwh / effExport / (1 - FEEDIN_HEADROOM);
+    feedDL = remainTicks - hrs * 3600 / TICK_S;
   }
 
-  return Math.max(0, Math.min(socDeadlineTicks, feedinDeadlineTicks));
+  return Math.max(0, Math.min(socDL, feedDL));
 }
 
-// ── Algorithm: calculate_discharge_power ───────────────────────────
-function calcDischargePower(currentSoc, minSoc, capKwh, remainingH,
-                             maxPowerW, netConsumptionKw, feedinRemainingKwh) {
-  let energyKwh = (currentSoc - minSoc) / 100 * capKwh;
-  if (energyKwh <= 0) return 100;
-  if (remainingH <= 0) return maxPowerW;
+// ── Discharge power (priority-weighted) ────────────────────────────
+function calcDischargePower(soc, remainH, consumption, peakCons, feedinRemKwh) {
+  let energy = (soc - MIN_SOC) / 100 * CAP_KWH;
+  if (energy <= 0) return 100;
+  if (remainH <= 0) return MAX_POWER_W;
 
-  if (feedinRemainingKwh != null && feedinRemainingKwh >= 0 && remainingH > 0) {
-    const houseAbsorptionKwh = Math.max(0, netConsumptionKw) * remainingH;
-    const maxDrainKwh = feedinRemainingKwh + houseAbsorptionKwh;
-    if (maxDrainKwh < energyKwh) {
-      energyKwh = maxDrainKwh;
-      if (energyKwh <= 0) return 100;
+  const cons = Math.max(0, consumption);
+  const peak = Math.max(cons, peakCons || 0);
+
+  // Safety floor: peak × safety factor — prevents import even during spikes
+  const safetyFloorW = Math.round(peak * SAFETY_FACTOR * 1000);
+
+  // Feed-in energy cap
+  if (feedinRemKwh != null && feedinRemKwh >= 0 && remainH > 0) {
+    const houseKwh = cons * remainH;
+    const maxDrain = feedinRemKwh + houseKwh;
+    if (maxDrain < energy) {
+      energy = maxDrain;
+      if (energy <= 0) {
+        // Only need to cover house, no export needed
+        return (safetyFloorW > 0 && safetyFloorW <= MAX_POWER_W)
+          ? Math.max(100, safetyFloorW)
+          : 100;
+      }
     }
   }
 
-  let effectiveH = remainingH * (1 - HEADROOM);
-  if (effectiveH <= 0) effectiveH = remainingH;
-  let powerKw = energyKwh / effectiveH;
-  powerKw -= Math.max(0, netConsumptionKw);
-  powerKw *= (1 + HEADROOM);
-  let powerW = powerKw * 1000;
+  // Paced rate
+  let effH = remainH * (1 - HEADROOM);
+  if (effH <= 0) effH = remainH;
+  let pacedKw = energy / effH;
+  pacedKw -= cons;
+  pacedKw *= (1 + HEADROOM);
+  let powerW = pacedKw * 1000;
 
-  // Floor at house consumption to prevent grid import.
-  // Skip when consumption exceeds inverter capacity (unavoidable).
-  const consumptionW = Math.max(0, netConsumptionKw) * 1000;
-  if (consumptionW > 0 && consumptionW <= maxPowerW) {
-    powerW = Math.max(powerW, consumptionW);
+  // Apply safety floor (P1 — highest priority)
+  if (safetyFloorW > 0 && safetyFloorW <= MAX_POWER_W) {
+    powerW = Math.max(powerW, safetyFloorW);
   }
 
-  return Math.max(100, Math.min(Math.round(powerW), maxPowerW));
+  return Math.max(100, Math.min(Math.round(powerW), MAX_POWER_W));
 }
 
-// ── Run one scenario ───────────────────────────────────────────────
-function simulate(initSoc, loadFn, { noDefer = false } = {}) {
+// ── Old algorithm (for comparison) ─────────────────────────────────
+function calcDischargePowerOLD(soc, remainH, consumption, feedinRemKwh) {
+  let energy = (soc - MIN_SOC) / 100 * CAP_KWH;
+  if (energy <= 0) return 100;
+  if (remainH <= 0) return MAX_POWER_W;
+  const cons = Math.max(0, consumption);
+  if (feedinRemKwh != null && feedinRemKwh >= 0 && remainH > 0) {
+    const houseKwh = cons * remainH;
+    const maxDrain = feedinRemKwh + houseKwh;
+    if (maxDrain < energy) { energy = maxDrain; if (energy <= 0) return 100; }
+  }
+  let effH = remainH * (1 - HEADROOM);
+  if (effH <= 0) effH = remainH;
+  let kw = energy / effH;
+  kw -= cons;
+  if (kw <= 0) return 100;
+  kw *= (1 + HEADROOM);
+  return Math.max(100, Math.min(Math.round(kw * 1000), MAX_POWER_W));
+}
+
+function calcDeferredStartOLD(soc, remainTicks, consumption, feedinRemKwh) {
+  const maxKw = MAX_POWER_W / 1000;
+  if (maxKw <= 0) return TOTAL_TICKS;
+  let socDL = TOTAL_TICKS;
+  const energy = (soc - MIN_SOC) / 100 * CAP_KWH;
+  if (energy > 0) {
+    const cons = Math.max(0, consumption);
+    let eff = maxKw - cons;
+    if (eff <= 0) eff = 0;
+    if (eff > 0) {
+      const hrs = energy / eff / (1 - HEADROOM);
+      socDL = remainTicks - hrs * 3600 / TICK_S;
+    }
+  }
+  let feedDL = TOTAL_TICKS;
+  if (feedinRemKwh != null && feedinRemKwh > 0) {
+    const cons = Math.max(0, consumption);
+    let effExp = maxKw - cons;
+    if (effExp <= 0) effExp = maxKw * 0.1;
+    const hrs = feedinRemKwh / effExp / (1 - FEEDIN_HEADROOM);
+    feedDL = remainTicks - hrs * 3600 / TICK_S;
+  }
+  return Math.max(0, Math.min(socDL, feedDL));
+}
+
+// ── Simulate ───────────────────────────────────────────────────────
+function simulate(initSoc, loadFn, { useOld = false, noFeedin = false } = {}) {
   let soc = initSoc;
-  let dischargingStarted = false;
-  let cumulativeFeedinKwh = 0;
-  let lastPowerW = 0;
+  let started = false;
+  let feedinKwh = 0;
+  let peakCons = 0;
+  const feedinLimit = noFeedin ? null : FEEDIN_LIMIT;
 
-  const log = {
-    soc: [], dischargePowerKw: [], houseLoadKw: [],
-    gridFlowKw: [], feedinKwh: [], deferred: [],
-  };
-  let gridImportOccurred = false;     // during active phase only
-  let maxGridImportKw = 0;
-  let selfUseImportKwh = 0;           // expected — house load from grid when battery at min
-  let transitionTick = -1;
+  const log = { soc: [], powerKw: [], houseKw: [], gridKw: [], feedinKwh: [],
+                 peakKw: [], safetyFloorKw: [], deferred: [] };
+  let importKwh = 0, maxImportKw = 0, transitionTick = -1;
 
-  for (let tick = 0; tick < TOTAL_TICKS; tick++) {
-    const houseKw = loadFn(tick);
-    const remainingTicks = TOTAL_TICKS - tick;
-    const remainingH = remainingTicks * TICK_S / 3600;
+  for (let t = 0; t < TOTAL_TICKS; t++) {
+    const houseKw = loadFn(t);
+    const remTicks = TOTAL_TICKS - t;
+    const remH = remTicks * TICK_S / 3600;
+    const tickH = TICK_S / 3600;
 
-    let dischPowerW = 0;
-    let gridKw = 0;
+    // Update peak consumption (every tick for simulation accuracy)
+    peakCons = Math.max(houseKw, peakCons * TICK_DECAY);
 
-    if (!dischargingStarted && !noDefer) {
-      // Deferred phase: self-use. Battery serves house load naturally.
-      const availEnergyKwh = (soc - MIN_SOC) / 100 * BATTERY_CAP_KWH;
-      const maxSelfUseKw = Math.min(houseKw, availEnergyKwh / (TICK_S / 3600));
-      const selfUseKwh = maxSelfUseKw * (TICK_S / 3600);
-      soc -= (selfUseKwh / BATTERY_CAP_KWH) * 100;
+    let dischW = 0, gridKw = 0;
 
-      // Grid: if house > battery can provide, grid makes up the difference
-      const shortfall = houseKw - maxSelfUseKw;
-      gridKw = -shortfall; // negative = import
+    if (!started) {
+      // Self-use: battery serves house, no export
+      const availKwh = (soc - MIN_SOC) / 100 * CAP_KWH;
+      const selfUseKw = Math.min(houseKw, availKwh / tickH);
+      soc -= (selfUseKw * tickH / CAP_KWH) * 100;
+      gridKw = -(houseKw - selfUseKw); // negative = import
 
-      // Check if we should transition
-      const feedinRemaining = FEEDIN_LIMIT_KWH - cumulativeFeedinKwh;
-      const deferredTick = calcDeferredStart(
-        soc, MIN_SOC, BATTERY_CAP_KWH, MAX_POWER_W,
-        remainingTicks, houseKw, feedinRemaining > 0 ? feedinRemaining : null
-      );
+      // Check transition
+      const feedRem = feedinLimit != null ? feedinLimit - feedinKwh : null;
+      let deadline;
+      if (useOld) {
+        deadline = calcDeferredStartOLD(soc, remTicks, houseKw, feedRem);
+      } else {
+        deadline = calcDeferredStart(soc, remTicks, houseKw, peakCons, feedRem);
+      }
 
-      if (tick >= deferredTick || soc <= MIN_SOC) {
-        dischargingStarted = true;
-        transitionTick = tick;
-        // Calculate initial paced power
-        const feedinRem = FEEDIN_LIMIT_KWH - cumulativeFeedinKwh;
-        dischPowerW = calcDischargePower(
-          soc, MIN_SOC, BATTERY_CAP_KWH, remainingH,
-          MAX_POWER_W, houseKw, feedinRem > 0 ? feedinRem : null
-        );
-        lastPowerW = dischPowerW;
+      if (t >= deadline || soc <= MIN_SOC) {
+        started = true;
+        transitionTick = t;
+        // Undo self-use drain, apply forced discharge instead
+        soc += (selfUseKw * tickH / CAP_KWH) * 100;
 
-        // Apply discharge this tick
-        const dischKwh = dischPowerW / 1000 * (TICK_S / 3600);
-        soc -= (dischKwh / BATTERY_CAP_KWH) * 100;
-        // Undo the self-use drain we already applied
-        soc += (selfUseKwh / BATTERY_CAP_KWH) * 100;
-
-        // Grid export = discharge - house
-        const exportKw = dischPowerW / 1000 - houseKw;
-        gridKw = exportKw;
-        if (exportKw > 0) {
-          cumulativeFeedinKwh += exportKw * (TICK_S / 3600);
+        const feedRem2 = feedinLimit != null ? feedinLimit - feedinKwh : null;
+        if (useOld) {
+          dischW = calcDischargePowerOLD(soc, remH, houseKw, feedRem2);
+        } else {
+          dischW = calcDischargePower(soc, remH, houseKw, peakCons, feedRem2);
         }
+
+        soc -= (dischW / 1000 * tickH / CAP_KWH) * 100;
+        const expKw = dischW / 1000 - houseKw;
+        gridKw = expKw;
+        if (expKw > 0) feedinKwh += expKw * tickH;
       }
     } else {
-      if (!dischargingStarted) {
-        // noDefer mode: immediately start on first tick
-        dischargingStarted = true;
-        transitionTick = 0;
-      }
-      // Active phase: forced discharge with pacing
-      if (soc <= MIN_SOC) {
-        dischPowerW = 0;
-        gridKw = -houseKw; // grid supplies house
+      // Active phase
+      if (soc <= MIN_SOC || (feedinLimit != null && feedinKwh >= feedinLimit)) {
+        // Goals met or battery empty — self-use
+        const availKwh = Math.max(0, (soc - MIN_SOC) / 100 * CAP_KWH);
+        const selfUseKw = Math.min(houseKw, availKwh / tickH);
+        soc -= (selfUseKw * tickH / CAP_KWH) * 100;
+        gridKw = -(houseKw - selfUseKw);
       } else {
-        const feedinRemaining = FEEDIN_LIMIT_KWH - cumulativeFeedinKwh;
-        const remainH = remainingH;
-
-        dischPowerW = calcDischargePower(
-          soc, MIN_SOC, BATTERY_CAP_KWH, remainH,
-          MAX_POWER_W, houseKw,
-          feedinRemaining > 0 ? feedinRemaining : null
-        );
-
-        // If feedin target already met, stop discharging
-        if (cumulativeFeedinKwh >= FEEDIN_LIMIT_KWH) {
-          dischPowerW = 0;
+        const feedRem = feedinLimit != null ? feedinLimit - feedinKwh : null;
+        if (useOld) {
+          dischW = calcDischargePowerOLD(soc, remH, houseKw, feedRem);
+        } else {
+          dischW = calcDischargePower(soc, remH, houseKw, peakCons, feedRem);
         }
-
-        lastPowerW = dischPowerW;
-        const dischKwh = dischPowerW / 1000 * (TICK_S / 3600);
-        soc -= (dischKwh / BATTERY_CAP_KWH) * 100;
-
-        // Grid: export = discharge - house (house served from discharge)
-        const exportKw = dischPowerW / 1000 - houseKw;
-        gridKw = exportKw;
-        if (exportKw > 0) {
-          cumulativeFeedinKwh += exportKw * (TICK_S / 3600);
-        }
+        soc -= (dischW / 1000 * tickH / CAP_KWH) * 100;
+        const expKw = dischW / 1000 - houseKw;
+        gridKw = expKw;
+        if (expKw > 0) feedinKwh += expKw * tickH;
       }
     }
 
-    if (gridKw < -0.01) {
-      if (dischargingStarted) {
-        gridImportOccurred = true;
-        maxGridImportKw = Math.max(maxGridImportKw, -gridKw);
-      } else {
-        selfUseImportKwh += (-gridKw) * (TICK_S / 3600);
-      }
+    if (gridKw < -0.01 && started) {
+      importKwh += (-gridKw) * tickH;
+      maxImportKw = Math.max(maxImportKw, -gridKw);
     }
 
-    // Clamp SoC
     soc = Math.max(0, Math.min(100, soc));
-
     log.soc.push(soc);
-    log.dischargePowerKw.push(dischPowerW / 1000);
-    log.houseLoadKw.push(houseKw);
-    log.gridFlowKw.push(gridKw);
-    log.feedinKwh.push(cumulativeFeedinKwh);
-    log.deferred.push(!dischargingStarted);
+    log.powerKw.push(dischW / 1000);
+    log.houseKw.push(houseKw);
+    log.gridKw.push(gridKw);
+    log.feedinKwh.push(feedinKwh);
+    log.peakKw.push(peakCons);
+    log.safetyFloorKw.push(peakCons * SAFETY_FACTOR);
+    log.deferred.push(!started);
   }
 
-  return {
-    log, gridImportOccurred, maxGridImportKw, selfUseImportKwh,
-    transitionTick, finalFeedinKwh: cumulativeFeedinKwh, finalSoc: soc,
-  };
+  return { log, importKwh, maxImportKw, transitionTick,
+           finalFeedin: feedinKwh, finalSoc: soc };
 }
 
-// ── Chart drawing ──────────────────────────────────────────────────
-function drawChart(canvas, data, yConfigs, transitionTick) {
-  const ctx = canvas.getContext('2d');
-  const W = canvas.width, H = canvas.height;
-  const pad = { top: 10, right: 12, bottom: 28, left: 44 };
-  const cw = W - pad.left - pad.right;
-  const ch = H - pad.top - pad.bottom;
-
+// ── Chart ──────────────────────────────────────────────────────────
+function drawChart(cvs, configs, transitionTick) {
+  const ctx = cvs.getContext('2d');
+  const W = cvs.width, H = cvs.height;
+  const p = { t: 10, r: 12, b: 28, l: 44 };
+  const cw = W - p.l - p.r, ch = H - p.t - p.b;
   ctx.clearRect(0, 0, W, H);
 
-  // Find global Y range
   let yMin = Infinity, yMax = -Infinity;
-  for (const cfg of yConfigs) {
-    if (cfg.yMin !== undefined) yMin = Math.min(yMin, cfg.yMin);
-    if (cfg.yMax !== undefined) yMax = Math.max(yMax, cfg.yMax);
-    for (const v of cfg.data) {
-      if (v < yMin) yMin = v;
-      if (v > yMax) yMax = v;
-    }
+  for (const c of configs) {
+    if (c.yMin !== undefined) yMin = Math.min(yMin, c.yMin);
+    if (c.yMax !== undefined) yMax = Math.max(yMax, c.yMax);
+    for (const v of c.data) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; }
   }
-  // Add padding
-  const yRange = yMax - yMin || 1;
-  yMin -= yRange * 0.05;
-  yMax += yRange * 0.05;
+  const yr = yMax - yMin || 1;
+  yMin -= yr * 0.05; yMax += yr * 0.05;
 
-  function xPos(i) { return pad.left + (i / (TOTAL_TICKS - 1)) * cw; }
-  function yPos(v) { return pad.top + ch - ((v - yMin) / (yMax - yMin)) * ch; }
+  const xP = (i) => p.l + (i / (TOTAL_TICKS - 1)) * cw;
+  const yP = (v) => p.t + ch - ((v - yMin) / (yMax - yMin)) * ch;
 
-  // Deferred region shading
+  // Deferred shading
   if (transitionTick > 0) {
-    ctx.fillStyle = 'rgba(0, 212, 255, 0.06)';
-    ctx.fillRect(pad.left, pad.top, xPos(transitionTick) - pad.left, ch);
-    // Label
-    ctx.fillStyle = 'rgba(0, 212, 255, 0.4)';
-    ctx.font = '10px sans-serif';
-    ctx.textAlign = 'center';
-    const midX = pad.left + (xPos(transitionTick) - pad.left) / 2;
-    ctx.fillText('self-use', midX, pad.top + 14);
+    ctx.fillStyle = 'rgba(0, 212, 255, 0.05)';
+    ctx.fillRect(p.l, p.t, xP(transitionTick) - p.l, ch);
+    ctx.fillStyle = 'rgba(0, 212, 255, 0.3)';
+    ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('self-use', p.l + (xP(transitionTick) - p.l) / 2, p.t + 14);
   }
 
-  // Zero line if range crosses zero
+  // Zero line
   if (yMin < 0 && yMax > 0) {
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(pad.left, yPos(0));
-    ctx.lineTo(W - pad.right, yPos(0));
-    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]); ctx.beginPath();
+    ctx.moveTo(p.l, yP(0)); ctx.lineTo(W - p.r, yP(0)); ctx.stroke();
     ctx.setLineDash([]);
   }
 
   // Transition line
   if (transitionTick > 0 && transitionTick < TOTAL_TICKS) {
-    ctx.strokeStyle = 'rgba(0, 212, 255, 0.5)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([3, 3]);
-    ctx.beginPath();
-    ctx.moveTo(xPos(transitionTick), pad.top);
-    ctx.lineTo(xPos(transitionTick), pad.top + ch);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(0, 212, 255, 0.4)'; ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]); ctx.beginPath();
+    ctx.moveTo(xP(transitionTick), p.t); ctx.lineTo(xP(transitionTick), p.t + ch);
+    ctx.stroke(); ctx.setLineDash([]);
   }
 
-  // Grid import region highlight (red)
-  for (const cfg of yConfigs) {
-    if (cfg.label === 'Grid') {
-      for (let i = 0; i < cfg.data.length; i++) {
-        if (cfg.data[i] < -0.01) {
-          const x = xPos(i);
-          ctx.fillStyle = 'rgba(255, 60, 60, 0.15)';
-          ctx.fillRect(x - 1, yPos(0), 3, yPos(cfg.data[i]) - yPos(0));
-        }
+  // Import highlighting
+  for (const c of configs) {
+    if (c.label !== 'Grid') continue;
+    for (let i = 0; i < c.data.length; i++) {
+      if (c.data[i] < -0.01) {
+        ctx.fillStyle = 'rgba(255, 60, 60, 0.2)';
+        ctx.fillRect(xP(i) - 1, yP(0), 3, yP(c.data[i]) - yP(0));
       }
     }
   }
 
-  // Draw lines
-  for (const cfg of yConfigs) {
-    ctx.strokeStyle = cfg.color;
-    ctx.lineWidth = cfg.thick ? 2 : 1.5;
-    ctx.globalAlpha = cfg.alpha || 1;
+  // Lines
+  for (const c of configs) {
+    ctx.strokeStyle = c.color; ctx.lineWidth = c.thick ? 2 : 1.2;
+    ctx.globalAlpha = c.alpha || 1;
+    if (c.dash) ctx.setLineDash(c.dash);
     ctx.beginPath();
-    for (let i = 0; i < cfg.data.length; i++) {
-      const x = xPos(i), y = yPos(cfg.data[i]);
+    for (let i = 0; i < c.data.length; i++) {
+      const x = xP(i), y = yP(c.data[i]);
       i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     }
     ctx.stroke();
     ctx.globalAlpha = 1;
-
-    // Fill under for certain lines
-    if (cfg.fill) {
-      ctx.fillStyle = cfg.fill;
-      ctx.lineTo(xPos(cfg.data.length - 1), yPos(0));
-      ctx.lineTo(xPos(0), yPos(0));
-      ctx.closePath();
-      ctx.fill();
-    }
+    ctx.setLineDash([]);
   }
 
   // Axes
-  ctx.strokeStyle = '#333';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(pad.left, pad.top);
-  ctx.lineTo(pad.left, pad.top + ch);
-  ctx.lineTo(W - pad.right, pad.top + ch);
-  ctx.stroke();
+  ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(p.l, p.t); ctx.lineTo(p.l, p.t + ch);
+  ctx.lineTo(W - p.r, p.t + ch); ctx.stroke();
 
   // Y labels
-  ctx.fillStyle = '#888';
-  ctx.font = '10px sans-serif';
-  ctx.textAlign = 'right';
-  const ySteps = 5;
-  for (let i = 0; i <= ySteps; i++) {
-    const v = yMin + (yMax - yMin) * (i / ySteps);
-    const y = yPos(v);
-    ctx.fillText(v.toFixed(1), pad.left - 4, y + 3);
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-    ctx.beginPath();
-    ctx.moveTo(pad.left, y);
-    ctx.lineTo(W - pad.right, y);
-    ctx.stroke();
+  ctx.fillStyle = '#777'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+  for (let i = 0; i <= 5; i++) {
+    const v = yMin + (yMax - yMin) * i / 5;
+    ctx.fillText(v.toFixed(1), p.l - 4, yP(v) + 3);
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.beginPath();
+    ctx.moveTo(p.l, yP(v)); ctx.lineTo(W - p.r, yP(v)); ctx.stroke();
   }
 
-  // X labels (time)
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#888';
-  for (let h = WINDOW_START_H; h <= WINDOW_END_H; h++) {
-    const tick = (h - WINDOW_START_H) * 3600 / TICK_S;
-    const x = xPos(Math.min(tick, TOTAL_TICKS - 1));
-    ctx.fillText(`${h}:00`, x, H - 4);
+  // X labels
+  ctx.textAlign = 'center'; ctx.fillStyle = '#777';
+  for (let h = W_START; h <= W_END; h++) {
+    const t = (h - W_START) * 3600 / TICK_S;
+    ctx.fillText(`${h}:00`, xP(Math.min(t, TOTAL_TICKS - 1)), H - 4);
   }
-  // Half hours
-  for (let h = WINDOW_START_H; h < WINDOW_END_H; h++) {
-    const tick = (h - WINDOW_START_H + 0.5) * 3600 / TICK_S;
-    const x = xPos(tick);
-    ctx.fillStyle = '#555';
-    ctx.fillText(`${h}:30`, x, H - 4);
+  for (let h = W_START; h < W_END; h++) {
+    ctx.fillStyle = '#444';
+    ctx.fillText(`${h}:30`, xP((h - W_START + 0.5) * 3600 / TICK_S), H - 4);
+    ctx.fillStyle = '#777';
   }
 }
 
-// ── Render scenarios ───────────────────────────────────────────────
-const scenarios = [
+// ── Priority scoreboard ────────────────────────────────────────────
+function prioBoard(r) {
+  const hasImport = r.maxImportKw > 0.05;
+  const importSev = r.importKwh > 0.5 ? 'fail' : r.maxImportKw > 0.05 ? 'warn' : 'ok';
+  const socOk = r.finalSoc >= MIN_SOC - 0.5;
+  const feedOk = r.finalFeedin >= FEEDIN_LIMIT * 0.95;
+  const feedPart = r.finalFeedin >= FEEDIN_LIMIT * 0.5;
+  const feedPct = FEEDIN_LIMIT > 0 ? Math.round(r.finalFeedin / FEEDIN_LIMIT * 100) : 100;
+
+  return `<div class="prio-board">
+    <div class="prio-cell prio-${importSev}">
+      <div class="prio-label" style="color:#f44336">P1 Import</div>
+      <div class="prio-val">${hasImport ? r.maxImportKw.toFixed(1) + ' kW' : 'None ✓'}</div>
+    </div>
+    <div class="prio-cell prio-${socOk ? 'ok' : 'fail'}">
+      <div class="prio-label" style="color:#ff9800">P2 Min SoC</div>
+      <div class="prio-val">${r.finalSoc.toFixed(0)}% ${socOk ? '✓' : '✗'}</div>
+    </div>
+    <div class="prio-cell prio-${feedOk ? 'ok' : feedPart ? 'warn' : 'fail'}">
+      <div class="prio-label" style="color:#4caf50">P3 Target</div>
+      <div class="prio-val">${r.finalFeedin.toFixed(1)} kWh (${feedPct}%)</div>
+    </div>
+    <div class="prio-cell prio-ok">
+      <div class="prio-label" style="color:#2196f3">P4 Feed-in</div>
+      <div class="prio-val">${r.finalFeedin.toFixed(1)} kWh</div>
+    </div>
+  </div>`;
+}
+
+// ── Build scenario card ────────────────────────────────────────────
+function buildCard(sc, r, isComparison) {
+  const div = document.createElement('div');
+  div.className = 'scenario' + (isComparison ? ' comparison' : '');
+
+  const tMin = r.transitionTick >= 0 ? Math.round(r.transitionTick * TICK_S / 60) : -1;
+  const tTime = r.transitionTick >= 0 ? `${W_START}:${String(tMin).padStart(2, '0')}` : '—';
+
+  const pcvs = document.createElement('canvas');
+  pcvs.width = 600; pcvs.height = 200;
+  const scvs = document.createElement('canvas');
+  scvs.width = 600; scvs.height = 160;
+
+  div.innerHTML = `<h3>${sc.title}</h3><p class="desc">${sc.desc}</p>`;
+  div.innerHTML += `<div class="chart-label">Power (kW) — discharge, house, grid, safety floor</div>`;
+  div.appendChild(pcvs);
+  div.innerHTML += `<div class="chart-label">SoC (%) · cumulative feed-in (kWh) · peak consumption (kW)</div>`;
+  div.appendChild(scvs);
+
+  // Legend
+  const leg = document.createElement('div');
+  leg.className = 'legend';
+  const items = [
+    ['#ff9800', 'Discharge'], ['#e91e63', 'House'],
+    ['#4caf50', 'Export'], ['#f44336', 'Import'],
+    ['#00bcd4', 'SoC'], ['#ffc107', 'Feed-in'],
+    ['rgba(255,0,0,0.5)', 'Safety floor'],
+    ['rgba(0,212,255,0.2)', 'Self-use'],
+  ];
+  for (const [c, l] of items) {
+    leg.innerHTML += `<div class="legend-item"><div class="legend-dot" style="background:${c}"></div>${l}</div>`;
+  }
+  div.appendChild(leg);
+
+  // Stats
+  const s = document.createElement('div');
+  s.className = 'stats';
+  s.innerHTML = `
+    <div class="stat"><div class="val">${tTime}</div><div class="lbl">Transition</div></div>
+    <div class="stat"><div class="val">${r.finalFeedin.toFixed(1)} kWh</div><div class="lbl">Feed-in</div></div>
+    <div class="stat"><div class="val">${r.finalSoc.toFixed(0)}%</div><div class="lbl">Final SoC</div></div>
+    <div class="stat"><div class="val" style="color:${r.maxImportKw > 0.05 ? '#f44336' : '#4caf50'}">${r.importKwh > 0.001 ? r.importKwh.toFixed(2) + ' kWh' : 'None'}</div><div class="lbl">Import total</div></div>
+  `;
+  div.appendChild(s);
+  div.innerHTML += prioBoard(r);
+
+  // Draw charts
+  const powerCfg = [
+    { data: r.log.powerKw, color: '#ff9800', label: 'Discharge', thick: true },
+    { data: r.log.houseKw, color: '#e91e63', label: 'House', alpha: 0.7 },
+    { data: r.log.gridKw, color: '#4caf50', label: 'Grid' },
+    { data: r.log.safetyFloorKw, color: 'rgba(255,80,80,0.5)', label: 'Floor', dash: [4, 4] },
+  ];
+  drawChart(pcvs, powerCfg, r.transitionTick);
+
+  const socCfg = [
+    { data: r.log.soc, color: '#00bcd4', label: 'SoC', thick: true, yMin: 0, yMax: 100 },
+    { data: r.log.feedinKwh, color: '#ffc107', label: 'Feed-in' },
+    { data: r.log.peakKw, color: 'rgba(255,80,80,0.4)', label: 'Peak' },
+  ];
+  drawChart(scvs, socCfg, r.transitionTick);
+
+  return div;
+}
+
+// ── Scenarios ──────────────────────────────────────────────────────
+const sections = [
   {
-    title: '1. High SoC, low steady load',
-    desc: 'SoC 90% | House 0.5 kW steady — easy case, plenty of energy and export headroom',
-    initSoc: 90, loadFn: steadyLoad(0.5),
+    heading: 'Standard scenarios — priority-weighted algorithm',
+    scenarios: [
+      { title: '1. High SoC, low steady load',
+        desc: 'SoC 90% | 0.5 kW — easy case, pacing dominates, floor is minimal',
+        soc: 90, load: steady(0.5) },
+      { title: '2. High SoC, moderate steady load',
+        desc: 'SoC 90% | 2 kW — safety floor raises minimum discharge power',
+        soc: 90, load: steady(2) },
+      { title: '3. High SoC, high steady load',
+        desc: 'SoC 90% | 5 kW — floor at 7.5 kW, significant export reduction but zero import',
+        soc: 90, load: steady(5) },
+      { title: '4. Medium SoC, low load',
+        desc: 'SoC 60% | 0.5 kW — limited energy above min SoC',
+        soc: 60, load: steady(0.5) },
+      { title: '5. High SoC, bursty load (EV charger)',
+        desc: 'SoC 90% | 0.5 kW base + 7 kW spikes q10 min (3 min) — peak tracking elevates floor',
+        soc: 90, load: bursty(0.5, 7, 10, 3) },
+      { title: '6. High SoC, extreme bursty (near inverter limit)',
+        desc: 'SoC 90% | 0.5 kW base + 12 kW spikes q15 min (5 min) — floor near max power',
+        soc: 90, load: bursty(0.5, 12, 15, 5) },
+      { title: '7. Medium SoC, moderate bursty',
+        desc: 'SoC 55% | 1 kW + 5 kW spikes q8 min (2 min) — energy-constrained with spikes',
+        soc: 55, load: bursty(1, 5, 8, 2) },
+      { title: '8. Ramping load',
+        desc: 'SoC 85% | 0.5→6 kW ramp — floor rises as consumption grows',
+        soc: 85, load: ramp(0.5, 6) },
+      { title: '9. Low SoC (SoC-constrained)',
+        desc: 'SoC 45% | 1 kW — may not reach feed-in target (not enough energy)',
+        soc: 45, load: steady(1) },
+      { title: '10. No feed-in limit, only SoC goal',
+        desc: 'SoC 80% | 2 kW — drain to min SoC, no feed-in target',
+        soc: 80, load: steady(2), noFeedin: true },
+    ],
   },
   {
-    title: '2. High SoC, moderate steady load',
-    desc: 'SoC 90% | House 2 kW steady — house eats into export capacity',
-    initSoc: 90, loadFn: steadyLoad(2),
-  },
-  {
-    title: '3. High SoC, high steady load',
-    desc: 'SoC 90% | House 5 kW steady — significant export reduction, tests headroom',
-    initSoc: 90, loadFn: steadyLoad(5),
-  },
-  {
-    title: '4. Medium SoC, low load',
-    desc: 'SoC 60% | House 0.5 kW steady — limited energy budget above min SoC',
-    initSoc: 60, loadFn: steadyLoad(0.5),
-  },
-  {
-    title: '5. High SoC, bursty load (EV charger) — DEFERRED',
-    desc: 'SoC 90% | 0.5 kW base + 7 kW spikes every 10 min (3 min duration) — deferred approach',
-    initSoc: 90, loadFn: burstyLoad(0.5, 7, 10, 3),
-  },
-  {
-    title: '5b. Same bursty load — OLD PACING (no deferral)',
-    desc: 'SoC 90% | Same load profile — immediate ForceDischarge with pacing. Compare grid import!',
-    initSoc: 90, loadFn: burstyLoad(0.5, 7, 10, 3), noDefer: true,
-  },
-  {
-    title: '6. Medium SoC, bursty load',
-    desc: 'SoC 55% | 1 kW base + 5 kW spikes every 8 min (2 min duration)',
-    initSoc: 55, loadFn: burstyLoad(1, 5, 8, 2),
-  },
-  {
-    title: '7. High SoC, ramping load',
-    desc: 'SoC 85% | Load ramps 0.5 kW → 6 kW over the window',
-    initSoc: 85, loadFn: rampLoad(0.5, 6),
-  },
-  {
-    title: '8. Low SoC (SoC-constrained)',
-    desc: 'SoC 45% | House 1 kW — may not reach feed-in target due to min SoC',
-    initSoc: 45, loadFn: steadyLoad(1),
-  },
-  {
-    title: '9. High SoC, extreme bursty — DEFERRED',
-    desc: 'SoC 90% | 0.5 kW base + 12 kW spikes every 15 min (5 min). Tests near-inverter-limit spikes',
-    initSoc: 90, loadFn: burstyLoad(0.5, 12, 15, 5),
-  },
-  {
-    title: '9b. Same extreme bursty — OLD PACING',
-    desc: 'SoC 90% | Same profile — pacing at ~5kW means 12kW spike causes 7kW grid import',
-    initSoc: 90, loadFn: burstyLoad(0.5, 12, 15, 5), noDefer: true,
+    heading: 'Comparison — new (peak-tracked) vs old (instantaneous floor)',
+    scenarios: [
+      { title: '5-NEW. Bursty (EV charger) — peak-tracked floor',
+        desc: 'New algorithm: peak tracking raises floor above spike level during active phase',
+        soc: 90, load: bursty(0.5, 7, 10, 3) },
+      { title: '5-OLD. Bursty (EV charger) — old instantaneous floor',
+        desc: 'Old algorithm: floor only at current consumption — imports during spikes',
+        soc: 90, load: bursty(0.5, 7, 10, 3), useOld: true },
+      { title: '6-NEW. Extreme bursty — peak-tracked floor',
+        desc: 'New: peak at 12kW → floor ≈18kW clamped to 15kW → zero import',
+        soc: 90, load: bursty(0.5, 12, 15, 5) },
+      { title: '6-OLD. Extreme bursty — old instantaneous floor',
+        desc: 'Old: floor at 0.5kW during base → 12kW spike causes massive import',
+        soc: 90, load: bursty(0.5, 12, 15, 5), useOld: true },
+      { title: '3-NEW. High steady load — peak-tracked',
+        desc: 'New: safety floor at 7.5kW, always above house load',
+        soc: 90, load: steady(5) },
+      { title: '3-OLD. High steady load — old instantaneous',
+        desc: 'Old: floor at 5kW, exactly at house load — any fluctuation causes import',
+        soc: 90, load: steady(5), useOld: true },
+    ],
   },
 ];
 
-const container = document.getElementById('scenarios');
+const root = document.getElementById('scenarios');
 
-for (const sc of scenarios) {
-  const result = simulate(sc.initSoc, sc.loadFn, { noDefer: sc.noDefer || false });
-  const { log, gridImportOccurred, maxGridImportKw, selfUseImportKwh,
-          transitionTick, finalFeedinKwh, finalSoc } = result;
+for (const section of sections) {
+  const h = document.createElement('h2');
+  h.textContent = section.heading;
+  root.appendChild(h);
 
-  const div = document.createElement('div');
-  div.className = 'scenario' + (sc.noDefer ? ' old-approach' : '');
+  const grid = document.createElement('div');
+  grid.className = 'grid';
+  root.appendChild(grid);
 
-  const transitionMin = transitionTick >= 0 ? (transitionTick * TICK_S / 60) : -1;
-  const transitionTime = transitionTick >= 0
-    ? `${WINDOW_START_H}:${String(Math.round(transitionMin)).padStart(2, '0')}`
-    : 'never';
-
-  // Power chart
-  const powerCanvas = document.createElement('canvas');
-  powerCanvas.width = 600; powerCanvas.height = 200;
-
-  // SoC + feedin chart
-  const socCanvas = document.createElement('canvas');
-  socCanvas.width = 600; socCanvas.height = 160;
-
-  div.innerHTML = `<h3>${sc.title}</h3><p class="desc">${sc.desc}</p>`;
-
-  const powerLabel = document.createElement('div');
-  powerLabel.style.cssText = 'color:#666; font-size:0.7em; margin-top:6px;';
-  powerLabel.textContent = 'Power (kW) — discharge, house load, grid flow';
-  div.appendChild(powerLabel);
-  div.appendChild(powerCanvas);
-
-  const socLabel = document.createElement('div');
-  socLabel.style.cssText = 'color:#666; font-size:0.7em; margin-top:6px;';
-  socLabel.textContent = 'SoC (%) and cumulative feed-in (kWh)';
-  div.appendChild(socLabel);
-  div.appendChild(socCanvas);
-
-  // Legend
-  const legend = document.createElement('div');
-  legend.className = 'legend';
-  const items = [
-    ['#ff9800', 'Discharge'], ['#e91e63', 'House load'],
-    ['#4caf50', 'Grid export'], ['#f44336', 'Grid import'],
-    ['#00bcd4', 'SoC %'], ['#ffc107', 'Feed-in kWh'],
-    ['rgba(0,212,255,0.2)', 'Self-use phase'],
-  ];
-  for (const [c, l] of items) {
-    legend.innerHTML += `<div class="legend-item"><div class="legend-dot" style="background:${c}"></div>${l}</div>`;
+  for (const sc of section.scenarios) {
+    const r = simulate(sc.soc, sc.load, {
+      useOld: sc.useOld || false,
+      noFeedin: sc.noFeedin || false,
+    });
+    grid.appendChild(buildCard(sc, r, sc.useOld || false));
   }
-  div.appendChild(legend);
-
-  // Stats
-  const statsDiv = document.createElement('div');
-  statsDiv.className = 'stats';
-  statsDiv.innerHTML = `
-    <div class="stat"><div class="val">${transitionTime}</div><div class="lbl">Transition</div></div>
-    <div class="stat"><div class="val">${finalFeedinKwh.toFixed(2)}</div><div class="lbl">Feed-in kWh</div></div>
-    <div class="stat"><div class="val">${finalSoc.toFixed(1)}%</div><div class="lbl">Final SoC</div></div>
-    <div class="stat"><div class="val" style="color:${gridImportOccurred ? '#f44336' : '#4caf50'}">${gridImportOccurred ? maxGridImportKw.toFixed(2) + ' kW' : 'None'}</div><div class="lbl">Active-phase import</div></div>
-  `;
-  div.appendChild(statsDiv);
-
-  // Result summary
-  const resultDiv = document.createElement('div');
-  const feedinMet = finalFeedinKwh >= FEEDIN_LIMIT_KWH * 0.98;
-  const socOk = finalSoc >= MIN_SOC - 0.5;
-  const allGood = !gridImportOccurred && feedinMet && socOk;
-  const partial = !feedinMet && finalSoc <= MIN_SOC + 1;
-  resultDiv.className = `result ${allGood || partial ? 'ok' : 'fail'}`;
-
-  let msg = '';
-  if (allGood) {
-    msg = `Target met: ${finalFeedinKwh.toFixed(1)} kWh exported, SoC ${finalSoc.toFixed(1)}%, no grid import.`;
-  } else if (partial) {
-    msg = `SoC-constrained: only ${finalFeedinKwh.toFixed(1)} / ${FEEDIN_LIMIT_KWH} kWh exported (battery hit min SoC). Expected.`;
-  } else {
-    const issues = [];
-    if (gridImportOccurred) issues.push(`grid import ${maxGridImportKw.toFixed(2)} kW`);
-    if (!feedinMet) issues.push(`feed-in short: ${finalFeedinKwh.toFixed(1)} / ${FEEDIN_LIMIT_KWH} kWh`);
-    if (!socOk) issues.push(`SoC ${finalSoc.toFixed(1)}% below min ${MIN_SOC}%`);
-    msg = `Issues: ${issues.join(', ')}`;
-  }
-  resultDiv.textContent = msg;
-  div.appendChild(resultDiv);
-
-  container.appendChild(div);
-
-  // Draw charts
-  drawChart(powerCanvas, log, [
-    { data: log.dischargePowerKw, color: '#ff9800', label: 'Discharge', thick: true },
-    { data: log.houseLoadKw, color: '#e91e63', label: 'House', alpha: 0.7 },
-    { data: log.gridFlowKw, color: '#4caf50', label: 'Grid',
-      fill: 'rgba(76, 175, 80, 0.08)' },
-  ], transitionTick);
-
-  drawChart(socCanvas, log, [
-    { data: log.soc, color: '#00bcd4', label: 'SoC', thick: true, yMin: 0, yMax: 100 },
-    { data: log.feedinKwh, color: '#ffc107', label: 'Feed-in' },
-  ], transitionTick);
 }
 </script>
 </body>

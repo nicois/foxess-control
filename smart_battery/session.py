@@ -110,6 +110,7 @@ def session_data_from_discharge_state(state: dict[str, Any]) -> dict[str, Any]:
     data["discharging_started"] = state.get("discharging_started", True)
     started_at = state.get("discharging_started_at")
     data["discharging_started_at"] = started_at.isoformat() if started_at else None
+    data["consumption_peak_kw"] = state.get("consumption_peak_kw", 0.0)
     return data
 
 

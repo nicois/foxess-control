@@ -49,6 +49,9 @@ from .coordinator import (
 )
 from .foxess import FoxESSClient, Inverter, WorkMode
 from .smart_battery.algorithms import (
+    PEAK_DECAY_PER_TICK,
+)
+from .smart_battery.algorithms import (
     calculate_charge_power as _calculate_charge_power,
 )
 from .smart_battery.algorithms import (
@@ -1185,12 +1188,20 @@ def _setup_smart_discharge_listeners(
         if cur_state is None or cur_state.get("session_id") != my_session_id:
             return
 
+        # --- Update peak consumption tracker ---
+        current_consumption = max(0.0, _get_net_consumption(hass))
+        old_peak = cur_state.get("consumption_peak_kw", 0.0)
+        cur_state["consumption_peak_kw"] = max(
+            current_consumption, old_peak * PEAK_DECAY_PER_TICK
+        )
+
         # --- Deferred self-use phase ---
         if not cur_state.get("discharging_started", True):
             soc_value = _get_current_soc(hass)
             if soc_value is not None and soc_value > cur_state["min_soc"]:
                 now_dt = dt_util.now()
                 taper = hass.data.get(DOMAIN, {}).get("_taper_profile")
+                peak = cur_state.get("consumption_peak_kw", 0.0)
                 deferred = _calculate_discharge_deferred_start(
                     soc_value,
                     cur_state["min_soc"],
@@ -1201,13 +1212,16 @@ def _setup_smart_discharge_listeners(
                     headroom=_get_smart_headroom(hass),
                     taper_profile=taper,
                     feedin_energy_limit_kwh=cur_state.get("feedin_energy_limit_kwh"),
+                    consumption_peak_kw=peak,
                 )
                 if now_dt < deferred:
                     _LOGGER.debug(
-                        "Smart discharge: deferring until ~%02d:%02d (SoC=%.1f%%)",
+                        "Smart discharge: deferring until ~%02d:%02d "
+                        "(SoC=%.1f%%, peak=%.2fkW)",
                         deferred.hour,
                         deferred.minute,
                         soc_value,
+                        peak,
                     )
                     return
 
@@ -1221,6 +1235,7 @@ def _setup_smart_discharge_listeners(
                     cur_state["max_power_w"],
                     net_consumption_kw=_get_net_consumption(hass),
                     headroom=_get_smart_headroom(hass),
+                    consumption_peak_kw=peak,
                 )
                 api_min_soc = _get_api_min_soc(hass)
                 if _is_entity_mode(hass):
@@ -1388,6 +1403,7 @@ def _setup_smart_discharge_listeners(
             remaining_h = (cur_state["end"] - now_dt).total_seconds() / 3600.0
             net_consumption = _get_net_consumption(hass)
             headroom = _get_smart_headroom(hass)
+            peak = cur_state.get("consumption_peak_kw", 0.0)
 
             # --- Suspend / resume ---
             # If house consumption alone would drain to min SoC within
@@ -1399,15 +1415,17 @@ def _setup_smart_discharge_listeners(
                 remaining_h,
                 net_consumption,
                 headroom=headroom,
+                consumption_peak_kw=peak,
             )
             was_suspended = cur_state.get("suspended", False)
 
             if should_suspend and not was_suspended:
                 _LOGGER.info(
                     "Smart discharge: suspending — house consumption "
-                    "(%.2f kW) would breach min SoC %d%% "
+                    "(%.2f kW, peak %.2f kW) would breach min SoC %d%% "
                     "(SoC=%.1f%%, remaining=%.2fh)",
                     net_consumption,
+                    peak,
                     cur_state["min_soc"],
                     soc_value,
                     remaining_h,
@@ -1445,6 +1463,7 @@ def _setup_smart_discharge_listeners(
                     net_consumption_kw=net_consumption,
                     headroom=headroom,
                     feedin_remaining_kwh=feedin_remaining_for_pacing,
+                    consumption_peak_kw=peak,
                 )
                 min_change = cur_state.get("min_power_change", DEFAULT_MIN_POWER_CHANGE)
                 power_delta = abs(new_power - cur_state["last_power_w"])
@@ -1794,6 +1813,7 @@ async def _recover_discharge_session(
                     feedin_remaining = feedin_limit - (feedin_now - feedin_start)
                 else:
                     feedin_remaining = feedin_limit
+            recovered_peak = discharge_data.get("consumption_peak_kw", 0.0)
             if current_soc is not None and remaining_h > 0:
                 recovered_power = _calculate_discharge_power(
                     current_soc,
@@ -1804,6 +1824,7 @@ async def _recover_discharge_session(
                     net_consumption_kw=_get_net_consumption(hass),
                     headroom=_get_smart_headroom(hass),
                     feedin_remaining_kwh=feedin_remaining,
+                    consumption_peak_kw=recovered_peak,
                 )
 
         hass.data[DOMAIN]["_smart_discharge_state"] = {
@@ -1830,6 +1851,7 @@ async def _recover_discharge_session(
                 if discharge_data.get("discharging_started_at")
                 else None
             ),
+            "consumption_peak_kw": discharge_data.get("consumption_peak_kw", 0.0),
         }
         _setup_smart_discharge_listeners(hass, inverter)
     else:
@@ -2490,6 +2512,7 @@ def _register_services(hass: HomeAssistant) -> None:
             "pacing_enabled": pacing_enabled,
             "discharging_started": not should_defer,
             "discharging_started_at": None if should_defer else now,
+            "consumption_peak_kw": max(0.0, net_consumption),
         }
 
         _setup_smart_discharge_listeners(hass, inverter)

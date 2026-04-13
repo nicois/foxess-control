@@ -405,6 +405,7 @@ def register_services(
             "start_soc": current_soc,
             "discharging_started": not should_defer,
             "discharging_started_at": None if should_defer else now,
+            "consumption_peak_kw": max(0.0, net_consumption),
         }
 
         setup_smart_discharge_listeners(hass, domain, adapter)

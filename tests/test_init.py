@@ -1559,12 +1559,12 @@ class TestCalculateDischargePower:
         assert with_load < base
 
     def test_consumption_exceeds_needed_floors_at_consumption(self) -> None:
-        # House load exceeds paced rate → floor at consumption to prevent
-        # grid import (discharge covers house load, net export = 0)
+        # House load exceeds paced rate → safety floor at consumption × 1.5
+        # to prevent grid import with margin for inter-poll spikes
         result = _calculate_discharge_power(
             20.0, 10, 10.0, 2.0, 10000, net_consumption_kw=5.0
         )
-        assert result == 5000
+        assert result == 7500  # 5kW × 1.5 safety factor
 
     def test_negative_consumption_ignored(self) -> None:
         # Solar surplus → net negative; should not increase discharge power
@@ -1666,7 +1666,7 @@ class TestDischargePowerFeedinConstraint:
             net_consumption_kw=1.5,
             feedin_remaining_kwh=0.0,
         )
-        assert result == 1500  # floored at house consumption to prevent import
+        assert result == 2250  # floored at consumption × 1.5 safety factor
         unconstrained = _calculate_discharge_power(
             80.0,
             10,

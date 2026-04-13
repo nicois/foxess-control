@@ -19,6 +19,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from .algorithms import (
+    PEAK_DECAY_PER_TICK,
     calculate_charge_power,
     calculate_deferred_start,
     calculate_discharge_deferred_start,
@@ -502,12 +503,20 @@ def setup_smart_discharge_listeners(
         if cur_state is None or cur_state.get("session_id") != my_session_id:
             return
 
+        # --- Update peak consumption tracker ---
+        current_consumption = max(0.0, _get_net_consumption(hass, domain))
+        old_peak = cur_state.get("consumption_peak_kw", 0.0)
+        cur_state["consumption_peak_kw"] = max(
+            current_consumption, old_peak * PEAK_DECAY_PER_TICK
+        )
+
         # --- Deferred self-use phase ---
         if not cur_state.get("discharging_started", True):
             soc_value = _get_current_soc(hass, domain)
             if soc_value is not None and soc_value > cur_state["min_soc"]:
                 now_dt = dt_util.now()
                 taper = _get_taper_profile(hass, domain)
+                peak = cur_state.get("consumption_peak_kw", 0.0)
                 deferred = calculate_discharge_deferred_start(
                     soc_value,
                     cur_state["min_soc"],
@@ -518,13 +527,16 @@ def setup_smart_discharge_listeners(
                     headroom=_get_smart_headroom(hass, domain),
                     taper_profile=taper,
                     feedin_energy_limit_kwh=cur_state.get("feedin_energy_limit_kwh"),
+                    consumption_peak_kw=peak,
                 )
                 if now_dt < deferred:
                     _LOGGER.debug(
-                        "Smart discharge: deferring until ~%02d:%02d (SoC=%.1f%%)",
+                        "Smart discharge: deferring until ~%02d:%02d "
+                        "(SoC=%.1f%%, peak=%.2fkW)",
                         deferred.hour,
                         deferred.minute,
                         soc_value,
+                        peak,
                     )
                     return
 
@@ -538,6 +550,7 @@ def setup_smart_discharge_listeners(
                     cur_state["max_power_w"],
                     net_consumption_kw=_get_net_consumption(hass, domain),
                     headroom=_get_smart_headroom(hass, domain),
+                    consumption_peak_kw=peak,
                 )
                 await adapter.apply_mode(
                     hass,
@@ -672,6 +685,7 @@ def setup_smart_discharge_listeners(
             remaining_h = (cur_state["end"] - now_dt).total_seconds() / 3600.0
             net_consumption = _get_net_consumption(hass, domain)
             headroom = _get_smart_headroom(hass, domain)
+            peak = cur_state.get("consumption_peak_kw", 0.0)
 
             # --- Suspend / resume ---
             should_suspend_now = remaining_h > 0 and should_suspend_discharge(
@@ -681,15 +695,17 @@ def setup_smart_discharge_listeners(
                 remaining_h,
                 net_consumption,
                 headroom=headroom,
+                consumption_peak_kw=peak,
             )
             was_suspended = cur_state.get("suspended", False)
 
             if should_suspend_now and not was_suspended:
                 _LOGGER.info(
                     "Smart discharge: suspending — house consumption "
-                    "(%.2f kW) would breach min SoC %d%% "
+                    "(%.2f kW, peak %.2f kW) would breach min SoC %d%% "
                     "(SoC=%.1f%%, remaining=%.2fh)",
                     net_consumption,
+                    peak,
                     cur_state["min_soc"],
                     soc_value,
                     remaining_h,
@@ -727,6 +743,7 @@ def setup_smart_discharge_listeners(
                     net_consumption_kw=net_consumption,
                     headroom=headroom,
                     feedin_remaining_kwh=feedin_remaining_for_pacing,
+                    consumption_peak_kw=peak,
                 )
                 min_change = cur_state.get("min_power_change", DEFAULT_MIN_POWER_CHANGE)
                 power_delta = abs(new_power - cur_state["last_power_w"])

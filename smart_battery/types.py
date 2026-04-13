@@ -82,5 +82,6 @@ class DischargeSessionState(TypedDict, total=False):
     suspended: bool
     discharging_started: bool
     discharging_started_at: Any  # datetime.datetime | None
+    consumption_peak_kw: float
     groups: list[ScheduleGroup]
     soc_below_min_count: int

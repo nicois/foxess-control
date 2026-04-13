@@ -567,12 +567,17 @@ class OverrideStatusSensor(SensorEntity):
             phase = (
                 "deferred" if not ds.get("discharging_started", True) else "discharging"
             )
+            peak = ds.get("consumption_peak_kw", 0.0)
+            from .algorithms import safety_floor_w
+
             return {
                 "mode": "smart_discharge",
                 "phase": phase,
                 "power_w": ds.get("last_power_w", 0),
                 "min_soc": ds.get("min_soc"),
                 "end_time": ds["end"].isoformat(),
+                "consumption_peak_kw": round(peak, 2),
+                "safety_floor_w": safety_floor_w(peak),
             }
 
         return None
@@ -896,7 +901,14 @@ class DischargePowerSensor(SensorEntity):
         ds = get_discharge_state(self.hass, self._domain)
         if ds is None:
             return None
-        return {"min_soc": ds.get("min_soc")}
+        peak = ds.get("consumption_peak_kw", 0.0)
+        from .algorithms import safety_floor_w
+
+        return {
+            "min_soc": ds.get("min_soc"),
+            "consumption_peak_kw": round(peak, 2),
+            "safety_floor_w": safety_floor_w(peak),
+        }
 
 
 class DischargeWindowSensor(SensorEntity):

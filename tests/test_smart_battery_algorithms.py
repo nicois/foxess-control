@@ -203,6 +203,82 @@ class TestCalculateDischargePower:
         assert result == 100
 
 
+class TestDischargePowerPeakSafetyFloor:
+    """Tests for peak-consumption-based safety floor (P1 priority)."""
+
+    def test_peak_raises_floor_above_current(self) -> None:
+        # Current 0.5kW, peak 7kW → floor at 7*1.5=10.5kW
+        result = calculate_discharge_power(
+            80.0,
+            20,
+            10.0,
+            2.0,
+            15000,
+            net_consumption_kw=0.5,
+            consumption_peak_kw=7.0,
+        )
+        assert result >= 10500  # 7 * 1.5 * 1000
+
+    def test_peak_floor_clamped_to_max_power(self) -> None:
+        # Peak 12kW → floor at 18kW but max is 15kW.
+        # Safety floor > max_power → floor skipped (grid import unavoidable).
+        result = calculate_discharge_power(
+            90.0,
+            30,
+            20.0,
+            2.0,
+            15000,
+            net_consumption_kw=0.5,
+            consumption_peak_kw=12.0,
+        )
+        assert result <= 15000
+
+    def test_no_peak_uses_current_only(self) -> None:
+        # No peak → floor at current * 1.5 = 0.75kW, pacing dominates
+        result = calculate_discharge_power(
+            80.0,
+            20,
+            10.0,
+            3.0,
+            5000,
+            net_consumption_kw=0.5,
+        )
+        assert result < 5000  # pacing, not max
+
+    def test_peak_decayed_still_provides_margin(self) -> None:
+        # Peak decayed to 4kW → floor at 6kW
+        result = calculate_discharge_power(
+            50.0,
+            20,
+            10.0,
+            2.0,
+            10000,
+            net_consumption_kw=0.5,
+            consumption_peak_kw=4.0,
+        )
+        assert result >= 6000
+
+    def test_peak_zero_same_as_no_peak(self) -> None:
+        no_peak = calculate_discharge_power(
+            80.0,
+            20,
+            10.0,
+            3.0,
+            5000,
+            net_consumption_kw=1.0,
+        )
+        zero_peak = calculate_discharge_power(
+            80.0,
+            20,
+            10.0,
+            3.0,
+            5000,
+            net_consumption_kw=1.0,
+            consumption_peak_kw=0.0,
+        )
+        assert no_peak == zero_peak
+
+
 class TestDischargePowerFeedinConstraint:
     def test_feedin_caps_discharge(self) -> None:
         # Without limit: full discharge pacing
@@ -245,6 +321,22 @@ class TestShouldSuspendDischarge:
 
     def test_zero_capacity(self) -> None:
         assert not should_suspend_discharge(50.0, 20, 0.0, 2.0, 2.0)
+
+    def test_peak_triggers_suspension(self) -> None:
+        # 50% - 20% = 30% of 10kWh = 3kWh. Current 0.5kW → 6h drain > 2h*1.1 → safe.
+        # But peak 3kW → 1h drain < 2h * 1.1 → suspend.
+        assert not should_suspend_discharge(50.0, 20, 10.0, 2.0, 0.5)
+        assert should_suspend_discharge(
+            50.0, 20, 10.0, 2.0, 0.5, consumption_peak_kw=3.0
+        )
+
+    def test_peak_below_current_uses_current(self) -> None:
+        # Peak lower than current — current dominates.
+        result_no_peak = should_suspend_discharge(25.0, 20, 10.0, 2.0, 2.0)
+        result_low_peak = should_suspend_discharge(
+            25.0, 20, 10.0, 2.0, 2.0, consumption_peak_kw=1.0
+        )
+        assert result_no_peak == result_low_peak
 
 
 class TestCalculateDischargeDeferredStart:
@@ -367,3 +459,50 @@ class TestCalculateDischargeDeferredStart:
         # That should push start before the SoC-only deadline
         assert result >= self._start()
         assert result < self._end()
+
+    def test_peak_consumption_makes_feedin_earlier(self) -> None:
+        """Peak consumption reduces effective export rate → earlier feedin deadline."""
+        no_peak = calculate_discharge_deferred_start(
+            80.0,
+            30,
+            10.0,
+            10500,
+            self._end(),
+            net_consumption_kw=1.0,
+            feedin_energy_limit_kwh=5.0,
+            start=self._start(),
+        )
+        with_peak = calculate_discharge_deferred_start(
+            80.0,
+            30,
+            10.0,
+            10500,
+            self._end(),
+            net_consumption_kw=1.0,
+            feedin_energy_limit_kwh=5.0,
+            consumption_peak_kw=5.0,
+            start=self._start(),
+        )
+        # Peak 5kW reduces effective export from 10.5-1=9.5kW to 10.5-5=5.5kW
+        assert with_peak < no_peak
+
+    def test_peak_without_feedin_no_effect(self) -> None:
+        """Peak only affects feedin deadline — SoC deadline unaffected."""
+        no_peak = calculate_discharge_deferred_start(
+            80.0,
+            30,
+            10.0,
+            10500,
+            self._end(),
+            start=self._start(),
+        )
+        with_peak = calculate_discharge_deferred_start(
+            80.0,
+            30,
+            10.0,
+            10500,
+            self._end(),
+            consumption_peak_kw=5.0,
+            start=self._start(),
+        )
+        assert no_peak == with_peak

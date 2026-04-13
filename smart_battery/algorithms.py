@@ -149,6 +149,28 @@ def calculate_charge_power(
     return max(100, min(int(power_w), max_power_w))
 
 
+PEAK_DECAY_PER_TICK = 0.85
+"""Exponential decay factor applied to peak consumption each polling tick.
+
+At 0.85/tick with 5-min polling, half-life is ~21 minutes — long enough
+to protect against recurring spikes but short enough to adapt to falling loads.
+"""
+
+DISCHARGE_SAFETY_FACTOR = 1.5
+"""Multiplier applied to peak consumption for the discharge safety floor.
+
+During forced discharge the inverter output must cover house load or the
+shortfall is imported from the grid.  The safety factor provides margin
+above the highest *observed* consumption, protecting against inter-poll
+spikes that would otherwise cause grid import.
+"""
+
+
+def safety_floor_w(peak_kw: float) -> int:
+    """Return the discharge safety floor in watts for a given peak consumption."""
+    return int(peak_kw * DISCHARGE_SAFETY_FACTOR * 1000)
+
+
 def should_suspend_discharge(
     current_soc: float,
     min_soc: int,
@@ -156,6 +178,7 @@ def should_suspend_discharge(
     remaining_hours: float,
     net_consumption_kw: float,
     headroom: float = 0.10,
+    consumption_peak_kw: float | None = None,
 ) -> bool:
     """Return True if forced discharge should be suspended.
 
@@ -163,6 +186,10 @@ def should_suspend_discharge(
     alone would drain the battery to (or past) min SoC within the
     remaining window, adding *any* forced discharge power risks
     breaching the floor.
+
+    When *consumption_peak_kw* is provided, the peak (rather than
+    instantaneous) consumption is used — this accounts for recent load
+    spikes that may recur between polling intervals.
     """
     if remaining_hours <= 0 or battery_capacity_kwh <= 0:
         return False
@@ -170,6 +197,8 @@ def should_suspend_discharge(
     if energy_kwh <= 0:
         return True  # already at or below min SoC
     consumption = max(0.0, net_consumption_kw)
+    if consumption_peak_kw is not None:
+        consumption = max(consumption, consumption_peak_kw)
     if consumption <= 0:
         return False  # no house load — no risk from forced discharge
     hours_to_min = energy_kwh / consumption
@@ -185,21 +214,26 @@ def calculate_discharge_power(
     net_consumption_kw: float = 0.0,
     headroom: float = 0.10,
     feedin_remaining_kwh: float | None = None,
+    consumption_peak_kw: float | None = None,
 ) -> int:
     """Calculate the discharge power needed to reach min SoC by window end.
 
-    In ForceDischarge mode, the inverter discharges at the commanded rate
-    and the house draws from that output.  If the commanded rate is below
-    house consumption, the shortfall is imported from the grid — which is
-    expensive and must be avoided.
+    **Priority ordering** (highest first):
 
-    The discharge power is therefore floored at ``net_consumption_kw`` so
-    the battery always covers the house load (net export >= 0).  When the
-    paced rate drops below house consumption and no feed-in energy remains,
-    the caller should transition back to self-use instead.
+    1. **No grid import** — the discharge rate is floored at
+       ``max(current, peak) × DISCHARGE_SAFETY_FACTOR`` so the battery
+       always covers house load with a margin for inter-poll spikes.
+    2. **Protect min SoC** — handled by the caller via
+       :func:`should_suspend_discharge`.
+    3. **Meet energy target** — when *feedin_remaining_kwh* is set, the
+       target energy is capped so the export budget is spread across the
+       remaining window.
+    4. **Maximise feed-in** — pacing spreads export over the window.
 
-    When *feedin_remaining_kwh* is provided, the target energy is capped
-    so the grid export budget is spread evenly across the remaining window.
+    When priorities conflict, higher priorities win.  The safety floor
+    may cause faster battery drain than the paced rate; this is
+    acceptable because avoiding grid import (P1) outweighs meeting the
+    exact energy target (P3) or maximising feed-in (P4).
 
     Returns an integer power in watts, clamped to [100, max_power_w].
     """
@@ -210,7 +244,8 @@ def calculate_discharge_power(
         return max_power_w
 
     consumption = max(0.0, net_consumption_kw)
-    consumption_floor_w = int(consumption * 1000)
+    peak = max(consumption, consumption_peak_kw or 0.0)
+    safety_floor_w = int(peak * DISCHARGE_SAFETY_FACTOR * 1000)
 
     # When a feed-in energy limit constrains the session, cap the target
     # energy so the export budget is spread across the full window.
@@ -234,7 +269,9 @@ def calculate_discharge_power(
             )
             energy_kwh = max_drain_kwh
             if energy_kwh <= 0:
-                return max(100, min(consumption_floor_w, max_power_w))
+                if 0 < safety_floor_w <= max_power_w:
+                    return max(100, safety_floor_w)
+                return 100
 
     effective_hours = remaining_hours * (1 - headroom)
     if effective_hours <= 0:
@@ -245,12 +282,12 @@ def calculate_discharge_power(
     battery_power_kw *= 1 + headroom
     power_w = battery_power_kw * 1000
 
-    # Floor at house consumption to prevent grid import.  In ForceDischarge
-    # mode the inverter output must cover the house load; any shortfall is
-    # drawn from the grid.  Skip when consumption exceeds inverter capacity
-    # (grid import is unavoidable — caller should use self-use instead).
-    if 0 < consumption_floor_w <= max_power_w:
-        power_w = max(power_w, consumption_floor_w)
+    # P1: Floor at peak consumption × safety factor to prevent grid import.
+    # Uses the highest observed consumption (not just current) so that
+    # inter-poll spikes don't cause import.  Skip when peak consumption
+    # exceeds inverter capacity (grid import is unavoidable).
+    if 0 < safety_floor_w <= max_power_w:
+        power_w = max(power_w, safety_floor_w)
 
     return max(100, min(int(power_w), max_power_w))
 
@@ -314,6 +351,7 @@ def calculate_discharge_deferred_start(
     headroom: float = 0.10,
     taper_profile: TaperProfile | None = None,
     feedin_energy_limit_kwh: float | None = None,
+    consumption_peak_kw: float | None = None,
 ) -> datetime.datetime:
     """Calculate the latest time to start forced discharge to meet goals by *end*.
 
@@ -323,14 +361,14 @@ def calculate_discharge_deferred_start(
     Two independent deadlines are computed (the earlier wins):
 
     1. **SoC deadline** — how long full-power discharge takes to drain
-       from *current_soc* to *min_soc*.  House consumption assists during
-       self-use (it drains the battery too), so only the *excess* energy
-       above what self-use would naturally consume needs forced discharge.
+       from *current_soc* to *min_soc*.
 
     2. **Feed-in energy deadline** — self-use does not export, so ALL
        required grid export must come from forced discharge.  House load
-       *reduces* net export (``grid_export = discharge - house_load``),
-       so more discharge time is needed than the raw energy / power calc.
+       *reduces* net export (``grid_export = discharge - house_load``).
+       When *consumption_peak_kw* is provided, the peak (worst-case)
+       consumption is used for the effective export rate estimate, making
+       the deadline more conservative for volatile loads.
 
     Returns *end* if no forced discharge is needed.
     """
@@ -370,10 +408,14 @@ def calculate_discharge_deferred_start(
     feedin_deadline = end
     feedin_headroom = min(headroom * 2, 0.40)
     if feedin_energy_limit_kwh is not None and feedin_energy_limit_kwh > 0:
-        # All export must come from forced discharge.
-        # grid_export = discharge_power - house_load, so effective export
-        # rate = max_power - house_load.
+        # Use peak consumption (if available) for a conservative export
+        # rate estimate.  Volatile loads reduce the effective export rate
+        # (grid_export = discharge - house), so using the peak means we
+        # start earlier — sacrificing self-use time to ensure the export
+        # target is achievable even during load spikes.
         consumption = max(0.0, net_consumption_kw)
+        if consumption_peak_kw is not None:
+            consumption = max(consumption, consumption_peak_kw)
         effective_export_kw = max_power_kw - consumption
         if effective_export_kw <= 0:
             # Can't export at all — need the full window.
