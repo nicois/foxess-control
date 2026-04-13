@@ -517,6 +517,25 @@ work_mode_entity: sensor.foxess_work_mode
 >       type: module
 > ```
 
+## Supported languages
+
+The integration UI — entity names, service descriptions, config options, and both Lovelace cards — is fully translated into the following languages:
+
+| Language | Code |
+|---|---|
+| English | `en` |
+| German | `de` |
+| French | `fr` |
+| Dutch | `nl` |
+| Spanish | `es` |
+| Italian | `it` |
+| Polish | `pl` |
+| Portuguese | `pt` |
+| Simplified Chinese | `zh-Hans` |
+| Japanese | `ja` |
+
+Home Assistant automatically selects the language based on the user's profile language setting. Lovelace cards use `hass.language` for card-level UI elements (labels, durations, status text).
+
 ## Binary sensors
 
 The integration creates two binary sensors that track whether a smart charge or smart discharge session is currently active:
