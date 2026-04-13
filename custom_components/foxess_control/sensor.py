@@ -539,7 +539,8 @@ class FoxESSWorkModeSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntit
     def native_value(self) -> str | None:
         if self.coordinator.data is None:
             return None
-        return self.coordinator.data.get("_work_mode")
+        val: str | None = self.coordinator.data.get("_work_mode")
+        return val
 
 
 # ---------------------------------------------------------------------------

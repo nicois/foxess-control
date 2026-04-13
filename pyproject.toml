@@ -34,6 +34,12 @@ warn_return_any = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
+module = "custom_components.foxess_control.__init__"
+# websocket_api attrs exist at runtime but pre-commit's isolated mypy env
+# can't resolve them — suppress both the error and the unused-ignore.
+disable_error_code = ["attr-defined", "unused-ignore"]
+
+[[tool.mypy.overrides]]
 module = "custom_components.foxess_control.config_flow"
 # HA types resolve as Any in pre-commit's isolated mypy env (Python 3.12),
 # causing false positives on ConfigFlow/OptionsFlow subclassing.
