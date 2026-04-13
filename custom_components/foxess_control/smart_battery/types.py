@@ -46,6 +46,7 @@ class ChargeSessionState(TypedDict, total=False):
     start: Any  # datetime.datetime
     end: Any  # datetime.datetime
     target_soc: int
+    start_soc: float | None
     max_power_w: int
     battery_capacity_kwh: float
     min_soc_on_grid: int
@@ -68,6 +69,7 @@ class DischargeSessionState(TypedDict, total=False):
     start: Any  # datetime.datetime
     end: Any  # datetime.datetime
     min_soc: int
+    start_soc: float | None
     max_power_w: int
     last_power_w: int
     battery_capacity_kwh: float

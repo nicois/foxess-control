@@ -20,6 +20,22 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
+async def load_taper_profile(
+    store: Store[dict[str, Any]] | None,
+) -> Any:
+    """Load the adaptive taper profile from the session Store.
+
+    Returns a :class:`~smart_battery.taper.TaperProfile` instance.
+    """
+    from .taper import TaperProfile
+
+    if store is None:
+        return TaperProfile()
+    stored: dict[str, Any] = await store.async_load() or {}
+    raw = stored.get("taper_profile")
+    return TaperProfile.from_dict(raw) if raw else TaperProfile()
+
+
 async def save_session(
     store: Store[dict[str, Any]] | None,
     key: str,

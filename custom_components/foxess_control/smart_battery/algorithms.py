@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import datetime
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .taper import TaperProfile
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,6 +34,7 @@ def calculate_charge_power(
     elapsed_since_charge_started: float = 0.0,
     effective_charge_window: float = 0.0,
     min_power_change_w: int = 0,
+    taper_profile: TaperProfile | None = None,
 ) -> int:
     """Calculate the charge power needed to reach target SoC in remaining time.
 
@@ -59,7 +64,10 @@ def calculate_charge_power(
     if remaining_hours <= 0:
         return max_power_w
 
-    # Check if we're behind the ideal headroom-adjusted trajectory.
+    # Check if we're behind the ideal trajectory.
+    # When a taper profile is available, compare time-progress vs
+    # energy-progress proportionally (accounts for non-linear charge rates).
+    # Without taper data, fall back to the linear trajectory check.
     if (
         charging_started_energy_kwh is not None
         and elapsed_since_charge_started > 0
@@ -70,25 +78,62 @@ def calculate_charge_power(
         if effective_window > 0:
             energy_to_add = target_energy_kwh - charging_started_energy_kwh
             if energy_to_add > 0:
-                progress = min(elapsed_since_charge_started / effective_window, 1.0)
-                ideal_energy_now = (
-                    charging_started_energy_kwh + progress * energy_to_add
-                )
                 actual_energy = soc_energy_kwh(current_soc, battery_capacity_kwh)
                 tolerance_kwh = min_power_change_w / 1000.0 * remaining_hours
-                deficit = ideal_energy_now - actual_energy
-                if deficit > tolerance_kwh:
-                    _LOGGER.debug(
-                        "Smart charge: behind schedule "
-                        "(%.2f kWh < ideal %.2f kWh, "
-                        "deficit %.3f > tolerance %.3f), "
-                        "charging at max power",
-                        actual_energy,
-                        ideal_energy_now,
-                        deficit,
-                        tolerance_kwh,
+
+                if taper_profile is not None:
+                    # Taper-aware: compare proportional progress.
+                    # time_frac = how much of the window has elapsed
+                    # energy_frac = how much energy has been delivered
+                    # If energy_frac >= time_frac we are on track.
+                    start_soc = (
+                        charging_started_energy_kwh / battery_capacity_kwh * 100.0
                     )
-                    return max_power_w
+                    total_hours = taper_profile.estimate_charge_hours(
+                        start_soc,
+                        target_soc,
+                        battery_capacity_kwh,
+                        max_power_w,
+                    )
+                    if total_hours > 0:
+                        time_frac = min(
+                            elapsed_since_charge_started / effective_window,
+                            1.0,
+                        )
+                        energy_delivered = actual_energy - charging_started_energy_kwh
+                        energy_frac = energy_delivered / energy_to_add
+                        deficit = (time_frac - energy_frac) * energy_to_add
+                        if deficit > tolerance_kwh:
+                            _LOGGER.debug(
+                                "Smart charge: behind taper-adjusted "
+                                "schedule (energy %.1f%% vs time %.1f%%, "
+                                "deficit %.3f > tolerance %.3f), "
+                                "charging at max power",
+                                energy_frac * 100,
+                                time_frac * 100,
+                                deficit,
+                                tolerance_kwh,
+                            )
+                            return max_power_w
+                else:
+                    # Linear trajectory check (no taper data).
+                    progress = min(elapsed_since_charge_started / effective_window, 1.0)
+                    ideal_energy_now = (
+                        charging_started_energy_kwh + progress * energy_to_add
+                    )
+                    deficit = ideal_energy_now - actual_energy
+                    if deficit > tolerance_kwh:
+                        _LOGGER.debug(
+                            "Smart charge: behind schedule "
+                            "(%.2f kWh < ideal %.2f kWh, "
+                            "deficit %.3f > tolerance %.3f), "
+                            "charging at max power",
+                            actual_energy,
+                            ideal_energy_now,
+                            deficit,
+                            tolerance_kwh,
+                        )
+                        return max_power_w
 
     # Plan to finish in (1 - headroom) of the remaining time so there is
     # a buffer if consumption spikes or the inverter can't sustain full power.
@@ -200,8 +245,13 @@ def calculate_deferred_start(
     net_consumption_kw: float = 0.0,
     start: datetime.datetime | None = None,
     headroom: float = 0.10,
+    taper_profile: TaperProfile | None = None,
 ) -> datetime.datetime:
     """Calculate the latest time to start charging to reach target SoC by *end*.
+
+    When *taper_profile* is provided, uses the taper-aware time estimate
+    instead of the linear ``energy / power`` calculation.  This accounts
+    for BMS charge current reduction at high SoC.
 
     Returns *end* if no charging is needed (SoC already at target).
     Returns a time before *end* otherwise; may be in the past if the
@@ -210,14 +260,23 @@ def calculate_deferred_start(
     energy_needed_kwh = (target_soc - current_soc) / 100.0 * battery_capacity_kwh
     if energy_needed_kwh <= 0:
         return end
-    max_power_kw = max_power_w / 1000.0
-    consumption_headroom_kw = max(0.0, net_consumption_kw)
-    min_headroom_kw = max_power_kw * headroom
-    headroom_kw = max(consumption_headroom_kw, min_headroom_kw)
-    effective_charge_kw = max_power_kw - headroom_kw
-    if effective_charge_kw <= 0:
-        effective_charge_kw = max_power_kw * headroom
-    charge_hours = energy_needed_kwh / effective_charge_kw
+
+    if taper_profile is not None:
+        # Taper-aware: numerically integrate over the SoC range
+        charge_hours = taper_profile.estimate_charge_hours(
+            current_soc, target_soc, battery_capacity_kwh, max_power_w
+        )
+    else:
+        # Linear estimate (original behaviour)
+        max_power_kw = max_power_w / 1000.0
+        consumption_headroom_kw = max(0.0, net_consumption_kw)
+        min_headroom_kw = max_power_kw * headroom
+        headroom_kw = max(consumption_headroom_kw, min_headroom_kw)
+        effective_charge_kw = max_power_kw - headroom_kw
+        if effective_charge_kw <= 0:
+            effective_charge_kw = max_power_kw * headroom
+        charge_hours = energy_needed_kwh / effective_charge_kw
+
     buffered_hours = charge_hours / (1 - headroom)
     deferred = end - datetime.timedelta(hours=buffered_hours)
     if start is not None and deferred < start:

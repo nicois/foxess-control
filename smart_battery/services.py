@@ -366,6 +366,7 @@ def register_services(
             "battery_capacity_kwh": battery_capacity_kwh,
             "min_power_change": min_power_change,
             "pacing_enabled": pacing_enabled,
+            "start_soc": current_soc,
         }
 
         setup_smart_discharge_listeners(hass, domain, adapter)
@@ -442,6 +443,7 @@ def register_services(
                 net_consumption_kw=net_consumption,
                 start=start,
                 headroom=headroom,
+                taper_profile=hass.data.get(domain, {}).get("_taper_profile"),
             )
             should_defer = now < deferred_start
 
@@ -503,6 +505,7 @@ def register_services(
             ),
             "force": False,
             "soc_unavailable_count": 0,
+            "start_soc": current_soc,
         }
 
         setup_smart_charge_listeners(hass, domain, adapter)

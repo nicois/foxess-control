@@ -134,8 +134,12 @@ class TestSetupEntry:
         hass = MagicMock()
         hass.async_add_executor_job = AsyncMock(return_value=10500)
         hass.config_entries.async_forward_entry_setups = AsyncMock()
-        hass.data = {}
-        hass.data.setdefault(DOMAIN, {})
+
+        mock_store = MagicMock()
+        mock_store.async_load = AsyncMock(return_value={})
+        mock_store.async_save = AsyncMock()
+
+        hass.data = {DOMAIN: {"_store": mock_store}}
 
         entry = MagicMock()
         entry.entry_id = "entry1"
@@ -175,7 +179,15 @@ class TestSetupEntry:
         hass = MagicMock()
         hass.async_add_executor_job = AsyncMock(return_value=10500)
         hass.config_entries.async_forward_entry_setups = AsyncMock()
-        hass.data = {DOMAIN: {"existing": {"inverter": MagicMock()}}}
+        mock_store = MagicMock()
+        mock_store.async_load = AsyncMock(return_value={})
+        mock_store.async_save = AsyncMock()
+        hass.data = {
+            DOMAIN: {
+                "existing": {"inverter": MagicMock()},
+                "_store": mock_store,
+            }
+        }
 
         entry = MagicMock()
         entry.entry_id = "entry2"

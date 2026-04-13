@@ -79,6 +79,7 @@ from .smart_battery.session import (
 from .smart_battery.session import (
     session_data_from_discharge_state as _session_data_from_discharge_state,
 )
+from .smart_battery.taper import TaperProfile as _TaperProfile
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -394,6 +395,41 @@ def _get_feedin_energy_kwh(hass: HomeAssistant) -> float | None:
                     except (ValueError, TypeError):
                         return None
     return None
+
+
+def _get_coordinator_value(hass: HomeAssistant, variable: str) -> float | None:
+    """Read a numeric variable from the coordinator."""
+    domain_data = hass.data.get(DOMAIN)
+    if domain_data is None:
+        return None
+    for key in domain_data:
+        if not str(key).startswith("_"):
+            entry_data = domain_data.get(key)
+            if isinstance(entry_data, dict):
+                coordinator = entry_data.get("coordinator")
+                if coordinator is not None and coordinator.data:
+                    raw = coordinator.data.get(variable)
+                    if raw is not None:
+                        try:
+                            return float(raw)
+                        except (ValueError, TypeError):
+                            return None
+    return None
+
+
+def _get_taper_profile(hass: HomeAssistant) -> _TaperProfile | None:
+    """Return the adaptive taper profile from domain data."""
+    return hass.data.get(DOMAIN, {}).get("_taper_profile")  # type: ignore[no-any-return]
+
+
+async def _save_taper_profile(hass: HomeAssistant, profile: _TaperProfile) -> None:
+    """Persist the taper profile to the session Store."""
+    store: Store[dict[str, Any]] | None = hass.data.get(DOMAIN, {}).get("_store")
+    if store is None:
+        return
+    stored: dict[str, Any] = await store.async_load() or {}
+    stored["taper_profile"] = profile.to_dict()
+    await store.async_save(stored)
 
 
 def _cancel_smart_discharge(hass: HomeAssistant, *, clear_storage: bool = True) -> None:
@@ -819,6 +855,22 @@ def _setup_smart_charge_listeners(
             return
 
         net_consumption = _get_net_consumption(hass)
+        taper = _get_taper_profile(hass)
+
+        # Record taper observation from previous tick's requested power
+        if (
+            taper is not None
+            and cur_state.get("charging_started")
+            and cur_state.get("last_power_w", 0) >= 500
+        ):
+            actual_kw = _get_coordinator_value(hass, "batChargePower")
+            if actual_kw is not None:
+                taper.record_charge(
+                    cur_soc, cur_state["last_power_w"], actual_kw * 1000
+                )
+                cur_state["taper_tick"] = cur_state.get("taper_tick", 0) + 1
+                if cur_state["taper_tick"] % 3 == 0:
+                    hass.async_create_task(_save_taper_profile(hass, taper))
 
         if not cur_state["charging_started"]:
             # Check if it's time to start deferred charging
@@ -832,6 +884,7 @@ def _setup_smart_charge_listeners(
                 net_consumption_kw=net_consumption,
                 start=cur_state["start"],
                 headroom=headroom,
+                taper_profile=taper,
             )
             if now_dt < deferred:
                 _LOGGER.debug(
@@ -857,6 +910,7 @@ def _setup_smart_charge_listeners(
                 cur_state["max_power_w"],
                 net_consumption_kw=net_consumption,
                 headroom=headroom,
+                taper_profile=taper,
             )
             if _is_entity_mode(hass):
                 await _apply_mode_via_entities(
@@ -960,6 +1014,7 @@ def _setup_smart_charge_listeners(
             elapsed_since_charge_started=elapsed_since_start,
             effective_charge_window=window_from_start,
             min_power_change_w=cur_state["min_power_change"],
+            taper_profile=taper,
         )
 
         if (
@@ -1218,6 +1273,23 @@ def _setup_smart_discharge_listeners(
         soc_value = _get_current_soc(hass)
         if soc_value is None:
             return
+
+        # Record taper observation for discharge
+        taper = _get_taper_profile(hass)
+        if (
+            taper is not None
+            and cur_state.get("last_power_w", 0) >= 500
+            and not cur_state.get("suspended", False)
+        ):
+            actual_kw = _get_coordinator_value(hass, "batDischargePower")
+            if actual_kw is not None:
+                taper.record_discharge(
+                    soc_value, cur_state["last_power_w"], actual_kw * 1000
+                )
+                cur_state["taper_tick"] = cur_state.get("taper_tick", 0) + 1
+                if cur_state["taper_tick"] % 5 == 0:
+                    hass.async_create_task(_save_taper_profile(hass, taper))
+
         if cur_state.get("pacing_enabled") and soc_value > cur_state["min_soc"]:
             now_dt = dt_util.now()
             remaining_h = (cur_state["end"] - now_dt).total_seconds() / 3600.0
@@ -1496,6 +1568,7 @@ async def _recover_charge_session(
                 min_power_change_w=charge_data.get(
                     "min_power_change", DEFAULT_MIN_POWER_CHANGE
                 ),
+                taper_profile=_get_taper_profile(hass),
             )
         else:
             last_power = max_power
@@ -1873,6 +1946,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN].setdefault(
         "_store", Store[dict[str, Any]](hass, STORAGE_VERSION, STORAGE_KEY)
     )
+
+    # Load adaptive taper profile from persistent storage
+    if "_taper_profile" not in hass.data[DOMAIN]:
+        store: Store[dict[str, Any]] = hass.data[DOMAIN]["_store"]
+        stored = await store.async_load() or {}
+        raw_taper = stored.get("taper_profile")
+        hass.data[DOMAIN]["_taper_profile"] = (
+            _TaperProfile.from_dict(raw_taper) if raw_taper else _TaperProfile()
+        )
 
     entity_map = _build_entity_map(entry.options)
     entity_mode = bool(entity_map)
@@ -2366,6 +2448,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 net_consumption_kw=net_consumption,
                 start=start,
                 headroom=headroom,
+                taper_profile=_get_taper_profile(hass),
             )
             should_defer = now < deferred_start
 
@@ -2400,6 +2483,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     effective_max_power,
                     net_consumption_kw=net_consumption,
                     headroom=headroom,
+                    taper_profile=_get_taper_profile(hass),
                 )
 
             _LOGGER.info(

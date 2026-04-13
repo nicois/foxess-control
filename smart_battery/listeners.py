@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from homeassistant.helpers.storage import Store
 
     from .adapter import InverterAdapter
+    from .taper import TaperProfile
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -138,6 +139,28 @@ def _get_polling_interval_seconds(hass: HomeAssistant, domain: str) -> int:
 def _get_store(hass: HomeAssistant, domain: str) -> Store[dict[str, Any]] | None:
     """Return the session Store from domain data."""
     return hass.data.get(domain, {}).get("_store")  # type: ignore[no-any-return]
+
+
+def _get_taper_profile(hass: HomeAssistant, domain: str) -> TaperProfile | None:
+    """Return the adaptive taper profile from domain data.
+
+    Returns None if the profile has not been loaded yet.  Brand
+    integrations should load it on startup via
+    :func:`~smart_battery.session.load_taper_profile`.
+    """
+    return hass.data.get(domain, {}).get("_taper_profile")  # type: ignore[no-any-return]
+
+
+async def _save_taper_profile(
+    hass: HomeAssistant, domain: str, profile: TaperProfile
+) -> None:
+    """Persist the taper profile to the session Store."""
+    store = _get_store(hass, domain)
+    if store is None:
+        return
+    stored: dict[str, Any] = await store.async_load() or {}
+    stored["taper_profile"] = profile.to_dict()
+    await store.async_save(stored)
 
 
 def cancel_smart_charge(
@@ -271,6 +294,22 @@ def setup_smart_charge_listeners(
 
         net_consumption = _get_net_consumption(hass, domain)
         headroom = _get_smart_headroom(hass, domain)
+        taper = _get_taper_profile(hass, domain)
+
+        # Record taper observation from previous tick's requested power
+        if (
+            taper is not None
+            and cur_state.get("charging_started")
+            and cur_state.get("last_power_w", 0) >= 500
+        ):
+            actual_kw = _get_coordinator_value(hass, domain, "batChargePower")
+            if actual_kw is not None:
+                taper.record_charge(
+                    cur_soc, cur_state["last_power_w"], actual_kw * 1000
+                )
+                cur_state["taper_tick"] = cur_state.get("taper_tick", 0) + 1
+                if cur_state["taper_tick"] % 3 == 0:
+                    hass.async_create_task(_save_taper_profile(hass, domain, taper))
 
         if not cur_state["charging_started"]:
             # Check if it's time to start deferred charging
@@ -283,6 +322,7 @@ def setup_smart_charge_listeners(
                 net_consumption_kw=net_consumption,
                 start=cur_state["start"],
                 headroom=headroom,
+                taper_profile=taper,
             )
             if now_dt < deferred:
                 _LOGGER.debug(
@@ -308,6 +348,7 @@ def setup_smart_charge_listeners(
                 cur_state["max_power_w"],
                 net_consumption_kw=net_consumption,
                 headroom=headroom,
+                taper_profile=taper,
             )
             await adapter.apply_mode(hass, WorkMode.FORCE_CHARGE, new_power)
 
@@ -355,6 +396,7 @@ def setup_smart_charge_listeners(
             elapsed_since_charge_started=elapsed_since_start,
             effective_charge_window=window_from_start,
             min_power_change_w=cur_state["min_power_change"],
+            taper_profile=taper,
         )
 
         if (
@@ -540,6 +582,23 @@ def setup_smart_discharge_listeners(
         soc_value = _get_current_soc(hass, domain)
         if soc_value is None:
             return
+
+        # Record taper observation for discharge
+        taper = _get_taper_profile(hass, domain)
+        if (
+            taper is not None
+            and cur_state.get("last_power_w", 0) >= 500
+            and not cur_state.get("suspended", False)
+        ):
+            actual_kw = _get_coordinator_value(hass, domain, "batDischargePower")
+            if actual_kw is not None:
+                taper.record_discharge(
+                    soc_value, cur_state["last_power_w"], actual_kw * 1000
+                )
+                cur_state["taper_tick"] = cur_state.get("taper_tick", 0) + 1
+                if cur_state["taper_tick"] % 5 == 0:
+                    hass.async_create_task(_save_taper_profile(hass, domain, taper))
+
         if cur_state.get("pacing_enabled") and soc_value > cur_state["min_soc"]:
             now_dt = dt_util.now()
             remaining_h = (cur_state["end"] - now_dt).total_seconds() / 3600.0
