@@ -1,6 +1,36 @@
 {
   "entity": {
     "sensor": {
+      "battery_soc": { "name": "Battery SoC" },
+      "bat_charge_power": { "name": "Charge Rate" },
+      "bat_discharge_power": { "name": "Discharge Rate" },
+      "loads_power": { "name": "House Load" },
+      "pv_power": { "name": "Solar Power" },
+      "bat_temperature": { "name": "Battery Temperature" },
+      "grid_consumption": { "name": "Grid Consumption" },
+      "feedin_power": { "name": "Grid Feed-in" },
+      "generation_power": { "name": "Generation" },
+      "bat_volt": { "name": "Battery Voltage" },
+      "bat_current": { "name": "Battery Current" },
+      "pv1_power": { "name": "PV1 Power" },
+      "pv2_power": { "name": "PV2 Power" },
+      "ambient_temp": { "name": "Ambient Temperature" },
+      "inverter_temp": { "name": "Inverter Temperature" },
+      "feedin_energy": { "name": "Grid Feed-in Energy" },
+      "grid_consumption_energy": { "name": "Grid Consumption Energy" },
+      "generation_energy": { "name": "Solar Generation Energy" },
+      "charge_energy_total": { "name": "Battery Charge Energy" },
+      "discharge_energy_total": { "name": "Battery Discharge Energy" },
+      "loads_energy": { "name": "House Load Energy" },
+      "energy_throughput": { "name": "Battery Throughput" },
+      "meter_power": { "name": "Grid Meter Power" },
+      "grid_voltage": { "name": "Grid Voltage" },
+      "grid_current": { "name": "Grid Current" },
+      "grid_frequency": { "name": "Grid Frequency" },
+      "eps_power": { "name": "EPS Power" },
+      "work_mode": { "name": "Work Mode" },
+      "debug_log": { "name": "Debug Log" },
+      "override_status": { "name": "Status" },
       "smart_operations": {
         "name": "Smart Operations",
         "state": {
@@ -13,7 +43,18 @@
           "discharge_suspended": "Suspended",
           "charge_discharge_active": "Charge + Discharge"
         }
-      }
+      },
+      "charge_power": { "name": "Charge Power" },
+      "charge_window": { "name": "Charge Window" },
+      "charge_remaining": { "name": "Charge Remaining" },
+      "discharge_power": { "name": "Discharge Power" },
+      "discharge_window": { "name": "Discharge Window" },
+      "discharge_remaining": { "name": "Discharge Remaining" },
+      "battery_forecast": { "name": "Battery Forecast" }
+    },
+    "binary_sensor": {
+      "smart_charge_active": { "name": "Smart Charge Active" },
+      "smart_discharge_active": { "name": "Smart Discharge Active" }
     }
   },
   "services": {

@@ -1,6 +1,36 @@
 {
   "entity": {
     "sensor": {
+      "battery_soc": { "name": "SoC batterie" },
+      "bat_charge_power": { "name": "Puissance de charge" },
+      "bat_discharge_power": { "name": "Puissance de décharge" },
+      "loads_power": { "name": "Consommation maison" },
+      "pv_power": { "name": "Puissance solaire" },
+      "bat_temperature": { "name": "Température batterie" },
+      "grid_consumption": { "name": "Consommation réseau" },
+      "feedin_power": { "name": "Injection réseau" },
+      "generation_power": { "name": "Production" },
+      "bat_volt": { "name": "Tension batterie" },
+      "bat_current": { "name": "Courant batterie" },
+      "pv1_power": { "name": "Puissance PV1" },
+      "pv2_power": { "name": "Puissance PV2" },
+      "ambient_temp": { "name": "Température ambiante" },
+      "inverter_temp": { "name": "Température onduleur" },
+      "feedin_energy": { "name": "Énergie injectée" },
+      "grid_consumption_energy": { "name": "Énergie consommée réseau" },
+      "generation_energy": { "name": "Énergie solaire produite" },
+      "charge_energy_total": { "name": "Énergie de charge batterie" },
+      "discharge_energy_total": { "name": "Énergie de décharge batterie" },
+      "loads_energy": { "name": "Énergie consommée maison" },
+      "energy_throughput": { "name": "Débit batterie" },
+      "meter_power": { "name": "Puissance compteur réseau" },
+      "grid_voltage": { "name": "Tension réseau" },
+      "grid_current": { "name": "Courant réseau" },
+      "grid_frequency": { "name": "Fréquence réseau" },
+      "eps_power": { "name": "Puissance EPS" },
+      "work_mode": { "name": "Mode de fonctionnement" },
+      "debug_log": { "name": "Journal de débogage" },
+      "override_status": { "name": "Statut" },
       "smart_operations": {
         "name": "Opérations intelligentes",
         "state": {
@@ -13,7 +43,18 @@
           "discharge_suspended": "Suspendue",
           "charge_discharge_active": "Charge + Décharge"
         }
-      }
+      },
+      "charge_power": { "name": "Puissance de charge (Smart)" },
+      "charge_window": { "name": "Fenêtre de charge" },
+      "charge_remaining": { "name": "Charge restante" },
+      "discharge_power": { "name": "Puissance de décharge (Smart)" },
+      "discharge_window": { "name": "Fenêtre de décharge" },
+      "discharge_remaining": { "name": "Décharge restante" },
+      "battery_forecast": { "name": "Prévision batterie" }
+    },
+    "binary_sensor": {
+      "smart_charge_active": { "name": "Charge intelligente active" },
+      "smart_discharge_active": { "name": "Décharge intelligente active" }
     }
   },
   "services": {

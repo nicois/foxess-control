@@ -559,7 +559,7 @@ class FoxESSControlCard extends HTMLElement {
       if (startSoc != null && target != null && current != null && target > startSoc) {
         socPct = Math.min(100, Math.max(0, ((current - startSoc) / (target - startSoc)) * 100));
       }
-      const socLabel = `${current != null ? Math.round(current) : "?"}% → ${target != null ? target : "?"}%`;
+      const socLabel = `${startSoc != null ? Math.round(startSoc) : "?"}% → ${current != null ? Math.round(current) : "?"}% → ${target != null ? target : "?"}%`;
       const time = this._timeProgress(a.charge_start_time, a.charge_end_time, now);
 
       bars += this._progressBar(this._t("soc"), socLabel, socPct, "charge-fill");
@@ -575,7 +575,7 @@ class FoxESSControlCard extends HTMLElement {
       if (startSoc != null && minSoc != null && current != null && startSoc > minSoc) {
         socPct = Math.min(100, Math.max(0, ((startSoc - current) / (startSoc - minSoc)) * 100));
       }
-      const socLabel = `${current != null ? Math.round(current) : "?"}% → ${minSoc != null ? minSoc : "?"}%`;
+      const socLabel = `${startSoc != null ? Math.round(startSoc) : "?"}% → ${current != null ? Math.round(current) : "?"}% → ${minSoc != null ? minSoc : "?"}%`;
 
       bars += this._progressBar(this._t("soc"), socLabel, socPct, "discharge-fill");
 

@@ -1,6 +1,36 @@
 {
   "entity": {
     "sensor": {
+      "battery_soc": { "name": "SoC baterii" },
+      "bat_charge_power": { "name": "Moc ładowania" },
+      "bat_discharge_power": { "name": "Moc rozładowania" },
+      "loads_power": { "name": "Zużycie domu" },
+      "pv_power": { "name": "Moc solarna" },
+      "bat_temperature": { "name": "Temperatura baterii" },
+      "grid_consumption": { "name": "Pobór z sieci" },
+      "feedin_power": { "name": "Oddawanie do sieci" },
+      "generation_power": { "name": "Produkcja" },
+      "bat_volt": { "name": "Napięcie baterii" },
+      "bat_current": { "name": "Prąd baterii" },
+      "pv1_power": { "name": "Moc PV1" },
+      "pv2_power": { "name": "Moc PV2" },
+      "ambient_temp": { "name": "Temperatura otoczenia" },
+      "inverter_temp": { "name": "Temperatura falownika" },
+      "feedin_energy": { "name": "Energia oddana do sieci" },
+      "grid_consumption_energy": { "name": "Energia pobrana z sieci" },
+      "generation_energy": { "name": "Energia solarna wyprodukowana" },
+      "charge_energy_total": { "name": "Energia ładowania baterii" },
+      "discharge_energy_total": { "name": "Energia rozładowania baterii" },
+      "loads_energy": { "name": "Energia zużyta przez dom" },
+      "energy_throughput": { "name": "Przepustowość baterii" },
+      "meter_power": { "name": "Moc licznika sieciowego" },
+      "grid_voltage": { "name": "Napięcie sieci" },
+      "grid_current": { "name": "Prąd sieci" },
+      "grid_frequency": { "name": "Częstotliwość sieci" },
+      "eps_power": { "name": "Moc EPS" },
+      "work_mode": { "name": "Tryb pracy" },
+      "debug_log": { "name": "Dziennik debugowania" },
+      "override_status": { "name": "Status" },
       "smart_operations": {
         "name": "Inteligentne operacje",
         "state": {
@@ -13,7 +43,18 @@
           "discharge_suspended": "Wstrzymane",
           "charge_discharge_active": "Ładowanie + Rozładowywanie"
         }
-      }
+      },
+      "charge_power": { "name": "Moc ładowania (Smart)" },
+      "charge_window": { "name": "Okno ładowania" },
+      "charge_remaining": { "name": "Ładowanie pozostałe" },
+      "discharge_power": { "name": "Moc rozładowania (Smart)" },
+      "discharge_window": { "name": "Okno rozładowania" },
+      "discharge_remaining": { "name": "Rozładowanie pozostałe" },
+      "battery_forecast": { "name": "Prognoza baterii" }
+    },
+    "binary_sensor": {
+      "smart_charge_active": { "name": "Inteligentne ładowanie aktywne" },
+      "smart_discharge_active": { "name": "Inteligentne rozładowanie aktywne" }
     }
   },
   "services": {

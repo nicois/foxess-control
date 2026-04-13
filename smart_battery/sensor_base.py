@@ -464,7 +464,7 @@ class OverrideStatusSensor(SensorEntity):
         self._entry = entry
         self._domain = domain
         self._attr_unique_id = f"{entry.entry_id}_override_status"
-        self._attr_name = "Status"
+        self._attr_translation_key = "override_status"
         self._attr_device_info = device_info
         self.hass = hass
 
@@ -564,7 +564,6 @@ class SmartOperationsOverviewSensor(SensorEntity):
         self._entry = entry
         self._domain = domain
         self._attr_unique_id = f"{entry.entry_id}_smart_operations"
-        self._attr_name = "Smart Operations"
         self._attr_device_info = device_info
         self._attr_options = [
             "idle",
@@ -719,7 +718,7 @@ class ChargePowerSensor(SensorEntity):
         self._entry = entry
         self._domain = domain
         self._attr_unique_id = f"{entry.entry_id}_charge_power"
-        self._attr_name = "Charge Power"
+        self._attr_translation_key = "charge_power"
         self._attr_device_info = device_info
         self.hass = hass
 
@@ -766,7 +765,7 @@ class ChargeWindowSensor(SensorEntity):
         self._entry = entry
         self._domain = domain
         self._attr_unique_id = f"{entry.entry_id}_charge_window"
-        self._attr_name = "Charge Window"
+        self._attr_translation_key = "charge_window"
         self._attr_device_info = device_info
         self.hass = hass
 
@@ -795,7 +794,7 @@ class ChargeRemainingSensor(SensorEntity):
         self._entry = entry
         self._domain = domain
         self._attr_unique_id = f"{entry.entry_id}_charge_remaining"
-        self._attr_name = "Charge Remaining"
+        self._attr_translation_key = "charge_remaining"
         self._attr_device_info = device_info
         self.hass = hass
 
@@ -825,7 +824,7 @@ class DischargePowerSensor(SensorEntity):
         self._entry = entry
         self._domain = domain
         self._attr_unique_id = f"{entry.entry_id}_discharge_power"
-        self._attr_name = "Discharge Power"
+        self._attr_translation_key = "discharge_power"
         self._attr_device_info = device_info
         self.hass = hass
 
@@ -869,7 +868,7 @@ class DischargeWindowSensor(SensorEntity):
         self._entry = entry
         self._domain = domain
         self._attr_unique_id = f"{entry.entry_id}_discharge_window"
-        self._attr_name = "Discharge Window"
+        self._attr_translation_key = "discharge_window"
         self._attr_device_info = device_info
         self.hass = hass
 
@@ -898,7 +897,7 @@ class DischargeRemainingSensor(SensorEntity):
         self._entry = entry
         self._domain = domain
         self._attr_unique_id = f"{entry.entry_id}_discharge_remaining"
-        self._attr_name = "Discharge Remaining"
+        self._attr_translation_key = "discharge_remaining"
         self._attr_device_info = device_info
         self.hass = hass
 
@@ -928,7 +927,7 @@ class BatteryForecastSensor(SensorEntity):
         self._entry = entry
         self._domain = domain
         self._attr_unique_id = f"{entry.entry_id}_battery_forecast"
-        self._attr_name = "Battery Forecast"
+        self._attr_translation_key = "battery_forecast"
         self._attr_device_info = device_info
         self.hass = hass
 
@@ -972,7 +971,7 @@ class SmartChargeActiveSensor(BinarySensorEntity):
         self._entry = entry
         self._domain = domain
         self._attr_unique_id = f"{entry.entry_id}_smart_charge_active"
-        self._attr_name = "Smart Charge Active"
+        self._attr_translation_key = "smart_charge_active"
         self._attr_device_info = device_info
         self.hass = hass
 
@@ -1019,7 +1018,7 @@ class SmartDischargeActiveSensor(BinarySensorEntity):
         self._entry = entry
         self._domain = domain
         self._attr_unique_id = f"{entry.entry_id}_smart_discharge_active"
-        self._attr_name = "Smart Discharge Active"
+        self._attr_translation_key = "smart_discharge_active"
         self._attr_device_info = device_info
         self.hass = hass
 

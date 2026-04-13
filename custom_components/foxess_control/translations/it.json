@@ -1,6 +1,36 @@
 {
   "entity": {
     "sensor": {
+      "battery_soc": { "name": "SoC batteria" },
+      "bat_charge_power": { "name": "Potenza di ricarica" },
+      "bat_discharge_power": { "name": "Potenza di scarica" },
+      "loads_power": { "name": "Consumo casa" },
+      "pv_power": { "name": "Potenza solare" },
+      "bat_temperature": { "name": "Temperatura batteria" },
+      "grid_consumption": { "name": "Consumo rete" },
+      "feedin_power": { "name": "Immissione in rete" },
+      "generation_power": { "name": "Produzione" },
+      "bat_volt": { "name": "Tensione batteria" },
+      "bat_current": { "name": "Corrente batteria" },
+      "pv1_power": { "name": "Potenza PV1" },
+      "pv2_power": { "name": "Potenza PV2" },
+      "ambient_temp": { "name": "Temperatura ambiente" },
+      "inverter_temp": { "name": "Temperatura inverter" },
+      "feedin_energy": { "name": "Energia immessa in rete" },
+      "grid_consumption_energy": { "name": "Energia consumata dalla rete" },
+      "generation_energy": { "name": "Energia solare prodotta" },
+      "charge_energy_total": { "name": "Energia di ricarica batteria" },
+      "discharge_energy_total": { "name": "Energia di scarica batteria" },
+      "loads_energy": { "name": "Energia consumata casa" },
+      "energy_throughput": { "name": "Throughput batteria" },
+      "meter_power": { "name": "Potenza contatore rete" },
+      "grid_voltage": { "name": "Tensione rete" },
+      "grid_current": { "name": "Corrente rete" },
+      "grid_frequency": { "name": "Frequenza rete" },
+      "eps_power": { "name": "Potenza EPS" },
+      "work_mode": { "name": "Modalità operativa" },
+      "debug_log": { "name": "Registro debug" },
+      "override_status": { "name": "Stato" },
       "smart_operations": {
         "name": "Operazioni intelligenti",
         "state": {
@@ -13,7 +43,18 @@
           "discharge_suspended": "Sospesa",
           "charge_discharge_active": "Ricarica + Scarica"
         }
-      }
+      },
+      "charge_power": { "name": "Potenza di ricarica (Smart)" },
+      "charge_window": { "name": "Finestra di ricarica" },
+      "charge_remaining": { "name": "Ricarica rimanente" },
+      "discharge_power": { "name": "Potenza di scarica (Smart)" },
+      "discharge_window": { "name": "Finestra di scarica" },
+      "discharge_remaining": { "name": "Scarica rimanente" },
+      "battery_forecast": { "name": "Previsione batteria" }
+    },
+    "binary_sensor": {
+      "smart_charge_active": { "name": "Ricarica intelligente attiva" },
+      "smart_discharge_active": { "name": "Scarica intelligente attiva" }
     }
   },
   "services": {

@@ -499,7 +499,7 @@ class FoxESSPolledSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity)
         super().__init__(coordinator)
         self._variable = desc.variable
         self._attr_unique_id = f"{entry.entry_id}_{desc.unique_id_suffix}"
-        self._attr_name = desc.name
+        self._attr_translation_key = desc.unique_id_suffix
         self._attr_device_class = desc.device_class
         self._attr_native_unit_of_measurement = desc.unit
         self._attr_state_class = desc.state_class
@@ -532,7 +532,7 @@ class FoxESSWorkModeSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntit
     ) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_work_mode"
-        self._attr_name = "Work Mode"
+        self._attr_translation_key = "work_mode"
         self._attr_device_info = _device_info(entry)
 
     @property
@@ -589,7 +589,7 @@ class DebugLogSensor(SensorEntity):
     ) -> None:
         self._buffer = buffer
         self._attr_unique_id = f"{entry.entry_id}_debug_log"
-        self._attr_name = "Debug Log"
+        self._attr_translation_key = "debug_log"
         self._attr_device_info = _device_info(entry)
 
     @property

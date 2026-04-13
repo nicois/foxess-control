@@ -1,6 +1,36 @@
 {
   "entity": {
     "sensor": {
+      "battery_soc": { "name": "Batterie-SoC" },
+      "bat_charge_power": { "name": "Ladeleistung" },
+      "bat_discharge_power": { "name": "Entladeleistung" },
+      "loads_power": { "name": "Hausverbrauch" },
+      "pv_power": { "name": "Solarleistung" },
+      "bat_temperature": { "name": "Batterietemperatur" },
+      "grid_consumption": { "name": "Netzbezug" },
+      "feedin_power": { "name": "Netzeinspeisung" },
+      "generation_power": { "name": "Erzeugung" },
+      "bat_volt": { "name": "Batteriespannung" },
+      "bat_current": { "name": "Batteriestrom" },
+      "pv1_power": { "name": "PV1-Leistung" },
+      "pv2_power": { "name": "PV2-Leistung" },
+      "ambient_temp": { "name": "Umgebungstemperatur" },
+      "inverter_temp": { "name": "Wechselrichtertemperatur" },
+      "feedin_energy": { "name": "Einspeiseenergie" },
+      "grid_consumption_energy": { "name": "Netzbezugsenergie" },
+      "generation_energy": { "name": "Solarenergie" },
+      "charge_energy_total": { "name": "Ladeenergie" },
+      "discharge_energy_total": { "name": "Entladeenergie" },
+      "loads_energy": { "name": "Hausverbrauchsenergie" },
+      "energy_throughput": { "name": "Batteriedurchsatz" },
+      "meter_power": { "name": "Netzzählerleistung" },
+      "grid_voltage": { "name": "Netzspannung" },
+      "grid_current": { "name": "Netzstrom" },
+      "grid_frequency": { "name": "Netzfrequenz" },
+      "eps_power": { "name": "EPS-Leistung" },
+      "work_mode": { "name": "Betriebsmodus" },
+      "debug_log": { "name": "Debug-Protokoll" },
+      "override_status": { "name": "Status" },
       "smart_operations": {
         "name": "Intelligente Steuerung",
         "state": {
@@ -13,7 +43,18 @@
           "discharge_suspended": "Pausiert",
           "charge_discharge_active": "Laden + Entladen"
         }
-      }
+      },
+      "charge_power": { "name": "Ladeleistung (Smart)" },
+      "charge_window": { "name": "Ladefenster" },
+      "charge_remaining": { "name": "Ladezeit verbleibend" },
+      "discharge_power": { "name": "Entladeleistung (Smart)" },
+      "discharge_window": { "name": "Entladefenster" },
+      "discharge_remaining": { "name": "Entladezeit verbleibend" },
+      "battery_forecast": { "name": "Batterieprognose" }
+    },
+    "binary_sensor": {
+      "smart_charge_active": { "name": "Intelligentes Laden aktiv" },
+      "smart_discharge_active": { "name": "Intelligentes Entladen aktiv" }
     }
   },
   "services": {
