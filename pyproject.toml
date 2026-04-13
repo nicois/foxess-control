@@ -7,7 +7,7 @@ name = "foxess-inverter"
 version = "0.1.0"
 description = "Python client for FoxESS Cloud API - inverter management"
 requires-python = ">=3.11"
-dependencies = ["requests>=2.28"]
+dependencies = ["requests>=2.28", "wasmtime>=29.0.0"]
 
 [project.optional-dependencies]
 dev = [
