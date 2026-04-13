@@ -275,13 +275,24 @@ function buildLoadFn(total) {
 
 // ── Algorithms (matching smart_battery/algorithms.py exactly) ─────
 
-// should_suspend_discharge — P2 preemptive check
+// should_suspend_discharge — P2 preemptive check + end-of-discharge guard
+const END_GUARD_MINUTES = 10.0;
 function shouldSuspend(p, soc, remainH, consumption, peakCons) {
   if (remainH <= 0 || p.capKwh <= 0) return false;
   const energy = (soc - p.minSoc) / 100 * p.capKwh;
   if (energy <= 0) return true;
   let cons = Math.max(0, consumption);
   if (peakCons != null) cons = Math.max(cons, peakCons);
+
+  // End-of-discharge guard: if remaining energy can't sustain the
+  // safety floor for ~10 minutes, forced discharge would soon drop
+  // to 100W minimum causing grid import.  Self-use avoids this.
+  if (cons > 0) {
+    const floorKw = cons * p.safety;
+    const guardKwh = floorKw * (END_GUARD_MINUTES / 60);
+    if (energy < guardKwh) return true;
+  }
+
   if (cons <= 0) return false;
   const hoursToMin = energy / cons;
   return hoursToMin <= remainH * (1 + p.headroom);

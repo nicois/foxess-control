@@ -338,6 +338,28 @@ class TestShouldSuspendDischarge:
         )
         assert result_no_peak == result_low_peak
 
+    def test_end_guard_suspends_low_energy(self) -> None:
+        # 21% - 20% = 1% of 10kWh = 0.1kWh.
+        # At 5kW consumption, floor = 5 * 1.5 = 7.5kW.
+        # Guard = 7.5 * 10/60 = 1.25 kWh.  0.1 < 1.25 → suspend.
+        assert should_suspend_discharge(21.0, 20, 10.0, 0.05, 5.0)
+
+    def test_end_guard_does_not_trigger_with_plenty_of_energy(self) -> None:
+        # 60% - 20% = 40% of 10kWh = 4kWh.
+        # Floor = 5 * 1.5 = 7.5kW.  Guard = 1.25 kWh.  4 > 1.25 → no guard.
+        # Use short window so P2 doesn't trigger: 4/5 = 0.8h > 0.5*1.1.
+        assert not should_suspend_discharge(60.0, 20, 10.0, 0.5, 5.0)
+
+    def test_end_guard_scales_with_consumption(self) -> None:
+        # 22% - 20% = 2% of 10kWh = 0.2kWh.
+        # At 0.5kW consumption, floor = 0.75kW, guard = 0.125kWh.
+        # 0.2 > 0.125 → no guard.  Short window so P2 doesn't fire:
+        # 0.2/0.5 = 0.4h > 0.3*1.1 = 0.33.
+        assert not should_suspend_discharge(22.0, 20, 10.0, 0.3, 0.5)
+        # At 2kW consumption, floor = 3kW, guard = 3*10/60 = 0.5kWh.
+        # 0.2 < 0.5 → suspend via guard.
+        assert should_suspend_discharge(22.0, 20, 10.0, 0.05, 2.0)
+
 
 class TestCalculateDischargeDeferredStart:
     """Tests for calculate_discharge_deferred_start."""

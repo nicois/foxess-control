@@ -165,6 +165,20 @@ above the highest *observed* consumption, protecting against inter-poll
 spikes that would otherwise cause grid import.
 """
 
+_END_GUARD_MINUTES = 10.0
+"""Stop forced discharge when remaining energy above min SoC can't sustain
+the safety floor for this many minutes.
+
+At the tail end of a discharge, when nearly all available energy is spent,
+the paced power drops to the 100 W minimum — well below house load.  The
+shortfall is imported from the grid.  Switching to self-use ~10 min early
+lets the inverter serve house load directly from the battery without
+importing, at the cost of a small amount of forgone export.
+
+The guard scales with consumption: high loads produce a larger guard
+(more at stake), while low loads produce a tiny guard (negligible loss).
+"""
+
 
 def safety_floor_w(peak_kw: float) -> int:
     """Return the discharge safety floor in watts for a given peak consumption."""
@@ -187,6 +201,13 @@ def should_suspend_discharge(
     remaining window, adding *any* forced discharge power risks
     breaching the floor.
 
+    Also triggers an **end-of-discharge guard**: when the remaining
+    energy above *min_soc* can't sustain the safety floor for at least
+    ~10 minutes, forced discharge would soon collapse to the 100 W
+    minimum — well below house load — causing grid import.  Self-use
+    avoids this because the inverter matches house load exactly from
+    the battery until *min_soc*, without importing from the grid.
+
     When *consumption_peak_kw* is provided, the peak (rather than
     instantaneous) consumption is used — this accounts for recent load
     spikes that may recur between polling intervals.
@@ -199,6 +220,19 @@ def should_suspend_discharge(
     consumption = max(0.0, net_consumption_kw)
     if consumption_peak_kw is not None:
         consumption = max(consumption, consumption_peak_kw)
+
+    # End-of-discharge guard: forced discharge at rates below house
+    # load causes grid import.  When remaining energy is too small to
+    # sustain the safety floor (peak × safety factor), the algorithm
+    # would soon return the 100 W minimum, creating import.  Switching
+    # to self-use lets the inverter serve house load directly from the
+    # battery until min_soc without import or export.
+    if consumption > 0:
+        floor_kw = consumption * DISCHARGE_SAFETY_FACTOR
+        guard_kwh = floor_kw * (_END_GUARD_MINUTES / 60.0)
+        if energy_kwh < guard_kwh:
+            return True
+
     if consumption <= 0:
         return False  # no house load — no risk from forced discharge
     hours_to_min = energy_kwh / consumption
