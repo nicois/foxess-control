@@ -11,7 +11,132 @@
  *   # soc_entity: sensor.foxess_battery_soc
  */
 
-const CARD_VERSION = "1.1.0";
+const CARD_VERSION = "1.2.0";
+
+// -- i18n --------------------------------------------------------------------
+
+const TRANSLATIONS = {
+  en: {
+    title: "FoxESS Control",
+    smart_charge: "Smart Charge",
+    charge_scheduled: "Charge Scheduled",
+    smart_discharge: "Smart Discharge",
+    discharge_scheduled: "Discharge Scheduled",
+    discharge_suspended: "Discharge Suspended",
+    window: "Window",
+    power: "Power",
+    target: "Target",
+    min_soc: "Min SoC",
+    feedin: "Feed-in",
+    no_active: "No active operations",
+    idle_hint: "Call <b>smart_charge</b> or <b>smart_discharge</b> to begin",
+    progress: "Progress",
+    soc: "SoC",
+    time: "Time",
+    energy: "Energy",
+  },
+  de: {
+    title: "FoxESS Steuerung",
+    smart_charge: "Intelligentes Laden",
+    charge_scheduled: "Laden geplant",
+    smart_discharge: "Intelligente Entladung",
+    discharge_scheduled: "Entladung geplant",
+    discharge_suspended: "Entladung pausiert",
+    window: "Zeitfenster",
+    power: "Leistung",
+    target: "Ziel",
+    min_soc: "Min. SoC",
+    feedin: "Einspeisung",
+    no_active: "Keine aktiven Vorgänge",
+    idle_hint: "Starte <b>smart_charge</b> oder <b>smart_discharge</b>",
+    progress: "Fortschritt",
+    soc: "SoC",
+    time: "Zeit",
+    energy: "Energie",
+  },
+  fr: {
+    title: "FoxESS Contrôle",
+    smart_charge: "Charge intelligente",
+    charge_scheduled: "Charge programmée",
+    smart_discharge: "Décharge intelligente",
+    discharge_scheduled: "Décharge programmée",
+    discharge_suspended: "Décharge suspendue",
+    window: "Fenêtre",
+    power: "Puissance",
+    target: "Objectif",
+    min_soc: "SoC min",
+    feedin: "Injection",
+    no_active: "Aucune opération active",
+    idle_hint: "Appelez <b>smart_charge</b> ou <b>smart_discharge</b> pour commencer",
+    progress: "Progression",
+    soc: "SoC",
+    time: "Temps",
+    energy: "Énergie",
+  },
+  nl: {
+    title: "FoxESS Besturing",
+    smart_charge: "Slim laden",
+    charge_scheduled: "Laden gepland",
+    smart_discharge: "Slim ontladen",
+    discharge_scheduled: "Ontladen gepland",
+    discharge_suspended: "Ontladen gepauzeerd",
+    window: "Tijdvenster",
+    power: "Vermogen",
+    target: "Doel",
+    min_soc: "Min SoC",
+    feedin: "Teruglevering",
+    no_active: "Geen actieve bewerkingen",
+    idle_hint: "Start <b>smart_charge</b> of <b>smart_discharge</b>",
+    progress: "Voortgang",
+    soc: "SoC",
+    time: "Tijd",
+    energy: "Energie",
+  },
+  es: {
+    title: "FoxESS Control",
+    smart_charge: "Carga inteligente",
+    charge_scheduled: "Carga programada",
+    smart_discharge: "Descarga inteligente",
+    discharge_scheduled: "Descarga programada",
+    discharge_suspended: "Descarga suspendida",
+    window: "Ventana",
+    power: "Potencia",
+    target: "Objetivo",
+    min_soc: "SoC mín",
+    feedin: "Inyección",
+    no_active: "Sin operaciones activas",
+    idle_hint: "Llame a <b>smart_charge</b> o <b>smart_discharge</b> para iniciar",
+    progress: "Progreso",
+    soc: "SoC",
+    time: "Tiempo",
+    energy: "Energía",
+  },
+  it: {
+    title: "FoxESS Controllo",
+    smart_charge: "Ricarica intelligente",
+    charge_scheduled: "Ricarica programmata",
+    smart_discharge: "Scarica intelligente",
+    discharge_scheduled: "Scarica programmata",
+    discharge_suspended: "Scarica sospesa",
+    window: "Finestra",
+    power: "Potenza",
+    target: "Obiettivo",
+    min_soc: "SoC min",
+    feedin: "Immissione",
+    no_active: "Nessuna operazione attiva",
+    idle_hint: "Avvia <b>smart_charge</b> o <b>smart_discharge</b> per iniziare",
+    progress: "Progresso",
+    soc: "SoC",
+    time: "Tempo",
+    energy: "Energia",
+  },
+};
+
+function _getStrings(lang) {
+  if (!lang) return TRANSLATIONS.en;
+  // Try exact match (e.g. "de"), then base language (e.g. "de" from "de-AT")
+  return TRANSLATIONS[lang] || TRANSLATIONS[lang.split("-")[0]] || TRANSLATIONS.en;
+}
 
 class FoxESSControlCard extends HTMLElement {
   constructor() {
@@ -46,6 +171,11 @@ class FoxESSControlCard extends HTMLElement {
   }
 
   // -- Helpers ---------------------------------------------------------------
+
+  _t(key) {
+    const strings = _getStrings(this._hass && this._hass.language);
+    return strings[key] || TRANSLATIONS.en[key] || key;
+  }
 
   _entity(id) {
     return this._hass && this._hass.states[id];
@@ -126,7 +256,7 @@ class FoxESSControlCard extends HTMLElement {
     return `
       <div class="header">
         <div class="header-left">
-          <div class="title">FoxESS Control</div>
+          <div class="title">${this._t("title")}</div>
         </div>
         <div class="header-right">
           <div class="soc-group">
@@ -159,22 +289,22 @@ class FoxESSControlCard extends HTMLElement {
         <div class="section-header">
           <div class="section-icon-group">
             <span class="dot ${deferred ? "dot-waiting" : "dot-active"}"></span>
-            <span class="section-title">${deferred ? "Charge Scheduled" : "Smart Charge"}</span>
+            <span class="section-title">${deferred ? this._t("charge_scheduled") : this._t("smart_charge")}</span>
           </div>
           <span class="section-badge charge-badge">${remaining}</span>
         </div>
         <div class="section-body">
           <div class="detail-row">
-            <span class="detail-label">Window</span>
+            <span class="detail-label">${this._t("window")}</span>
             <span class="detail-value">${window}</span>
           </div>
           ${!deferred ? `
           <div class="detail-row">
-            <span class="detail-label">Power</span>
+            <span class="detail-label">${this._t("power")}</span>
             <span class="detail-value">${this._formatPower(power)}</span>
           </div>` : ""}
           <div class="detail-row">
-            <span class="detail-label">Target</span>
+            <span class="detail-label">${this._t("target")}</span>
             <span class="detail-value">${current != null ? Math.round(current) : "?"}% → ${target != null ? target : "?"}%</span>
           </div>
         </div>
@@ -203,27 +333,27 @@ class FoxESSControlCard extends HTMLElement {
         <div class="section-header">
           <div class="section-icon-group">
             <span class="dot ${scheduled || suspended ? "dot-waiting" : "dot-active dot-discharge"}"></span>
-            <span class="section-title">${scheduled ? "Discharge Scheduled" : suspended ? "Discharge Suspended" : "Smart Discharge"}</span>
+            <span class="section-title">${scheduled ? this._t("discharge_scheduled") : suspended ? this._t("discharge_suspended") : this._t("smart_discharge")}</span>
           </div>
           <span class="section-badge discharge-badge">${remaining}</span>
         </div>
         <div class="section-body">
           <div class="detail-row">
-            <span class="detail-label">Window</span>
+            <span class="detail-label">${this._t("window")}</span>
             <span class="detail-value">${window}</span>
           </div>
           ${!scheduled ? `
           <div class="detail-row">
-            <span class="detail-label">Power</span>
+            <span class="detail-label">${this._t("power")}</span>
             <span class="detail-value">${this._formatPower(power)}</span>
           </div>` : ""}
           <div class="detail-row">
-            <span class="detail-label">Min SoC</span>
+            <span class="detail-label">${this._t("min_soc")}</span>
             <span class="detail-value">${minSoc != null ? minSoc + "%" : "—"}</span>
           </div>
           ${feedinLimit != null ? `
           <div class="detail-row">
-            <span class="detail-label">Feed-in</span>
+            <span class="detail-label">${this._t("feedin")}</span>
             <span class="detail-value">${feedinUsed != null ? feedinUsed : "—"} / ${feedinLimit} kWh${feedinProjected != null ? ` (→${feedinProjected})` : ""}</span>
           </div>` : ""}
         </div>
@@ -240,8 +370,8 @@ class FoxESSControlCard extends HTMLElement {
                    10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10
                    14.17l7.59-7.59L19 8l-9 9z"/>
         </svg>
-        <div class="idle-text">No active operations</div>
-        <div class="idle-sub">Call <b>smart_charge</b> or <b>smart_discharge</b> to begin</div>
+        <div class="idle-text">${this._t("no_active")}</div>
+        <div class="idle-sub">${this._t("idle_hint")}</div>
       </div>
     `;
   }
@@ -314,8 +444,8 @@ class FoxESSControlCard extends HTMLElement {
       const socLabel = `${current != null ? Math.round(current) : "?"}% → ${target != null ? target : "?"}%`;
       const time = this._timeProgress(a.charge_start_time, a.charge_end_time, now);
 
-      bars += this._progressBar("SoC", socLabel, socPct, "charge-fill");
-      bars += this._progressBar("Time", time.label, time.pct, "time-fill");
+      bars += this._progressBar(this._t("soc"), socLabel, socPct, "charge-fill");
+      bars += this._progressBar(this._t("time"), time.label, time.pct, "time-fill");
     }
 
     if (dischargeActive) {
@@ -329,7 +459,7 @@ class FoxESSControlCard extends HTMLElement {
       }
       const socLabel = `${current != null ? Math.round(current) : "?"}% → ${minSoc != null ? minSoc : "?"}%`;
 
-      bars += this._progressBar("SoC", socLabel, socPct, "discharge-fill");
+      bars += this._progressBar(this._t("soc"), socLabel, socPct, "discharge-fill");
 
       const time = this._timeProgress(a.discharge_start_time, a.discharge_end_time, now);
 
@@ -337,15 +467,15 @@ class FoxESSControlCard extends HTMLElement {
       if (feedinLimit != null && feedinLimit > 0) {
         const used = a.discharge_feedin_used_kwh ?? 0;
         const energyPct = Math.min(100, Math.max(0, (used / feedinLimit) * 100));
-        bars += this._energyScheduleBar("Energy", `${used} / ${feedinLimit} kWh`, energyPct, time.pct);
+        bars += this._energyScheduleBar(this._t("energy"), `${used} / ${feedinLimit} kWh`, energyPct, time.pct);
       }
 
-      bars += this._progressBar("Time", time.label, time.pct, "time-fill");
+      bars += this._progressBar(this._t("time"), time.label, time.pct, "time-fill");
     }
 
     return `
       <div class="progress-section">
-        <div class="progress-label">Progress</div>
+        <div class="progress-label">${this._t("progress")}</div>
         ${bars}
       </div>
     `;
