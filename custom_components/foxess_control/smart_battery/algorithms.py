@@ -188,9 +188,15 @@ def calculate_discharge_power(
 ) -> int:
     """Calculate the discharge power needed to reach min SoC by window end.
 
-    Unlike charge, household consumption *assists* discharge (the load
-    drains the battery alongside the inverter), so *net_consumption_kw*
-    is **subtracted** from the required discharge rate.
+    In ForceDischarge mode, the inverter discharges at the commanded rate
+    and the house draws from that output.  If the commanded rate is below
+    house consumption, the shortfall is imported from the grid — which is
+    expensive and must be avoided.
+
+    The discharge power is therefore floored at ``net_consumption_kw`` so
+    the battery always covers the house load (net export >= 0).  When the
+    paced rate drops below house consumption and no feed-in energy remains,
+    the caller should transition back to self-use instead.
 
     When *feedin_remaining_kwh* is provided, the target energy is capped
     so the grid export budget is spread evenly across the remaining window.
@@ -202,14 +208,20 @@ def calculate_discharge_power(
         return 100
     if remaining_hours <= 0:
         return max_power_w
+
+    consumption = max(0.0, net_consumption_kw)
+    consumption_floor_w = int(consumption * 1000)
+
     # When a feed-in energy limit constrains the session, cap the target
     # energy so the export budget is spread across the full window.
-    if (
+    has_feedin_target = (
         feedin_remaining_kwh is not None
         and feedin_remaining_kwh >= 0
         and remaining_hours > 0
-    ):
-        house_absorption_kwh = max(0.0, net_consumption_kw) * remaining_hours
+    )
+    if has_feedin_target:
+        assert feedin_remaining_kwh is not None  # narrowing for mypy
+        house_absorption_kwh = consumption * remaining_hours
         max_drain_kwh = feedin_remaining_kwh + house_absorption_kwh
         if max_drain_kwh < energy_kwh:
             _LOGGER.debug(
@@ -222,17 +234,24 @@ def calculate_discharge_power(
             )
             energy_kwh = max_drain_kwh
             if energy_kwh <= 0:
-                return 100
+                return max(100, min(consumption_floor_w, max_power_w))
+
     effective_hours = remaining_hours * (1 - headroom)
     if effective_hours <= 0:
         effective_hours = remaining_hours
     battery_power_kw = energy_kwh / effective_hours
     # House load assists discharge — subtract it from needed inverter power.
-    battery_power_kw -= max(0.0, net_consumption_kw)
-    if battery_power_kw <= 0:
-        return 100
+    battery_power_kw -= consumption
     battery_power_kw *= 1 + headroom
     power_w = battery_power_kw * 1000
+
+    # Floor at house consumption to prevent grid import.  In ForceDischarge
+    # mode the inverter output must cover the house load; any shortfall is
+    # drawn from the grid.  Skip when consumption exceeds inverter capacity
+    # (grid import is unavoidable — caller should use self-use instead).
+    if 0 < consumption_floor_w <= max_power_w:
+        power_w = max(power_w, consumption_floor_w)
+
     return max(100, min(int(power_w), max_power_w))
 
 

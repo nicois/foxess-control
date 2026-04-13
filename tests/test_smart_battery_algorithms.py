@@ -182,9 +182,23 @@ class TestCalculateDischargePower:
         assert with_load < base
 
     def test_high_consumption_returns_min(self) -> None:
-        # House load alone drains battery fast enough
+        # House load exceeds inverter capacity — can't cover it, return min
         result = calculate_discharge_power(
             80.0, 20, 10.0, 3.0, 5000, net_consumption_kw=10.0
+        )
+        assert result == 100
+
+    def test_consumption_floor_prevents_grid_import(self) -> None:
+        # Paced power would be below 3kW house load → floor at 3kW
+        result = calculate_discharge_power(
+            35.0, 20, 10.0, 3.0, 5000, net_consumption_kw=3.0
+        )
+        assert result >= 3000
+
+    def test_consumption_floor_not_applied_when_exceeds_max(self) -> None:
+        # 6kW consumption > 5kW max power — floor can't help, return min
+        result = calculate_discharge_power(
+            25.0, 20, 10.0, 3.0, 5000, net_consumption_kw=6.0
         )
         assert result == 100
 

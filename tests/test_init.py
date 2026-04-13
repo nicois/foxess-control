@@ -1558,12 +1558,13 @@ class TestCalculateDischargePower:
         )
         assert with_load < base
 
-    def test_consumption_exceeds_needed_returns_min(self) -> None:
-        # House load alone drains battery fast enough → return 100
+    def test_consumption_exceeds_needed_floors_at_consumption(self) -> None:
+        # House load exceeds paced rate → floor at consumption to prevent
+        # grid import (discharge covers house load, net export = 0)
         result = _calculate_discharge_power(
             20.0, 10, 10.0, 2.0, 10000, net_consumption_kw=5.0
         )
-        assert result == 100
+        assert result == 5000
 
     def test_negative_consumption_ignored(self) -> None:
         # Solar surplus → net negative; should not increase discharge power
@@ -1655,7 +1656,7 @@ class TestDischargePowerFeedinConstraint:
     def test_feedin_zero_with_house_load(self) -> None:
         # No feedin budget but house load absorbs energy
         # max drain = 0 + 1.5*2 = 3 kWh; energy needed = 7 kWh → capped to 3
-        # Power = 3kWh / (2*0.9) * 1.1 - 1.5 kW = ~333W, small but >100
+        # Paced power ~183W < 1500W consumption → floored at consumption
         result = _calculate_discharge_power(
             80.0,
             10,
@@ -1665,7 +1666,7 @@ class TestDischargePowerFeedinConstraint:
             net_consumption_kw=1.5,
             feedin_remaining_kwh=0.0,
         )
-        assert result < 500  # significantly reduced from unconstrained
+        assert result == 1500  # floored at house consumption to prevent import
         unconstrained = _calculate_discharge_power(
             80.0,
             10,

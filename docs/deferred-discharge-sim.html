@@ -129,9 +129,16 @@ function calcDischargePower(currentSoc, minSoc, capKwh, remainingH,
   if (effectiveH <= 0) effectiveH = remainingH;
   let powerKw = energyKwh / effectiveH;
   powerKw -= Math.max(0, netConsumptionKw);
-  if (powerKw <= 0) return 100;
   powerKw *= (1 + HEADROOM);
-  const powerW = powerKw * 1000;
+  let powerW = powerKw * 1000;
+
+  // Floor at house consumption to prevent grid import.
+  // Skip when consumption exceeds inverter capacity (unavoidable).
+  const consumptionW = Math.max(0, netConsumptionKw) * 1000;
+  if (consumptionW > 0 && consumptionW <= maxPowerW) {
+    powerW = Math.max(powerW, consumptionW);
+  }
+
   return Math.max(100, Math.min(Math.round(powerW), maxPowerW));
 }
 
