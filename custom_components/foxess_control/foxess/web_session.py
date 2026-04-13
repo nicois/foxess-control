@@ -10,9 +10,12 @@ import hashlib
 import logging
 import re
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 import aiohttp
+
+from .signature import generate_signature
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,8 +45,10 @@ class FoxESSWebSession:
     """
 
     BASE_URL = "https://www.foxesscloud.com"
-    LOGIN_PATH = "/c/v0/user/login"
+    LOGIN_PATH = "/basic/v0/user/login"
     TOKEN_TTL = 3600 * 12  # refresh proactively every 12 hours
+    TIMEZONE = "Australia/Melbourne"
+    LANG = "en"
 
     def __init__(self, username: str, password_md5: str) -> None:
         self._username = username
@@ -57,14 +62,42 @@ class FoxESSWebSession:
             self._session = aiohttp.ClientSession()
         return self._session
 
+    def _make_headers(self, path: str) -> dict[str, str]:
+        """Build the required headers including the WASM signature."""
+        ts_ms = str(int(time.time() * 1000))
+        token = self._token or ""
+        sig = generate_signature(path, token, self.LANG, ts_ms)
+        now = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S")
+        return {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+            "lang": self.LANG,
+            "timestamp": ts_ms,
+            "signature": sig,
+            "token": token,
+            "timezone": self.TIMEZONE,
+            "dt": f"{self.TIMEZONE}@{ts_ms}@{now}",
+            "platform": "web",
+        }
+
     async def async_login(self) -> str:
         """Authenticate with the web portal and return a session token."""
         session = self._get_session()
         url = f"{self.BASE_URL}{self.LOGIN_PATH}"
-        body = {"user": self._username, "password": self._password_md5}
+        headers = self._make_headers(self.LOGIN_PATH)
+        body = {
+            "user": self._username,
+            "password": self._password_md5,
+            "type": 1,
+            "verification": 1,
+        }
         try:
             async with session.post(
-                url, json=body, timeout=aiohttp.ClientTimeout(total=30)
+                url,
+                json=body,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
                 resp.raise_for_status()
                 data: dict[str, Any] = await resp.json()

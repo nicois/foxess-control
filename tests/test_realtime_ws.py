@@ -52,6 +52,40 @@ class TestEnsurePasswordHash:
 
 
 # ---------------------------------------------------------------------------
+# generate_signature — WASM request signing
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateSignature:
+    def test_known_signature(self) -> None:
+        from custom_components.foxess_control.foxess.signature import (
+            generate_signature,
+        )
+
+        sig = generate_signature("/basic/v0/user/login", "", "en", "1776124242356")
+        assert sig == "02ed69731394e020c1a7e28d56a51013.5245784"
+
+    def test_different_timestamp_gives_different_signature(self) -> None:
+        from custom_components.foxess_control.foxess.signature import (
+            generate_signature,
+        )
+
+        sig1 = generate_signature("/basic/v0/user/login", "", "en", "1776124242356")
+        sig2 = generate_signature("/basic/v0/user/login", "", "en", "1776124300000")
+        assert sig1 != sig2
+
+    def test_signature_format(self) -> None:
+        from custom_components.foxess_control.foxess.signature import (
+            generate_signature,
+        )
+
+        sig = generate_signature("/basic/v0/user/login", "", "en", "1776124242356")
+        parts = sig.split(".")
+        assert len(parts) == 2
+        assert len(parts[0]) == 32  # MD5 hex
+
+
+# ---------------------------------------------------------------------------
 # map_ws_to_coordinator — pure data mapping
 # ---------------------------------------------------------------------------
 
