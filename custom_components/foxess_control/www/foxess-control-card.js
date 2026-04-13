@@ -134,8 +134,9 @@ const TRANSLATIONS = {
 
 function _getStrings(lang) {
   if (!lang) return TRANSLATIONS.en;
+  const lc = lang.toLowerCase();
   // Try exact match (e.g. "de"), then base language (e.g. "de" from "de-AT")
-  return TRANSLATIONS[lang] || TRANSLATIONS[lang.split("-")[0]] || TRANSLATIONS.en;
+  return TRANSLATIONS[lc] || TRANSLATIONS[lc.split("-")[0]] || TRANSLATIONS.en;
 }
 
 class FoxESSControlCard extends HTMLElement {
@@ -173,7 +174,8 @@ class FoxESSControlCard extends HTMLElement {
   // -- Helpers ---------------------------------------------------------------
 
   _t(key) {
-    const strings = _getStrings(this._hass && this._hass.language);
+    const lang = this._hass && (this._hass.language || (this._hass.locale && this._hass.locale.language));
+    const strings = _getStrings(lang);
     return strings[key] || TRANSLATIONS.en[key] || key;
   }
 

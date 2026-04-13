@@ -1,4 +1,21 @@
 {
+  "entity": {
+    "sensor": {
+      "smart_operations": {
+        "name": "Opérations intelligentes",
+        "state": {
+          "idle": "Inactif",
+          "charging": "Charge",
+          "deferred": "Différée",
+          "target_reached": "Objectif atteint",
+          "discharging": "Décharge",
+          "discharge_scheduled": "Décharge programmée",
+          "discharge_suspended": "Suspendue",
+          "charge_discharge_active": "Charge + Décharge"
+        }
+      }
+    }
+  },
   "services": {
     "clear_overrides": {
       "name": "Effacer les forçages",

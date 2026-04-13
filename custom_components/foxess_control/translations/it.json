@@ -1,4 +1,21 @@
 {
+  "entity": {
+    "sensor": {
+      "smart_operations": {
+        "name": "Operazioni intelligenti",
+        "state": {
+          "idle": "Inattivo",
+          "charging": "Ricarica",
+          "deferred": "Differita",
+          "target_reached": "Obiettivo raggiunto",
+          "discharging": "Scarica",
+          "discharge_scheduled": "Scarica programmata",
+          "discharge_suspended": "Sospesa",
+          "charge_discharge_active": "Ricarica + Scarica"
+        }
+      }
+    }
+  },
   "services": {
     "clear_overrides": {
       "name": "Cancella forzature",

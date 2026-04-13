@@ -1,4 +1,21 @@
 {
+  "entity": {
+    "sensor": {
+      "smart_operations": {
+        "name": "Smart Operations",
+        "state": {
+          "idle": "Idle",
+          "charging": "Charging",
+          "deferred": "Deferred",
+          "target_reached": "Target reached",
+          "discharging": "Discharging",
+          "discharge_scheduled": "Discharge scheduled",
+          "discharge_suspended": "Suspended",
+          "charge_discharge_active": "Charge + Discharge"
+        }
+      }
+    }
+  },
   "services": {
     "clear_overrides": {
       "name": "Clear overrides",

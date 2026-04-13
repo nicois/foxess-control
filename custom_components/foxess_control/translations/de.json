@@ -1,4 +1,21 @@
 {
+  "entity": {
+    "sensor": {
+      "smart_operations": {
+        "name": "Intelligente Steuerung",
+        "state": {
+          "idle": "Leerlauf",
+          "charging": "Laden",
+          "deferred": "Verzögert",
+          "target_reached": "Ziel erreicht",
+          "discharging": "Entladen",
+          "discharge_scheduled": "Entladung geplant",
+          "discharge_suspended": "Pausiert",
+          "charge_discharge_active": "Laden + Entladen"
+        }
+      }
+    }
+  },
   "services": {
     "clear_overrides": {
       "name": "Übersteuerungen löschen",

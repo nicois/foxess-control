@@ -224,7 +224,7 @@ class TestSmartOperationsOverviewSensor:
     def test_idle(self) -> None:
         hass = _make_hass()
         sensor = SmartOperationsOverviewSensor(hass, _make_entry())
-        assert sensor.native_value == "Idle"
+        assert sensor.native_value == "idle"
         assert sensor.icon == "mdi:home-battery"
         attrs = sensor.extra_state_attributes
         assert attrs["charge_active"] is False
@@ -233,7 +233,7 @@ class TestSmartOperationsOverviewSensor:
     def test_charging(self) -> None:
         hass = _make_hass(smart_charge_state=_charge_state())
         sensor = SmartOperationsOverviewSensor(hass, _make_entry())
-        assert sensor.native_value == "Charging to 80%"
+        assert sensor.native_value == "charging"
         assert sensor.icon == "mdi:battery-charging"
         attrs = sensor.extra_state_attributes
         assert attrs["charge_active"] is True
@@ -246,7 +246,7 @@ class TestSmartOperationsOverviewSensor:
             smart_charge_state=_charge_state(last_power_w=0, charging_started=False)
         )
         sensor = SmartOperationsOverviewSensor(hass, _make_entry())
-        assert sensor.native_value == "Deferred charge to 80%"
+        assert sensor.native_value == "deferred"
         assert sensor.icon == "mdi:battery-clock"
         attrs = sensor.extra_state_attributes
         assert attrs["charge_phase"] == "deferred"
@@ -277,7 +277,7 @@ class TestSmartOperationsOverviewSensor:
             "custom_components.foxess_control.sensor.dt_util.now",
             return_value=datetime.datetime(2026, 4, 8, 5, 50, 0),
         ):
-            assert sensor.native_value == "Charging to 80%"
+            assert sensor.native_value == "charging"
             assert sensor.icon == "mdi:battery-charging"
             attrs = sensor.extra_state_attributes
             assert attrs["charge_phase"] == "charging"
@@ -290,7 +290,7 @@ class TestSmartOperationsOverviewSensor:
             "custom_components.foxess_control.sensor.dt_util.now",
             return_value=datetime.datetime(2026, 4, 8, 18, 0, 0),
         ):
-            assert sensor.native_value == "Discharging until 20:00"
+            assert sensor.native_value == "discharging"
             assert sensor.icon == "mdi:battery-arrow-down"
             attrs = sensor.extra_state_attributes
             assert attrs["discharge_active"] is True
@@ -303,7 +303,7 @@ class TestSmartOperationsOverviewSensor:
             smart_discharge_state=_discharge_state(feedin_energy_limit_kwh=5.0)
         )
         sensor = SmartOperationsOverviewSensor(hass, _make_entry())
-        assert sensor.native_value == "Discharging 5.0 kWh feed-in"
+        assert sensor.native_value == "discharging"
 
     def test_both_active(self) -> None:
         hass = _make_hass(
@@ -311,7 +311,7 @@ class TestSmartOperationsOverviewSensor:
             smart_discharge_state=_discharge_state(),
         )
         sensor = SmartOperationsOverviewSensor(hass, _make_entry())
-        assert sensor.native_value == "Charge + Discharge active"
+        assert sensor.native_value == "charge_discharge_active"
         attrs = sensor.extra_state_attributes
         assert attrs["charge_active"] is True
         assert attrs["discharge_active"] is True
@@ -352,7 +352,7 @@ class TestSmartOperationsOverviewSensor:
         hass = MagicMock()
         hass.data = {}
         sensor = SmartOperationsOverviewSensor(hass, _make_entry())
-        assert sensor.native_value == "Idle"
+        assert sensor.native_value == "idle"
         attrs = sensor.extra_state_attributes
         assert attrs["charge_active"] is False
         assert attrs["discharge_active"] is False

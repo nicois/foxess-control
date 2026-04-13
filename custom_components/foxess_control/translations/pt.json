@@ -1,4 +1,21 @@
 {
+  "entity": {
+    "sensor": {
+      "smart_operations": {
+        "name": "Operações inteligentes",
+        "state": {
+          "idle": "Inativo",
+          "charging": "Carregando",
+          "deferred": "Adiada",
+          "target_reached": "Meta atingida",
+          "discharging": "Descarregando",
+          "discharge_scheduled": "Descarga agendada",
+          "discharge_suspended": "Suspensa",
+          "charge_discharge_active": "Carga + Descarga"
+        }
+      }
+    }
+  },
   "services": {
     "clear_overrides": {
       "name": "Limpar substituições",

@@ -1,4 +1,21 @@
 {
+  "entity": {
+    "sensor": {
+      "smart_operations": {
+        "name": "Inteligentne operacje",
+        "state": {
+          "idle": "Bezczynny",
+          "charging": "Ładowanie",
+          "deferred": "Odroczone",
+          "target_reached": "Cel osiągnięty",
+          "discharging": "Rozładowywanie",
+          "discharge_scheduled": "Rozładowanie zaplanowane",
+          "discharge_suspended": "Wstrzymane",
+          "charge_discharge_active": "Ładowanie + Rozładowywanie"
+        }
+      }
+    }
+  },
   "services": {
     "clear_overrides": {
       "name": "Wyczyść nadpisania",

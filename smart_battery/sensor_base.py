@@ -13,7 +13,7 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -551,6 +551,8 @@ class SmartOperationsOverviewSensor(SensorEntity):
 
     _attr_has_entity_name = True
     _attr_should_poll = True
+    _attr_translation_key = "smart_operations"
+    _attr_device_class = SensorDeviceClass.ENUM
 
     def __init__(
         self,
@@ -564,6 +566,16 @@ class SmartOperationsOverviewSensor(SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_smart_operations"
         self._attr_name = "Smart Operations"
         self._attr_device_info = device_info
+        self._attr_options = [
+            "idle",
+            "charging",
+            "deferred",
+            "target_reached",
+            "discharging",
+            "discharge_scheduled",
+            "discharge_suspended",
+            "charge_discharge_active",
+        ]
         self.hass = hass
 
     @property
@@ -572,15 +584,14 @@ class SmartOperationsOverviewSensor(SensorEntity):
         ds = get_discharge_state(self.hass, self._domain)
 
         if cs is not None and ds is not None:
-            return "Charge + Discharge active"
+            return "charge_discharge_active"
 
         if cs is not None:
-            target = cs.get("target_soc", "?")
             if cs.get("target_reached"):
-                return f"Charged to {target}% (monitoring)"
+                return "target_reached"
             if not is_effectively_charging(self.hass, self._domain, cs):
-                return f"Deferred charge to {target}%"
-            return f"Charging to {target}%"
+                return "deferred"
+            return "charging"
 
         if ds is not None:
             now = dt_util.now()
@@ -588,19 +599,12 @@ class SmartOperationsOverviewSensor(SensorEntity):
             if start.tzinfo is None and now.tzinfo is not None:
                 now = now.replace(tzinfo=None)
             if now < start:
-                return f"Discharge scheduled at {format_time(start)}"
+                return "discharge_scheduled"
             if ds.get("suspended"):
-                return "Discharge suspended (high consumption)"
-            feedin_limit = ds.get("feedin_energy_limit_kwh")
-            if feedin_limit is not None:
-                return f"Discharging {feedin_limit} kWh feed-in"
-            end = ds.get("end")
-            if end is not None:
-                return f"Discharging until {format_time(end)}"
-            min_soc = ds.get("min_soc", "?")
-            return f"Discharging to {min_soc}%"
+                return "discharge_suspended"
+            return "discharging"
 
-        return "Idle"
+        return "idle"
 
     @property
     def icon(self) -> str:

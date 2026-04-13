@@ -16,7 +16,96 @@
  *   # etc.
  */
 
-const OVERVIEW_VERSION = "2.1.0";
+const OVERVIEW_VERSION = "2.2.0";
+
+// -- i18n --------------------------------------------------------------------
+
+const _OV_TRANSLATIONS = {
+  en: {
+    title: "FoxESS Overview",
+    solar: "Solar",
+    house: "House",
+    grid: "Grid",
+    battery: "Battery",
+    importing: "Importing ↓",
+    exporting: "Exporting ↑",
+    charging: "Charging",
+    discharging: "Discharging",
+    not_found: "not found",
+    not_discovered: "not discovered",
+  },
+  de: {
+    title: "FoxESS Übersicht",
+    solar: "Solar",
+    house: "Haus",
+    grid: "Netz",
+    battery: "Batterie",
+    importing: "Bezug ↓",
+    exporting: "Einspeisung ↑",
+    charging: "Laden",
+    discharging: "Entladen",
+    not_found: "nicht gefunden",
+    not_discovered: "nicht erkannt",
+  },
+  fr: {
+    title: "FoxESS Aperçu",
+    solar: "Solaire",
+    house: "Maison",
+    grid: "Réseau",
+    battery: "Batterie",
+    importing: "Import ↓",
+    exporting: "Export ↑",
+    charging: "Charge",
+    discharging: "Décharge",
+    not_found: "introuvable",
+    not_discovered: "non détecté",
+  },
+  nl: {
+    title: "FoxESS Overzicht",
+    solar: "Zon",
+    house: "Huis",
+    grid: "Net",
+    battery: "Batterij",
+    importing: "Afname ↓",
+    exporting: "Teruglevering ↑",
+    charging: "Laden",
+    discharging: "Ontladen",
+    not_found: "niet gevonden",
+    not_discovered: "niet ontdekt",
+  },
+  es: {
+    title: "FoxESS Resumen",
+    solar: "Solar",
+    house: "Casa",
+    grid: "Red",
+    battery: "Batería",
+    importing: "Importando ↓",
+    exporting: "Exportando ↑",
+    charging: "Cargando",
+    discharging: "Descargando",
+    not_found: "no encontrado",
+    not_discovered: "no detectado",
+  },
+  it: {
+    title: "FoxESS Panoramica",
+    solar: "Solare",
+    house: "Casa",
+    grid: "Rete",
+    battery: "Batteria",
+    importing: "Importazione ↓",
+    exporting: "Esportazione ↑",
+    charging: "Ricarica",
+    discharging: "Scarica",
+    not_found: "non trovato",
+    not_discovered: "non rilevato",
+  },
+};
+
+function _ovGetStrings(lang) {
+  if (!lang) return _OV_TRANSLATIONS.en;
+  const lc = lang.toLowerCase();
+  return _OV_TRANSLATIONS[lc] || _OV_TRANSLATIONS[lc.split("-")[0]] || _OV_TRANSLATIONS.en;
+}
 
 // Config key → role name returned by the foxess_control/entity_map WS command.
 const _ROLE_MAP = {
@@ -97,6 +186,12 @@ class FoxESSOverviewCard extends HTMLElement {
 
   // -- Helpers ---------------------------------------------------------------
 
+  _t(key) {
+    const lang = this._hass && (this._hass.language || (this._hass.locale && this._hass.locale.language));
+    const strings = _ovGetStrings(lang);
+    return strings[key] || _OV_TRANSLATIONS.en[key] || key;
+  }
+
   _exists(entityId) {
     return entityId && this._hass && entityId in this._hass.states;
   }
@@ -174,12 +269,12 @@ class FoxESSOverviewCard extends HTMLElement {
       <style>${FoxESSOverviewCard._styles()}</style>
       <ha-card>
         <div class="header">
-          <div class="title">FoxESS Overview</div>
+          <div class="title">${this._t("title")}</div>
           ${workMode && workMode !== "SelfUse" ? `<span class="work-mode">${this._formatWorkMode(workMode)}</span>` : ""}
         </div>
         <div class="flow-grid">
-          ${this._renderNode("solar", "☀️", "Solar", solarFound, this._formatKw(solar), solarActive, pv1 != null || pv2 != null ? this._pvDetail(pv1, pv2) : "", eid.solar_entity)}
-          ${this._renderNode("house", "🏠", "House", houseFound, this._formatKw(house), houseActive, "", eid.house_entity)}
+          ${this._renderNode("solar", "☀️", this._t("solar"), solarFound, this._formatKw(solar), solarActive, pv1 != null || pv2 != null ? this._pvDetail(pv1, pv2) : "", eid.solar_entity)}
+          ${this._renderNode("house", "🏠", this._t("house"), houseFound, this._formatKw(house), houseActive, "", eid.house_entity)}
           ${this._renderGridNode(gridFound, gridNet, gridImporting, gridExporting, gridV, gridHz, eid.grid_import_entity)}
           ${this._renderBatteryNode(soc, socPct, socColor, batNet, batCharging, batDischarging, batTemp, residual, batFound)}
         </div>
@@ -207,13 +302,13 @@ class FoxESSOverviewCard extends HTMLElement {
         <div class="node grid not-found">
           <div class="node-icon">⚡</div>
           <div class="node-value">—</div>
-          <div class="node-label">Grid</div>
-          <div class="node-sub">${entityId ? entityId + " not found" : "not discovered"}</div>
+          <div class="node-label">${this._t("grid")}</div>
+          <div class="node-sub">${entityId ? entityId + " " + this._t("not_found") : this._t("not_discovered")}</div>
         </div>
       `;
     }
     const active = importing || exporting;
-    const direction = importing ? "Importing ↓" : exporting ? "Exporting ↑" : "";
+    const direction = importing ? this._t("importing") : exporting ? this._t("exporting") : "";
     const sub = [];
     if (voltage != null) sub.push(`${voltage.toFixed(0)}V`);
     if (freq != null) sub.push(`${freq.toFixed(1)}Hz`);
@@ -221,7 +316,7 @@ class FoxESSOverviewCard extends HTMLElement {
       <div class="node grid ${active ? "active" : "inactive"}">
         <div class="node-icon">⚡</div>
         <div class="node-value">${active ? this._formatKw(Math.abs(gridNet)) : "—"}</div>
-        <div class="node-label">Grid${direction ? " · " + direction : ""}</div>
+        <div class="node-label">${this._t("grid")}${direction ? " · " + direction : ""}</div>
         ${sub.length ? `<div class="node-sub">${sub.join(" · ")}</div>` : ""}
       </div>
     `;
@@ -234,7 +329,7 @@ class FoxESSOverviewCard extends HTMLElement {
           <div class="node-icon">${icon}</div>
           <div class="node-value">—</div>
           <div class="node-label">${label}</div>
-          <div class="node-sub">${entityId ? entityId + " not found" : "not discovered"}</div>
+          <div class="node-sub">${entityId ? entityId + " " + this._t("not_found") : this._t("not_discovered")}</div>
         </div>
       `;
     }
@@ -254,14 +349,14 @@ class FoxESSOverviewCard extends HTMLElement {
         <div class="node battery not-found">
           <div class="node-icon">🔋</div>
           <div class="node-value">—</div>
-          <div class="node-label">Battery</div>
-          <div class="node-sub">not discovered</div>
+          <div class="node-label">${this._t("battery")}</div>
+          <div class="node-sub">${this._t("not_discovered")}</div>
         </div>
       `;
     }
     const batPower = Math.abs(batNet);
     const active = charging || discharging;
-    const direction = charging ? "Charging" : discharging ? "Discharging" : "";
+    const direction = charging ? this._t("charging") : discharging ? this._t("discharging") : "";
     const sub = [];
     if (temp != null) sub.push(`${temp.toFixed(1)}°C`);
     if (residual != null) sub.push(`${residual.toFixed(1)} kWh`);
@@ -280,7 +375,7 @@ class FoxESSOverviewCard extends HTMLElement {
           <span class="bat-soc">${soc != null ? Math.round(soc) + "%" : "—"}</span>
         </div>
         <div class="node-value">${active ? this._formatKw(batPower) : "—"}</div>
-        <div class="node-label">Battery${direction ? " · " + direction : ""}</div>
+        <div class="node-label">${this._t("battery")}${direction ? " · " + direction : ""}</div>
         ${sub.length ? `<div class="node-sub">${sub.join(" · ")}</div>` : ""}
       </div>
     `;
