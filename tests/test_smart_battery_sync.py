@@ -23,7 +23,6 @@ CANONICAL = REPO_ROOT / "smart_battery"
 # Every integration that vendors smart_battery
 VENDORED_COPIES = [
     REPO_ROOT / "custom_components" / "foxess_control" / "smart_battery",
-    REPO_ROOT / "custom_components" / "goodwe_battery_control" / "smart_battery",
 ]
 
 

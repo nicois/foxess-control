@@ -346,6 +346,18 @@ class FoxESSControlCard extends HTMLElement {
     );
     const linePath = pathParts.join(" ");
 
+    // Forecast-only path — only future points, so dashed line doesn't cover the past
+    let forecastPath = linePath;
+    if (this._socHistory && this._socHistory.length >= 2) {
+      const futurePoints = points.filter((p) => p.time >= now);
+      if (futurePoints.length >= 2) {
+        const fParts = futurePoints.map(
+          (p, i) => `${i === 0 ? "M" : "L"}${toX(p.time).toFixed(1)},${toY(p.soc).toFixed(1)}`
+        );
+        forecastPath = fParts.join(" ");
+      }
+    }
+
     // Area fill (forecast only — future portion)
     const chartBottom = padTop + chartHeight;
     const areaPath =
@@ -400,7 +412,7 @@ class FoxESSControlCard extends HTMLElement {
           </defs>
           <path d="${areaPath}" fill="url(#fg)"/>
           ${historyPath ? `<path d="${historyPath}" fill="none" stroke="var(--primary-color)" stroke-width="2" stroke-linejoin="round" opacity="0.9"/>` : ""}
-          <path d="${linePath}" fill="none" stroke="var(--primary-color)"
+          <path d="${historyPath ? forecastPath : linePath}" fill="none" stroke="var(--primary-color)"
                 stroke-width="1.5" stroke-linejoin="round" ${historyPath ? 'stroke-dasharray="4,3" opacity="0.6"' : ""}/>
           ${showNow ? `<line x1="${nowX.toFixed(1)}" y1="${padTop}" x2="${nowX.toFixed(1)}" y2="${chartBottom}" stroke="var(--primary-text-color)" stroke-width="0.5" stroke-dasharray="2,2" opacity="0.4"/>` : ""}
           <!-- Y-axis labels -->
