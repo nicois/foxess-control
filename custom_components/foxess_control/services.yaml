@@ -165,7 +165,7 @@ smart_charge:
 smart_discharge:
   name: Smart discharge
   description: >-
-    Discharge the battery within a time window, pacing the discharge rate to spread energy delivery evenly. Reverts to self-use when the minimum SoC or feed-in energy limit is reached.
+    Discharge the battery within a time window. Stays in self-use as long as possible, then switches to forced discharge at full power when needed to meet the target by the window end. Reverts to self-use when the minimum SoC or feed-in energy limit is reached.
   fields:
     start_time:
       name: Start time

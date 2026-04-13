@@ -39,6 +39,7 @@
           "deferred": "Différée",
           "target_reached": "Objectif atteint",
           "discharging": "Décharge",
+          "discharge_deferred": "Décharge différée",
           "discharge_scheduled": "Décharge programmée",
           "discharge_suspended": "Suspendue",
           "charge_discharge_active": "Charge + Décharge"
@@ -147,7 +148,7 @@
     },
     "smart_discharge": {
       "name": "Décharge intelligente",
-      "description": "Décharger la batterie dans une fenêtre horaire, en régulant la puissance de décharge pour répartir l'énergie uniformément. Revient à l'autoconsommation lorsque le SoC minimum ou la limite d'énergie injectée est atteinte.",
+      "description": "Décharge la batterie dans une fenêtre temporelle. Reste en autoconsommation le plus longtemps possible, puis passe en décharge forcée à pleine puissance lorsque nécessaire pour atteindre l'objectif avant la fin de la fenêtre. Revient en autoconsommation lorsque le SoC minimum ou la limite d'énergie d'injection est atteint.",
       "fields": {
         "start_time": {
           "name": "Heure de début",

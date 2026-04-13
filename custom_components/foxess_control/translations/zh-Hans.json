@@ -39,6 +39,7 @@
           "deferred": "延迟中",
           "target_reached": "已达目标",
           "discharging": "放电中",
+          "discharge_deferred": "放电延迟",
           "discharge_scheduled": "放电已计划",
           "discharge_suspended": "放电暂停",
           "charge_discharge_active": "充电 + 放电"
@@ -147,7 +148,7 @@
     },
     "smart_discharge": {
       "name": "智能放电",
-      "description": "在时间窗口内放电，调节放电速率以均匀分配能量输出。当达到最低电量或馈网电量限制时恢复自用模式。",
+      "description": "在时间窗口内放电。尽可能长时间保持自用模式，然后在需要时切换到最大功率强制放电以在窗口结束前达到目标。当达到最低电量或馈电能量限制时恢复自用模式。",
       "fields": {
         "start_time": {
           "name": "开始时间",

@@ -11,6 +11,7 @@ import datetime
 from custom_components.foxess_control.smart_battery.algorithms import (
     calculate_charge_power,
     calculate_deferred_start,
+    calculate_discharge_deferred_start,
     calculate_discharge_power,
     should_suspend_discharge,
     soc_energy_kwh,
@@ -230,3 +231,125 @@ class TestShouldSuspendDischarge:
 
     def test_zero_capacity(self) -> None:
         assert not should_suspend_discharge(50.0, 20, 0.0, 2.0, 2.0)
+
+
+class TestCalculateDischargeDeferredStart:
+    """Tests for calculate_discharge_deferred_start."""
+
+    def _end(self, hours_from_now: float = 2.0) -> datetime.datetime:
+        return datetime.datetime(2026, 4, 13, 20, 0, 0)
+
+    def _start(self) -> datetime.datetime:
+        return datetime.datetime(2026, 4, 13, 18, 0, 0)
+
+    def test_no_discharge_needed_returns_end(self) -> None:
+        """SoC already at min — no forced discharge needed."""
+        result = calculate_discharge_deferred_start(30.0, 30, 10.0, 10500, self._end())
+        assert result == self._end()
+
+    def test_soc_below_min_returns_end(self) -> None:
+        result = calculate_discharge_deferred_start(25.0, 30, 10.0, 10500, self._end())
+        assert result == self._end()
+
+    def test_defers_with_long_window(self) -> None:
+        """Plenty of time — should defer past start."""
+        result = calculate_discharge_deferred_start(
+            80.0, 30, 10.0, 10500, self._end(), start=self._start()
+        )
+        # 5kWh to discharge at 10.5kW = ~0.48h → buffered ~0.53h
+        # End - 0.53h = ~19:28, which is after 18:00 start
+        assert result > self._start()
+        assert result < self._end()
+
+    def test_tight_window_returns_start(self) -> None:
+        """Window too short — should return start time (discharge immediately)."""
+        short_end = datetime.datetime(2026, 4, 13, 18, 20, 0)
+        result = calculate_discharge_deferred_start(
+            90.0, 10, 20.0, 10500, short_end, start=self._start()
+        )
+        assert result == self._start()
+
+    def test_house_consumption_reduces_effective_rate(self) -> None:
+        """House load reduces effective discharge rate → earlier start."""
+        no_load = calculate_discharge_deferred_start(
+            80.0,
+            30,
+            10.0,
+            10500,
+            self._end(),
+            net_consumption_kw=0.0,
+            start=self._start(),
+        )
+        with_load = calculate_discharge_deferred_start(
+            80.0,
+            30,
+            10.0,
+            10500,
+            self._end(),
+            net_consumption_kw=2.0,
+            start=self._start(),
+        )
+        # House load reduces effective forced discharge rate → need earlier start
+        assert with_load < no_load
+
+    def test_feedin_uses_doubled_headroom(self) -> None:
+        """Feed-in deadline uses 2x headroom → starts earlier."""
+        soc_only = calculate_discharge_deferred_start(
+            80.0, 30, 10.0, 10500, self._end(), start=self._start()
+        )
+        with_feedin = calculate_discharge_deferred_start(
+            80.0,
+            30,
+            10.0,
+            10500,
+            self._end(),
+            start=self._start(),
+            feedin_energy_limit_kwh=5.0,
+        )
+        # Feed-in requires earlier start due to doubled headroom
+        assert with_feedin <= soc_only
+
+    def test_feedin_deadline_accounts_for_consumption(self) -> None:
+        """House load reduces effective export rate → earlier start."""
+        no_load = calculate_discharge_deferred_start(
+            80.0,
+            30,
+            10.0,
+            10500,
+            self._end(),
+            net_consumption_kw=0.0,
+            feedin_energy_limit_kwh=5.0,
+            start=self._start(),
+        )
+        with_load = calculate_discharge_deferred_start(
+            80.0,
+            30,
+            10.0,
+            10500,
+            self._end(),
+            net_consumption_kw=3.0,
+            feedin_energy_limit_kwh=5.0,
+            start=self._start(),
+        )
+        # House load reduces export rate → must start earlier for feedin
+        assert with_load < no_load
+
+    def test_zero_max_power_returns_end(self) -> None:
+        result = calculate_discharge_deferred_start(80.0, 30, 10.0, 0, self._end())
+        assert result == self._end()
+
+    def test_large_feedin_dominates(self) -> None:
+        """Large feedin limit forces earlier start than SoC alone."""
+        result = calculate_discharge_deferred_start(
+            80.0,
+            30,
+            10.0,
+            10500,
+            self._end(),
+            start=self._start(),
+            feedin_energy_limit_kwh=15.0,
+        )
+        # 15kWh export at ~10.5kW effective = ~1.43h → buffered ~1.79h
+        # That should push start before the SoC-only deadline
+        assert result >= self._start()
+        assert result < self._end()

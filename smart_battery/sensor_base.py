@@ -234,6 +234,28 @@ def estimate_discharge_remaining(
         wait = start - now
         return f"starts in {format_duration(wait)}"
 
+    # Deferred phase — estimate when forced discharge will begin
+    if not ds.get("discharging_started", True):
+        from .algorithms import calculate_discharge_deferred_start
+
+        soc = get_soc_value(hass, domain)
+        if soc is not None:
+            capacity = get_battery_capacity_kwh(hass, domain)
+            headroom = get_smart_headroom_fraction(hass, domain)
+            deferred = calculate_discharge_deferred_start(
+                soc,
+                ds.get("min_soc", 10),
+                capacity,
+                ds.get("max_power_w", 0),
+                end,
+                headroom=headroom,
+                feedin_energy_limit_kwh=ds.get("feedin_energy_limit_kwh"),
+            )
+            if now < deferred:
+                wait = deferred - now
+                return f"defers {format_duration(wait)}"
+        return format_duration(end - now)
+
     window_remaining = end - now
     if window_remaining.total_seconds() <= 0:
         return "ending"
@@ -487,6 +509,9 @@ class OverrideStatusSensor(SensorEntity):
                 now = now.replace(tzinfo=None)
             if now < start:
                 return f"Dchg@{format_time(start)}"
+            if not ds.get("discharging_started", True):
+                min_soc = ds.get("min_soc", "?")
+                return f"Wait→{min_soc}%"
             power = format_power(
                 get_actual_discharge_power_w(
                     self.hass, self._domain, ds.get("last_power_w", 0)
@@ -511,7 +536,10 @@ class OverrideStatusSensor(SensorEntity):
                 return ICON_DEFERRED
             return ICON_CHARGING
 
-        if get_discharge_state(self.hass, self._domain) is not None:
+        ds = get_discharge_state(self.hass, self._domain)
+        if ds is not None:
+            if not ds.get("discharging_started", True):
+                return ICON_DEFERRED
             return ICON_DISCHARGING
 
         return ICON_IDLE
@@ -536,8 +564,12 @@ class OverrideStatusSensor(SensorEntity):
 
         ds = get_discharge_state(self.hass, self._domain)
         if ds is not None:
+            phase = (
+                "deferred" if not ds.get("discharging_started", True) else "discharging"
+            )
             return {
                 "mode": "smart_discharge",
+                "phase": phase,
                 "power_w": ds.get("last_power_w", 0),
                 "min_soc": ds.get("min_soc"),
                 "end_time": ds["end"].isoformat(),
@@ -571,6 +603,7 @@ class SmartOperationsOverviewSensor(SensorEntity):
             "deferred",
             "target_reached",
             "discharging",
+            "discharge_deferred",
             "discharge_scheduled",
             "discharge_suspended",
             "charge_discharge_active",
@@ -599,6 +632,8 @@ class SmartOperationsOverviewSensor(SensorEntity):
                 now = now.replace(tzinfo=None)
             if now < start:
                 return "discharge_scheduled"
+            if not ds.get("discharging_started", True):
+                return "discharge_deferred"
             if ds.get("suspended"):
                 return "discharge_suspended"
             return "discharging"
@@ -612,7 +647,10 @@ class SmartOperationsOverviewSensor(SensorEntity):
             if not is_effectively_charging(self.hass, self._domain, cs):
                 return ICON_DEFERRED
             return ICON_CHARGING
-        if get_discharge_state(self.hass, self._domain) is not None:
+        ds = get_discharge_state(self.hass, self._domain)
+        if ds is not None:
+            if not ds.get("discharging_started", True):
+                return ICON_DEFERRED
             return ICON_DISCHARGING
         return ICON_IDLE
 
@@ -677,8 +715,16 @@ class SmartOperationsOverviewSensor(SensorEntity):
                         feedin_projected = round(
                             min(feedin_used / elapsed * total_secs, feedin_limit), 2
                         )
+            discharge_phase = "discharging"
+            if now < ds_start:
+                discharge_phase = "scheduled"
+            elif not ds.get("discharging_started", True):
+                discharge_phase = "deferred"
+            elif ds.get("suspended"):
+                discharge_phase = "suspended"
             attrs.update(
                 {
+                    "discharge_phase": discharge_phase,
                     "discharge_power_w": ds_power,
                     "discharge_min_soc": ds.get("min_soc"),
                     "discharge_current_soc": soc,
@@ -838,6 +884,8 @@ class DischargePowerSensor(SensorEntity):
         if start.tzinfo is None and now.tzinfo is not None:
             now = now.replace(tzinfo=None)
         if now < start:
+            return 0
+        if not ds.get("discharging_started", True):
             return 0
         return get_actual_discharge_power_w(
             self.hass, self._domain, ds.get("last_power_w", 0)

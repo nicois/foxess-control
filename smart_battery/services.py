@@ -22,7 +22,11 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 
-from .algorithms import calculate_charge_power, calculate_deferred_start
+from .algorithms import (
+    calculate_charge_power,
+    calculate_deferred_start,
+    calculate_discharge_deferred_start,
+)
 from .const import (
     CONF_API_MIN_SOC,
     CONF_BATTERY_CAPACITY_KWH,
@@ -314,37 +318,69 @@ def register_services(
         )
         pacing_enabled = battery_capacity_kwh > 0
 
-        # Calculate paced initial power
+        # Decide whether to start discharging now or defer (stay in self-use)
         current_soc = _get_current_soc(hass, domain)
+        now = dt_util.now()
+        headroom_pct: int = _get_entry_option(
+            hass, domain, CONF_SMART_HEADROOM, DEFAULT_SMART_HEADROOM
+        )
+        headroom = headroom_pct / 100.0
+        net_consumption = _get_net_consumption(hass, domain)
+        should_defer = False
         if pacing_enabled and current_soc is not None:
-            from .algorithms import calculate_discharge_power
-
-            now = dt_util.now()
-            remaining = (end - now).total_seconds() / 3600.0
-            headroom_pct: int = _get_entry_option(
-                hass, domain, CONF_SMART_HEADROOM, DEFAULT_SMART_HEADROOM
-            )
-            initial_power = calculate_discharge_power(
+            deferred_start = calculate_discharge_deferred_start(
                 current_soc,
                 min_soc,
                 battery_capacity_kwh,
-                remaining,
                 max_power_w,
-                net_consumption_kw=_get_net_consumption(hass, domain),
-                headroom=headroom_pct / 100.0,
-                feedin_remaining_kwh=feedin_energy_limit,
+                end,
+                net_consumption_kw=net_consumption,
+                start=start,
+                headroom=headroom,
+                taper_profile=hass.data.get(domain, {}).get("_taper_profile"),
+                feedin_energy_limit_kwh=feedin_energy_limit,
             )
+            should_defer = now < deferred_start
+
+        if should_defer:
+            _LOGGER.info(
+                "Smart discharge %02d:%02d - %02d:%02d deferred "
+                "(min_soc=%d%%, SoC=%.1f%%)",
+                start.hour,
+                start.minute,
+                end.hour,
+                end.minute,
+                min_soc,
+                current_soc,
+            )
+            initial_power = 0
         else:
-            initial_power = max_power_w
+            if pacing_enabled and current_soc is not None:
+                from .algorithms import calculate_discharge_power
+
+                remaining = (end - now).total_seconds() / 3600.0
+                initial_power = calculate_discharge_power(
+                    current_soc,
+                    min_soc,
+                    battery_capacity_kwh,
+                    remaining,
+                    max_power_w,
+                    net_consumption_kw=net_consumption,
+                    headroom=headroom,
+                    feedin_remaining_kwh=feedin_energy_limit,
+                )
+            else:
+                initial_power = max_power_w
 
         cancel_smart_discharge(hass, domain)
         if hass.data[domain].get("_smart_charge_state") is not None:
             _LOGGER.info("Smart discharge: cancelling active smart charge session")
             cancel_smart_charge(hass, domain)
 
-        await adapter.apply_mode(
-            hass, WorkMode.FORCE_DISCHARGE, initial_power, fd_soc=api_min_soc
-        )
+        if not should_defer:
+            await adapter.apply_mode(
+                hass, WorkMode.FORCE_DISCHARGE, initial_power, fd_soc=api_min_soc
+            )
 
         min_power_change = int(
             _get_entry_option(
@@ -367,6 +403,8 @@ def register_services(
             "min_power_change": min_power_change,
             "pacing_enabled": pacing_enabled,
             "start_soc": current_soc,
+            "discharging_started": not should_defer,
+            "discharging_started_at": None if should_defer else now,
         }
 
         setup_smart_discharge_listeners(hass, domain, adapter)

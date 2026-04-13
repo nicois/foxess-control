@@ -39,6 +39,7 @@
           "deferred": "Differita",
           "target_reached": "Obiettivo raggiunto",
           "discharging": "Scarica",
+          "discharge_deferred": "Scarica differita",
           "discharge_scheduled": "Scarica programmata",
           "discharge_suspended": "Sospesa",
           "charge_discharge_active": "Ricarica + Scarica"
@@ -147,7 +148,7 @@
     },
     "smart_discharge": {
       "name": "Scarica intelligente",
-      "description": "Scaricare la batteria entro una finestra temporale, regolando la potenza di scarica per distribuire l'energia in modo uniforme. Torna all'autoconsumo quando viene raggiunto il SoC minimo o il limite di energia immessa in rete.",
+      "description": "Scarica la batteria entro una finestra temporale. Rimane in autoconsumo il più a lungo possibile, poi passa alla scarica forzata a piena potenza quando necessario per raggiungere l'obiettivo entro la fine della finestra. Torna all'autoconsumo quando viene raggiunto il SoC minimo o il limite di energia di immissione.",
       "fields": {
         "start_time": {
           "name": "Ora di inizio",

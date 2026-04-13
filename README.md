@@ -14,7 +14,7 @@ FoxESS Control polls real-time inverter data (battery SoC, charge/discharge powe
 ### Smart charge: optimally ensure SoC is reached at a given time
 <img width="508" height="891" alt="image" src="https://github.com/user-attachments/assets/16f47ed2-2656-4ec8-92ec-40474f852d62" />
 
-### Smart discharge: feed in during a time window, optionally limiting total energy, reverting to self-use afterwards. If minimum SoC will be reached, throttle discharge rate to not reach it prematurely
+### Smart discharge: defer forced discharge as long as possible, then discharge to meet SoC and feed-in targets by the end of the window
 <img width="510" height="1038" alt="image" src="https://github.com/user-attachments/assets/471f6ce7-55dc-4a84-972d-83b8b58775ea" />
 
 
@@ -77,7 +77,7 @@ After setup, click **Configure** on the integration entry to adjust:
 | Battery Capacity | 0.0 kWh | 0-100 kWh | Total usable battery capacity in kWh. Required for `smart_charge` power calculations. |
 | Min Power Change | 500 W | 0-5000 W | Minimum watt change before updating the charge schedule during `smart_charge`. Lower values improve SoC tracking, higher values reduce API calls. |
 | Minimum API fdSoc | 11% | 0-11% | The minimum `fdSoc` value sent to the FoxESS API. The API normally rejects values below 11 (errno 40257). Only lower this if you know your firmware supports it. |
-| Smart Headroom | 10% | 0-25% | Spare capacity reserved during `smart_charge` and `smart_discharge` for transient load variation. Applied as both a time buffer (plan to finish in 90% of the window) and a power multiplier (request 110% of the calculated rate). For smart charge, lower values charge more slowly and defer longer; higher values start earlier and charge faster. For smart discharge, the headroom ensures the battery is not drained too quickly, reaching `min_soc` near the end of the window. Set to 0 for no headroom (not recommended — transient loads may prevent reaching the target). |
+| Smart Headroom | 10% | 0-25% | Spare capacity reserved during `smart_charge` and `smart_discharge` for transient load variation. Applied as both a time buffer (plan to finish in 90% of the window) and a power multiplier (request 110% of the calculated rate). For smart charge, lower values charge more slowly and defer longer; higher values start earlier and charge faster. For smart discharge, the headroom determines how long the deferred self-use phase lasts — lower values defer longer (start forced discharge later), higher values start earlier. When a feed-in energy limit is set, the headroom is doubled (up to 40%) to account for household consumption reducing the effective export rate. Set to 0 for no headroom (not recommended — transient loads may prevent reaching the target). |
 
 > **Warning:** The inverter's behaviour when it reaches this SoC level during force discharge or feed-in is unintuitive. Consider using an automation to cancel the override before the battery reaches this level. See [Known limitations](#known-limitations).
 
@@ -234,12 +234,12 @@ data:
 
 ### `foxess_control.smart_discharge`
 
-Discharges the battery within a time window and automatically reverts to self-use when the battery reaches a minimum SoC. This replaces the need for a separate automation to monitor SoC and cancel the discharge.
+Discharges the battery within a time window, deferring forced discharge as long as possible to keep the battery serving household load naturally. Only switches to forced discharge when necessary to meet the SoC or feed-in target by the end of the window.
 
 **How it works:**
 
-1. Sets a `ForceDischarge` schedule with `fdSoc` set low (11%) so the inverter never stops discharging on its own — HA is the sole authority for stopping.
-2. **Power pacing** (requires `battery_capacity_kwh` in options): Calculates the discharge rate needed to reach `min_soc` by the end of the window, accounting for household consumption (which assists discharge) and applying the configurable Smart Headroom buffer. When available, the inverter's `ResidualEnergy` sensor (direct kWh measurement) is used for higher precision than integer SoC% × capacity. When `feedin_energy_limit_kwh` is set, pacing factors in the remaining export budget: the target energy is capped so the export is spread evenly across the window, preventing the session from exhausting the feed-in limit early and stopping before `min_soc` is reached. The power is recalculated every 5 minutes and adjusted if the change exceeds the Minimum Power Change threshold. Without `battery_capacity_kwh` configured, the discharge runs at the inverter's maximum power (or the user-specified `power` limit). When a `power` value is provided, it acts as a ceiling — pacing still operates but never exceeds the specified limit.
+1. **Deferred phase** (requires `battery_capacity_kwh` in options): Calculates the latest possible start time for forced discharge, considering two independent deadlines — (a) the time needed at full power to drain from the current SoC to `min_soc`, and (b) if `feedin_energy_limit_kwh` is set, the time needed to export the required energy (with doubled headroom, since household consumption reduces the effective export rate). The inverter stays in self-use during this phase, so the battery naturally serves household load without grid export. This prevents accidental grid import that can occur when paced discharge power is set below the house load. Without `battery_capacity_kwh` configured, forced discharge starts immediately.
+2. **Discharging phase:** When the deferred deadline arrives, sets a `ForceDischarge` schedule with `fdSoc` set low (11%) so the inverter never stops discharging on its own — HA is the sole authority for stopping. The initial discharge power is calculated based on the remaining energy to discharge and time remaining, then re-evaluated every 5 minutes. Power is adjusted if the change exceeds the Minimum Power Change threshold. When `feedin_energy_limit_kwh` is set, pacing factors in the remaining export budget so the feed-in limit is not exhausted early. When a `power` value is provided, it acts as a ceiling — pacing still operates but never exceeds the specified limit. When available, the inverter's `ResidualEnergy` sensor (direct kWh measurement) is used for higher precision than integer SoC% × capacity.
 3. Monitors the battery SoC periodically. When the SoC drops to the `min_soc` threshold for two consecutive readings, the `ForceDischarge` group is removed from the schedule, all listeners are cancelled, and the session ends. Requiring two readings prevents a single SoC dip from prematurely ending the session. Other modes' schedule groups (e.g. a standing `ForceCharge` window) are preserved.
 4. If `feedin_energy_limit_kwh` is set, the cumulative grid feed-in counter is snapshot at the start and compared each interval. When the exported energy reaches the limit, the session ends. This uses the API's lifetime `feedin` counter rather than integrating instantaneous power, so it is accurate across HA restarts.
 5. When the time window ends, the `ForceDischarge` group is removed from the schedule and listeners are cancelled. This prevents the schedule from replaying the next day.
@@ -472,7 +472,7 @@ That's it — no configuration required. The card auto-discovers the `sensor.fox
 
 - **Header**: Battery SoC gauge with colour-coded fill (green/orange/red by level)
 - **Smart Charge** (green section): Time window, power, target SoC with progress bar, remaining time badge. Shows "Charge Scheduled" with a dim indicator when deferred, "Smart Charge" with a pulsing dot when actively charging.
-- **Smart Discharge** (orange section): Time window, power, min SoC, feed-in energy limit. Shows "Discharge Scheduled" before the window opens.
+- **Smart Discharge** (orange section): Time window, power, min SoC, feed-in energy limit. Shows "Discharge Scheduled" before the window opens, "Discharge Deferred" during the deferred self-use phase, and "Smart Discharge" with a pulsing dot when actively discharging. Power is hidden during the deferred phase since no forced discharge is active.
 - **Idle**: Clean message when no smart operation is active.
 - **Forecast**: SVG sparkline of projected SoC with time axis labels and a "now" marker. Y-axis scales to fit the data range.
 

@@ -39,6 +39,7 @@
           "deferred": "Odroczone",
           "target_reached": "Cel osiągnięty",
           "discharging": "Rozładowywanie",
+          "discharge_deferred": "Rozładowanie odroczone",
           "discharge_scheduled": "Rozładowanie zaplanowane",
           "discharge_suspended": "Wstrzymane",
           "charge_discharge_active": "Ładowanie + Rozładowywanie"
@@ -147,7 +148,7 @@
     },
     "smart_discharge": {
       "name": "Inteligentne rozładowanie",
-      "description": "Rozładowywać baterię w oknie czasowym, regulując moc rozładowania, aby równomiernie rozłożyć dostarczanie energii. Wraca do autokonsumpcji po osiągnięciu minimalnego SoC lub limitu energii oddanej do sieci.",
+      "description": "Rozładowuje baterię w oknie czasowym. Pozostaje w trybie zużycia własnego tak długo jak to możliwe, następnie przełącza się na wymuszone rozładowanie z pełną mocą, gdy jest to konieczne do osiągnięcia celu przed końcem okna. Wraca do zużycia własnego po osiągnięciu minimalnego SoC lub limitu energii oddawanej do sieci.",
       "fields": {
         "start_time": {
           "name": "Godzina rozpoczęcia",

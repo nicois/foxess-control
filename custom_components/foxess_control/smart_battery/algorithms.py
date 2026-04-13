@@ -282,3 +282,89 @@ def calculate_deferred_start(
     if start is not None and deferred < start:
         deferred = start
     return deferred
+
+
+def calculate_discharge_deferred_start(
+    current_soc: float,
+    min_soc: int,
+    battery_capacity_kwh: float,
+    max_power_w: int,
+    end: datetime.datetime,
+    net_consumption_kw: float = 0.0,
+    start: datetime.datetime | None = None,
+    headroom: float = 0.10,
+    taper_profile: TaperProfile | None = None,
+    feedin_energy_limit_kwh: float | None = None,
+) -> datetime.datetime:
+    """Calculate the latest time to start forced discharge to meet goals by *end*.
+
+    During the deferred phase the inverter stays in self-use mode, where
+    house consumption naturally drains the battery without grid export.
+
+    Two independent deadlines are computed (the earlier wins):
+
+    1. **SoC deadline** — how long full-power discharge takes to drain
+       from *current_soc* to *min_soc*.  House consumption assists during
+       self-use (it drains the battery too), so only the *excess* energy
+       above what self-use would naturally consume needs forced discharge.
+
+    2. **Feed-in energy deadline** — self-use does not export, so ALL
+       required grid export must come from forced discharge.  House load
+       *reduces* net export (``grid_export = discharge - house_load``),
+       so more discharge time is needed than the raw energy / power calc.
+
+    Returns *end* if no forced discharge is needed.
+    """
+    max_power_kw = max_power_w / 1000.0
+    if max_power_kw <= 0:
+        return end
+
+    # --- SoC deadline ---
+    soc_deadline = end
+    energy_to_discharge_kwh = (current_soc - min_soc) / 100.0 * battery_capacity_kwh
+    if energy_to_discharge_kwh > 0:
+        if taper_profile is not None:
+            discharge_hours = taper_profile.estimate_discharge_hours(
+                current_soc, min_soc, battery_capacity_kwh, max_power_w
+            )
+        else:
+            # House consumption assists discharge — subtract it.
+            consumption = max(0.0, net_consumption_kw)
+            effective_kw = max_power_kw - consumption
+            if effective_kw <= 0:
+                # House load alone exceeds max discharge — self-use will
+                # drain the battery without any forced discharge needed.
+                effective_kw = 0
+            if effective_kw <= 0:
+                discharge_hours = 0.0
+            else:
+                discharge_hours = energy_to_discharge_kwh / effective_kw
+
+        if discharge_hours > 0:
+            buffered_hours = discharge_hours / (1 - headroom)
+            soc_deadline = end - datetime.timedelta(hours=buffered_hours)
+
+    # --- Feed-in energy deadline ---
+    # Use doubled headroom: house consumption is variable and all export
+    # must come from forced discharge, so we start earlier to absorb
+    # load spikes that reduce net grid export during the burst.
+    feedin_deadline = end
+    feedin_headroom = min(headroom * 2, 0.40)
+    if feedin_energy_limit_kwh is not None and feedin_energy_limit_kwh > 0:
+        # All export must come from forced discharge.
+        # grid_export = discharge_power - house_load, so effective export
+        # rate = max_power - house_load.
+        consumption = max(0.0, net_consumption_kw)
+        effective_export_kw = max_power_kw - consumption
+        if effective_export_kw <= 0:
+            # Can't export at all — need the full window.
+            effective_export_kw = max_power_kw * 0.1  # fallback
+        feedin_hours = feedin_energy_limit_kwh / effective_export_kw
+        buffered_hours = feedin_hours / (1 - feedin_headroom)
+        feedin_deadline = end - datetime.timedelta(hours=buffered_hours)
+
+    # Take the earlier deadline (whichever requires starting sooner).
+    deferred = min(soc_deadline, feedin_deadline)
+    if start is not None and deferred < start:
+        deferred = start
+    return deferred

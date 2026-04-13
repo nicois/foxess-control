@@ -39,6 +39,7 @@
           "deferred": "Diferida",
           "target_reached": "Objetivo alcanzado",
           "discharging": "Descargando",
+          "discharge_deferred": "Descarga diferida",
           "discharge_scheduled": "Descarga programada",
           "discharge_suspended": "Suspendida",
           "charge_discharge_active": "Carga + Descarga"
@@ -147,7 +148,7 @@
     },
     "smart_discharge": {
       "name": "Descarga inteligente",
-      "description": "Descargar la batería en una ventana de tiempo, regulando la tasa de descarga para distribuir la energía de manera uniforme. Vuelve al autoconsumo cuando se alcanza el SoC mínimo o el límite de energía inyectada.",
+      "description": "Descarga la batería dentro de una ventana de tiempo. Permanece en autoconsumo el mayor tiempo posible, luego cambia a descarga forzada a máxima potencia cuando sea necesario para alcanzar el objetivo antes del fin de la ventana. Vuelve a autoconsumo cuando se alcanza el SoC mínimo o el límite de energía de inyección.",
       "fields": {
         "start_time": {
           "name": "Hora de inicio",

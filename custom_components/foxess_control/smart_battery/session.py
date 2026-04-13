@@ -107,6 +107,9 @@ def session_data_from_discharge_state(state: dict[str, Any]) -> dict[str, Any]:
         data["pacing_enabled"] = True
         data["battery_capacity_kwh"] = state["battery_capacity_kwh"]
         data["min_power_change"] = state["min_power_change"]
+    data["discharging_started"] = state.get("discharging_started", True)
+    started_at = state.get("discharging_started_at")
+    data["discharging_started_at"] = started_at.isoformat() if started_at else None
     return data
 
 

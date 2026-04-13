@@ -39,6 +39,7 @@
           "deferred": "待機予定",
           "target_reached": "目標達成",
           "discharging": "放電中",
+          "discharge_deferred": "放電遅延中",
           "discharge_scheduled": "放電予定",
           "discharge_suspended": "放電一時停止",
           "charge_discharge_active": "充電 + 放電"
@@ -147,7 +148,7 @@
     },
     "smart_discharge": {
       "name": "スマート放電",
-      "description": "時間帯内でバッテリーを放電し、放電速度を調整してエネルギー供給を均等に分散します。最低残量または売電量制限に達すると自家消費モードに戻ります。",
+      "description": "時間枠内でバッテリーを放電します。できるだけ長く自家消費モードを維持し、ウィンドウ終了までに目標を達成するために必要な場合にのみ、最大出力での強制放電に切り替えます。最小SoCまたは売電エネルギー制限に達すると自家消費に戻ります。",
       "fields": {
         "start_time": {
           "name": "開始時刻",

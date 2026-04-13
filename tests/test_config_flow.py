@@ -137,9 +137,9 @@ def _make_options_flow(
 
     hass = MagicMock()
     hass.config_entries.async_entries = MagicMock(
-        side_effect=lambda domain: [MagicMock()]
-        if domain == "foxess_modbus" and has_modbus
-        else []
+        side_effect=lambda domain: (
+            [MagicMock()] if domain == "foxess_modbus" and has_modbus else []
+        )
     )
 
     flow = FoxessControlOptionsFlow(config_entry)

@@ -80,5 +80,7 @@ class DischargeSessionState(TypedDict, total=False):
     feedin_prev_kwh: float | None
     feedin_stop_scheduled: bool
     suspended: bool
+    discharging_started: bool
+    discharging_started_at: Any  # datetime.datetime | None
     groups: list[ScheduleGroup]
     soc_below_min_count: int

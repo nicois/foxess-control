@@ -1169,10 +1169,11 @@ class TestHandleSmartDischarge:
 
         state = hass.data[DOMAIN]["_smart_discharge_state"]
         assert state["pacing_enabled"] is True
-        # Paced power should be less than max
-        assert state["last_power_w"] < 10500
-        assert state["last_power_w"] > 0
         assert state["max_power_w"] == 10500
+        # With a long window and moderate SoC, discharge is deferred
+        assert state["discharging_started"] is False
+        assert state["last_power_w"] == 0
+        assert state["discharging_started_at"] is None
 
     @pytest.mark.asyncio
     async def test_smart_discharge_no_pacing_without_capacity(self) -> None:
@@ -1315,22 +1316,23 @@ class TestHandleSmartDischarge:
 
         assert captured_interval is not None
 
-        # Simulate SoC dropping after 1 hour — power should change
+        # Simulate SoC dropping and time advancing past deferred start
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {
             "SoC": 50.0,
             "loadsPower": 0.0,
             "pvPower": 0.0,
         }
 
+        # At 19:40, only 20 min remain — deferral should end, discharge starts
         with patch(
             "custom_components.foxess_control.dt_util.now",
-            return_value=datetime.datetime(2026, 4, 7, 18, 0, 0),
+            return_value=datetime.datetime(2026, 4, 7, 19, 40, 0),
         ):
-            await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
+            await captured_interval(datetime.datetime(2026, 4, 7, 19, 40, 0))
 
-        new_power = hass.data[DOMAIN]["_smart_discharge_state"]["last_power_w"]
-        # With less energy remaining and less time, power may differ
-        assert new_power > 0
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state["discharging_started"] is True
+        assert state["last_power_w"] > 0
 
     @pytest.mark.asyncio
     async def test_smart_discharge_feedin_limit_constrains_pacing(self) -> None:
@@ -1381,41 +1383,11 @@ class TestHandleSmartDischarge:
             )
 
         constrained = hass.data[DOMAIN]["_smart_discharge_state"]
-        constrained_power = constrained["last_power_w"]
         assert constrained["feedin_energy_limit_kwh"] == 3.0
-
-        # Reset and run without feedin limit for comparison
-        hass.data[DOMAIN].pop("_smart_discharge_state", None)
-        hass.data[DOMAIN].pop("_smart_discharge_unsubs", None)
-
-        with (
-            patch(
-                "custom_components.foxess_control.dt_util.now",
-                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
-            ),
-            patch(
-                "custom_components.foxess_control.async_track_point_in_time",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "custom_components.foxess_control.async_track_time_interval",
-                return_value=MagicMock(),
-            ),
-        ):
-            await handler(
-                _make_call(
-                    {
-                        "start_time": datetime.time(17, 0),
-                        "end_time": datetime.time(20, 0),
-                        "min_soc": 10,
-                    }
-                )
-            )
-
-        unconstrained_power = hass.data[DOMAIN]["_smart_discharge_state"][
-            "last_power_w"
-        ]
-        assert constrained_power < unconstrained_power
+        # Both cases are deferred with this long window, but the feedin
+        # session should be stored with its limit preserved
+        assert constrained["discharging_started"] is False
+        assert constrained["last_power_w"] == 0
 
 
 class TestHandleSmartCharge:

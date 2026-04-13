@@ -76,7 +76,7 @@ jobs:
             $0 == ver { found=1; next }
             found && /^## / { exit }
             found { print }
-          ' foxess-control/CHANGELOG.md)
+          ' CHANGELOG.md)
           # Write to file to preserve newlines
           echo "$body" > /tmp/release_body.md
 

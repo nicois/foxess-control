@@ -39,6 +39,7 @@
           "deferred": "Verzögert",
           "target_reached": "Ziel erreicht",
           "discharging": "Entladen",
+          "discharge_deferred": "Entladung verzögert",
           "discharge_scheduled": "Entladung geplant",
           "discharge_suspended": "Pausiert",
           "charge_discharge_active": "Laden + Entladen"
@@ -147,7 +148,7 @@
     },
     "smart_discharge": {
       "name": "Intelligentes Entladen",
-      "description": "Batterie innerhalb eines Zeitfensters entladen und die Entladeleistung so anpassen, dass die Energieabgabe gleichmäßig verteilt wird. Kehrt zum Eigenverbrauch zurück, wenn der minimale SoC oder das Einspeise-Energielimit erreicht wird.",
+      "description": "Entlädt die Batterie innerhalb eines Zeitfensters. Bleibt so lange wie möglich im Eigenverbrauch und wechselt erst dann zur Zwangsentladung mit voller Leistung, wenn dies zum Erreichen des Ziels bis zum Ende des Fensters erforderlich ist. Kehrt zum Eigenverbrauch zurück, wenn der minimale SoC oder das Einspeiseenergielimit erreicht ist.",
       "fields": {
         "start_time": {
           "name": "Startzeit",

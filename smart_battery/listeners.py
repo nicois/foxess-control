@@ -21,6 +21,7 @@ from homeassistant.util import dt as dt_util
 from .algorithms import (
     calculate_charge_power,
     calculate_deferred_start,
+    calculate_discharge_deferred_start,
     calculate_discharge_power,
     should_suspend_discharge,
 )
@@ -489,14 +490,81 @@ def setup_smart_discharge_listeners(
     async def _on_timer_expire(_now: datetime.datetime) -> None:
         if not _is_my_session():
             return
+        cur = hass.data[domain].get("_smart_discharge_state")
+        was_active = cur is not None and cur.get("discharging_started", True)
         _log_session_end("window ended, removing override")
         cancel_smart_discharge(hass, domain)
-        await _remove_discharge_override()
+        if was_active:
+            await _remove_discharge_override()
 
     async def _check_discharge_soc(_now: datetime.datetime) -> None:
         cur_state = hass.data[domain].get("_smart_discharge_state")
         if cur_state is None or cur_state.get("session_id") != my_session_id:
             return
+
+        # --- Deferred self-use phase ---
+        if not cur_state.get("discharging_started", True):
+            soc_value = _get_current_soc(hass, domain)
+            if soc_value is not None and soc_value > cur_state["min_soc"]:
+                now_dt = dt_util.now()
+                taper = _get_taper_profile(hass, domain)
+                deferred = calculate_discharge_deferred_start(
+                    soc_value,
+                    cur_state["min_soc"],
+                    cur_state["battery_capacity_kwh"],
+                    cur_state["max_power_w"],
+                    cur_state["end"],
+                    net_consumption_kw=_get_net_consumption(hass, domain),
+                    headroom=_get_smart_headroom(hass, domain),
+                    taper_profile=taper,
+                    feedin_energy_limit_kwh=cur_state.get("feedin_energy_limit_kwh"),
+                )
+                if now_dt < deferred:
+                    _LOGGER.debug(
+                        "Smart discharge: deferring until ~%02d:%02d (SoC=%.1f%%)",
+                        deferred.hour,
+                        deferred.minute,
+                        soc_value,
+                    )
+                    return
+
+                # Time to start forced discharge — use paced power
+                remaining_h = (cur_state["end"] - now_dt).total_seconds() / 3600.0
+                new_power = calculate_discharge_power(
+                    soc_value,
+                    cur_state["min_soc"],
+                    cur_state["battery_capacity_kwh"],
+                    remaining_h,
+                    cur_state["max_power_w"],
+                    net_consumption_kw=_get_net_consumption(hass, domain),
+                    headroom=_get_smart_headroom(hass, domain),
+                )
+                await adapter.apply_mode(
+                    hass,
+                    WorkMode.FORCE_DISCHARGE,
+                    new_power,
+                    fd_soc=cur_state.get("min_soc", 11),
+                )
+                if not _is_my_session():
+                    return
+                cur_state = hass.data[domain]["_smart_discharge_state"]
+                cur_state["last_power_w"] = new_power
+                cur_state["discharging_started"] = True
+                cur_state["discharging_started_at"] = now_dt
+                _LOGGER.info(
+                    "Smart discharge: deferred discharge started "
+                    "(SoC=%.1f%%, power=%dW)",
+                    soc_value,
+                    new_power,
+                )
+                await save_session(
+                    _get_store(hass, domain),
+                    "smart_discharge",
+                    session_data_from_discharge_state(cur_state),
+                )
+                return
+            # SoC <= min_soc during deferred phase — fall through to
+            # the SoC threshold check below which will end the session.
 
         # --- Check feed-in energy limit using cumulative counter ---
         feedin_remaining_for_pacing: float | None = None

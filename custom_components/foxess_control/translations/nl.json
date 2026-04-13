@@ -39,6 +39,7 @@
           "deferred": "Uitgesteld",
           "target_reached": "Doel bereikt",
           "discharging": "Ontladen",
+          "discharge_deferred": "Ontlading uitgesteld",
           "discharge_scheduled": "Ontladen gepland",
           "discharge_suspended": "Gepauzeerd",
           "charge_discharge_active": "Laden + Ontladen"
@@ -147,7 +148,7 @@
     },
     "smart_discharge": {
       "name": "Slim ontladen",
-      "description": "Ontlaad de batterij binnen een tijdvenster, met aanpassing van de ontlaadsnelheid om de energielevering gelijkmatig te spreiden. Keert terug naar eigenverbruik wanneer de minimum SoC of de terugleveringslimiet is bereikt.",
+      "description": "Ontlaad de batterij binnen een tijdvenster. Blijft zo lang mogelijk in eigenverbruik, schakelt dan over naar gedwongen ontlading op vol vermogen wanneer nodig om het doel te halen voor het einde van het venster. Keert terug naar eigenverbruik wanneer de minimale SoC of het terugleverlimiet is bereikt.",
       "fields": {
         "start_time": {
           "name": "Starttijd",

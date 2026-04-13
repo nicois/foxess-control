@@ -23,6 +23,7 @@ const TRANSLATIONS = {
     smart_discharge: "Smart Discharge",
     discharge_scheduled: "Discharge Scheduled",
     discharge_suspended: "Discharge Suspended",
+    discharge_deferred: "Discharge Deferred",
     window: "Window",
     power: "Power",
     target: "Target",
@@ -54,6 +55,7 @@ const TRANSLATIONS = {
     smart_discharge: "Intelligente Entladung",
     discharge_scheduled: "Entladung geplant",
     discharge_suspended: "Entladung pausiert",
+    discharge_deferred: "Entladung verzögert",
     window: "Zeitfenster",
     power: "Leistung",
     target: "Ziel",
@@ -85,6 +87,7 @@ const TRANSLATIONS = {
     smart_discharge: "Décharge intelligente",
     discharge_scheduled: "Décharge programmée",
     discharge_suspended: "Décharge suspendue",
+    discharge_deferred: "Décharge différée",
     window: "Fenêtre",
     power: "Puissance",
     target: "Objectif",
@@ -116,6 +119,7 @@ const TRANSLATIONS = {
     smart_discharge: "Slim ontladen",
     discharge_scheduled: "Ontladen gepland",
     discharge_suspended: "Ontladen gepauzeerd",
+    discharge_deferred: "Ontlading uitgesteld",
     window: "Tijdvenster",
     power: "Vermogen",
     target: "Doel",
@@ -147,6 +151,7 @@ const TRANSLATIONS = {
     smart_discharge: "Descarga inteligente",
     discharge_scheduled: "Descarga programada",
     discharge_suspended: "Descarga suspendida",
+    discharge_deferred: "Descarga diferida",
     window: "Ventana",
     power: "Potencia",
     target: "Objetivo",
@@ -178,6 +183,7 @@ const TRANSLATIONS = {
     smart_discharge: "Scarica intelligente",
     discharge_scheduled: "Scarica programmata",
     discharge_suspended: "Scarica sospesa",
+    discharge_deferred: "Scarica differita",
     window: "Finestra",
     power: "Potenza",
     target: "Obiettivo",
@@ -209,6 +215,7 @@ const TRANSLATIONS = {
     smart_discharge: "Inteligentne rozładowanie",
     discharge_scheduled: "Rozładowanie zaplanowane",
     discharge_suspended: "Rozładowanie wstrzymane",
+    discharge_deferred: "Rozładowanie odroczone",
     window: "Okno czasowe",
     power: "Moc",
     target: "Cel",
@@ -240,6 +247,7 @@ const TRANSLATIONS = {
     smart_discharge: "Descarga inteligente",
     discharge_scheduled: "Descarga agendada",
     discharge_suspended: "Descarga suspensa",
+    discharge_deferred: "Descarga adiada",
     window: "Janela",
     power: "Potência",
     target: "Objetivo",
@@ -271,6 +279,7 @@ const TRANSLATIONS = {
     smart_discharge: "智能放电",
     discharge_scheduled: "放电已计划",
     discharge_suspended: "放电暂停",
+    discharge_deferred: "放电延迟",
     window: "时段",
     power: "功率",
     target: "目标",
@@ -302,6 +311,7 @@ const TRANSLATIONS = {
     smart_discharge: "スマート放電",
     discharge_scheduled: "放電予定",
     discharge_suspended: "放電一時停止",
+    discharge_deferred: "放電遅延中",
     window: "時間帯",
     power: "電力",
     target: "目標",
@@ -550,6 +560,7 @@ class FoxESSControlCard extends HTMLElement {
     const scheduled = beforeStart || remaining.startsWith("scheduled");
     const opsState = this._state(this._config.operations_entity) || "";
     const suspended = opsState.includes("suspended");
+    const deferred = opsState.includes("deferred");
 
     // Feed-in energy progress
     const feedinLimit = a.discharge_feedin_limit_kwh;
@@ -560,8 +571,8 @@ class FoxESSControlCard extends HTMLElement {
       <div class="section discharge">
         <div class="section-header">
           <div class="section-icon-group">
-            <span class="dot ${scheduled || suspended ? "dot-waiting" : "dot-active dot-discharge"}"></span>
-            <span class="section-title">${scheduled ? this._t("discharge_scheduled") : suspended ? this._t("discharge_suspended") : this._t("smart_discharge")}</span>
+            <span class="dot ${scheduled || suspended || deferred ? "dot-waiting" : "dot-active dot-discharge"}"></span>
+            <span class="section-title">${scheduled ? this._t("discharge_scheduled") : deferred ? this._t("discharge_deferred") : suspended ? this._t("discharge_suspended") : this._t("smart_discharge")}</span>
           </div>
           <span class="section-badge discharge-badge">${this._translateRemaining(remaining)}</span>
         </div>
@@ -570,7 +581,7 @@ class FoxESSControlCard extends HTMLElement {
             <span class="detail-label">${this._t("window")}</span>
             <span class="detail-value">${window}</span>
           </div>
-          ${!scheduled ? `
+          ${!scheduled && !deferred ? `
           <div class="detail-row">
             <span class="detail-label">${this._t("power")}</span>
             <span class="detail-value">${this._formatPower(power)}</span>
