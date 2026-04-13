@@ -1,18 +1,17 @@
 /**
  * FoxESS Control — custom Lovelace card.
  *
- * Renders smart charge / discharge status with a battery gauge,
- * progress indicators, and an SVG forecast sparkline.
+ * Renders smart charge / discharge status with a battery gauge
+ * and progress bars showing time elapsed vs goal completion.
  *
  * Usage:
  *   type: custom:foxess-control-card
  *   # Optional overrides (auto-discovered by default):
  *   # operations_entity: sensor.foxess_smart_operations
- *   # forecast_entity: sensor.foxess_battery_forecast
  *   # soc_entity: sensor.foxess_battery_soc
  */
 
-const CARD_VERSION = "1.0.0";
+const CARD_VERSION = "1.1.0";
 
 class FoxESSControlCard extends HTMLElement {
   constructor() {
@@ -28,8 +27,6 @@ class FoxESSControlCard extends HTMLElement {
     this._config = {
       operations_entity:
         config.operations_entity || "sensor.foxess_smart_operations",
-      forecast_entity:
-        config.forecast_entity || "sensor.foxess_battery_forecast",
       soc_entity: config.soc_entity || "sensor.foxess_battery_soc",
       ...config,
     };
@@ -37,7 +34,6 @@ class FoxESSControlCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    this._fetchSocHistory();
     this._render();
   }
 
@@ -47,56 +43,6 @@ class FoxESSControlCard extends HTMLElement {
 
   static getStubConfig() {
     return {};
-  }
-
-  // -- SoC history -----------------------------------------------------------
-
-  _fetchSocHistory() {
-    if (!this._hass) return;
-    const ops = this._attr(this._config.operations_entity);
-    // Only fetch when a session is active
-    const active = ops.charge_active === true || ops.discharge_active === true;
-    if (!active) {
-      this._socHistory = null;
-      return;
-    }
-    // Determine session window from the forecast entity
-    const fAttrs = this._attr(this._config.forecast_entity);
-    const forecast = fAttrs.forecast;
-    if (!forecast || !forecast.length) return;
-    const startMs = forecast[0].time;
-
-    // Throttle: re-fetch at most once per 60 seconds for the same window
-    const now = Date.now();
-    if (
-      this._socHistoryStart === startMs &&
-      this._socHistory &&
-      this._socHistoryFetched &&
-      now - this._socHistoryFetched < 60000
-    ) return;
-
-    const startIso = new Date(startMs).toISOString();
-    const endIso = new Date().toISOString();
-    const socEntity = this._config.soc_entity;
-
-    this._hass.callApi(
-      "GET",
-      `history/period/${startIso}?filter_entity_id=${socEntity}&minimal_response&end_time=${endIso}`
-    ).then((data) => {
-      if (data && data[0]) {
-        this._socHistory = data[0]
-          .map((s) => ({
-            time: new Date(s.last_updated || s.last_changed).getTime(),
-            soc: parseFloat(s.state),
-          }))
-          .filter((p) => !isNaN(p.soc));
-        this._socHistoryStart = startMs;
-        this._socHistoryFetched = Date.now();
-        this._render();
-      }
-    }).catch(() => {
-      // Silently ignore — history is optional
-    });
   }
 
   // -- Helpers ---------------------------------------------------------------
@@ -126,6 +72,16 @@ class FoxESSControlCard extends HTMLElement {
     return `${w} W`;
   }
 
+  _formatDuration(ms) {
+    if (ms <= 0) return "0m";
+    const totalMin = Math.round(ms / 60000);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    if (h === 0) return `${m}m`;
+    if (m === 0) return `${h}h`;
+    return `${h}h ${m}m`;
+  }
+
   // -- Rendering -------------------------------------------------------------
 
   _render() {
@@ -145,7 +101,7 @@ class FoxESSControlCard extends HTMLElement {
           ${chargeActive ? this._renderCharge(a) : ""}
           ${dischargeActive ? this._renderDischarge(a) : ""}
           ${!chargeActive && !dischargeActive ? this._renderIdle() : ""}
-          ${this._renderForecast()}
+          ${this._renderProgress(a)}
         </div>
       </ha-card>
     `;
@@ -198,12 +154,6 @@ class FoxESSControlCard extends HTMLElement {
     const remaining = a.charge_remaining || "";
     const window = a.charge_window || "";
 
-    let progressPct = 0;
-    if (target && current != null) {
-      // Progress from 0% (session start assumed at some lower SoC) toward target
-      progressPct = Math.min(100, Math.max(0, (current / target) * 100));
-    }
-
     return `
       <div class="section charge">
         <div class="section-header">
@@ -227,10 +177,6 @@ class FoxESSControlCard extends HTMLElement {
             <span class="detail-label">Target</span>
             <span class="detail-value">${current != null ? Math.round(current) : "?"}% → ${target != null ? target : "?"}%</span>
           </div>
-          ${target && current != null && !deferred ? `
-          <div class="progress-track">
-            <div class="progress-fill charge-fill" style="width:${progressPct}%"></div>
-          </div>` : ""}
         </div>
       </div>
     `;
@@ -300,129 +246,84 @@ class FoxESSControlCard extends HTMLElement {
     `;
   }
 
-  _renderForecast() {
-    const forecastEntity = this._config.forecast_entity;
-    const attrs = this._attr(forecastEntity);
-    const points = attrs.forecast;
-    if (!points || !Array.isArray(points) || points.length < 2) return "";
+  _progressBar(label, value, pct, fillClass) {
+    return `
+      <div class="progress-row">
+        <div class="detail-row">
+          <span class="detail-label">${label}</span>
+          <span class="detail-value">${value}</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill ${fillClass}" style="width:${pct}%"></div>
+        </div>
+      </div>
+    `;
+  }
 
-    const fmt = (ms) => {
-      const d = new Date(ms);
-      const h = d.getHours();
-      const m = d.getMinutes();
-      return `${h}:${m < 10 ? "0" + m : m}`;
+  _timeProgress(startIso, endIso, now) {
+    const startTime = startIso ? new Date(startIso).getTime() : null;
+    const endTime = endIso ? new Date(endIso).getTime() : null;
+    if (!startTime || !endTime || endTime <= startTime) return { pct: 0, label: "" };
+    const elapsed = now - startTime;
+    const total = endTime - startTime;
+    return {
+      pct: Math.min(100, Math.max(0, (elapsed / total) * 100)),
+      label: `${this._formatDuration(elapsed)} / ${this._formatDuration(total)}`,
     };
+  }
 
-    // Build SVG sparkline
-    const width = 280;
-    const height = 72;
-    const padTop = 4;
-    const padBottom = 14; // room for time labels
-    const padX = 4;
-    const chartHeight = height - padTop - padBottom;
-    // Scale Y-axis to the data extent (including history) with some padding
-    const socValues = points.map((p) => p.soc);
-    if (this._socHistory) {
-      for (const h of this._socHistory) socValues.push(h.soc);
-    }
-    const rawMin = Math.min(...socValues);
-    const rawMax = Math.max(...socValues);
-    const socMargin = Math.max(5, (rawMax - rawMin) * 0.1);
-    const minSoc = Math.max(0, Math.floor((rawMin - socMargin) / 5) * 5);
-    const maxSoc = Math.min(100, Math.ceil((rawMax + socMargin) / 5) * 5);
+  _renderProgress(a) {
+    const chargeActive = a.charge_active === true;
+    const dischargeActive = a.discharge_active === true;
+    if (!chargeActive && !dischargeActive) return "";
 
     const now = Date.now();
-    const times = points.map((p) => p.time);
-    const tMin = Math.min(...times);
-    const tMax = Math.max(...times);
-    const tRange = tMax - tMin || 1;
+    let bars = "";
 
-    const toX = (t) => padX + ((t - tMin) / tRange) * (width - 2 * padX);
-    const toY = (s) =>
-      padTop + (1 - (s - minSoc) / (maxSoc - minSoc)) * chartHeight;
+    if (chargeActive) {
+      const startSoc = a.charge_start_soc;
+      const current = a.charge_current_soc;
+      const target = a.charge_target_soc;
 
-    const pathParts = points.map(
-      (p, i) => `${i === 0 ? "M" : "L"}${toX(p.time).toFixed(1)},${toY(p.soc).toFixed(1)}`
-    );
-    const linePath = pathParts.join(" ");
-
-    // Forecast-only path — only future points, so dashed line doesn't cover the past
-    let forecastPath = linePath;
-    if (this._socHistory && this._socHistory.length >= 2) {
-      const futurePoints = points.filter((p) => p.time >= now);
-      if (futurePoints.length >= 2) {
-        const fParts = futurePoints.map(
-          (p, i) => `${i === 0 ? "M" : "L"}${toX(p.time).toFixed(1)},${toY(p.soc).toFixed(1)}`
-        );
-        forecastPath = fParts.join(" ");
+      let socPct = 0;
+      if (startSoc != null && target != null && current != null && target > startSoc) {
+        socPct = Math.min(100, Math.max(0, ((current - startSoc) / (target - startSoc)) * 100));
       }
+      const socLabel = `${current != null ? Math.round(current) : "?"}% → ${target != null ? target : "?"}%`;
+      const time = this._timeProgress(a.charge_start_time, a.charge_end_time, now);
+
+      bars += this._progressBar("SoC", socLabel, socPct, "charge-fill");
+      bars += this._progressBar("Time", time.label, time.pct, "time-fill");
     }
 
-    // Area fill (forecast only — future portion)
-    const chartBottom = padTop + chartHeight;
-    const areaPath =
-      linePath +
-      ` L${toX(times[times.length - 1]).toFixed(1)},${chartBottom.toFixed(1)}` +
-      ` L${toX(times[0]).toFixed(1)},${chartBottom.toFixed(1)} Z`;
+    if (dischargeActive) {
+      const startSoc = a.discharge_start_soc;
+      const current = a.discharge_current_soc;
+      const minSoc = a.discharge_min_soc;
 
-    // History line — actual SoC values from HA recorder
-    let historyPath = "";
-    if (this._socHistory && this._socHistory.length >= 2) {
-      const hParts = this._socHistory
-        .filter((p) => p.time >= tMin && p.time <= now)
-        .map(
-          (p, i) =>
-            `${i === 0 ? "M" : "L"}${toX(p.time).toFixed(1)},${toY(p.soc).toFixed(1)}`
-        );
-      if (hParts.length >= 2) historyPath = hParts.join(" ");
-    }
-
-    // Now marker
-    const nowX = toX(now);
-    const showNow = now >= tMin && now <= tMax;
-
-    // Time axis labels — start, end, and optionally "now"
-    const labelY = height - 2;
-    let timeLabels = `
-      <text x="${padX}" y="${labelY}" font-size="7" text-anchor="start"
-            fill="var(--secondary-text-color)" opacity="0.6">${fmt(tMin)}</text>
-      <text x="${width - padX}" y="${labelY}" font-size="7" text-anchor="end"
-            fill="var(--secondary-text-color)" opacity="0.6">${fmt(tMax)}</text>
-    `;
-    if (showNow) {
-      // Only show "now" label if it won't overlap start/end
-      const nowPct = (now - tMin) / tRange;
-      if (nowPct > 0.15 && nowPct < 0.85) {
-        timeLabels += `
-          <text x="${nowX.toFixed(1)}" y="${labelY}" font-size="7" text-anchor="middle"
-                fill="var(--primary-text-color)" opacity="0.5">now</text>
-        `;
+      let socPct = 0;
+      if (startSoc != null && minSoc != null && current != null && startSoc > minSoc) {
+        socPct = Math.min(100, Math.max(0, ((startSoc - current) / (startSoc - minSoc)) * 100));
       }
+      const socLabel = `${current != null ? Math.round(current) : "?"}% → ${minSoc != null ? minSoc : "?"}%`;
+
+      bars += this._progressBar("SoC", socLabel, socPct, "discharge-fill");
+
+      const feedinLimit = a.discharge_feedin_limit_kwh;
+      if (feedinLimit != null && feedinLimit > 0) {
+        const used = a.discharge_feedin_used_kwh ?? 0;
+        const energyPct = Math.min(100, Math.max(0, (used / feedinLimit) * 100));
+        bars += this._progressBar("Energy", `${used} / ${feedinLimit} kWh`, energyPct, "energy-fill");
+      }
+
+      const time = this._timeProgress(a.discharge_start_time, a.discharge_end_time, now);
+      bars += this._progressBar("Time", time.label, time.pct, "time-fill");
     }
 
     return `
-      <div class="forecast">
-        <div class="forecast-label">Battery SoC</div>
-        <svg class="forecast-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
-          <defs>
-            <linearGradient id="fg" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="var(--primary-color)" stop-opacity="0.3"/>
-              <stop offset="100%" stop-color="var(--primary-color)" stop-opacity="0.02"/>
-            </linearGradient>
-          </defs>
-          <path d="${areaPath}" fill="url(#fg)"/>
-          ${historyPath ? `<path d="${historyPath}" fill="none" stroke="var(--primary-color)" stroke-width="2" stroke-linejoin="round" opacity="0.9"/>` : ""}
-          <path d="${historyPath ? forecastPath : linePath}" fill="none" stroke="var(--primary-color)"
-                stroke-width="1.5" stroke-linejoin="round" ${historyPath ? 'stroke-dasharray="4,3" opacity="0.6"' : ""}/>
-          ${showNow ? `<line x1="${nowX.toFixed(1)}" y1="${padTop}" x2="${nowX.toFixed(1)}" y2="${chartBottom}" stroke="var(--primary-text-color)" stroke-width="0.5" stroke-dasharray="2,2" opacity="0.4"/>` : ""}
-          <!-- Y-axis labels -->
-          <text x="${padX}" y="${padTop + 6}" font-size="7"
-                fill="var(--secondary-text-color)" opacity="0.6">${maxSoc}%</text>
-          <text x="${padX}" y="${chartBottom}" font-size="7"
-                fill="var(--secondary-text-color)" opacity="0.6">${minSoc}%</text>
-          <!-- Time axis -->
-          ${timeLabels}
-        </svg>
+      <div class="progress-section">
+        <div class="progress-label">Progress</div>
+        ${bars}
       </div>
     `;
   }
@@ -436,6 +337,7 @@ class FoxESSControlCard extends HTMLElement {
         --fc-charge-bg: rgba(76, 175, 80, 0.08);
         --fc-discharge: #ff9800;
         --fc-discharge-bg: rgba(255, 152, 0, 0.08);
+        --fc-energy: #2196f3;
         --fc-radius: 12px;
         --fc-section-radius: 10px;
       }
@@ -581,13 +483,32 @@ class FoxESSControlCard extends HTMLElement {
         font-weight: 500;
       }
 
-      /* Progress bar */
+      /* Progress bars */
+      .progress-section {
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.08));
+      }
+      .progress-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--secondary-text-color);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 8px;
+      }
+      .progress-row {
+        margin-bottom: 8px;
+      }
+      .progress-row:last-child {
+        margin-bottom: 0;
+      }
       .progress-track {
         height: 6px;
         background: rgba(0, 0, 0, 0.08);
         border-radius: 3px;
         overflow: hidden;
-        margin-top: 6px;
+        margin-top: 4px;
       }
       .progress-fill {
         height: 100%;
@@ -596,6 +517,15 @@ class FoxESSControlCard extends HTMLElement {
       }
       .charge-fill {
         background: linear-gradient(90deg, var(--fc-charge), #81c784);
+      }
+      .discharge-fill {
+        background: linear-gradient(90deg, var(--fc-discharge), #ffb74d);
+      }
+      .energy-fill {
+        background: linear-gradient(90deg, var(--fc-energy), #64b5f6);
+      }
+      .time-fill {
+        background: linear-gradient(90deg, rgba(0,0,0,0.25), rgba(0,0,0,0.15));
       }
 
       /* Idle state */
@@ -618,26 +548,6 @@ class FoxESSControlCard extends HTMLElement {
         color: var(--secondary-text-color);
         margin-top: 4px;
       }
-
-      /* Forecast sparkline */
-      .forecast {
-        margin-top: 12px;
-        padding-top: 10px;
-        border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.08));
-      }
-      .forecast-label {
-        font-size: 11px;
-        font-weight: 600;
-        color: var(--secondary-text-color);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        margin-bottom: 6px;
-      }
-      .forecast-svg {
-        width: 100%;
-        height: 72px;
-        display: block;
-      }
     `;
   }
 }
@@ -650,7 +560,7 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "foxess-control-card",
   name: "FoxESS Control",
-  description: "Smart charge & discharge status with battery forecast",
+  description: "Smart charge & discharge status with progress tracking",
   preview: true,
 });
 
