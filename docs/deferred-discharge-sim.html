@@ -7,25 +7,51 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 20px; }
   h1 { text-align: center; margin-bottom: 4px; color: #00d4ff; font-size: 1.5em; }
-  h2 { text-align: center; margin: 24px 0 12px; color: #888; font-size: 1.1em; border-bottom: 1px solid #333; padding-bottom: 8px; max-width: 1400px; margin-left: auto; margin-right: auto; }
   .subtitle { text-align: center; margin-bottom: 16px; color: #888; font-size: 0.9em; }
-  .params { text-align: center; margin-bottom: 8px; color: #aaa; font-size: 0.85em; }
-  .params span { color: #00d4ff; font-weight: bold; }
-  .priorities { text-align: center; margin-bottom: 20px; font-size: 0.82em; color: #ccc; }
+  .priorities { text-align: center; margin-bottom: 16px; font-size: 0.82em; color: #ccc; }
   .priorities .p1 { color: #f44336; font-weight: bold; }
   .priorities .p2 { color: #ff9800; font-weight: bold; }
   .priorities .p3 { color: #4caf50; font-weight: bold; }
   .priorities .p4 { color: #2196f3; font-weight: bold; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1400px; margin: 0 auto; }
-  .scenario { background: #16213e; border-radius: 12px; padding: 16px; border: 1px solid #0f3460; }
-  .scenario.comparison { border-color: #5c2020; background: #1a1520; }
-  .scenario h3 { color: #00d4ff; margin-bottom: 4px; font-size: 1em; }
-  .scenario .desc { color: #888; font-size: 0.8em; margin-bottom: 10px; }
+
+  /* Controls */
+  .controls { max-width: 1200px; margin: 0 auto 20px; background: #16213e; border-radius: 12px; padding: 16px; border: 1px solid #0f3460; }
+  .controls h2 { color: #00d4ff; font-size: 1em; margin-bottom: 12px; }
+  .ctrl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 16px; }
+  .ctrl-group { display: flex; flex-direction: column; gap: 2px; }
+  .ctrl-group label { font-size: 0.78em; color: #aaa; display: flex; justify-content: space-between; }
+  .ctrl-group label .val { color: #00d4ff; font-weight: bold; }
+  .ctrl-group input[type="range"] { width: 100%; accent-color: #00d4ff; }
+  .ctrl-group select { background: #0a0a1a; color: #e0e0e0; border: 1px solid #333; border-radius: 4px; padding: 4px; font-size: 0.85em; }
+
+  /* Load profile sub-params */
+  .load-params { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin-top: 6px; }
+  .load-params.hidden { display: none; }
+
+  /* Presets */
+  .presets { max-width: 1200px; margin: 0 auto 16px; }
+  .presets h2 { color: #888; font-size: 0.9em; margin-bottom: 8px; }
+  .preset-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+  .preset-btn { background: #0f3460; color: #ccc; border: 1px solid #1a4080; border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 0.75em; transition: all 0.15s; }
+  .preset-btn:hover { background: #1a4080; color: #fff; }
+  .preset-btn.active { background: #00d4ff; color: #0a0a1a; border-color: #00d4ff; font-weight: bold; }
+
+  /* Output */
+  .output { max-width: 1200px; margin: 0 auto; }
+  .compare-toggle { text-align: center; margin-bottom: 12px; }
+  .compare-toggle label { color: #aaa; font-size: 0.85em; cursor: pointer; }
+  .compare-toggle input { accent-color: #00d4ff; }
+  .sim-panels { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  .sim-panels.comparing { grid-template-columns: 1fr 1fr; }
+  .panel { background: #16213e; border-radius: 12px; padding: 16px; border: 1px solid #0f3460; }
+  .panel.old-algo { border-color: #5c2020; background: #1a1520; }
+  .panel h3 { color: #00d4ff; margin-bottom: 8px; font-size: 1em; }
   canvas { width: 100%; border-radius: 6px; background: #0a0a1a; }
+  .chart-label { color: #555; font-size: 0.68em; margin-top: 6px; margin-bottom: 2px; }
   .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; font-size: 0.72em; }
   .legend-item { display: flex; align-items: center; gap: 4px; }
   .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; font-size: 0.78em; }
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 8px; font-size: 0.78em; }
   .stat { text-align: center; padding: 4px; background: rgba(255,255,255,0.03); border-radius: 4px; }
   .stat .val { font-weight: bold; font-size: 1.1em; }
   .stat .lbl { color: #888; }
@@ -36,99 +62,274 @@
   .prio-ok { background: rgba(76, 175, 80, 0.15); border: 1px solid rgba(76, 175, 80, 0.3); }
   .prio-warn { background: rgba(255, 152, 0, 0.15); border: 1px solid rgba(255, 152, 0, 0.3); }
   .prio-fail { background: rgba(244, 67, 54, 0.15); border: 1px solid rgba(244, 67, 54, 0.3); }
-  .chart-label { color: #555; font-size: 0.68em; margin-top: 6px; }
 </style>
 </head>
 <body>
 <h1>Priority-Weighted Smart Discharge</h1>
-<p class="subtitle">Deferred self-use + peak-tracked safety floor — optimised for arbitrage windows</p>
-<p class="params">
-  Inverter: <span>15 kW</span> |
-  Window: <span>18:00–20:00</span> |
-  Feed-in target: <span>10 kWh</span> |
-  Min SoC: <span>30%</span> |
-  Battery: <span>20 kWh</span> |
-  Headroom: <span>10%</span> |
-  Safety factor: <span>1.5×</span> |
-  Peak decay: <span>0.85/poll</span>
-</p>
+<p class="subtitle">Deferred self-use + peak-tracked safety floor &mdash; interactive simulation</p>
 <div class="priorities">
-  <span class="p1">P1 No grid import</span> ≫
-  <span class="p2">P2 Protect min SoC</span> ≫
+  <span class="p1">P1 No grid import</span> &gg;
+  <span class="p2">P2 Protect min SoC</span> &gg;
   <span class="p3">P3 Meet energy target</span> &gt;
   <span class="p4">P4 Maximise feed-in</span>
 </div>
-<div id="scenarios"></div>
+
+<!-- Controls -->
+<div class="controls">
+  <h2>Parameters</h2>
+  <div class="ctrl-grid">
+    <div class="ctrl-group">
+      <label>Inverter max power <span class="val" id="v-maxPower">15 kW</span></label>
+      <input type="range" id="maxPower" min="3000" max="30000" step="500" value="15000">
+    </div>
+    <div class="ctrl-group">
+      <label>Battery capacity <span class="val" id="v-capKwh">20 kWh</span></label>
+      <input type="range" id="capKwh" min="5" max="50" step="0.5" value="20">
+    </div>
+    <div class="ctrl-group">
+      <label>Start SoC <span class="val" id="v-startSoc">90%</span></label>
+      <input type="range" id="startSoc" min="10" max="100" step="1" value="90">
+    </div>
+    <div class="ctrl-group">
+      <label>Min SoC <span class="val" id="v-minSoc">30%</span></label>
+      <input type="range" id="minSoc" min="5" max="80" step="1" value="30">
+    </div>
+    <div class="ctrl-group">
+      <label>Feed-in target <span class="val" id="v-feedin">10 kWh</span></label>
+      <input type="range" id="feedin" min="0" max="40" step="0.5" value="10">
+    </div>
+    <div class="ctrl-group">
+      <label>Headroom <span class="val" id="v-headroom">10%</span></label>
+      <input type="range" id="headroom" min="0" max="30" step="1" value="10">
+    </div>
+    <div class="ctrl-group">
+      <label>Window start <span class="val" id="v-wStart">18:00</span></label>
+      <input type="range" id="wStart" min="0" max="23" step="1" value="18">
+    </div>
+    <div class="ctrl-group">
+      <label>Window end <span class="val" id="v-wEnd">20:00</span></label>
+      <input type="range" id="wEnd" min="1" max="24" step="1" value="20">
+    </div>
+    <div class="ctrl-group">
+      <label>Safety factor <span class="val" id="v-safety">1.5x</span></label>
+      <input type="range" id="safety" min="1.0" max="3.0" step="0.1" value="1.5">
+    </div>
+    <div class="ctrl-group">
+      <label>Peak decay / poll <span class="val" id="v-decay">0.85</span></label>
+      <input type="range" id="decay" min="0.50" max="0.99" step="0.01" value="0.85">
+    </div>
+  </div>
+
+  <h2 style="margin-top:14px">Load profile</h2>
+  <div class="ctrl-grid">
+    <div class="ctrl-group">
+      <label>Profile type</label>
+      <select id="loadType">
+        <option value="steady">Steady</option>
+        <option value="bursty">Bursty (periodic spikes)</option>
+        <option value="ramp">Ramp (linear increase)</option>
+        <option value="step">Step (sudden change)</option>
+      </select>
+    </div>
+  </div>
+  <div class="load-params" id="steadyParams">
+    <div class="ctrl-group">
+      <label>Load <span class="val" id="v-steadyKw">0.5 kW</span></label>
+      <input type="range" id="steadyKw" min="0" max="15" step="0.1" value="0.5">
+    </div>
+  </div>
+  <div class="load-params hidden" id="burstyParams">
+    <div class="ctrl-group">
+      <label>Base load <span class="val" id="v-burstBase">0.5 kW</span></label>
+      <input type="range" id="burstBase" min="0" max="10" step="0.1" value="0.5">
+    </div>
+    <div class="ctrl-group">
+      <label>Spike load <span class="val" id="v-burstSpike">7 kW</span></label>
+      <input type="range" id="burstSpike" min="1" max="20" step="0.5" value="7">
+    </div>
+    <div class="ctrl-group">
+      <label>Spike interval <span class="val" id="v-burstInterval">10 min</span></label>
+      <input type="range" id="burstInterval" min="2" max="60" step="1" value="10">
+    </div>
+    <div class="ctrl-group">
+      <label>Spike duration <span class="val" id="v-burstDuration">3 min</span></label>
+      <input type="range" id="burstDuration" min="1" max="30" step="1" value="3">
+    </div>
+  </div>
+  <div class="load-params hidden" id="rampParams">
+    <div class="ctrl-group">
+      <label>Start load <span class="val" id="v-rampStart">0.5 kW</span></label>
+      <input type="range" id="rampStart" min="0" max="15" step="0.1" value="0.5">
+    </div>
+    <div class="ctrl-group">
+      <label>End load <span class="val" id="v-rampEnd">6 kW</span></label>
+      <input type="range" id="rampEnd" min="0" max="20" step="0.1" value="6">
+    </div>
+  </div>
+  <div class="load-params hidden" id="stepParams">
+    <div class="ctrl-group">
+      <label>Initial load <span class="val" id="v-stepLow">0.5 kW</span></label>
+      <input type="range" id="stepLow" min="0" max="15" step="0.1" value="0.5">
+    </div>
+    <div class="ctrl-group">
+      <label>After step <span class="val" id="v-stepHigh">8 kW</span></label>
+      <input type="range" id="stepHigh" min="0" max="20" step="0.5" value="8">
+    </div>
+    <div class="ctrl-group">
+      <label>Step at <span class="val" id="v-stepMin">30 min</span></label>
+      <input type="range" id="stepMin" min="5" max="120" step="5" value="30">
+    </div>
+  </div>
+</div>
+
+<!-- Presets -->
+<div class="presets">
+  <h2>Presets</h2>
+  <div class="preset-btns" id="presetBtns"></div>
+</div>
+
+<!-- Compare toggle -->
+<div class="compare-toggle">
+  <label><input type="checkbox" id="compareOld"> Show old algorithm for comparison (no peak tracking, no safety factor)</label>
+</div>
+
+<!-- Output -->
+<div class="output">
+  <div class="sim-panels" id="panels">
+    <div class="panel" id="newPanel">
+      <h3 id="newTitle">New algorithm (peak-tracked safety floor)</h3>
+      <div class="chart-label">Power (kW) &mdash; discharge, house load, grid flow, safety floor</div>
+      <canvas id="newPowerCvs" width="800" height="240"></canvas>
+      <div class="chart-label">SoC (%) &middot; cumulative feed-in (kWh) &middot; peak consumption (kW)</div>
+      <canvas id="newSocCvs" width="800" height="200"></canvas>
+      <div class="legend" id="newLegend"></div>
+      <div class="stats" id="newStats"></div>
+      <div id="newPrio"></div>
+    </div>
+    <div class="panel old-algo" id="oldPanel" style="display:none">
+      <h3>Old algorithm (instantaneous floor, no peak tracking)</h3>
+      <div class="chart-label">Power (kW) &mdash; discharge, house load, grid flow</div>
+      <canvas id="oldPowerCvs" width="800" height="240"></canvas>
+      <div class="chart-label">SoC (%) &middot; cumulative feed-in (kWh)</div>
+      <canvas id="oldSocCvs" width="800" height="200"></canvas>
+      <div class="legend" id="oldLegend"></div>
+      <div class="stats" id="oldStats"></div>
+      <div id="oldPrio"></div>
+    </div>
+  </div>
+</div>
 
 <script>
-// ── Parameters ─────────────────────────────────────────────────────
-const MAX_POWER_W = 15000;
-const CAP_KWH = 20;
-const MIN_SOC = 30;
-const FEEDIN_LIMIT = 10;
-const HEADROOM = 0.10;
-const FEEDIN_HEADROOM = 0.20;
-const SAFETY_FACTOR = 1.5;
-const PEAK_DECAY = 0.85;     // per 5-min poll
-const TICK_S = 60;
-const POLL_TICKS = 5;         // update peak every 5 ticks (5 min)
-const W_START = 18, W_END = 20;
-const TOTAL_TICKS = (W_END - W_START) * 3600 / TICK_S;
-const TICK_DECAY = Math.pow(PEAK_DECAY, 1 / POLL_TICKS);
-
-// ── Load profiles ──────────────────────────────────────────────────
-const steady = (kw) => () => kw;
-const bursty = (base, spike, intervalMin, durationMin) => {
-  const iT = intervalMin, dT = durationMin;
-  return (tick) => {
-    const min = tick * TICK_S / 60;
-    return (min % iT) < dT ? spike : base;
+// ── Read parameters from controls ─────────────────────────────────
+function P() {
+  return {
+    maxPowerW: +document.getElementById('maxPower').value,
+    capKwh:    +document.getElementById('capKwh').value,
+    startSoc:  +document.getElementById('startSoc').value,
+    minSoc:    +document.getElementById('minSoc').value,
+    feedinLimit: +document.getElementById('feedin').value,
+    headroom:  +document.getElementById('headroom').value / 100,
+    wStart:    +document.getElementById('wStart').value,
+    wEnd:      +document.getElementById('wEnd').value,
+    safety:    +document.getElementById('safety').value,
+    peakDecay: +document.getElementById('decay').value,
   };
-};
-const ramp = (s, e) => (tick) => s + (e - s) * tick / TOTAL_TICKS;
+}
 
-// ── Deferred start calculation ─────────────────────────────────────
-function calcDeferredStart(soc, remainTicks, consumption, peakCons, feedinRemKwh) {
-  const maxKw = MAX_POWER_W / 1000;
-  if (maxKw <= 0) return TOTAL_TICKS;
+const TICK_S = 60;
+const POLL_TICKS = 5;
 
-  // SoC deadline — how long to drain to min at max power
-  let socDL = TOTAL_TICKS;
-  const energy = (soc - MIN_SOC) / 100 * CAP_KWH;
+function totalTicks(p) { return Math.max(1, (p.wEnd - p.wStart) * 3600 / TICK_S); }
+function tickDecay(p) { return Math.pow(p.peakDecay, 1 / POLL_TICKS); }
+
+// ── Load profile builder ──────────────────────────────────────────
+function buildLoadFn(total) {
+  const type = document.getElementById('loadType').value;
+  if (type === 'steady') {
+    const kw = +document.getElementById('steadyKw').value;
+    return () => kw;
+  }
+  if (type === 'bursty') {
+    const base = +document.getElementById('burstBase').value;
+    const spike = +document.getElementById('burstSpike').value;
+    const interval = +document.getElementById('burstInterval').value;
+    const dur = +document.getElementById('burstDuration').value;
+    return (t) => {
+      const min = t * TICK_S / 60;
+      return (min % interval) < dur ? spike : base;
+    };
+  }
+  if (type === 'ramp') {
+    const s = +document.getElementById('rampStart').value;
+    const e = +document.getElementById('rampEnd').value;
+    return (t) => s + (e - s) * t / total;
+  }
+  if (type === 'step') {
+    const lo = +document.getElementById('stepLow').value;
+    const hi = +document.getElementById('stepHigh').value;
+    const at = +document.getElementById('stepMin').value;
+    return (t) => (t * TICK_S / 60) >= at ? hi : lo;
+  }
+  return () => 0;
+}
+
+// ── Algorithms (matching smart_battery/algorithms.py exactly) ─────
+
+// should_suspend_discharge — P2 preemptive check
+function shouldSuspend(p, soc, remainH, consumption, peakCons) {
+  if (remainH <= 0 || p.capKwh <= 0) return false;
+  const energy = (soc - p.minSoc) / 100 * p.capKwh;
+  if (energy <= 0) return true;
+  let cons = Math.max(0, consumption);
+  if (peakCons != null) cons = Math.max(cons, peakCons);
+  if (cons <= 0) return false;
+  const hoursToMin = energy / cons;
+  return hoursToMin <= remainH * (1 + p.headroom);
+}
+
+// calculate_discharge_deferred_start
+function calcDeferredStart(p, soc, remainTicks, consumption, peakCons, feedinRemKwh) {
+  const maxKw = p.maxPowerW / 1000;
+  const total = totalTicks(p);
+  if (maxKw <= 0) return total;
+
+  // SoC deadline
+  let socDL = total;
+  const energy = (soc - p.minSoc) / 100 * p.capKwh;
   if (energy > 0) {
     const cons = Math.max(0, consumption);
     let eff = maxKw - cons;
     if (eff <= 0) eff = 0;
     if (eff > 0) {
-      const hrs = energy / eff / (1 - HEADROOM);
+      const hrs = energy / eff / (1 - p.headroom);
       socDL = remainTicks - hrs * 3600 / TICK_S;
     }
   }
 
-  // Feed-in deadline — use peak for conservative export rate estimate
-  let feedDL = TOTAL_TICKS;
+  // Feed-in deadline — use peak for conservative export rate
+  let feedDL = total;
+  const feedinHeadroom = Math.min(p.headroom * 2, 0.40);
   if (feedinRemKwh != null && feedinRemKwh > 0) {
-    const peakClamped = Math.max(Math.max(0, consumption), peakCons || 0);
-    let effExport = maxKw - peakClamped;
+    let cons = Math.max(0, consumption);
+    if (peakCons != null) cons = Math.max(cons, peakCons);
+    let effExport = maxKw - cons;
     if (effExport <= 0) effExport = maxKw * 0.1;
-    const hrs = feedinRemKwh / effExport / (1 - FEEDIN_HEADROOM);
+    const hrs = feedinRemKwh / effExport / (1 - feedinHeadroom);
     feedDL = remainTicks - hrs * 3600 / TICK_S;
   }
 
   return Math.max(0, Math.min(socDL, feedDL));
 }
 
-// ── Discharge power (priority-weighted) ────────────────────────────
-function calcDischargePower(soc, remainH, consumption, peakCons, feedinRemKwh) {
-  let energy = (soc - MIN_SOC) / 100 * CAP_KWH;
+// calculate_discharge_power
+function calcDischargePower(p, soc, remainH, consumption, peakCons, feedinRemKwh) {
+  let energy = (soc - p.minSoc) / 100 * p.capKwh;
   if (energy <= 0) return 100;
-  if (remainH <= 0) return MAX_POWER_W;
+  if (remainH <= 0) return p.maxPowerW;
 
   const cons = Math.max(0, consumption);
   const peak = Math.max(cons, peakCons || 0);
-
-  // Safety floor: peak × safety factor — prevents import even during spikes
-  const safetyFloorW = Math.round(peak * SAFETY_FACTOR * 1000);
+  const safetyFloorW = Math.round(peak * p.safety * 1000);
 
   // Feed-in energy cap
   if (feedinRemKwh != null && feedinRemKwh >= 0 && remainH > 0) {
@@ -137,151 +338,170 @@ function calcDischargePower(soc, remainH, consumption, peakCons, feedinRemKwh) {
     if (maxDrain < energy) {
       energy = maxDrain;
       if (energy <= 0) {
-        // Only need to cover house, no export needed
-        return (safetyFloorW > 0 && safetyFloorW <= MAX_POWER_W)
-          ? Math.max(100, safetyFloorW)
-          : 100;
+        if (safetyFloorW > 0 && safetyFloorW <= p.maxPowerW)
+          return Math.max(100, safetyFloorW);
+        return 100;
       }
     }
   }
 
   // Paced rate
-  let effH = remainH * (1 - HEADROOM);
+  let effH = remainH * (1 - p.headroom);
   if (effH <= 0) effH = remainH;
   let pacedKw = energy / effH;
   pacedKw -= cons;
-  pacedKw *= (1 + HEADROOM);
+  pacedKw *= (1 + p.headroom);
   let powerW = pacedKw * 1000;
 
-  // Apply safety floor (P1 — highest priority)
-  if (safetyFloorW > 0 && safetyFloorW <= MAX_POWER_W) {
+  // P1: Safety floor
+  if (safetyFloorW > 0 && safetyFloorW <= p.maxPowerW) {
     powerW = Math.max(powerW, safetyFloorW);
   }
 
-  return Math.max(100, Math.min(Math.round(powerW), MAX_POWER_W));
+  return Math.max(100, Math.min(Math.round(powerW), p.maxPowerW));
 }
 
-// ── Old algorithm (for comparison) ─────────────────────────────────
-function calcDischargePowerOLD(soc, remainH, consumption, feedinRemKwh) {
-  let energy = (soc - MIN_SOC) / 100 * CAP_KWH;
+// Old algorithm — no peak tracking, no safety factor
+function calcDischargePowerOLD(p, soc, remainH, consumption, feedinRemKwh) {
+  let energy = (soc - p.minSoc) / 100 * p.capKwh;
   if (energy <= 0) return 100;
-  if (remainH <= 0) return MAX_POWER_W;
+  if (remainH <= 0) return p.maxPowerW;
   const cons = Math.max(0, consumption);
   if (feedinRemKwh != null && feedinRemKwh >= 0 && remainH > 0) {
     const houseKwh = cons * remainH;
     const maxDrain = feedinRemKwh + houseKwh;
     if (maxDrain < energy) { energy = maxDrain; if (energy <= 0) return 100; }
   }
-  let effH = remainH * (1 - HEADROOM);
+  let effH = remainH * (1 - p.headroom);
   if (effH <= 0) effH = remainH;
   let kw = energy / effH;
   kw -= cons;
   if (kw <= 0) return 100;
-  kw *= (1 + HEADROOM);
-  return Math.max(100, Math.min(Math.round(kw * 1000), MAX_POWER_W));
+  kw *= (1 + p.headroom);
+  return Math.max(100, Math.min(Math.round(kw * 1000), p.maxPowerW));
 }
 
-function calcDeferredStartOLD(soc, remainTicks, consumption, feedinRemKwh) {
-  const maxKw = MAX_POWER_W / 1000;
-  if (maxKw <= 0) return TOTAL_TICKS;
-  let socDL = TOTAL_TICKS;
-  const energy = (soc - MIN_SOC) / 100 * CAP_KWH;
+function calcDeferredStartOLD(p, soc, remainTicks, consumption, feedinRemKwh) {
+  const maxKw = p.maxPowerW / 1000;
+  const total = totalTicks(p);
+  if (maxKw <= 0) return total;
+  let socDL = total;
+  const energy = (soc - p.minSoc) / 100 * p.capKwh;
   if (energy > 0) {
     const cons = Math.max(0, consumption);
     let eff = maxKw - cons;
     if (eff <= 0) eff = 0;
     if (eff > 0) {
-      const hrs = energy / eff / (1 - HEADROOM);
+      const hrs = energy / eff / (1 - p.headroom);
       socDL = remainTicks - hrs * 3600 / TICK_S;
     }
   }
-  let feedDL = TOTAL_TICKS;
+  let feedDL = total;
+  const feedinHeadroom = Math.min(p.headroom * 2, 0.40);
   if (feedinRemKwh != null && feedinRemKwh > 0) {
-    const cons = Math.max(0, consumption);
-    let effExp = maxKw - cons;
+    let effExp = maxKw - Math.max(0, consumption);
     if (effExp <= 0) effExp = maxKw * 0.1;
-    const hrs = feedinRemKwh / effExp / (1 - FEEDIN_HEADROOM);
+    const hrs = feedinRemKwh / effExp / (1 - feedinHeadroom);
     feedDL = remainTicks - hrs * 3600 / TICK_S;
   }
   return Math.max(0, Math.min(socDL, feedDL));
 }
 
-// ── Simulate ───────────────────────────────────────────────────────
-function simulate(initSoc, loadFn, { useOld = false, noFeedin = false } = {}) {
-  let soc = initSoc;
+// ── Simulation ────────────────────────────────────────────────────
+function simulate(p, loadFn, useOld) {
+  const total = totalTicks(p);
+  const td = tickDecay(p);
+  let soc = p.startSoc;
   let started = false;
+  let suspended = false;
   let feedinKwh = 0;
   let peakCons = 0;
-  const feedinLimit = noFeedin ? null : FEEDIN_LIMIT;
+  const feedinLimit = p.feedinLimit > 0 ? p.feedinLimit : null;
 
   const log = { soc: [], powerKw: [], houseKw: [], gridKw: [], feedinKwh: [],
-                 peakKw: [], safetyFloorKw: [], deferred: [] };
+                peakKw: [], safetyFloorKw: [], deferred: [], suspendedArr: [] };
   let importKwh = 0, maxImportKw = 0, transitionTick = -1;
+  let suspendCount = 0;
 
-  for (let t = 0; t < TOTAL_TICKS; t++) {
+  for (let t = 0; t < total; t++) {
     const houseKw = loadFn(t);
-    const remTicks = TOTAL_TICKS - t;
+    const remTicks = total - t;
     const remH = remTicks * TICK_S / 3600;
     const tickH = TICK_S / 3600;
 
-    // Update peak consumption (every tick for simulation accuracy)
-    peakCons = Math.max(houseKw, peakCons * TICK_DECAY);
+    // Update peak consumption every tick (matches TICK_DECAY in listeners.py)
+    peakCons = Math.max(Math.max(0, houseKw), peakCons * td);
 
     let dischW = 0, gridKw = 0;
 
     if (!started) {
       // Self-use: battery serves house, no export
-      const availKwh = (soc - MIN_SOC) / 100 * CAP_KWH;
-      const selfUseKw = Math.min(houseKw, availKwh / tickH);
-      soc -= (selfUseKw * tickH / CAP_KWH) * 100;
+      const availKwh = Math.max(0, (soc - p.minSoc) / 100 * p.capKwh);
+      const selfUseKw = Math.min(Math.max(0, houseKw), availKwh / tickH);
+      soc -= (selfUseKw * tickH / p.capKwh) * 100;
       gridKw = -(houseKw - selfUseKw); // negative = import
 
-      // Check transition
+      // Check deferred start transition
       const feedRem = feedinLimit != null ? feedinLimit - feedinKwh : null;
       let deadline;
       if (useOld) {
-        deadline = calcDeferredStartOLD(soc, remTicks, houseKw, feedRem);
+        deadline = calcDeferredStartOLD(p, soc, remTicks, houseKw, feedRem);
       } else {
-        deadline = calcDeferredStart(soc, remTicks, houseKw, peakCons, feedRem);
+        deadline = calcDeferredStart(p, soc, remTicks, houseKw, peakCons, feedRem);
       }
 
-      if (t >= deadline || soc <= MIN_SOC) {
+      if ((t >= deadline || soc <= p.minSoc) && soc > p.minSoc) {
         started = true;
         transitionTick = t;
         // Undo self-use drain, apply forced discharge instead
-        soc += (selfUseKw * tickH / CAP_KWH) * 100;
+        soc += (selfUseKw * tickH / p.capKwh) * 100;
 
         const feedRem2 = feedinLimit != null ? feedinLimit - feedinKwh : null;
         if (useOld) {
-          dischW = calcDischargePowerOLD(soc, remH, houseKw, feedRem2);
+          dischW = calcDischargePowerOLD(p, soc, remH, houseKw, feedRem2);
         } else {
-          dischW = calcDischargePower(soc, remH, houseKw, peakCons, feedRem2);
+          dischW = calcDischargePower(p, soc, remH, houseKw, peakCons, feedRem2);
         }
 
-        soc -= (dischW / 1000 * tickH / CAP_KWH) * 100;
+        soc -= (dischW / 1000 * tickH / p.capKwh) * 100;
         const expKw = dischW / 1000 - houseKw;
         gridKw = expKw;
         if (expKw > 0) feedinKwh += expKw * tickH;
       }
     } else {
       // Active phase
-      if (soc <= MIN_SOC || (feedinLimit != null && feedinKwh >= feedinLimit)) {
+      const feedDone = feedinLimit != null && feedinKwh >= feedinLimit;
+
+      if (soc <= p.minSoc || feedDone) {
         // Goals met or battery empty — self-use
-        const availKwh = Math.max(0, (soc - MIN_SOC) / 100 * CAP_KWH);
-        const selfUseKw = Math.min(houseKw, availKwh / tickH);
-        soc -= (selfUseKw * tickH / CAP_KWH) * 100;
+        const availKwh = Math.max(0, (soc - p.minSoc) / 100 * p.capKwh);
+        const selfUseKw = Math.min(Math.max(0, houseKw), availKwh / tickH);
+        soc -= (selfUseKw * tickH / p.capKwh) * 100;
         gridKw = -(houseKw - selfUseKw);
       } else {
+        // Check suspension (P2 — protect min SoC)
         const feedRem = feedinLimit != null ? feedinLimit - feedinKwh : null;
-        if (useOld) {
-          dischW = calcDischargePowerOLD(soc, remH, houseKw, feedRem);
+        const shouldSusp = !useOld && shouldSuspend(p, soc, remH, houseKw, peakCons);
+        if (shouldSusp) {
+          suspended = true;
+          suspendCount++;
+          // Suspended — self-use only
+          const availKwh = Math.max(0, (soc - p.minSoc) / 100 * p.capKwh);
+          const selfUseKw = Math.min(Math.max(0, houseKw), availKwh / tickH);
+          soc -= (selfUseKw * tickH / p.capKwh) * 100;
+          gridKw = -(houseKw - selfUseKw);
         } else {
-          dischW = calcDischargePower(soc, remH, houseKw, peakCons, feedRem);
+          suspended = false;
+          if (useOld) {
+            dischW = calcDischargePowerOLD(p, soc, remH, houseKw, feedRem);
+          } else {
+            dischW = calcDischargePower(p, soc, remH, houseKw, peakCons, feedRem);
+          }
+          soc -= (dischW / 1000 * tickH / p.capKwh) * 100;
+          const expKw = dischW / 1000 - houseKw;
+          gridKw = expKw;
+          if (expKw > 0) feedinKwh += expKw * tickH;
         }
-        soc -= (dischW / 1000 * tickH / CAP_KWH) * 100;
-        const expKw = dischW / 1000 - houseKw;
-        gridKw = expKw;
-        if (expKw > 0) feedinKwh += expKw * tickH;
       }
     }
 
@@ -297,22 +517,29 @@ function simulate(initSoc, loadFn, { useOld = false, noFeedin = false } = {}) {
     log.gridKw.push(gridKw);
     log.feedinKwh.push(feedinKwh);
     log.peakKw.push(peakCons);
-    log.safetyFloorKw.push(peakCons * SAFETY_FACTOR);
+    log.safetyFloorKw.push(peakCons * p.safety);
     log.deferred.push(!started);
+    log.suspendedArr.push(suspended);
   }
 
   return { log, importKwh, maxImportKw, transitionTick,
-           finalFeedin: feedinKwh, finalSoc: soc };
+           finalFeedin: feedinKwh, finalSoc: soc, suspendCount };
 }
 
-// ── Chart ──────────────────────────────────────────────────────────
-function drawChart(cvs, configs, transitionTick) {
+// ── Chart drawing ─────────────────────────────────────────────────
+function drawChart(cvs, configs, transitionTick, p) {
   const ctx = cvs.getContext('2d');
-  const W = cvs.width, H = cvs.height;
-  const p = { t: 10, r: 12, b: 28, l: 44 };
-  const cw = W - p.l - p.r, ch = H - p.t - p.b;
+  const dpr = window.devicePixelRatio || 1;
+  const rect = cvs.getBoundingClientRect();
+  cvs.width = rect.width * dpr;
+  cvs.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+  const W = rect.width, H = rect.height;
+  const pad = { t: 10, r: 12, b: 28, l: 44 };
+  const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
   ctx.clearRect(0, 0, W, H);
 
+  const total = totalTicks(p);
   let yMin = Infinity, yMax = -Infinity;
   for (const c of configs) {
     if (c.yMin !== undefined) yMin = Math.min(yMin, c.yMin);
@@ -322,41 +549,42 @@ function drawChart(cvs, configs, transitionTick) {
   const yr = yMax - yMin || 1;
   yMin -= yr * 0.05; yMax += yr * 0.05;
 
-  const xP = (i) => p.l + (i / (TOTAL_TICKS - 1)) * cw;
-  const yP = (v) => p.t + ch - ((v - yMin) / (yMax - yMin)) * ch;
+  const xP = (i) => pad.l + (i / (total - 1)) * cw;
+  const yP = (v) => pad.t + ch - ((v - yMin) / (yMax - yMin)) * ch;
 
   // Deferred shading
   if (transitionTick > 0) {
     ctx.fillStyle = 'rgba(0, 212, 255, 0.05)';
-    ctx.fillRect(p.l, p.t, xP(transitionTick) - p.l, ch);
+    ctx.fillRect(pad.l, pad.t, xP(transitionTick) - pad.l, ch);
     ctx.fillStyle = 'rgba(0, 212, 255, 0.3)';
     ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('self-use', p.l + (xP(transitionTick) - p.l) / 2, p.t + 14);
+    ctx.fillText('self-use', pad.l + (xP(transitionTick) - pad.l) / 2, pad.t + 14);
   }
 
   // Zero line
   if (yMin < 0 && yMax > 0) {
     ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]); ctx.beginPath();
-    ctx.moveTo(p.l, yP(0)); ctx.lineTo(W - p.r, yP(0)); ctx.stroke();
+    ctx.moveTo(pad.l, yP(0)); ctx.lineTo(W - pad.r, yP(0)); ctx.stroke();
     ctx.setLineDash([]);
   }
 
   // Transition line
-  if (transitionTick > 0 && transitionTick < TOTAL_TICKS) {
+  if (transitionTick > 0 && transitionTick < total) {
     ctx.strokeStyle = 'rgba(0, 212, 255, 0.4)'; ctx.lineWidth = 1;
     ctx.setLineDash([3, 3]); ctx.beginPath();
-    ctx.moveTo(xP(transitionTick), p.t); ctx.lineTo(xP(transitionTick), p.t + ch);
+    ctx.moveTo(xP(transitionTick), pad.t); ctx.lineTo(xP(transitionTick), pad.t + ch);
     ctx.stroke(); ctx.setLineDash([]);
   }
 
-  // Import highlighting
+  // Import highlighting (red bars below zero)
   for (const c of configs) {
     if (c.label !== 'Grid') continue;
     for (let i = 0; i < c.data.length; i++) {
       if (c.data[i] < -0.01) {
-        ctx.fillStyle = 'rgba(255, 60, 60, 0.2)';
-        ctx.fillRect(xP(i) - 1, yP(0), 3, yP(c.data[i]) - yP(0));
+        ctx.fillStyle = 'rgba(255, 60, 60, 0.25)';
+        const x0 = xP(i), y0 = yP(0), y1 = yP(c.data[i]);
+        ctx.fillRect(x0 - 1, Math.min(y0, y1), 3, Math.abs(y1 - y0));
       }
     }
   }
@@ -378,52 +606,105 @@ function drawChart(cvs, configs, transitionTick) {
 
   // Axes
   ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(p.l, p.t); ctx.lineTo(p.l, p.t + ch);
-  ctx.lineTo(W - p.r, p.t + ch); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(pad.l, pad.t); ctx.lineTo(pad.l, pad.t + ch);
+  ctx.lineTo(W - pad.r, pad.t + ch); ctx.stroke();
 
   // Y labels
   ctx.fillStyle = '#777'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
   for (let i = 0; i <= 5; i++) {
     const v = yMin + (yMax - yMin) * i / 5;
-    ctx.fillText(v.toFixed(1), p.l - 4, yP(v) + 3);
+    ctx.fillText(v.toFixed(1), pad.l - 4, yP(v) + 3);
     ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.beginPath();
-    ctx.moveTo(p.l, yP(v)); ctx.lineTo(W - p.r, yP(v)); ctx.stroke();
+    ctx.moveTo(pad.l, yP(v)); ctx.lineTo(W - pad.r, yP(v)); ctx.stroke();
   }
 
-  // X labels
+  // X labels (hours)
   ctx.textAlign = 'center'; ctx.fillStyle = '#777';
-  for (let h = W_START; h <= W_END; h++) {
-    const t = (h - W_START) * 3600 / TICK_S;
-    ctx.fillText(`${h}:00`, xP(Math.min(t, TOTAL_TICKS - 1)), H - 4);
+  for (let h = p.wStart; h <= p.wEnd; h++) {
+    const t = (h - p.wStart) * 3600 / TICK_S;
+    ctx.fillText(`${h}:00`, xP(Math.min(t, total - 1)), H - 4);
   }
-  for (let h = W_START; h < W_END; h++) {
+  for (let h = p.wStart; h < p.wEnd; h++) {
     ctx.fillStyle = '#444';
-    ctx.fillText(`${h}:30`, xP((h - W_START + 0.5) * 3600 / TICK_S), H - 4);
+    ctx.fillText(`${h}:30`, xP((h - p.wStart + 0.5) * 3600 / TICK_S), H - 4);
     ctx.fillStyle = '#777';
   }
 }
 
-// ── Priority scoreboard ────────────────────────────────────────────
-function prioBoard(r) {
-  const hasImport = r.maxImportKw > 0.05;
-  const importSev = r.importKwh > 0.5 ? 'fail' : r.maxImportKw > 0.05 ? 'warn' : 'ok';
-  const socOk = r.finalSoc >= MIN_SOC - 0.5;
-  const feedOk = r.finalFeedin >= FEEDIN_LIMIT * 0.95;
-  const feedPart = r.finalFeedin >= FEEDIN_LIMIT * 0.5;
-  const feedPct = FEEDIN_LIMIT > 0 ? Math.round(r.finalFeedin / FEEDIN_LIMIT * 100) : 100;
+// ── Render a panel ────────────────────────────────────────────────
+function renderPanel(prefix, r, p, isOld) {
+  const pCvs = document.getElementById(prefix + 'PowerCvs');
+  const sCvs = document.getElementById(prefix + 'SocCvs');
 
-  return `<div class="prio-board">
+  const powerCfg = [
+    { data: r.log.powerKw, color: '#ff9800', label: 'Discharge', thick: true },
+    { data: r.log.houseKw, color: '#e91e63', label: 'House', alpha: 0.7 },
+    { data: r.log.gridKw, color: '#4caf50', label: 'Grid' },
+  ];
+  if (!isOld) {
+    powerCfg.push({ data: r.log.safetyFloorKw, color: 'rgba(255,80,80,0.5)', label: 'Floor', dash: [4, 4] });
+  }
+  drawChart(pCvs, powerCfg, r.transitionTick, p);
+
+  const socCfg = [
+    { data: r.log.soc, color: '#00bcd4', label: 'SoC', thick: true, yMin: 0, yMax: 100 },
+    { data: r.log.feedinKwh, color: '#ffc107', label: 'Feed-in' },
+  ];
+  if (!isOld) {
+    socCfg.push({ data: r.log.peakKw, color: 'rgba(255,80,80,0.4)', label: 'Peak' });
+  }
+  drawChart(sCvs, socCfg, r.transitionTick, p);
+
+  // Legend
+  const leg = document.getElementById(prefix + 'Legend');
+  const items = [
+    ['#ff9800', 'Discharge'], ['#e91e63', 'House load'],
+    ['#4caf50', 'Export'], ['#f44336', 'Import (bad!)'],
+    ['#00bcd4', 'SoC'], ['#ffc107', 'Feed-in'],
+  ];
+  if (!isOld) {
+    items.push(['rgba(255,80,80,0.5)', 'Safety floor']);
+    items.push(['rgba(0,212,255,0.2)', 'Self-use phase']);
+  }
+  leg.innerHTML = items.map(([c, l]) =>
+    `<div class="legend-item"><div class="legend-dot" style="background:${c}"></div>${l}</div>`
+  ).join('');
+
+  // Stats
+  const tMin = r.transitionTick >= 0 ? Math.round(r.transitionTick * TICK_S / 60) : -1;
+  const tHour = p.wStart + Math.floor(tMin / 60);
+  const tMinR = tMin % 60;
+  const tTime = r.transitionTick >= 0 ? `${tHour}:${String(tMinR).padStart(2, '0')}` : 'immediate';
+  const stats = document.getElementById(prefix + 'Stats');
+  stats.innerHTML = `
+    <div class="stat"><div class="val">${tTime}</div><div class="lbl">Transition</div></div>
+    <div class="stat"><div class="val">${r.finalFeedin.toFixed(1)} kWh</div><div class="lbl">Feed-in</div></div>
+    <div class="stat"><div class="val">${r.finalSoc.toFixed(0)}%</div><div class="lbl">Final SoC</div></div>
+    <div class="stat"><div class="val" style="color:${r.maxImportKw > 0.05 ? '#f44336' : '#4caf50'}">${r.importKwh > 0.001 ? r.importKwh.toFixed(2) + ' kWh' : 'None'}</div><div class="lbl">Import</div></div>
+    <div class="stat"><div class="val">${r.suspendCount}</div><div class="lbl">Suspensions</div></div>
+  `;
+
+  // Priority board
+  const fl = p.feedinLimit;
+  const hasImport = r.maxImportKw > 0.05;
+  const importSev = r.importKwh > 0.5 ? 'fail' : hasImport ? 'warn' : 'ok';
+  const socOk = r.finalSoc >= p.minSoc - 0.5;
+  const feedOk = fl > 0 && r.finalFeedin >= fl * 0.95;
+  const feedPart = fl > 0 && r.finalFeedin >= fl * 0.5;
+  const feedPct = fl > 0 ? Math.round(r.finalFeedin / fl * 100) : 100;
+
+  document.getElementById(prefix + 'Prio').innerHTML = `<div class="prio-board">
     <div class="prio-cell prio-${importSev}">
       <div class="prio-label" style="color:#f44336">P1 Import</div>
-      <div class="prio-val">${hasImport ? r.maxImportKw.toFixed(1) + ' kW' : 'None ✓'}</div>
+      <div class="prio-val">${hasImport ? r.maxImportKw.toFixed(1) + ' kW' : 'None &#10003;'}</div>
     </div>
     <div class="prio-cell prio-${socOk ? 'ok' : 'fail'}">
       <div class="prio-label" style="color:#ff9800">P2 Min SoC</div>
-      <div class="prio-val">${r.finalSoc.toFixed(0)}% ${socOk ? '✓' : '✗'}</div>
+      <div class="prio-val">${r.finalSoc.toFixed(0)}% ${socOk ? '&#10003;' : '&#10007;'}</div>
     </div>
-    <div class="prio-cell prio-${feedOk ? 'ok' : feedPart ? 'warn' : 'fail'}">
+    <div class="prio-cell prio-${fl <= 0 ? 'ok' : feedOk ? 'ok' : feedPart ? 'warn' : 'fail'}">
       <div class="prio-label" style="color:#4caf50">P3 Target</div>
-      <div class="prio-val">${r.finalFeedin.toFixed(1)} kWh (${feedPct}%)</div>
+      <div class="prio-val">${fl > 0 ? r.finalFeedin.toFixed(1) + ' kWh (' + feedPct + '%)' : 'N/A'}</div>
     </div>
     <div class="prio-cell prio-ok">
       <div class="prio-label" style="color:#2196f3">P4 Feed-in</div>
@@ -432,152 +713,168 @@ function prioBoard(r) {
   </div>`;
 }
 
-// ── Build scenario card ────────────────────────────────────────────
-function buildCard(sc, r, isComparison) {
-  const div = document.createElement('div');
-  div.className = 'scenario' + (isComparison ? ' comparison' : '');
+// ── Full render ───────────────────────────────────────────────────
+function render() {
+  const p = P();
+  if (p.wEnd <= p.wStart) return;
+  const total = totalTicks(p);
+  const loadFn = buildLoadFn(total);
 
-  const tMin = r.transitionTick >= 0 ? Math.round(r.transitionTick * TICK_S / 60) : -1;
-  const tTime = r.transitionTick >= 0 ? `${W_START}:${String(tMin).padStart(2, '0')}` : '—';
+  const rNew = simulate(p, loadFn, false);
+  renderPanel('new', rNew, p, false);
 
-  const pcvs = document.createElement('canvas');
-  pcvs.width = 600; pcvs.height = 200;
-  const scvs = document.createElement('canvas');
-  scvs.width = 600; scvs.height = 160;
-
-  div.innerHTML = `<h3>${sc.title}</h3><p class="desc">${sc.desc}</p>`;
-  div.innerHTML += `<div class="chart-label">Power (kW) — discharge, house, grid, safety floor</div>`;
-  div.appendChild(pcvs);
-  div.innerHTML += `<div class="chart-label">SoC (%) · cumulative feed-in (kWh) · peak consumption (kW)</div>`;
-  div.appendChild(scvs);
-
-  // Legend
-  const leg = document.createElement('div');
-  leg.className = 'legend';
-  const items = [
-    ['#ff9800', 'Discharge'], ['#e91e63', 'House'],
-    ['#4caf50', 'Export'], ['#f44336', 'Import'],
-    ['#00bcd4', 'SoC'], ['#ffc107', 'Feed-in'],
-    ['rgba(255,0,0,0.5)', 'Safety floor'],
-    ['rgba(0,212,255,0.2)', 'Self-use'],
-  ];
-  for (const [c, l] of items) {
-    leg.innerHTML += `<div class="legend-item"><div class="legend-dot" style="background:${c}"></div>${l}</div>`;
+  const comparing = document.getElementById('compareOld').checked;
+  const oldPanel = document.getElementById('oldPanel');
+  const panels = document.getElementById('panels');
+  if (comparing) {
+    oldPanel.style.display = '';
+    panels.classList.add('comparing');
+    const rOld = simulate(p, loadFn, true);
+    renderPanel('old', rOld, p, true);
+  } else {
+    oldPanel.style.display = 'none';
+    panels.classList.remove('comparing');
   }
-  div.appendChild(leg);
-
-  // Stats
-  const s = document.createElement('div');
-  s.className = 'stats';
-  s.innerHTML = `
-    <div class="stat"><div class="val">${tTime}</div><div class="lbl">Transition</div></div>
-    <div class="stat"><div class="val">${r.finalFeedin.toFixed(1)} kWh</div><div class="lbl">Feed-in</div></div>
-    <div class="stat"><div class="val">${r.finalSoc.toFixed(0)}%</div><div class="lbl">Final SoC</div></div>
-    <div class="stat"><div class="val" style="color:${r.maxImportKw > 0.05 ? '#f44336' : '#4caf50'}">${r.importKwh > 0.001 ? r.importKwh.toFixed(2) + ' kWh' : 'None'}</div><div class="lbl">Import total</div></div>
-  `;
-  div.appendChild(s);
-  div.innerHTML += prioBoard(r);
-
-  // Draw charts
-  const powerCfg = [
-    { data: r.log.powerKw, color: '#ff9800', label: 'Discharge', thick: true },
-    { data: r.log.houseKw, color: '#e91e63', label: 'House', alpha: 0.7 },
-    { data: r.log.gridKw, color: '#4caf50', label: 'Grid' },
-    { data: r.log.safetyFloorKw, color: 'rgba(255,80,80,0.5)', label: 'Floor', dash: [4, 4] },
-  ];
-  drawChart(pcvs, powerCfg, r.transitionTick);
-
-  const socCfg = [
-    { data: r.log.soc, color: '#00bcd4', label: 'SoC', thick: true, yMin: 0, yMax: 100 },
-    { data: r.log.feedinKwh, color: '#ffc107', label: 'Feed-in' },
-    { data: r.log.peakKw, color: 'rgba(255,80,80,0.4)', label: 'Peak' },
-  ];
-  drawChart(scvs, socCfg, r.transitionTick);
-
-  return div;
 }
 
-// ── Scenarios ──────────────────────────────────────────────────────
-const sections = [
-  {
-    heading: 'Standard scenarios — priority-weighted algorithm',
-    scenarios: [
-      { title: '1. High SoC, low steady load',
-        desc: 'SoC 90% | 0.5 kW — easy case, pacing dominates, floor is minimal',
-        soc: 90, load: steady(0.5) },
-      { title: '2. High SoC, moderate steady load',
-        desc: 'SoC 90% | 2 kW — safety floor raises minimum discharge power',
-        soc: 90, load: steady(2) },
-      { title: '3. High SoC, high steady load',
-        desc: 'SoC 90% | 5 kW — floor at 7.5 kW, significant export reduction but zero import',
-        soc: 90, load: steady(5) },
-      { title: '4. Medium SoC, low load',
-        desc: 'SoC 60% | 0.5 kW — limited energy above min SoC',
-        soc: 60, load: steady(0.5) },
-      { title: '5. High SoC, bursty load (EV charger)',
-        desc: 'SoC 90% | 0.5 kW base + 7 kW spikes q10 min (3 min) — peak tracking elevates floor',
-        soc: 90, load: bursty(0.5, 7, 10, 3) },
-      { title: '6. High SoC, extreme bursty (near inverter limit)',
-        desc: 'SoC 90% | 0.5 kW base + 12 kW spikes q15 min (5 min) — floor near max power',
-        soc: 90, load: bursty(0.5, 12, 15, 5) },
-      { title: '7. Medium SoC, moderate bursty',
-        desc: 'SoC 55% | 1 kW + 5 kW spikes q8 min (2 min) — energy-constrained with spikes',
-        soc: 55, load: bursty(1, 5, 8, 2) },
-      { title: '8. Ramping load',
-        desc: 'SoC 85% | 0.5→6 kW ramp — floor rises as consumption grows',
-        soc: 85, load: ramp(0.5, 6) },
-      { title: '9. Low SoC (SoC-constrained)',
-        desc: 'SoC 45% | 1 kW — may not reach feed-in target (not enough energy)',
-        soc: 45, load: steady(1) },
-      { title: '10. No feed-in limit, only SoC goal',
-        desc: 'SoC 80% | 2 kW — drain to min SoC, no feed-in target',
-        soc: 80, load: steady(2), noFeedin: true },
-    ],
-  },
-  {
-    heading: 'Comparison — new (peak-tracked) vs old (instantaneous floor)',
-    scenarios: [
-      { title: '5-NEW. Bursty (EV charger) — peak-tracked floor',
-        desc: 'New algorithm: peak tracking raises floor above spike level during active phase',
-        soc: 90, load: bursty(0.5, 7, 10, 3) },
-      { title: '5-OLD. Bursty (EV charger) — old instantaneous floor',
-        desc: 'Old algorithm: floor only at current consumption — imports during spikes',
-        soc: 90, load: bursty(0.5, 7, 10, 3), useOld: true },
-      { title: '6-NEW. Extreme bursty — peak-tracked floor',
-        desc: 'New: peak at 12kW → floor ≈18kW clamped to 15kW → zero import',
-        soc: 90, load: bursty(0.5, 12, 15, 5) },
-      { title: '6-OLD. Extreme bursty — old instantaneous floor',
-        desc: 'Old: floor at 0.5kW during base → 12kW spike causes massive import',
-        soc: 90, load: bursty(0.5, 12, 15, 5), useOld: true },
-      { title: '3-NEW. High steady load — peak-tracked',
-        desc: 'New: safety floor at 7.5kW, always above house load',
-        soc: 90, load: steady(5) },
-      { title: '3-OLD. High steady load — old instantaneous',
-        desc: 'Old: floor at 5kW, exactly at house load — any fluctuation causes import',
-        soc: 90, load: steady(5), useOld: true },
-    ],
-  },
+// ── Presets ────────────────────────────────────────────────────────
+const presets = [
+  { name: '1. Low load', soc: 90, load: 'steady', steadyKw: 0.5, desc: 'Easy case, pacing dominates' },
+  { name: '2. Moderate load', soc: 90, load: 'steady', steadyKw: 2, desc: 'Safety floor raises minimum' },
+  { name: '3. High load', soc: 90, load: 'steady', steadyKw: 5, desc: 'Floor at 7.5 kW, zero import' },
+  { name: '4. Medium SoC', soc: 60, load: 'steady', steadyKw: 0.5, desc: 'Limited energy above min' },
+  { name: '5. EV charger', soc: 90, load: 'bursty', burstBase: 0.5, burstSpike: 7, burstInterval: 10, burstDuration: 3, desc: 'Peak tracking elevates floor' },
+  { name: '6. Extreme spikes', soc: 90, load: 'bursty', burstBase: 0.5, burstSpike: 12, burstInterval: 15, burstDuration: 5, desc: 'Near inverter limit' },
+  { name: '7. Energy-limited spikes', soc: 55, load: 'bursty', burstBase: 1, burstSpike: 5, burstInterval: 8, burstDuration: 2, desc: 'Constrained SoC + spikes' },
+  { name: '8. Ramping', soc: 85, load: 'ramp', rampStart: 0.5, rampEnd: 6, desc: 'Floor rises with consumption' },
+  { name: '9. SoC-constrained', soc: 45, load: 'steady', steadyKw: 1, desc: 'May not reach feed-in target' },
+  { name: '10. No feed-in limit', soc: 80, load: 'steady', steadyKw: 2, feedin: 0, desc: 'Drain to min SoC only' },
+  { name: '11. Sudden EV', soc: 90, load: 'step', stepLow: 0.5, stepHigh: 8, stepMin: 30, desc: 'Step load after 30 min' },
 ];
 
-const root = document.getElementById('scenarios');
+let activePreset = -1;
 
-for (const section of sections) {
-  const h = document.createElement('h2');
-  h.textContent = section.heading;
-  root.appendChild(h);
+function applyPreset(idx) {
+  const pr = presets[idx];
+  activePreset = idx;
+  document.getElementById('startSoc').value = pr.soc;
+  if (pr.feedin !== undefined) document.getElementById('feedin').value = pr.feedin;
+  else document.getElementById('feedin').value = 10;
+  // Reset other params to defaults
+  document.getElementById('maxPower').value = 15000;
+  document.getElementById('capKwh').value = 20;
+  document.getElementById('minSoc').value = 30;
+  document.getElementById('headroom').value = 10;
+  document.getElementById('wStart').value = 18;
+  document.getElementById('wEnd').value = 20;
+  document.getElementById('safety').value = 1.5;
+  document.getElementById('decay').value = 0.85;
 
-  const grid = document.createElement('div');
-  grid.className = 'grid';
-  root.appendChild(grid);
+  document.getElementById('loadType').value = pr.load;
+  showLoadParams();
 
-  for (const sc of section.scenarios) {
-    const r = simulate(sc.soc, sc.load, {
-      useOld: sc.useOld || false,
-      noFeedin: sc.noFeedin || false,
-    });
-    grid.appendChild(buildCard(sc, r, sc.useOld || false));
+  if (pr.load === 'steady') document.getElementById('steadyKw').value = pr.steadyKw || 0.5;
+  if (pr.load === 'bursty') {
+    document.getElementById('burstBase').value = pr.burstBase || 0.5;
+    document.getElementById('burstSpike').value = pr.burstSpike || 7;
+    document.getElementById('burstInterval').value = pr.burstInterval || 10;
+    document.getElementById('burstDuration').value = pr.burstDuration || 3;
   }
+  if (pr.load === 'ramp') {
+    document.getElementById('rampStart').value = pr.rampStart || 0.5;
+    document.getElementById('rampEnd').value = pr.rampEnd || 6;
+  }
+  if (pr.load === 'step') {
+    document.getElementById('stepLow').value = pr.stepLow || 0.5;
+    document.getElementById('stepHigh').value = pr.stepHigh || 8;
+    document.getElementById('stepMin').value = pr.stepMin || 30;
+  }
+
+  updateLabels();
+  render();
+  highlightPreset(idx);
 }
+
+function highlightPreset(idx) {
+  document.querySelectorAll('.preset-btn').forEach((b, i) => {
+    b.classList.toggle('active', i === idx);
+  });
+}
+
+// ── Load profile UI toggle ────────────────────────────────────────
+function showLoadParams() {
+  const type = document.getElementById('loadType').value;
+  for (const id of ['steadyParams', 'burstyParams', 'rampParams', 'stepParams']) {
+    document.getElementById(id).classList.add('hidden');
+  }
+  document.getElementById(type + 'Params').classList.remove('hidden');
+}
+
+// ── Update value labels ───────────────────────────────────────────
+function updateLabels() {
+  document.getElementById('v-maxPower').textContent = (+document.getElementById('maxPower').value / 1000).toFixed(1) + ' kW';
+  document.getElementById('v-capKwh').textContent = document.getElementById('capKwh').value + ' kWh';
+  document.getElementById('v-startSoc').textContent = document.getElementById('startSoc').value + '%';
+  document.getElementById('v-minSoc').textContent = document.getElementById('minSoc').value + '%';
+  document.getElementById('v-feedin').textContent = (+document.getElementById('feedin').value === 0 ? 'None' : document.getElementById('feedin').value + ' kWh');
+  document.getElementById('v-headroom').textContent = document.getElementById('headroom').value + '%';
+  document.getElementById('v-wStart').textContent = document.getElementById('wStart').value + ':00';
+  document.getElementById('v-wEnd').textContent = document.getElementById('wEnd').value + ':00';
+  document.getElementById('v-safety').textContent = (+document.getElementById('safety').value).toFixed(1) + 'x';
+  document.getElementById('v-decay').textContent = document.getElementById('decay').value;
+  document.getElementById('v-steadyKw').textContent = document.getElementById('steadyKw').value + ' kW';
+  document.getElementById('v-burstBase').textContent = document.getElementById('burstBase').value + ' kW';
+  document.getElementById('v-burstSpike').textContent = document.getElementById('burstSpike').value + ' kW';
+  document.getElementById('v-burstInterval').textContent = document.getElementById('burstInterval').value + ' min';
+  document.getElementById('v-burstDuration').textContent = document.getElementById('burstDuration').value + ' min';
+  document.getElementById('v-rampStart').textContent = document.getElementById('rampStart').value + ' kW';
+  document.getElementById('v-rampEnd').textContent = document.getElementById('rampEnd').value + ' kW';
+  document.getElementById('v-stepLow').textContent = document.getElementById('stepLow').value + ' kW';
+  document.getElementById('v-stepHigh').textContent = document.getElementById('stepHigh').value + ' kW';
+  document.getElementById('v-stepMin').textContent = document.getElementById('stepMin').value + ' min';
+}
+
+// ── Wire up events ────────────────────────────────────────────────
+function init() {
+  // Build preset buttons
+  const container = document.getElementById('presetBtns');
+  presets.forEach((pr, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'preset-btn';
+    btn.textContent = pr.name;
+    btn.title = pr.desc;
+    btn.addEventListener('click', () => applyPreset(i));
+    container.appendChild(btn);
+  });
+
+  // All inputs trigger re-render
+  document.querySelectorAll('.controls input, .controls select').forEach(el => {
+    el.addEventListener('input', () => {
+      activePreset = -1;
+      highlightPreset(-1);
+      updateLabels();
+      render();
+    });
+  });
+
+  document.getElementById('loadType').addEventListener('change', () => {
+    showLoadParams();
+    activePreset = -1;
+    highlightPreset(-1);
+    updateLabels();
+    render();
+  });
+
+  document.getElementById('compareOld').addEventListener('change', render);
+
+  // Resize handler
+  window.addEventListener('resize', render);
+
+  // Initial render — start with preset 5 (EV charger) to show peak tracking
+  applyPreset(4);
+}
+
+init();
 </script>
 </body>
 </html>
