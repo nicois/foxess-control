@@ -40,6 +40,12 @@ const TRANSLATIONS = {
     dur_hm: "{0}h {1}m",
     dur_h: "{0}h",
     dur_m: "{0}m",
+    tip_soc_charge: "{0}% of {1}% target — {2}% remaining",
+    tip_soc_discharge: "{0}% of {1}% minimum — {2}% above min",
+    tip_time: "{0} elapsed of {1} — {2} remaining",
+    tip_energy: "{0} of {1} kWh — {2} kWh remaining",
+    tip_energy_ahead: "{0} kWh ahead of schedule",
+    tip_energy_behind: "{0} kWh behind schedule",
   },
   de: {
     title: "FoxESS Steuerung",
@@ -65,6 +71,12 @@ const TRANSLATIONS = {
     dur_hm: "{0} Std. {1} Min.",
     dur_h: "{0} Std.",
     dur_m: "{0} Min.",
+    tip_soc_charge: "{0}% von {1}% Ziel — {2}% verbleibend",
+    tip_soc_discharge: "{0}% von {1}% Minimum — {2}% über Min.",
+    tip_time: "{0} vergangen von {1} — {2} verbleibend",
+    tip_energy: "{0} von {1} kWh — {2} kWh verbleibend",
+    tip_energy_ahead: "{0} kWh vor dem Zeitplan",
+    tip_energy_behind: "{0} kWh hinter dem Zeitplan",
   },
   fr: {
     title: "FoxESS Contrôle",
@@ -90,6 +102,12 @@ const TRANSLATIONS = {
     dur_hm: "{0}h {1}min",
     dur_h: "{0}h",
     dur_m: "{0}min",
+    tip_soc_charge: "{0}% sur {1}% cible — {2}% restants",
+    tip_soc_discharge: "{0}% sur {1}% minimum — {2}% au-dessus du min.",
+    tip_time: "{0} écoulé sur {1} — {2} restant",
+    tip_energy: "{0} sur {1} kWh — {2} kWh restants",
+    tip_energy_ahead: "{0} kWh en avance",
+    tip_energy_behind: "{0} kWh en retard",
   },
   nl: {
     title: "FoxESS Besturing",
@@ -115,6 +133,12 @@ const TRANSLATIONS = {
     dur_hm: "{0}u {1}m",
     dur_h: "{0}u",
     dur_m: "{0}m",
+    tip_soc_charge: "{0}% van {1}% doel — {2}% resterend",
+    tip_soc_discharge: "{0}% van {1}% minimum — {2}% boven min.",
+    tip_time: "{0} verstreken van {1} — {2} resterend",
+    tip_energy: "{0} van {1} kWh — {2} kWh resterend",
+    tip_energy_ahead: "{0} kWh voor op schema",
+    tip_energy_behind: "{0} kWh achter op schema",
   },
   es: {
     title: "FoxESS Control",
@@ -140,6 +164,12 @@ const TRANSLATIONS = {
     dur_hm: "{0}h {1}min",
     dur_h: "{0}h",
     dur_m: "{0}min",
+    tip_soc_charge: "{0}% de {1}% objetivo — {2}% restante",
+    tip_soc_discharge: "{0}% de {1}% mínimo — {2}% sobre mín.",
+    tip_time: "{0} transcurrido de {1} — {2} restante",
+    tip_energy: "{0} de {1} kWh — {2} kWh restantes",
+    tip_energy_ahead: "{0} kWh adelantado",
+    tip_energy_behind: "{0} kWh atrasado",
   },
   it: {
     title: "FoxESS Controllo",
@@ -165,6 +195,12 @@ const TRANSLATIONS = {
     dur_hm: "{0}h {1}min",
     dur_h: "{0}h",
     dur_m: "{0}min",
+    tip_soc_charge: "{0}% di {1}% obiettivo — {2}% rimanente",
+    tip_soc_discharge: "{0}% di {1}% minimo — {2}% sopra min.",
+    tip_time: "{0} trascorso di {1} — {2} rimanente",
+    tip_energy: "{0} di {1} kWh — {2} kWh rimanenti",
+    tip_energy_ahead: "{0} kWh in anticipo",
+    tip_energy_behind: "{0} kWh in ritardo",
   },
   pl: {
     title: "FoxESS Sterowanie",
@@ -190,6 +226,12 @@ const TRANSLATIONS = {
     dur_hm: "{0} godz. {1} min",
     dur_h: "{0} godz.",
     dur_m: "{0} min",
+    tip_soc_charge: "{0}% z {1}% celu — {2}% pozostało",
+    tip_soc_discharge: "{0}% z {1}% minimum — {2}% powyżej min.",
+    tip_time: "{0} minęło z {1} — {2} pozostało",
+    tip_energy: "{0} z {1} kWh — {2} kWh pozostało",
+    tip_energy_ahead: "{0} kWh przed harmonogramem",
+    tip_energy_behind: "{0} kWh za harmonogramem",
   },
   pt: {
     title: "FoxESS Controlo",
@@ -215,6 +257,12 @@ const TRANSLATIONS = {
     dur_hm: "{0}h {1}min",
     dur_h: "{0}h",
     dur_m: "{0}min",
+    tip_soc_charge: "{0}% de {1}% objetivo — {2}% restante",
+    tip_soc_discharge: "{0}% de {1}% mínimo — {2}% acima do mín.",
+    tip_time: "{0} decorrido de {1} — {2} restante",
+    tip_energy: "{0} de {1} kWh — {2} kWh restantes",
+    tip_energy_ahead: "{0} kWh adiantado",
+    tip_energy_behind: "{0} kWh atrasado",
   },
   "zh-hans": {
     title: "FoxESS 控制",
@@ -240,6 +288,12 @@ const TRANSLATIONS = {
     dur_hm: "{0}时{1}分",
     dur_h: "{0}时",
     dur_m: "{0}分",
+    tip_soc_charge: "{0}% / {1}% 目标 — 剩余 {2}%",
+    tip_soc_discharge: "{0}% / {1}% 最低 — 高于最低 {2}%",
+    tip_time: "已过 {0} / 共 {1} — 剩余 {2}",
+    tip_energy: "{0} / {1} kWh — 剩余 {2} kWh",
+    tip_energy_ahead: "超前计划 {0} kWh",
+    tip_energy_behind: "落后计划 {0} kWh",
   },
   ja: {
     title: "FoxESS コントロール",
@@ -265,6 +319,12 @@ const TRANSLATIONS = {
     dur_hm: "{0}時間{1}分",
     dur_h: "{0}時間",
     dur_m: "{0}分",
+    tip_soc_charge: "{0}% / {1}% 目標 — 残り {2}%",
+    tip_soc_discharge: "{0}% / {1}% 最低 — 最低より {2}% 上",
+    tip_time: "経過 {0} / 全体 {1} — 残り {2}",
+    tip_energy: "{0} / {1} kWh — 残り {2} kWh",
+    tip_energy_ahead: "スケジュールより {0} kWh 先行",
+    tip_energy_behind: "スケジュールより {0} kWh 遅延",
   },
 };
 
@@ -544,9 +604,10 @@ class FoxESSControlCard extends HTMLElement {
     `;
   }
 
-  _progressBar(label, value, pct, fillClass) {
+  _progressBar(label, value, pct, fillClass, tooltip) {
+    const tip = tooltip ? ` title="${tooltip}"` : "";
     return `
-      <div class="progress-row">
+      <div class="progress-row"${tip}>
         <div class="detail-row">
           <span class="detail-label">${label}</span>
           <span class="detail-value">${value}</span>
@@ -558,7 +619,7 @@ class FoxESSControlCard extends HTMLElement {
     `;
   }
 
-  _energyScheduleBar(label, value, actualPct, expectedPct) {
+  _energyScheduleBar(label, value, actualPct, expectedPct, tooltip) {
     // Show energy progress with a coloured gap segment indicating
     // whether discharge is ahead of or behind the ideal schedule.
     const lo = Math.min(actualPct, expectedPct);
@@ -566,9 +627,10 @@ class FoxESSControlCard extends HTMLElement {
     const gapWidth = hi - lo;
     const ahead = actualPct >= expectedPct;
     const gapClass = ahead ? "energy-ahead" : "energy-behind";
+    const tip = tooltip ? ` title="${tooltip}"` : "";
 
     return `
-      <div class="progress-row">
+      <div class="progress-row"${tip}>
         <div class="detail-row">
           <span class="detail-label">${label}</span>
           <span class="detail-value">${value}</span>
@@ -583,12 +645,13 @@ class FoxESSControlCard extends HTMLElement {
   _timeProgress(startIso, endIso, now) {
     const startTime = startIso ? new Date(startIso).getTime() : null;
     const endTime = endIso ? new Date(endIso).getTime() : null;
-    if (!startTime || !endTime || endTime <= startTime) return { pct: 0, label: "" };
+    if (!startTime || !endTime || endTime <= startTime) return { pct: 0, label: "", remaining: 0 };
     const elapsed = now - startTime;
     const total = endTime - startTime;
     return {
       pct: Math.min(100, Math.max(0, (elapsed / total) * 100)),
       label: `${this._formatDuration(elapsed)} / ${this._formatDuration(total)}`,
+      remaining: Math.max(0, total - elapsed),
     };
   }
 
@@ -616,8 +679,15 @@ class FoxESSControlCard extends HTMLElement {
         : `${curStr} → ${tgtStr}`;
       const time = this._timeProgress(a.charge_start_time, a.charge_end_time, now);
 
-      bars += this._progressBar(this._t("soc"), socLabel, socPct, "charge-fill");
-      bars += this._progressBar(this._t("time"), time.label, time.pct, "time-fill");
+      const socTip = current != null && target != null
+        ? this._t("tip_soc_charge").replace("{0}", Math.round(current)).replace("{1}", target).replace("{2}", Math.max(0, target - Math.round(current)))
+        : "";
+      const timeTip = time.label
+        ? this._t("tip_time").replace("{0}", this._formatDuration(now - new Date(a.charge_start_time).getTime())).replace("{1}", this._formatDuration(new Date(a.charge_end_time).getTime() - new Date(a.charge_start_time).getTime())).replace("{2}", this._formatDuration(time.remaining))
+        : "";
+
+      bars += this._progressBar(this._t("soc"), socLabel, socPct, "charge-fill", socTip);
+      bars += this._progressBar(this._t("time"), time.label, time.pct, "time-fill", timeTip);
     }
 
     if (dischargeActive) {
@@ -635,7 +705,10 @@ class FoxESSControlCard extends HTMLElement {
         ? `${Math.round(startSoc)}% → ${curStr} → ${minStr}`
         : `${curStr} → ${minStr}`;
 
-      bars += this._progressBar(this._t("soc"), socLabel, socPct, "discharge-fill");
+      const socTip = current != null && minSoc != null
+        ? this._t("tip_soc_discharge").replace("{0}", Math.round(current)).replace("{1}", minSoc).replace("{2}", Math.max(0, Math.round(current) - minSoc))
+        : "";
+      bars += this._progressBar(this._t("soc"), socLabel, socPct, "discharge-fill", socTip);
 
       const time = this._timeProgress(a.discharge_start_time, a.discharge_end_time, now);
 
@@ -643,10 +716,21 @@ class FoxESSControlCard extends HTMLElement {
       if (feedinLimit != null && feedinLimit > 0) {
         const used = a.discharge_feedin_used_kwh ?? 0;
         const energyPct = Math.min(100, Math.max(0, (used / feedinLimit) * 100));
-        bars += this._energyScheduleBar(this._t("energy"), `${used} / ${feedinLimit} kWh`, energyPct, time.pct);
+        const remaining = Math.max(0, feedinLimit - used).toFixed(1);
+        let energyTip = this._t("tip_energy").replace("{0}", used.toFixed(1)).replace("{1}", feedinLimit.toFixed(1)).replace("{2}", remaining);
+        const diff = Math.abs(energyPct - time.pct) * feedinLimit / 100;
+        if (diff > 0.05) {
+          energyTip += " · " + (energyPct >= time.pct
+            ? this._t("tip_energy_ahead").replace("{0}", diff.toFixed(1))
+            : this._t("tip_energy_behind").replace("{0}", diff.toFixed(1)));
+        }
+        bars += this._energyScheduleBar(this._t("energy"), `${used} / ${feedinLimit} kWh`, energyPct, time.pct, energyTip);
       }
 
-      bars += this._progressBar(this._t("time"), time.label, time.pct, "time-fill");
+      const timeTip = time.label
+        ? this._t("tip_time").replace("{0}", this._formatDuration(now - new Date(a.discharge_start_time).getTime())).replace("{1}", this._formatDuration(new Date(a.discharge_end_time).getTime() - new Date(a.discharge_start_time).getTime())).replace("{2}", this._formatDuration(time.remaining))
+        : "";
+      bars += this._progressBar(this._t("time"), time.label, time.pct, "time-fill", timeTip);
     }
 
     return `
