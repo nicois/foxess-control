@@ -1,36 +1,96 @@
 {
   "entity": {
     "sensor": {
-      "battery_soc": { "name": "电池电量" },
-      "bat_charge_power": { "name": "充电功率" },
-      "bat_discharge_power": { "name": "放电功率" },
-      "loads_power": { "name": "家庭负载" },
-      "pv_power": { "name": "光伏功率" },
-      "bat_temperature": { "name": "电池温度" },
-      "grid_consumption": { "name": "电网用电" },
-      "feedin_power": { "name": "馈网功率" },
-      "generation_power": { "name": "发电功率" },
-      "bat_volt": { "name": "电池电压" },
-      "bat_current": { "name": "电池电流" },
-      "pv1_power": { "name": "PV1 功率" },
-      "pv2_power": { "name": "PV2 功率" },
-      "ambient_temp": { "name": "环境温度" },
-      "inverter_temp": { "name": "逆变器温度" },
-      "feedin_energy": { "name": "馈网电量" },
-      "grid_consumption_energy": { "name": "电网用电量" },
-      "generation_energy": { "name": "光伏发电量" },
-      "charge_energy_total": { "name": "电池充电量" },
-      "discharge_energy_total": { "name": "电池放电量" },
-      "loads_energy": { "name": "家庭用电量" },
-      "energy_throughput": { "name": "电池吞吐量" },
-      "meter_power": { "name": "电网表功率" },
-      "grid_voltage": { "name": "电网电压" },
-      "grid_current": { "name": "电网电流" },
-      "grid_frequency": { "name": "电网频率" },
-      "eps_power": { "name": "EPS 功率" },
-      "work_mode": { "name": "工作模式" },
-      "debug_log": { "name": "调试日志" },
-      "override_status": { "name": "状态" },
+      "battery_soc": {
+        "name": "电池电量"
+      },
+      "bat_charge_power": {
+        "name": "充电功率"
+      },
+      "bat_discharge_power": {
+        "name": "放电功率"
+      },
+      "loads_power": {
+        "name": "家庭负载"
+      },
+      "pv_power": {
+        "name": "光伏功率"
+      },
+      "bat_temperature": {
+        "name": "电池温度"
+      },
+      "grid_consumption": {
+        "name": "电网用电"
+      },
+      "feedin_power": {
+        "name": "馈网功率"
+      },
+      "generation_power": {
+        "name": "发电功率"
+      },
+      "bat_volt": {
+        "name": "电池电压"
+      },
+      "bat_current": {
+        "name": "电池电流"
+      },
+      "pv1_power": {
+        "name": "PV1 功率"
+      },
+      "pv2_power": {
+        "name": "PV2 功率"
+      },
+      "ambient_temp": {
+        "name": "环境温度"
+      },
+      "inverter_temp": {
+        "name": "逆变器温度"
+      },
+      "feedin_energy": {
+        "name": "馈网电量"
+      },
+      "grid_consumption_energy": {
+        "name": "电网用电量"
+      },
+      "generation_energy": {
+        "name": "光伏发电量"
+      },
+      "charge_energy_total": {
+        "name": "电池充电量"
+      },
+      "discharge_energy_total": {
+        "name": "电池放电量"
+      },
+      "loads_energy": {
+        "name": "家庭用电量"
+      },
+      "energy_throughput": {
+        "name": "电池吞吐量"
+      },
+      "meter_power": {
+        "name": "电网表功率"
+      },
+      "grid_voltage": {
+        "name": "电网电压"
+      },
+      "grid_current": {
+        "name": "电网电流"
+      },
+      "grid_frequency": {
+        "name": "电网频率"
+      },
+      "eps_power": {
+        "name": "EPS 功率"
+      },
+      "work_mode": {
+        "name": "工作模式"
+      },
+      "debug_log": {
+        "name": "调试日志"
+      },
+      "override_status": {
+        "name": "状态"
+      },
       "smart_operations": {
         "name": "智能运行",
         "state": {
@@ -45,17 +105,35 @@
           "charge_discharge_active": "充电 + 放电"
         }
       },
-      "charge_power": { "name": "智能充电功率" },
-      "charge_window": { "name": "充电时段" },
-      "charge_remaining": { "name": "充电剩余时间" },
-      "discharge_power": { "name": "智能放电功率" },
-      "discharge_window": { "name": "放电时段" },
-      "discharge_remaining": { "name": "放电剩余时间" },
-      "battery_forecast": { "name": "电池预测" }
+      "charge_power": {
+        "name": "智能充电功率"
+      },
+      "charge_window": {
+        "name": "充电时段"
+      },
+      "charge_remaining": {
+        "name": "充电剩余时间"
+      },
+      "discharge_power": {
+        "name": "智能放电功率"
+      },
+      "discharge_window": {
+        "name": "放电时段"
+      },
+      "discharge_remaining": {
+        "name": "放电剩余时间"
+      },
+      "battery_forecast": {
+        "name": "电池预测"
+      }
     },
     "binary_sensor": {
-      "smart_charge_active": { "name": "智能充电进行中" },
-      "smart_discharge_active": { "name": "智能放电进行中" }
+      "smart_charge_active": {
+        "name": "智能充电进行中"
+      },
+      "smart_discharge_active": {
+        "name": "智能放电进行中"
+      }
     }
   },
   "services": {
@@ -139,11 +217,26 @@
       "name": "智能充电",
       "description": "在时间窗口内对电池充电，调节充电速率以在时段结束时达到目标电量。如果目标可以在更短时间内达到，充电可能延迟开始。",
       "fields": {
-        "start_time": { "name": "开始时间", "description": "开始充电的时刻。" },
-        "end_time": { "name": "结束时间", "description": "停止充电的时刻。必须在开始时间之后，且在 4 小时内。" },
-        "target_soc": { "name": "目标电量", "description": "将电池充至此电量水平。达到后停止充电并恢复自用模式。" },
-        "power": { "name": "最大功率", "description": "最大充电功率（瓦）。实际功率可能更低，以便在整个时段内均匀充电。" },
-        "replace_conflicts": { "name": "替换冲突的覆盖而非中止", "description": "启用后，将静默移除与新时段重叠的现有覆盖，而非中止操作。" }
+        "start_time": {
+          "name": "开始时间",
+          "description": "开始充电的时刻。"
+        },
+        "end_time": {
+          "name": "结束时间",
+          "description": "停止充电的时刻。必须在开始时间之后，且在 4 小时内。"
+        },
+        "target_soc": {
+          "name": "目标电量",
+          "description": "将电池充至此电量水平。达到后停止充电并恢复自用模式。"
+        },
+        "power": {
+          "name": "最大功率",
+          "description": "最大充电功率（瓦）。实际功率可能更低，以便在整个时段内均匀充电。"
+        },
+        "replace_conflicts": {
+          "name": "替换冲突的覆盖而非中止",
+          "description": "启用后，将静默移除与新时段重叠的现有覆盖，而非中止操作。"
+        }
       }
     },
     "smart_discharge": {
@@ -195,6 +288,9 @@
           "web_password": "Web Password (or MD5 hash)"
         }
       }
+    },
+    "abort": {
+      "reconfigure_successful": "Web credentials updated successfully."
     },
     "error": {
       "cannot_connect": "无法连接到 FoxESS Cloud API。请检查您的网络连接。",

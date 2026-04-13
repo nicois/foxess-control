@@ -1,36 +1,96 @@
 {
   "entity": {
     "sensor": {
-      "battery_soc": { "name": "Batterij SoC" },
-      "bat_charge_power": { "name": "Laadvermogen" },
-      "bat_discharge_power": { "name": "Ontlaadvermogen" },
-      "loads_power": { "name": "Huisverbruik" },
-      "pv_power": { "name": "Zonne-energie" },
-      "bat_temperature": { "name": "Batterijtemperatuur" },
-      "grid_consumption": { "name": "Netverbruik" },
-      "feedin_power": { "name": "Teruglevering" },
-      "generation_power": { "name": "Opwekking" },
-      "bat_volt": { "name": "Batterijspanning" },
-      "bat_current": { "name": "Batterijstroom" },
-      "pv1_power": { "name": "PV1-vermogen" },
-      "pv2_power": { "name": "PV2-vermogen" },
-      "ambient_temp": { "name": "Omgevingstemperatuur" },
-      "inverter_temp": { "name": "Omvormertemperatuur" },
-      "feedin_energy": { "name": "Teruggeleverde energie" },
-      "grid_consumption_energy": { "name": "Netverbruiksenergie" },
-      "generation_energy": { "name": "Opgewekte zonne-energie" },
-      "charge_energy_total": { "name": "Batterij laadenergie" },
-      "discharge_energy_total": { "name": "Batterij ontlaadenergie" },
-      "loads_energy": { "name": "Huisverbruiksenergie" },
-      "energy_throughput": { "name": "Batterijdoorvoer" },
-      "meter_power": { "name": "Netmetervermogen" },
-      "grid_voltage": { "name": "Netspanning" },
-      "grid_current": { "name": "Netstroom" },
-      "grid_frequency": { "name": "Netfrequentie" },
-      "eps_power": { "name": "EPS-vermogen" },
-      "work_mode": { "name": "Werkstand" },
-      "debug_log": { "name": "Debug-logboek" },
-      "override_status": { "name": "Status" },
+      "battery_soc": {
+        "name": "Batterij SoC"
+      },
+      "bat_charge_power": {
+        "name": "Laadvermogen"
+      },
+      "bat_discharge_power": {
+        "name": "Ontlaadvermogen"
+      },
+      "loads_power": {
+        "name": "Huisverbruik"
+      },
+      "pv_power": {
+        "name": "Zonne-energie"
+      },
+      "bat_temperature": {
+        "name": "Batterijtemperatuur"
+      },
+      "grid_consumption": {
+        "name": "Netverbruik"
+      },
+      "feedin_power": {
+        "name": "Teruglevering"
+      },
+      "generation_power": {
+        "name": "Opwekking"
+      },
+      "bat_volt": {
+        "name": "Batterijspanning"
+      },
+      "bat_current": {
+        "name": "Batterijstroom"
+      },
+      "pv1_power": {
+        "name": "PV1-vermogen"
+      },
+      "pv2_power": {
+        "name": "PV2-vermogen"
+      },
+      "ambient_temp": {
+        "name": "Omgevingstemperatuur"
+      },
+      "inverter_temp": {
+        "name": "Omvormertemperatuur"
+      },
+      "feedin_energy": {
+        "name": "Teruggeleverde energie"
+      },
+      "grid_consumption_energy": {
+        "name": "Netverbruiksenergie"
+      },
+      "generation_energy": {
+        "name": "Opgewekte zonne-energie"
+      },
+      "charge_energy_total": {
+        "name": "Batterij laadenergie"
+      },
+      "discharge_energy_total": {
+        "name": "Batterij ontlaadenergie"
+      },
+      "loads_energy": {
+        "name": "Huisverbruiksenergie"
+      },
+      "energy_throughput": {
+        "name": "Batterijdoorvoer"
+      },
+      "meter_power": {
+        "name": "Netmetervermogen"
+      },
+      "grid_voltage": {
+        "name": "Netspanning"
+      },
+      "grid_current": {
+        "name": "Netstroom"
+      },
+      "grid_frequency": {
+        "name": "Netfrequentie"
+      },
+      "eps_power": {
+        "name": "EPS-vermogen"
+      },
+      "work_mode": {
+        "name": "Werkstand"
+      },
+      "debug_log": {
+        "name": "Debug-logboek"
+      },
+      "override_status": {
+        "name": "Status"
+      },
       "smart_operations": {
         "name": "Slimme bewerkingen",
         "state": {
@@ -45,17 +105,35 @@
           "charge_discharge_active": "Laden + Ontladen"
         }
       },
-      "charge_power": { "name": "Slim laadvermogen" },
-      "charge_window": { "name": "Laadvenster" },
-      "charge_remaining": { "name": "Laden resterend" },
-      "discharge_power": { "name": "Slim ontlaadvermogen" },
-      "discharge_window": { "name": "Ontlaadvenster" },
-      "discharge_remaining": { "name": "Ontladen resterend" },
-      "battery_forecast": { "name": "Batterijvoorspelling" }
+      "charge_power": {
+        "name": "Slim laadvermogen"
+      },
+      "charge_window": {
+        "name": "Laadvenster"
+      },
+      "charge_remaining": {
+        "name": "Laden resterend"
+      },
+      "discharge_power": {
+        "name": "Slim ontlaadvermogen"
+      },
+      "discharge_window": {
+        "name": "Ontlaadvenster"
+      },
+      "discharge_remaining": {
+        "name": "Ontladen resterend"
+      },
+      "battery_forecast": {
+        "name": "Batterijvoorspelling"
+      }
     },
     "binary_sensor": {
-      "smart_charge_active": { "name": "Slim laden actief" },
-      "smart_discharge_active": { "name": "Slim ontladen actief" }
+      "smart_charge_active": {
+        "name": "Slim laden actief"
+      },
+      "smart_discharge_active": {
+        "name": "Slim ontladen actief"
+      }
     }
   },
   "services": {
@@ -139,11 +217,26 @@
       "name": "Slim laden",
       "description": "Laad de batterij binnen een tijdvenster, met aanpassing van de laadsnelheid om een doel-SoC te bereiken aan het einde van het interval. Het laden kan later starten als het doel in minder tijd bereikt kan worden.",
       "fields": {
-        "start_time": { "name": "Starttijd", "description": "Tijdstip om het laden te starten." },
-        "end_time": { "name": "Eindtijd", "description": "Tijdstip om het laden te stoppen. Moet na de starttijd zijn, binnen 4 uur." },
-        "target_soc": { "name": "Doel-SoC", "description": "Laad de batterij tot dit SoC-niveau. Het laden stopt en keert terug naar eigenverbruik wanneer bereikt." },
-        "power": { "name": "Maximaal vermogen", "description": "Maximaal laadvermogen in watt. Het werkelijke vermogen kan lager zijn om het laden over het tijdvenster te spreiden." },
-        "replace_conflicts": { "name": "Conflicterende overschrijvingen verwijderen in plaats van afbreken", "description": "Indien ingeschakeld, worden bestaande overlappende overschrijvingen stilzwijgend verwijderd in plaats van afgebroken." }
+        "start_time": {
+          "name": "Starttijd",
+          "description": "Tijdstip om het laden te starten."
+        },
+        "end_time": {
+          "name": "Eindtijd",
+          "description": "Tijdstip om het laden te stoppen. Moet na de starttijd zijn, binnen 4 uur."
+        },
+        "target_soc": {
+          "name": "Doel-SoC",
+          "description": "Laad de batterij tot dit SoC-niveau. Het laden stopt en keert terug naar eigenverbruik wanneer bereikt."
+        },
+        "power": {
+          "name": "Maximaal vermogen",
+          "description": "Maximaal laadvermogen in watt. Het werkelijke vermogen kan lager zijn om het laden over het tijdvenster te spreiden."
+        },
+        "replace_conflicts": {
+          "name": "Conflicterende overschrijvingen verwijderen in plaats van afbreken",
+          "description": "Indien ingeschakeld, worden bestaande overlappende overschrijvingen stilzwijgend verwijderd in plaats van afgebroken."
+        }
       }
     },
     "smart_discharge": {
@@ -195,6 +288,9 @@
           "web_password": "Web Password (or MD5 hash)"
         }
       }
+    },
+    "abort": {
+      "reconfigure_successful": "Web credentials updated successfully."
     },
     "error": {
       "cannot_connect": "Kan geen verbinding maken met de FoxESS Cloud API. Controleer uw netwerkverbinding.",

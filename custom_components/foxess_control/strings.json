@@ -211,6 +211,9 @@
         }
       }
     },
+    "abort": {
+      "reconfigure_successful": "Web credentials updated successfully."
+    },
     "error": {
       "cannot_connect": "Cannot connect to FoxESS Cloud API. Check your network connection.",
       "invalid_auth": "Authentication failed. Check your API key and device serial number.",

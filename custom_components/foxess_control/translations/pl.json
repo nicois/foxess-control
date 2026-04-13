@@ -1,36 +1,96 @@
 {
   "entity": {
     "sensor": {
-      "battery_soc": { "name": "SoC baterii" },
-      "bat_charge_power": { "name": "Moc ładowania" },
-      "bat_discharge_power": { "name": "Moc rozładowania" },
-      "loads_power": { "name": "Zużycie domu" },
-      "pv_power": { "name": "Moc solarna" },
-      "bat_temperature": { "name": "Temperatura baterii" },
-      "grid_consumption": { "name": "Pobór z sieci" },
-      "feedin_power": { "name": "Oddawanie do sieci" },
-      "generation_power": { "name": "Produkcja" },
-      "bat_volt": { "name": "Napięcie baterii" },
-      "bat_current": { "name": "Prąd baterii" },
-      "pv1_power": { "name": "Moc PV1" },
-      "pv2_power": { "name": "Moc PV2" },
-      "ambient_temp": { "name": "Temperatura otoczenia" },
-      "inverter_temp": { "name": "Temperatura falownika" },
-      "feedin_energy": { "name": "Energia oddana do sieci" },
-      "grid_consumption_energy": { "name": "Energia pobrana z sieci" },
-      "generation_energy": { "name": "Energia solarna wyprodukowana" },
-      "charge_energy_total": { "name": "Energia ładowania baterii" },
-      "discharge_energy_total": { "name": "Energia rozładowania baterii" },
-      "loads_energy": { "name": "Energia zużyta przez dom" },
-      "energy_throughput": { "name": "Przepustowość baterii" },
-      "meter_power": { "name": "Moc licznika sieciowego" },
-      "grid_voltage": { "name": "Napięcie sieci" },
-      "grid_current": { "name": "Prąd sieci" },
-      "grid_frequency": { "name": "Częstotliwość sieci" },
-      "eps_power": { "name": "Moc EPS" },
-      "work_mode": { "name": "Tryb pracy" },
-      "debug_log": { "name": "Dziennik debugowania" },
-      "override_status": { "name": "Status" },
+      "battery_soc": {
+        "name": "SoC baterii"
+      },
+      "bat_charge_power": {
+        "name": "Moc ładowania"
+      },
+      "bat_discharge_power": {
+        "name": "Moc rozładowania"
+      },
+      "loads_power": {
+        "name": "Zużycie domu"
+      },
+      "pv_power": {
+        "name": "Moc solarna"
+      },
+      "bat_temperature": {
+        "name": "Temperatura baterii"
+      },
+      "grid_consumption": {
+        "name": "Pobór z sieci"
+      },
+      "feedin_power": {
+        "name": "Oddawanie do sieci"
+      },
+      "generation_power": {
+        "name": "Produkcja"
+      },
+      "bat_volt": {
+        "name": "Napięcie baterii"
+      },
+      "bat_current": {
+        "name": "Prąd baterii"
+      },
+      "pv1_power": {
+        "name": "Moc PV1"
+      },
+      "pv2_power": {
+        "name": "Moc PV2"
+      },
+      "ambient_temp": {
+        "name": "Temperatura otoczenia"
+      },
+      "inverter_temp": {
+        "name": "Temperatura falownika"
+      },
+      "feedin_energy": {
+        "name": "Energia oddana do sieci"
+      },
+      "grid_consumption_energy": {
+        "name": "Energia pobrana z sieci"
+      },
+      "generation_energy": {
+        "name": "Energia solarna wyprodukowana"
+      },
+      "charge_energy_total": {
+        "name": "Energia ładowania baterii"
+      },
+      "discharge_energy_total": {
+        "name": "Energia rozładowania baterii"
+      },
+      "loads_energy": {
+        "name": "Energia zużyta przez dom"
+      },
+      "energy_throughput": {
+        "name": "Przepustowość baterii"
+      },
+      "meter_power": {
+        "name": "Moc licznika sieciowego"
+      },
+      "grid_voltage": {
+        "name": "Napięcie sieci"
+      },
+      "grid_current": {
+        "name": "Prąd sieci"
+      },
+      "grid_frequency": {
+        "name": "Częstotliwość sieci"
+      },
+      "eps_power": {
+        "name": "Moc EPS"
+      },
+      "work_mode": {
+        "name": "Tryb pracy"
+      },
+      "debug_log": {
+        "name": "Dziennik debugowania"
+      },
+      "override_status": {
+        "name": "Status"
+      },
       "smart_operations": {
         "name": "Inteligentne operacje",
         "state": {
@@ -45,17 +105,35 @@
           "charge_discharge_active": "Ładowanie + Rozładowywanie"
         }
       },
-      "charge_power": { "name": "Moc ładowania (Smart)" },
-      "charge_window": { "name": "Okno ładowania" },
-      "charge_remaining": { "name": "Ładowanie pozostałe" },
-      "discharge_power": { "name": "Moc rozładowania (Smart)" },
-      "discharge_window": { "name": "Okno rozładowania" },
-      "discharge_remaining": { "name": "Rozładowanie pozostałe" },
-      "battery_forecast": { "name": "Prognoza baterii" }
+      "charge_power": {
+        "name": "Moc ładowania (Smart)"
+      },
+      "charge_window": {
+        "name": "Okno ładowania"
+      },
+      "charge_remaining": {
+        "name": "Ładowanie pozostałe"
+      },
+      "discharge_power": {
+        "name": "Moc rozładowania (Smart)"
+      },
+      "discharge_window": {
+        "name": "Okno rozładowania"
+      },
+      "discharge_remaining": {
+        "name": "Rozładowanie pozostałe"
+      },
+      "battery_forecast": {
+        "name": "Prognoza baterii"
+      }
     },
     "binary_sensor": {
-      "smart_charge_active": { "name": "Inteligentne ładowanie aktywne" },
-      "smart_discharge_active": { "name": "Inteligentne rozładowanie aktywne" }
+      "smart_charge_active": {
+        "name": "Inteligentne ładowanie aktywne"
+      },
+      "smart_discharge_active": {
+        "name": "Inteligentne rozładowanie aktywne"
+      }
     }
   },
   "services": {
@@ -139,11 +217,26 @@
       "name": "Inteligentne ładowanie",
       "description": "Ładować baterię w oknie czasowym, regulując moc ładowania, aby osiągnąć docelowy SoC na końcu interwału. Ładowanie może rozpocząć się później, jeśli cel można osiągnąć w krótszym czasie.",
       "fields": {
-        "start_time": { "name": "Godzina rozpoczęcia", "description": "Godzina rozpoczęcia ładowania." },
-        "end_time": { "name": "Godzina zakończenia", "description": "Godzina zakończenia ładowania. Musi być po godzinie rozpoczęcia, w ciągu 4 godzin." },
-        "target_soc": { "name": "Docelowy SoC", "description": "Ładować baterię do tego poziomu SoC. Ładowanie zatrzymuje się i wraca do autokonsumpcji po osiągnięciu." },
-        "power": { "name": "Maksymalna moc", "description": "Maksymalna moc ładowania w watach. Rzeczywista moc może być niższa, aby rozłożyć ładowanie w czasie." },
-        "replace_conflicts": { "name": "Usuń konfliktujące nadpisania zamiast przerywać", "description": "Jeśli włączone, istniejące nakładające się nadpisania zostaną usunięte zamiast przerywania operacji." }
+        "start_time": {
+          "name": "Godzina rozpoczęcia",
+          "description": "Godzina rozpoczęcia ładowania."
+        },
+        "end_time": {
+          "name": "Godzina zakończenia",
+          "description": "Godzina zakończenia ładowania. Musi być po godzinie rozpoczęcia, w ciągu 4 godzin."
+        },
+        "target_soc": {
+          "name": "Docelowy SoC",
+          "description": "Ładować baterię do tego poziomu SoC. Ładowanie zatrzymuje się i wraca do autokonsumpcji po osiągnięciu."
+        },
+        "power": {
+          "name": "Maksymalna moc",
+          "description": "Maksymalna moc ładowania w watach. Rzeczywista moc może być niższa, aby rozłożyć ładowanie w czasie."
+        },
+        "replace_conflicts": {
+          "name": "Usuń konfliktujące nadpisania zamiast przerywać",
+          "description": "Jeśli włączone, istniejące nakładające się nadpisania zostaną usunięte zamiast przerywania operacji."
+        }
       }
     },
     "smart_discharge": {
@@ -191,6 +284,9 @@
           "web_password": "Web Password (or MD5 hash)"
         }
       }
+    },
+    "abort": {
+      "reconfigure_successful": "Web credentials updated successfully."
     },
     "error": {
       "cannot_connect": "Nie można połączyć się z API FoxESS Cloud. Sprawdź połączenie sieciowe.",

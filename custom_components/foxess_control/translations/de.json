@@ -1,36 +1,96 @@
 {
   "entity": {
     "sensor": {
-      "battery_soc": { "name": "Batterie-SoC" },
-      "bat_charge_power": { "name": "Ladeleistung" },
-      "bat_discharge_power": { "name": "Entladeleistung" },
-      "loads_power": { "name": "Hausverbrauch" },
-      "pv_power": { "name": "Solarleistung" },
-      "bat_temperature": { "name": "Batterietemperatur" },
-      "grid_consumption": { "name": "Netzbezug" },
-      "feedin_power": { "name": "Netzeinspeisung" },
-      "generation_power": { "name": "Erzeugung" },
-      "bat_volt": { "name": "Batteriespannung" },
-      "bat_current": { "name": "Batteriestrom" },
-      "pv1_power": { "name": "PV1-Leistung" },
-      "pv2_power": { "name": "PV2-Leistung" },
-      "ambient_temp": { "name": "Umgebungstemperatur" },
-      "inverter_temp": { "name": "Wechselrichtertemperatur" },
-      "feedin_energy": { "name": "Einspeiseenergie" },
-      "grid_consumption_energy": { "name": "Netzbezugsenergie" },
-      "generation_energy": { "name": "Solarenergie" },
-      "charge_energy_total": { "name": "Ladeenergie" },
-      "discharge_energy_total": { "name": "Entladeenergie" },
-      "loads_energy": { "name": "Hausverbrauchsenergie" },
-      "energy_throughput": { "name": "Batteriedurchsatz" },
-      "meter_power": { "name": "Netzzählerleistung" },
-      "grid_voltage": { "name": "Netzspannung" },
-      "grid_current": { "name": "Netzstrom" },
-      "grid_frequency": { "name": "Netzfrequenz" },
-      "eps_power": { "name": "EPS-Leistung" },
-      "work_mode": { "name": "Betriebsmodus" },
-      "debug_log": { "name": "Debug-Protokoll" },
-      "override_status": { "name": "Status" },
+      "battery_soc": {
+        "name": "Batterie-SoC"
+      },
+      "bat_charge_power": {
+        "name": "Ladeleistung"
+      },
+      "bat_discharge_power": {
+        "name": "Entladeleistung"
+      },
+      "loads_power": {
+        "name": "Hausverbrauch"
+      },
+      "pv_power": {
+        "name": "Solarleistung"
+      },
+      "bat_temperature": {
+        "name": "Batterietemperatur"
+      },
+      "grid_consumption": {
+        "name": "Netzbezug"
+      },
+      "feedin_power": {
+        "name": "Netzeinspeisung"
+      },
+      "generation_power": {
+        "name": "Erzeugung"
+      },
+      "bat_volt": {
+        "name": "Batteriespannung"
+      },
+      "bat_current": {
+        "name": "Batteriestrom"
+      },
+      "pv1_power": {
+        "name": "PV1-Leistung"
+      },
+      "pv2_power": {
+        "name": "PV2-Leistung"
+      },
+      "ambient_temp": {
+        "name": "Umgebungstemperatur"
+      },
+      "inverter_temp": {
+        "name": "Wechselrichtertemperatur"
+      },
+      "feedin_energy": {
+        "name": "Einspeiseenergie"
+      },
+      "grid_consumption_energy": {
+        "name": "Netzbezugsenergie"
+      },
+      "generation_energy": {
+        "name": "Solarenergie"
+      },
+      "charge_energy_total": {
+        "name": "Ladeenergie"
+      },
+      "discharge_energy_total": {
+        "name": "Entladeenergie"
+      },
+      "loads_energy": {
+        "name": "Hausverbrauchsenergie"
+      },
+      "energy_throughput": {
+        "name": "Batteriedurchsatz"
+      },
+      "meter_power": {
+        "name": "Netzzählerleistung"
+      },
+      "grid_voltage": {
+        "name": "Netzspannung"
+      },
+      "grid_current": {
+        "name": "Netzstrom"
+      },
+      "grid_frequency": {
+        "name": "Netzfrequenz"
+      },
+      "eps_power": {
+        "name": "EPS-Leistung"
+      },
+      "work_mode": {
+        "name": "Betriebsmodus"
+      },
+      "debug_log": {
+        "name": "Debug-Protokoll"
+      },
+      "override_status": {
+        "name": "Status"
+      },
       "smart_operations": {
         "name": "Intelligente Steuerung",
         "state": {
@@ -45,17 +105,35 @@
           "charge_discharge_active": "Laden + Entladen"
         }
       },
-      "charge_power": { "name": "Ladeleistung (Smart)" },
-      "charge_window": { "name": "Ladefenster" },
-      "charge_remaining": { "name": "Ladezeit verbleibend" },
-      "discharge_power": { "name": "Entladeleistung (Smart)" },
-      "discharge_window": { "name": "Entladefenster" },
-      "discharge_remaining": { "name": "Entladezeit verbleibend" },
-      "battery_forecast": { "name": "Batterieprognose" }
+      "charge_power": {
+        "name": "Ladeleistung (Smart)"
+      },
+      "charge_window": {
+        "name": "Ladefenster"
+      },
+      "charge_remaining": {
+        "name": "Ladezeit verbleibend"
+      },
+      "discharge_power": {
+        "name": "Entladeleistung (Smart)"
+      },
+      "discharge_window": {
+        "name": "Entladefenster"
+      },
+      "discharge_remaining": {
+        "name": "Entladezeit verbleibend"
+      },
+      "battery_forecast": {
+        "name": "Batterieprognose"
+      }
     },
     "binary_sensor": {
-      "smart_charge_active": { "name": "Intelligentes Laden aktiv" },
-      "smart_discharge_active": { "name": "Intelligentes Entladen aktiv" }
+      "smart_charge_active": {
+        "name": "Intelligentes Laden aktiv"
+      },
+      "smart_discharge_active": {
+        "name": "Intelligentes Entladen aktiv"
+      }
     }
   },
   "services": {
@@ -139,11 +217,26 @@
       "name": "Intelligentes Laden",
       "description": "Batterie innerhalb eines Zeitfensters laden und die Ladeleistung so anpassen, dass der Ziel-SoC am Ende des Intervalls erreicht wird. Der Ladevorgang kann verspätet beginnen, wenn das Ziel in kürzerer Zeit erreichbar ist.",
       "fields": {
-        "start_time": { "name": "Startzeit", "description": "Tageszeit für den Beginn des Ladens." },
-        "end_time": { "name": "Endzeit", "description": "Tageszeit für das Ende des Ladens. Muss nach der Startzeit liegen, innerhalb von 4 Stunden." },
-        "target_soc": { "name": "Ziel-SoC", "description": "Batterie bis zu diesem SoC-Niveau laden. Das Laden stoppt und kehrt zum Eigenverbrauch zurück, wenn erreicht." },
-        "power": { "name": "Maximale Leistung", "description": "Maximale Ladeleistung in Watt. Die tatsächliche Leistung kann geringer sein, um das Laden bis zum Ende des Zeitfensters zu verteilen." },
-        "replace_conflicts": { "name": "Konfliktende Übersteuerungen entfernen statt abbrechen", "description": "Wenn aktiviert, werden bestehende überlappende Übersteuerungen stillschweigend entfernt, anstatt abzubrechen." }
+        "start_time": {
+          "name": "Startzeit",
+          "description": "Tageszeit für den Beginn des Ladens."
+        },
+        "end_time": {
+          "name": "Endzeit",
+          "description": "Tageszeit für das Ende des Ladens. Muss nach der Startzeit liegen, innerhalb von 4 Stunden."
+        },
+        "target_soc": {
+          "name": "Ziel-SoC",
+          "description": "Batterie bis zu diesem SoC-Niveau laden. Das Laden stoppt und kehrt zum Eigenverbrauch zurück, wenn erreicht."
+        },
+        "power": {
+          "name": "Maximale Leistung",
+          "description": "Maximale Ladeleistung in Watt. Die tatsächliche Leistung kann geringer sein, um das Laden bis zum Ende des Zeitfensters zu verteilen."
+        },
+        "replace_conflicts": {
+          "name": "Konfliktende Übersteuerungen entfernen statt abbrechen",
+          "description": "Wenn aktiviert, werden bestehende überlappende Übersteuerungen stillschweigend entfernt, anstatt abzubrechen."
+        }
       }
     },
     "smart_discharge": {
@@ -191,6 +284,9 @@
           "web_password": "Web Password (or MD5 hash)"
         }
       }
+    },
+    "abort": {
+      "reconfigure_successful": "Web credentials updated successfully."
     },
     "error": {
       "cannot_connect": "Verbindung zur FoxESS Cloud API nicht möglich. Überprüfen Sie Ihre Netzwerkverbindung.",

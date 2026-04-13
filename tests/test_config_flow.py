@@ -20,6 +20,8 @@ from custom_components.foxess_control.const import (
     CONF_MIN_POWER_CHANGE,
     CONF_MIN_SOC_ON_GRID,
     CONF_SOC_ENTITY,
+    CONF_WEB_PASSWORD,
+    CONF_WEB_USERNAME,
     CONF_WORK_MODE_ENTITY,
 )
 from custom_components.foxess_control.foxess.client import FoxESSApiError
@@ -283,6 +285,76 @@ class TestOptionsFlow:
         data = flow.async_create_entry.call_args.kwargs["data"]
         assert data[CONF_MIN_SOC_ON_GRID] == 20
         assert data[CONF_WORK_MODE_ENTITY] == "select.foxess_work_mode"
+
+
+class TestReconfigureFlow:
+    """Tests for reconfigure (updating web credentials on existing entry)."""
+
+    @pytest.mark.asyncio
+    async def test_reconfigure_adds_web_credentials(self) -> None:
+        """Reconfigure step updates entry data with web credentials."""
+        existing_data = {CONF_API_KEY: "key123", CONF_DEVICE_SERIAL: "SN001"}
+        entry = MagicMock()
+        entry.data = existing_data
+        entry.entry_id = "test_entry_id"
+
+        flow = FoxessControlConfigFlow()
+        flow.hass = _make_hass()
+        flow.hass.config_entries.async_get_entry = MagicMock(return_value=entry)
+        flow.context = {"entry_id": "test_entry_id", "source": "reconfigure"}
+        flow._get_reconfigure_entry = MagicMock(return_value=entry)
+        flow.async_update_reload_and_abort = MagicMock(
+            return_value={"type": "abort", "reason": "reconfigure_successful"},
+        )
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+        # Step 1: Show form (no input)
+        await flow.async_step_reconfigure(None)
+        flow.async_show_form.assert_called_once()
+        assert flow.async_show_form.call_args.kwargs["step_id"] == "web_credentials"
+
+        # Step 2: Submit credentials (skip validation for unit test)
+        with patch.object(flow, "_validate_web_credentials", return_value={}):
+            await flow.async_step_web_credentials(
+                {CONF_WEB_USERNAME: "user@fox.com", CONF_WEB_PASSWORD: "secret"}
+            )
+
+        flow.async_update_reload_and_abort.assert_called_once()
+        new_data = flow.async_update_reload_and_abort.call_args.kwargs["data"]
+        assert new_data[CONF_API_KEY] == "key123"
+        assert new_data[CONF_WEB_USERNAME] == "user@fox.com"
+        assert new_data[CONF_WEB_PASSWORD] != "secret"  # hashed
+
+    @pytest.mark.asyncio
+    async def test_reconfigure_clears_web_credentials(self) -> None:
+        """Submitting empty fields removes web credentials."""
+        existing_data = {
+            CONF_API_KEY: "key123",
+            CONF_DEVICE_SERIAL: "SN001",
+            CONF_WEB_USERNAME: "old@fox.com",
+            CONF_WEB_PASSWORD: "oldhash",
+        }
+        entry = MagicMock()
+        entry.data = existing_data
+        entry.entry_id = "test_entry_id"
+
+        flow = FoxessControlConfigFlow()
+        flow.hass = _make_hass()
+        flow.hass.config_entries.async_get_entry = MagicMock(return_value=entry)
+        flow.context = {"entry_id": "test_entry_id", "source": "reconfigure"}
+        flow._get_reconfigure_entry = MagicMock(return_value=entry)
+        flow.async_update_reload_and_abort = MagicMock(
+            return_value={"type": "abort", "reason": "reconfigure_successful"},
+        )
+
+        await flow.async_step_reconfigure(
+            {CONF_WEB_USERNAME: "", CONF_WEB_PASSWORD: ""}
+        )
+
+        new_data = flow.async_update_reload_and_abort.call_args.kwargs["data"]
+        assert CONF_WEB_USERNAME not in new_data
+        assert CONF_WEB_PASSWORD not in new_data
+        assert new_data[CONF_API_KEY] == "key123"
 
 
 class TestDetectFoxessModbusEntities:

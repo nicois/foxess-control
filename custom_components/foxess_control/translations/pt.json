@@ -1,36 +1,96 @@
 {
   "entity": {
     "sensor": {
-      "battery_soc": { "name": "SoC da bateria" },
-      "bat_charge_power": { "name": "Potência de carga" },
-      "bat_discharge_power": { "name": "Potência de descarga" },
-      "loads_power": { "name": "Consumo da casa" },
-      "pv_power": { "name": "Potência solar" },
-      "bat_temperature": { "name": "Temperatura da bateria" },
-      "grid_consumption": { "name": "Consumo da rede" },
-      "feedin_power": { "name": "Injeção na rede" },
-      "generation_power": { "name": "Produção" },
-      "bat_volt": { "name": "Tensão da bateria" },
-      "bat_current": { "name": "Corrente da bateria" },
-      "pv1_power": { "name": "Potência PV1" },
-      "pv2_power": { "name": "Potência PV2" },
-      "ambient_temp": { "name": "Temperatura ambiente" },
-      "inverter_temp": { "name": "Temperatura do inversor" },
-      "feedin_energy": { "name": "Energia injetada na rede" },
-      "grid_consumption_energy": { "name": "Energia consumida da rede" },
-      "generation_energy": { "name": "Energia solar produzida" },
-      "charge_energy_total": { "name": "Energia de carga da bateria" },
-      "discharge_energy_total": { "name": "Energia de descarga da bateria" },
-      "loads_energy": { "name": "Energia consumida pela casa" },
-      "energy_throughput": { "name": "Rendimento da bateria" },
-      "meter_power": { "name": "Potência do medidor de rede" },
-      "grid_voltage": { "name": "Tensão da rede" },
-      "grid_current": { "name": "Corrente da rede" },
-      "grid_frequency": { "name": "Frequência da rede" },
-      "eps_power": { "name": "Potência EPS" },
-      "work_mode": { "name": "Modo de operação" },
-      "debug_log": { "name": "Registo de depuração" },
-      "override_status": { "name": "Estado" },
+      "battery_soc": {
+        "name": "SoC da bateria"
+      },
+      "bat_charge_power": {
+        "name": "Potência de carga"
+      },
+      "bat_discharge_power": {
+        "name": "Potência de descarga"
+      },
+      "loads_power": {
+        "name": "Consumo da casa"
+      },
+      "pv_power": {
+        "name": "Potência solar"
+      },
+      "bat_temperature": {
+        "name": "Temperatura da bateria"
+      },
+      "grid_consumption": {
+        "name": "Consumo da rede"
+      },
+      "feedin_power": {
+        "name": "Injeção na rede"
+      },
+      "generation_power": {
+        "name": "Produção"
+      },
+      "bat_volt": {
+        "name": "Tensão da bateria"
+      },
+      "bat_current": {
+        "name": "Corrente da bateria"
+      },
+      "pv1_power": {
+        "name": "Potência PV1"
+      },
+      "pv2_power": {
+        "name": "Potência PV2"
+      },
+      "ambient_temp": {
+        "name": "Temperatura ambiente"
+      },
+      "inverter_temp": {
+        "name": "Temperatura do inversor"
+      },
+      "feedin_energy": {
+        "name": "Energia injetada na rede"
+      },
+      "grid_consumption_energy": {
+        "name": "Energia consumida da rede"
+      },
+      "generation_energy": {
+        "name": "Energia solar produzida"
+      },
+      "charge_energy_total": {
+        "name": "Energia de carga da bateria"
+      },
+      "discharge_energy_total": {
+        "name": "Energia de descarga da bateria"
+      },
+      "loads_energy": {
+        "name": "Energia consumida pela casa"
+      },
+      "energy_throughput": {
+        "name": "Rendimento da bateria"
+      },
+      "meter_power": {
+        "name": "Potência do medidor de rede"
+      },
+      "grid_voltage": {
+        "name": "Tensão da rede"
+      },
+      "grid_current": {
+        "name": "Corrente da rede"
+      },
+      "grid_frequency": {
+        "name": "Frequência da rede"
+      },
+      "eps_power": {
+        "name": "Potência EPS"
+      },
+      "work_mode": {
+        "name": "Modo de operação"
+      },
+      "debug_log": {
+        "name": "Registo de depuração"
+      },
+      "override_status": {
+        "name": "Estado"
+      },
       "smart_operations": {
         "name": "Operações inteligentes",
         "state": {
@@ -45,17 +105,35 @@
           "charge_discharge_active": "Carga + Descarga"
         }
       },
-      "charge_power": { "name": "Potência de carga (Smart)" },
-      "charge_window": { "name": "Janela de carga" },
-      "charge_remaining": { "name": "Carga restante" },
-      "discharge_power": { "name": "Potência de descarga (Smart)" },
-      "discharge_window": { "name": "Janela de descarga" },
-      "discharge_remaining": { "name": "Descarga restante" },
-      "battery_forecast": { "name": "Previsão da bateria" }
+      "charge_power": {
+        "name": "Potência de carga (Smart)"
+      },
+      "charge_window": {
+        "name": "Janela de carga"
+      },
+      "charge_remaining": {
+        "name": "Carga restante"
+      },
+      "discharge_power": {
+        "name": "Potência de descarga (Smart)"
+      },
+      "discharge_window": {
+        "name": "Janela de descarga"
+      },
+      "discharge_remaining": {
+        "name": "Descarga restante"
+      },
+      "battery_forecast": {
+        "name": "Previsão da bateria"
+      }
     },
     "binary_sensor": {
-      "smart_charge_active": { "name": "Carga inteligente ativa" },
-      "smart_discharge_active": { "name": "Descarga inteligente ativa" }
+      "smart_charge_active": {
+        "name": "Carga inteligente ativa"
+      },
+      "smart_discharge_active": {
+        "name": "Descarga inteligente ativa"
+      }
     }
   },
   "services": {
@@ -139,11 +217,26 @@
       "name": "Carga inteligente",
       "description": "Carregar a bateria numa janela de tempo, regulando a taxa de carga para atingir um SoC alvo no final do intervalo. A carga pode iniciar mais tarde se o objetivo puder ser alcançado em menos tempo.",
       "fields": {
-        "start_time": { "name": "Hora de início", "description": "Hora do dia para iniciar a carga." },
-        "end_time": { "name": "Hora de fim", "description": "Hora do dia para terminar a carga. Deve ser depois da hora de início, dentro de 4 horas." },
-        "target_soc": { "name": "SoC alvo", "description": "Carregar a bateria até este nível de SoC. A carga para e reverte para autoconsumo quando atingido." },
-        "power": { "name": "Potência máxima", "description": "Potência de carga máxima em watts. A potência real pode ser inferior para distribuir a carga ao longo do tempo." },
-        "replace_conflicts": { "name": "Remover substituições em conflito em vez de abortar", "description": "Se ativado, remove silenciosamente as substituições existentes sobrepostas em vez de abortar." }
+        "start_time": {
+          "name": "Hora de início",
+          "description": "Hora do dia para iniciar a carga."
+        },
+        "end_time": {
+          "name": "Hora de fim",
+          "description": "Hora do dia para terminar a carga. Deve ser depois da hora de início, dentro de 4 horas."
+        },
+        "target_soc": {
+          "name": "SoC alvo",
+          "description": "Carregar a bateria até este nível de SoC. A carga para e reverte para autoconsumo quando atingido."
+        },
+        "power": {
+          "name": "Potência máxima",
+          "description": "Potência de carga máxima em watts. A potência real pode ser inferior para distribuir a carga ao longo do tempo."
+        },
+        "replace_conflicts": {
+          "name": "Remover substituições em conflito em vez de abortar",
+          "description": "Se ativado, remove silenciosamente as substituições existentes sobrepostas em vez de abortar."
+        }
       }
     },
     "smart_discharge": {
@@ -191,6 +284,9 @@
           "web_password": "Web Password (or MD5 hash)"
         }
       }
+    },
+    "abort": {
+      "reconfigure_successful": "Web credentials updated successfully."
     },
     "error": {
       "cannot_connect": "Não é possível ligar à API FoxESS Cloud. Verifique a sua ligação de rede.",
