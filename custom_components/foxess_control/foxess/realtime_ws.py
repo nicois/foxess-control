@@ -29,7 +29,11 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _parse_power(power_obj: dict[str, Any] | None) -> float | None:
-    """Extract numeric watts from a WebSocket power object."""
+    """Extract numeric kW from a WebSocket power object.
+
+    The WebSocket reports power values in kW (matching the REST API),
+    despite the ``unit`` field sometimes reading ``"W"``.
+    """
     if power_obj is None:
         return None
     val = power_obj.get("value")
@@ -44,7 +48,7 @@ def _parse_power(power_obj: dict[str, Any] | None) -> float | None:
 def map_ws_to_coordinator(ws_msg: dict[str, Any]) -> dict[str, Any]:
     """Map a WebSocket message to coordinator variable names.
 
-    WebSocket reports watts (as strings); coordinator uses kW (as floats).
+    WebSocket reports kW (as strings), matching the REST API.
     Only populates fields that are present in the message.
     """
     node = ws_msg.get("result", {}).get("node", {})
@@ -61,35 +65,37 @@ def map_ws_to_coordinator(ws_msg: dict[str, Any]) -> dict[str, Any]:
             data["SoC"] = float(soc)
 
     # Battery power — direction indicated by bat.charge (1=charging)
-    bat_w = _parse_power(bat.get("power"))
-    if bat_w is not None:
-        is_charging = bat.get("charge") == 1
-        data["batChargePower"] = (bat_w / 1000.0) if is_charging else 0.0
-        data["batDischargePower"] = (bat_w / 1000.0) if not is_charging else 0.0
+    bat_kw = _parse_power(bat.get("power"))
+    if bat_kw is not None:
+        is_charging = str(bat.get("charge")) == "1"
+        data["batChargePower"] = bat_kw if is_charging else 0.0
+        data["batDischargePower"] = bat_kw if not is_charging else 0.0
 
     # Solar power
-    solar_w = _parse_power(node.get("solar", {}).get("power"))
-    if solar_w is not None:
-        data["pvPower"] = solar_w / 1000.0
+    solar_kw = _parse_power(node.get("solar", {}).get("power"))
+    if solar_kw is not None:
+        data["pvPower"] = solar_kw
 
     # House load
-    load_w = _parse_power(node.get("load", {}).get("power"))
-    if load_w is not None:
-        data["loadsPower"] = load_w / 1000.0
+    load_kw = _parse_power(node.get("load", {}).get("power"))
+    if load_kw is not None:
+        data["loadsPower"] = load_kw
 
-    # Grid power — positive = consuming from grid, negative = feeding in
+    # Grid power — direction from gridStatus (compare as string for
+    # robustness; the WS may send int or str depending on version).
     grid = node.get("grid", {})
-    grid_w = _parse_power(grid.get("power"))
-    if grid_w is not None:
-        grid_kw = grid_w / 1000.0
-        # gridStatus: 3 = importing from grid
-        grid_status = grid.get("gridStatus")
-        if grid_status == 3:
+    grid_kw = _parse_power(grid.get("power"))
+    if grid_kw is not None:
+        grid_status = str(grid.get("gridStatus", ""))
+        if grid_status == "3":
             data["gridConsumptionPower"] = grid_kw
             data["feedinPower"] = 0.0
         else:
             data["gridConsumptionPower"] = 0.0
             data["feedinPower"] = grid_kw
+
+    if data:
+        _LOGGER.debug("WS mapped data: %s (raw node keys: %s)", data, list(node.keys()))
 
     return data
 

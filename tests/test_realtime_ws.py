@@ -94,17 +94,17 @@ class TestMapWsToCoordinator:
     def _make_msg(self, **node_overrides: object) -> dict[str, object]:
         """Build a minimal WebSocket message with node data."""
         node = {
-            "solar": {"power": {"value": "3500", "unit": "W"}},
+            "solar": {"power": {"value": "3.5"}},
             "grid": {
-                "power": {"value": "200", "unit": "W"},
+                "power": {"value": "0.2"},
                 "gridStatus": 3,
             },
             "bat": {
-                "power": {"value": "1500", "unit": "W"},
+                "power": {"value": "1.5"},
                 "soc": 65,
                 "charge": 0,
             },
-            "load": {"power": {"value": "2000", "unit": "W"}},
+            "load": {"power": {"value": "2.0"}},
         }
         node.update(node_overrides)
         return {"errno": 0, "result": {"node": node, "timeDiff": 5}}
@@ -112,32 +112,40 @@ class TestMapWsToCoordinator:
     def test_basic_mapping(self) -> None:
         data = map_ws_to_coordinator(self._make_msg())
         assert data["SoC"] == 65.0
-        assert data["pvPower"] == 3.5  # 3500W -> 3.5kW
+        assert data["pvPower"] == 3.5
         assert data["loadsPower"] == 2.0
         assert data["batDischargePower"] == 1.5  # charge=0 -> discharging
         assert data["batChargePower"] == 0.0
 
     def test_battery_charging(self) -> None:
-        msg = self._make_msg(
-            bat={"power": {"value": "2000", "unit": "W"}, "soc": 45, "charge": 1}
-        )
+        msg = self._make_msg(bat={"power": {"value": "2.0"}, "soc": 45, "charge": 1})
         data = map_ws_to_coordinator(msg)
         assert data["SoC"] == 45.0
         assert data["batChargePower"] == 2.0
         assert data["batDischargePower"] == 0.0
 
+    def test_battery_charge_flag_as_string(self) -> None:
+        """WS may send charge flag as string or int."""
+        msg = self._make_msg(bat={"power": {"value": "2.0"}, "soc": 45, "charge": "1"})
+        data = map_ws_to_coordinator(msg)
+        assert data["batChargePower"] == 2.0
+        assert data["batDischargePower"] == 0.0
+
     def test_grid_importing(self) -> None:
-        msg = self._make_msg(
-            grid={"power": {"value": "500", "unit": "W"}, "gridStatus": 3}
-        )
+        msg = self._make_msg(grid={"power": {"value": "0.5"}, "gridStatus": 3})
         data = map_ws_to_coordinator(msg)
         assert data["gridConsumptionPower"] == 0.5
         assert data["feedinPower"] == 0.0
 
+    def test_grid_importing_string_status(self) -> None:
+        """gridStatus may arrive as string."""
+        msg = self._make_msg(grid={"power": {"value": "11.6"}, "gridStatus": "3"})
+        data = map_ws_to_coordinator(msg)
+        assert data["gridConsumptionPower"] == pytest.approx(11.6)
+        assert data["feedinPower"] == 0.0
+
     def test_grid_exporting(self) -> None:
-        msg = self._make_msg(
-            grid={"power": {"value": "1000", "unit": "W"}, "gridStatus": 1}
-        )
+        msg = self._make_msg(grid={"power": {"value": "1.0"}, "gridStatus": 1})
         data = map_ws_to_coordinator(msg)
         assert data["gridConsumptionPower"] == 0.0
         assert data["feedinPower"] == 1.0
@@ -159,14 +167,12 @@ class TestMapWsToCoordinator:
         assert "pvPower" not in data
 
     def test_zero_power(self) -> None:
-        msg = self._make_msg(solar={"power": {"value": "0", "unit": "W"}})
+        msg = self._make_msg(solar={"power": {"value": "0"}})
         data = map_ws_to_coordinator(msg)
         assert data["pvPower"] == 0.0
 
     def test_battery_soc_type_conversion(self) -> None:
-        msg = self._make_msg(
-            bat={"power": {"value": "0", "unit": "W"}, "soc": "75", "charge": 0}
-        )
+        msg = self._make_msg(bat={"power": {"value": "0"}, "soc": "75", "charge": 0})
         data = map_ws_to_coordinator(msg)
         assert data["SoC"] == 75.0
 
@@ -177,30 +183,34 @@ class TestMapWsToCoordinator:
         assert data == {}
 
     def test_real_world_sample(self) -> None:
-        """Test with actual FoxESS WebSocket message structure."""
+        """Test with actual FoxESS WebSocket message structure.
+
+        Values are in kW (matching the REST API), despite the unit
+        field sometimes reading "W".
+        """
         msg = {
             "errno": 0,
             "msg": "",
             "result": {
                 "node": {
-                    "solar": {"power": {"value": "809", "unit": "W"}},
+                    "solar": {"power": {"value": "0.809", "unit": "W"}},
                     "grid": {
-                        "power": {"value": "19", "unit": "W"},
+                        "power": {"value": "0.019", "unit": "W"},
                         "gridStatus": 3,
                         "gridToHidden": -1,
                     },
                     "bat": {
-                        "power": {"value": "607", "unit": "W"},
+                        "power": {"value": "0.607", "unit": "W"},
                         "soc": 34,
                         "charge": 1,
                         "batToDevice": -1,
                     },
                     "load": {
-                        "power": {"value": "183", "unit": "W"},
-                        "normalLoad": {"power": {"value": "183", "unit": "W"}},
+                        "power": {"value": "0.183", "unit": "W"},
+                        "normalLoad": {"power": {"value": "0.183", "unit": "W"}},
                         "backupLoad": {"power": {"value": "0", "unit": "W"}},
                     },
-                    "device": {"power": {"value": "202", "unit": "W"}},
+                    "device": {"power": {"value": "0.202", "unit": "W"}},
                     "charger": {"display": False},
                     "heatpump": {"display": False},
                 },
