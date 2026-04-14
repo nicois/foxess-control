@@ -2884,6 +2884,7 @@ def _register_services(hass: HomeAssistant) -> None:
             "force": force,
             "soc_unavailable_count": 0,
             "soc_above_target_count": 0,
+            "start_soc": current_soc,
         }
 
         _setup_smart_charge_listeners(hass, inverter)
