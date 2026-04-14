@@ -1523,6 +1523,11 @@ def _setup_smart_discharge_listeners(
                         "smart_discharge",
                         _session_data_from_discharge_state(cur_state),
                     )
+                    # Start or stop WS based on whether power is paced
+                    if _should_start_realtime_ws(hass):
+                        await _maybe_start_realtime_ws(hass)
+                    else:
+                        await _stop_realtime_ws(hass)
                 else:
                     _LOGGER.debug(
                         "Smart discharge: power change %dW -> %dW "
@@ -2118,12 +2123,15 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
     domain_data = hass.data.get(DOMAIN, {})
     ws_all = entry.options.get(CONF_WS_ALL_SESSIONS, False)
 
-    # Active forced discharge (always eligible when web creds exist)
+    # Active forced discharge — only when power is paced below max,
+    # which is when house load could exceed discharge power and cause
+    # grid import.  At full power there is plenty of headroom.
     ds = domain_data.get("_smart_discharge_state")
     if (
         ds is not None
         and ds.get("discharging_started", False)
         and not ds.get("min_soc", 0) >= 100
+        and ds.get("last_power_w", 0) < ds.get("max_power_w", 0)
     ):
         return True
 

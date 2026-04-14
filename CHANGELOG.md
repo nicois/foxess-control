@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1-beta.22
+
+### Fixed
+- **WebSocket active only when discharge power is paced**: the WebSocket now connects only when discharge power is paced below the inverter maximum (the window where house load could exceed discharge power and cause grid import). At full power there is plenty of headroom and 5-minute REST polling is sufficient. The connection is re-evaluated after each power adjustment so it starts/stops dynamically as pacing changes.
+
 ## 1.0.1-beta.21
 
 ### Fixed
