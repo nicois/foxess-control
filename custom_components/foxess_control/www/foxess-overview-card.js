@@ -335,7 +335,7 @@ class FoxESSOverviewCard extends HTMLElement {
     const gridNet = (gridImport || 0) - (gridExport || 0);
 
     const solarActive = solar != null && solar > 0.01;
-    const houseActive = house != null && house > 0.01;
+    const houseActive = house != null;
     const gridImporting = gridNet > 0.01;
     const gridExporting = gridNet < -0.01;
     const batCharging = batNet > 0.01;
