@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import logging
 import time as _time
@@ -2189,22 +2190,49 @@ async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
         )
 
 
+_WS_LINGER_TIMEOUT = 30.0  # seconds to wait for one final WS update
+
+
 async def _stop_realtime_ws(hass: HomeAssistant) -> None:
-    """Disconnect the WebSocket if running and refresh coordinator data."""
+    """Keep WS alive briefly to capture post-session data, then disconnect.
+
+    After a smart session ends the inverter reverts to self-use, but the
+    REST API may still return the old snapshot for up to 5 minutes.  By
+    lingering on the WebSocket for one more ~5-second data push we inject
+    the fresh post-session values into the coordinator so the overview card
+    immediately reflects reality.
+    """
     domain_data = hass.data.get(DOMAIN, {})
     ws: FoxESSRealtimeWS | None = domain_data.pop("_realtime_ws", None)
-    if ws is not None:
-        await ws.async_disconnect()
-        _LOGGER.info("FoxESS WebSocket real-time data stream stopped")
-        # Trigger an immediate REST poll so sensors don't show stale
-        # WS-injected values until the next scheduled poll.
+    if ws is None:
+        return
+
+    if ws.is_connected:
+        received = asyncio.Event()
+        original_on_data = ws._on_data  # noqa: SLF001
+
+        async def _linger_on_data(mapped: dict[str, Any]) -> None:
+            """Forward one final message then signal completion."""
+            await original_on_data(mapped)
+            received.set()
+
+        ws._on_data = _linger_on_data  # noqa: SLF001
+        _LOGGER.debug(
+            "FoxESS WebSocket: lingering up to %.0fs for post-session data",
+            _WS_LINGER_TIMEOUT,
+        )
         try:
-            entry = _get_first_entry(hass)
-            coordinator = domain_data.get(entry.entry_id, {}).get("coordinator")
-            if coordinator is not None:
-                await coordinator.async_request_refresh()
-        except Exception:
-            _LOGGER.debug("Could not trigger refresh after WS stop", exc_info=True)
+            await asyncio.wait_for(received.wait(), _WS_LINGER_TIMEOUT)
+            _LOGGER.info(
+                "FoxESS WebSocket: received post-session update, disconnecting"
+            )
+        except TimeoutError:
+            _LOGGER.info(
+                "FoxESS WebSocket: linger timeout, disconnecting with stale data"
+            )
+
+    await ws.async_disconnect()
+    _LOGGER.info("FoxESS WebSocket real-time data stream stopped")
 
 
 def _trigger_discharge_listener(hass: HomeAssistant) -> None:
