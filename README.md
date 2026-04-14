@@ -66,6 +66,20 @@ FoxESS Control polls real-time inverter data (battery SoC, charge/discharge powe
 3. Enter your **API Key** and **Device Serial Number**.
 4. The integration validates your credentials by querying the FoxESS Cloud API. If successful, the integration is added.
 
+### Web credentials (optional)
+
+After entering your API key and serial, an optional second step allows you to provide your **FoxESS Cloud web portal** username and password (the same credentials you use to log in at [foxesscloud.com](https://www.foxesscloud.com/)). These enable the real-time WebSocket data feature (see below). You can skip this step and add credentials later via **Configure > Reconfigure**.
+
+### Real-time WebSocket data
+
+When web credentials are configured, the integration can connect to an undocumented FoxESS Cloud WebSocket that streams inverter data every ~5 seconds (vs the standard 5-minute REST API polls). This is used during smart sessions to detect and react to load spikes faster, reducing the risk of accidental grid import.
+
+**Default behaviour**: The WebSocket connects only during active forced discharge — the highest-risk window where a load spike between polls can cause grid import that violates the "no import" priority.
+
+**Optional**: Enable **"Use real-time WebSocket for all smart sessions"** in the integration options to also use the WebSocket during smart charge and deferred discharge phases. This makes the overview card update every ~5 seconds during any smart operation.
+
+The WebSocket is best-effort: if the connection fails, the integration falls back to standard REST polling with no loss of functionality. Entity mode users (foxess_modbus) already have fast local data and are unaffected.
+
 ### Options
 
 After setup, click **Configure** on the integration entry to adjust:
@@ -78,6 +92,7 @@ After setup, click **Configure** on the integration entry to adjust:
 | Min Power Change | 500 W | 0-5000 W | Minimum watt change before updating the charge schedule during `smart_charge`. Lower values improve SoC tracking, higher values reduce API calls. |
 | Minimum API fdSoc | 11% | 0-11% | The minimum `fdSoc` value sent to the FoxESS API. The API normally rejects values below 11 (errno 40257). Only lower this if you know your firmware supports it. |
 | Smart Headroom | 10% | 0-25% | Spare capacity reserved during `smart_charge` and `smart_discharge` for transient load variation. Applied as both a time buffer (plan to finish in 90% of the window) and a power multiplier (request 110% of the calculated rate). For smart charge, lower values charge more slowly and defer longer; higher values start earlier and charge faster. For smart discharge, the headroom determines how long the deferred self-use phase lasts — lower values defer longer (start forced discharge later), higher values start earlier. When a feed-in energy limit is set, the headroom is doubled (up to 40%) to account for household consumption reducing the effective export rate. Set to 0 for no headroom (not recommended — transient loads may prevent reaching the target). |
+| Use WebSocket for all smart sessions | Off | On/Off | When web credentials are configured, extends real-time WebSocket data to all smart sessions (charge, deferred discharge), not just active forced discharge. See [Real-time WebSocket data](#real-time-websocket-data). |
 
 > **Warning:** The inverter's behaviour when it reaches this SoC level during force discharge or feed-in is unintuitive. Consider using an automation to cancel the override before the battery reaches this level. See [Known limitations](#known-limitations).
 

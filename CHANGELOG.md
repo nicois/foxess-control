@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.1-beta.17
+
+### Added
+- **WebSocket real-time data**: optional ~5-second real-time power data from the FoxESS Cloud WebSocket during smart sessions, reducing the risk of accidental grid import from load spikes between 5-minute REST polls. Requires FoxESS web portal credentials (configured via a new optional config flow step). Connects automatically during active forced discharge; an opt-in toggle extends coverage to all smart sessions (charge and discharge).
+- **End-of-discharge guard**: prevents tail-end grid import when paced discharge power drops below house load near session end
+- **Reconfigure flow for web credentials**: add or update FoxESS web portal credentials after initial setup without re-creating the config entry
+- **Feed-in energy integration from WebSocket**: trapezoidal integration of instantaneous feed-in power between REST polls for more accurate cumulative energy tracking during discharge
+
+### Fixed
+- **WebSocket token URL encoding**: tokens containing `+` and `=` were not URL-encoded, causing the FoxESS server to reject the WebSocket handshake (HTTP 200 instead of 101 Upgrade)
+- **WebSocket power values 1000x too small**: the WebSocket sends values in kW (matching the REST API), not watts as assumed — removed erroneous /1000 division
+- **WebSocket grid direction**: replaced unreliable `gridStatus` field with power-balance-derived direction (load + charge - discharge - solar) for correct import/export detection
+- **Taper profile corruption from unit mismatch**: the 1000x power error caused taper observations with ~0.1% acceptance ratios, making the behind-schedule detector always fire at max power. Added minimum actual power guard (50W) and plausibility check on profile load to auto-reset corrupted profiles
+- **Smart charge finishing early**: consequence of the corrupted taper profile — charge rate was pinned at maximum every tick instead of pacing to the target
+- **SoC progress bar showing current SoC**: `start_soc` was missing from initial smart charge session creation (only set during recovery and discharge). Progress bar now correctly shows the SoC at session start.
+- **Overview card greying out**: entity map discovery failed during integration reload and cached empty result, never retrying. Now retries every 10 seconds until entities are discovered.
+- **Session recovery `start_soc`**: persisted in charge and discharge session serialization so it survives HA restarts; falls back to current SoC for pre-fix sessions
+
 ## 1.0.1-beta.4
 
 ### Added
