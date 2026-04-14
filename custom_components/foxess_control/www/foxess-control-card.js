@@ -851,6 +851,7 @@ class FoxESSControlCard extends HTMLElement {
       bars += this._progressBar(this._t("time"), time.label, time.pct, "time-fill", timeTip, "discharge-time");
     }
 
+    if (!bars) return "";
     return `
       <div class="progress-section">
         <div class="progress-label">${this._t("progress")}</div>
