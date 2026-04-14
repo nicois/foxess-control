@@ -2127,9 +2127,12 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
     ):
         return True
 
-    # Any smart session when ws_all_sessions is enabled
-    return ws_all and (
-        ds is not None or domain_data.get("_smart_charge_state") is not None
+    # Any *started* smart session when ws_all_sessions is enabled
+    if not ws_all:
+        return False
+    cs = domain_data.get("_smart_charge_state")
+    return (ds is not None and ds.get("discharging_started", False)) or (
+        cs is not None and cs.get("charging_started", False)
     )
 
 

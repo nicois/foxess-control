@@ -793,7 +793,7 @@ class FoxESSControlCard extends HTMLElement {
       bars += this._progressBar(this._t("time"), time.label, time.pct, "time-fill", timeTip, "charge-time");
     }
 
-    if (dischargeActive) {
+    if (dischargeActive && a.discharge_phase !== "scheduled") {
       const startSoc = a.discharge_start_soc;
       const current = a.discharge_current_soc;
       const minSoc = a.discharge_min_soc;
