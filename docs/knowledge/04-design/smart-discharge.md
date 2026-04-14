@@ -88,20 +88,30 @@ The 1.5x safety factor provides margin above the tracked peak.
 `tests/test_smart_battery_algorithms.py::TestCalculateDischargePower`,
 `tests/test_smart_battery_algorithms.py::TestDischargePowerPeakSafetyFloor`
 
-### D-005: Feed-in energy budget spreading
+### D-005: Feed-in energy budget spreading with early-stop
 **Decision**: When `feedin_energy_limit_kwh` is set, cap the discharge
 rate so the export budget is spread across the full window rather than
-exhausted early.
+exhausted early. Additionally, track the observed export rate between
+polls and schedule a one-shot stop when the remaining budget will be
+exhausted before the next poll — preventing overshoot of the limit.
 **Context**: Some tariffs limit export kWh per day. Without spreading,
 the session exhausts the limit in the first hour and stops, failing to
-reach min_soc.
+reach min_soc. Without the early-stop, the 5-minute polling interval
+means up to 5 minutes of excess export after the limit is reached.
 **Rationale**: Spreading ensures both the energy target and the SoC
-target are achievable within the window.
+target are achievable within the window. The early-stop uses the
+observed rate (from the cumulative feed-in counter) rather than the
+configured discharge power, since actual export is reduced by house
+consumption and inverter grid-export limits. A one-shot timer at the
+projected completion time stops discharge precisely.
 **Alternatives considered**:
 - Export at max until limit hit, then switch to self-use: rejected
   because min_soc target would be missed
+- Stop at next poll after limit reached: rejected because up to
+  5 minutes of excess export may incur penalties on capped tariffs
 **Traces**: C-001;
-`tests/test_smart_battery_algorithms.py::TestDischargePowerFeedinConstraint`
+`tests/test_smart_battery_algorithms.py::TestDischargePowerFeedinConstraint`,
+`tests/test_services.py::TestFeedinEnergyLimit`
 
 ## Key Behaviours
 

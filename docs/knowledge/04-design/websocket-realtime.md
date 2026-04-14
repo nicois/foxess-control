@@ -24,16 +24,16 @@ where stale data risks grid import from undetected load spikes.
 (c) discharge has actually started (`discharging_started=True`),
 (d) discharge is paced below max (`last_power_w < max_power_w`).
 At full power, 5-minute REST polling is sufficient because there's
-ample headroom.
+ample headroom. WS-triggered discharge recalculations are debounced
+at 10 seconds (`_WS_DEBOUNCE_SECONDS`) to prevent noisy real-time
+data from causing excessive power changes on the inverter.
 **Context**: WebSocket uses a separate web session (username + MD5
 password) from the Open API key. It's an extra connection with
 reconnect complexity. Entity mode uses local Modbus with faster
 polling, making the cloud WebSocket unnecessary.
 **Rationale**: The risk window is specifically when paced power is near
 house load — that's when a load spike can cause grid import. At full
-power, there's >10x headroom and no risk. WS-triggered discharge
-recalculations are debounced at 10 seconds (`_WS_DEBOUNCE_SECONDS`)
-to avoid excessive power changes from noisy data.
+power, there's >10x headroom and no risk.
 **Alternatives considered**:
 - Always-on WebSocket: rejected as unnecessary connection overhead
   and complexity

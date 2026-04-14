@@ -38,11 +38,18 @@ responsiveness vs noise.
 ### D-012: Quality gates on taper observations
 **Decision**: Ignore observations where `requested < 500W` (transients),
 `actual < 50W` (sensor errors), or `count < 2` (insufficient trust).
+The listener layer pre-filters at the same 500W threshold and also
+skips recording during suspended discharge (where actual power is
+zero). The taper profile is persisted to HA Store every
+`_TAPER_SAVE_EVERY_N` (5) observations in both charge and discharge
+paths.
 **Context**: During ramp-up/ramp-down, power readings are noisy. Sensor
 errors can report near-zero actual when real power is flowing.
 **Rationale**: Garbage-in protection. One bad observation with EMA
 alpha 0.3 takes ~5 observations to wash out, so prevention is better
-than correction.
+than correction. The listener pre-filter avoids a coordinator lookup
+when the observation would be rejected anyway. The save interval
+balances persistence (surviving restarts) against HA Store I/O.
 **Alternatives considered**:
 - Lower thresholds: rejected after observing 1000x unit mismatch bug
   that corrupted profiles with ~0.1% ratios

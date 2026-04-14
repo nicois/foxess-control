@@ -116,6 +116,11 @@ SMART_DISCHARGE_CHECK_INTERVAL = datetime.timedelta(seconds=60)
 # consecutive periodic checks (3 × 5 min = 15 minutes).
 MAX_SOC_UNAVAILABLE_COUNT = 3
 
+# Persist the taper profile to HA Store every N taper observations.
+# Charge ticks every 5 min, discharge every 1 min — real-time save
+# frequency is 25 min (charge) and 5 min (discharge).
+_TAPER_SAVE_EVERY_N = 5
+
 STORAGE_KEY = "foxess_control_sessions"
 STORAGE_VERSION = 1
 
@@ -886,7 +891,7 @@ def _setup_smart_charge_listeners(
                     cur_soc, cur_state["last_power_w"], actual_kw * 1000
                 )
                 cur_state["taper_tick"] = cur_state.get("taper_tick", 0) + 1
-                if cur_state["taper_tick"] % 3 == 0:
+                if cur_state["taper_tick"] % _TAPER_SAVE_EVERY_N == 0:
                     hass.async_create_task(_save_taper_profile(hass, taper))
 
         if not cur_state["charging_started"]:
@@ -1407,7 +1412,7 @@ def _setup_smart_discharge_listeners(
                     soc_value, cur_state["last_power_w"], actual_kw * 1000
                 )
                 cur_state["taper_tick"] = cur_state.get("taper_tick", 0) + 1
-                if cur_state["taper_tick"] % 5 == 0:
+                if cur_state["taper_tick"] % _TAPER_SAVE_EVERY_N == 0:
                     hass.async_create_task(_save_taper_profile(hass, taper))
 
         if cur_state.get("pacing_enabled") and soc_value > cur_state["min_soc"]:

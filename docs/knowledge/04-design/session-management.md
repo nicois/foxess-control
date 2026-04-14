@@ -69,6 +69,34 @@ as both start and current (no progress visible).
 **Traces**:
 `tests/test_sensor.py::TestBatteryForecastSensor`
 
+### D-022: Entity mode as local control path
+**Decision**: When foxess_modbus entities are detected, the integration
+uses a parallel control path that reads and writes HA entity states
+(via `EntityAdapter`) instead of calling the FoxESS cloud API. All
+smart session logic (pacing, deferred start, suspension) is shared;
+only the mode-switching and power-setting calls differ.
+**Context**: The cloud API has ~5-minute polling intervals and depends
+on internet connectivity. Users with foxess_modbus (local Modbus)
+already have sub-second local access to inverter state and control.
+**Rationale**: Two benefits: (1) faster reads and writes — local
+Modbus responds in milliseconds vs seconds for cloud API, enabling
+more responsive pacing; (2) no cloud dependency — smart operations
+continue to function during internet outages. Both directly support
+the vision of maximum value and maximum reliability.
+**Trade-offs**: Entity mode bypasses schedule-group validation (C-008,
+C-009, C-010, C-011) since Modbus control doesn't use the FoxESS
+schedule API. It also cannot detect unmanaged modes (C-018) via
+schedule inspection — the entity adapter reads the current mode
+directly. WebSocket real-time data is disabled (D-008) since local
+Modbus is already faster than the cloud WS.
+**Alternatives considered**:
+- Cloud-only support: rejected because it limits reliability and
+  responsiveness for users who have invested in local Modbus hardware
+- Separate integration for Modbus: rejected in favour of a unified
+  integration with adapter-pattern branching
+**Traces**: C-021;
+`tests/test_entity_mode.py`
+
 ## Key Behaviours
 
 - Charge sessions check SoC every 5 minutes, adjust power accordingly.
