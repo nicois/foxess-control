@@ -31,6 +31,7 @@ Traceability from constraints through design decisions to tests.
 | C-016 Cancel listeners before awaits | D-018 | -- | GAP |
 | C-017 End-of-discharge guard | D-003 | `TestShouldSuspendDischarge::test_high_consumption_suspends` | COVERED |
 | C-018 Unmanaged work mode protection | D-016 | `TestCheckScheduleSafe` (7), `test_rejects_schedule_with_backup_mode` | COVERED |
+| C-020 Operational transparency | D-021 | `TestDataSourceTracking` (3), `TestFoxESSPolledSensor::test_data_source_*` (2) | COVERED |
 | C-019 Discharge SoC unavailability unprotected | -- | -- | GAP |
 
 ## Gaps
@@ -66,8 +67,8 @@ Traceability from constraints through design decisions to tests.
 
 ## Summary
 
-- **Total constraints**: 19
-- **Fully covered**: 15 (79%)
-- **Partial**: 2 (11%)
+- **Total constraints**: 20
+- **Fully covered**: 16 (80%)
+- **Partial**: 2 (10%)
 - **Gaps**: 2 (10%) — C-016 (structural), C-019 (code gap)
 - **Orphan tests**: 80+ (test_services.py largely unmapped)

@@ -73,10 +73,31 @@ load data is missing.
 
 
 ### D-021: Visibility of data source on lovelace cards
-**Decision**: whenever there is ambiguity about the source of data being displayed,
-include an indicator on each lovelace card to indicate the source.
-**Context**: The lovelace cards, when there is more than one potential data source
-(for example, when FoxESS is configured with modbus entities or websocket credentials).
+**Decision**: Whenever the user has configured more than one potential
+data source, each lovelace card displays a badge indicating which
+source is currently driving displayed values. The source is tracked
+in the coordinator (`_data_source` field) and exposed as a
+`data_source` state attribute on all polled sensors.
+**Context**: FoxESS can be configured with cloud API only, cloud API +
+WebSocket credentials, or Modbus entities via foxess_modbus. Data
+freshness varies significantly: API polls every 5 minutes, WebSocket
+pushes every ~5 seconds, Modbus polls at the foxess_modbus interval.
+Without an indicator, the user cannot tell whether displayed values
+are 5 seconds or 5 minutes old.
+**Rationale**: Ambiguity is from the user's perspective. If they have
+configured WebSocket credentials, they need to know whether WS is
+currently active or whether the system has fallen back to API — even
+(especially) when the answer is API. A missing badge when multiple
+sources are configured is itself a source of confusion.
+**Alternatives considered**:
+- Show freshness timestamp instead of source: rejected because the
+  source identity is more actionable than a raw timestamp
+- Hide badge when only one source is configured: accepted — no
+  ambiguity exists in the single-source case
+**Traces**: C-020;
+`tests/test_coordinator.py::TestDataSourceTracking`,
+`tests/test_sensor.py::TestFoxESSPolledSensor::test_data_source_exposed_as_attribute`,
+`tests/test_sensor.py::TestFoxESSPolledSensor::test_data_source_absent_when_not_set`
 
 ## Key Behaviours
 

@@ -230,6 +230,20 @@ as the baseline mode.
 `tests/test_init.py::TestCheckScheduleSafe`,
 `tests/test_init.py::TestMergeWithExisting::test_rejects_schedule_with_backup_mode`
 
+### C-020: Operational transparency
+**Statement**: The user must be able to determine the system's current
+state, what it is doing, and why, from the UI alone — without
+inspecting logs, developer tools, or source code.
+**Rationale**: Smart battery operations involve time-dependent pacing,
+deferred starts, session recovery, and multiple data sources. When
+something unexpected happens (e.g. discharge not starting, values
+appearing stale), the user needs enough visible state to diagnose
+the issue themselves. Opacity creates support burden and erodes trust.
+**Violation consequence**: Users cannot distinguish normal operation
+(e.g. deferred start waiting) from a fault, leading to unnecessary
+manual intervention or missed issues.
+**Traces**: D-021
+
 ### C-019: Discharge SoC unavailability is unprotected
 **Statement**: Unlike the charge path (C-012), the discharge listener
 does not count consecutive SoC-unavailable checks and has no abort

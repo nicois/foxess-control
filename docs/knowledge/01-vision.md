@@ -82,3 +82,7 @@ For smart discharge:
 - Pacing adapts to real-time consumption without operator intervention.
 - Integration survives HA restarts mid-session (session recovery).
 - Same pacing logic works across multiple inverter brands.
+
+Operational:
+- The system is operationally transparent — the user can understand
+  what the system is doing and why without inspecting logs or code.

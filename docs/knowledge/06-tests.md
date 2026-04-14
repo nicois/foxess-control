@@ -6,7 +6,7 @@ traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-523 tests across 13 files, grouped by behavioural domain.
+528 tests across 13 files, grouped by behavioural domain.
 
 > **Note**: This inventory covers the major constraint-mapped tests.
 > Many tests (particularly in `test_services.py`, `test_sensor.py`, and
@@ -123,7 +123,7 @@ traces_up: [02-constraints.md, 04-design/]
 ## Sensor Display
 
 **Constraints**: --
-**Source**: `tests/test_sensor.py` (83 tests)
+**Source**: `tests/test_sensor.py` (85 tests)
 
 Key tests:
 - Override status formatting (charge/discharge/deferred/idle)
