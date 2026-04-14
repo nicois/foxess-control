@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1-beta.27
+
+### Fixed
+- **WebSocket mixed unit handling**: the FoxESS cloud sends battery power in kW (`unit: "kW"`) but load/solar/grid in watts (`unit: "W"`) within the same message. Now respects the per-field `unit` property instead of assuming all fields use the same unit. Replaces the all-or-nothing heuristic from beta.25 which couldn't handle mixed units.
+
 ## 1.0.1-beta.26
 
 ### Fixed

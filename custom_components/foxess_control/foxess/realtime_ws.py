@@ -28,12 +28,13 @@ _LOGGER = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _parse_power(power_obj: dict[str, Any] | None) -> float | None:
-    """Extract numeric watts from a WebSocket power object.
+def _parse_power(power_obj: dict[str, Any] | None) -> tuple[float, str] | None:
+    """Extract numeric value and unit from a WebSocket power object.
 
-    The WebSocket reports power values in **watts** (as strings),
-    despite the ``unit`` field sometimes reading ``"W"`` or being
-    absent.  Returns the raw watt value; callers convert to kW.
+    Returns ``(value, unit)`` where *unit* is the raw ``unit`` field
+    from the WS message (e.g. ``"W"``, ``"kW"``, or ``""``).
+    The WS normally sends watts but sometimes sends kW for specific
+    fields — the unit field is the authoritative indicator.
     """
     if power_obj is None:
         return None
@@ -41,35 +42,31 @@ def _parse_power(power_obj: dict[str, Any] | None) -> float | None:
     if val is None:
         return None
     try:
-        return float(val)
+        return float(val), str(power_obj.get("unit", "W"))
     except (ValueError, TypeError):
         return None
 
 
-def _detect_kw_unit(raw_values: list[float]) -> bool:
-    """Detect whether raw WS power values are in kW instead of watts.
-
-    The WS normally sends watts (e.g. 5290) but sometimes sends kW
-    (e.g. 5.29).  If ALL non-zero raw values are < 50, they are almost
-    certainly already in kW — a real household with any load running
-    will have at least one value > 100W.  50kW is well above any
-    residential inverter, so values >= 50 are always watts.
-    """
-    nonzero = [v for v in raw_values if v > 0]
-    if not nonzero:
-        return False
-    return max(nonzero) < 50
+def _to_kw(parsed: tuple[float, str] | None) -> float | None:
+    """Convert a parsed power value to kW, respecting the unit field."""
+    if parsed is None:
+        return None
+    value, unit = parsed
+    if unit == "kW":
+        _LOGGER.debug("WS power value already in kW: %.3f (unit=%s)", value, unit)
+        return value
+    return value / 1000.0
 
 
 def map_ws_to_coordinator(ws_msg: dict[str, Any]) -> dict[str, Any]:
     """Map a WebSocket message to coordinator variable names.
 
-    The WebSocket normally sends power values in **watts** (as strings).
-    The coordinator (and REST API) use **kW**, so we divide by 1000.
-    However, the cloud API sometimes sends values already in kW.
-    We detect this by checking whether all raw values are < 50 and
-    skip the /1000 conversion when they are.
-    Only populates fields that are present in the message.
+    The WebSocket normally sends power values in **watts** (as strings)
+    but the cloud API sometimes sends individual fields in **kW**.
+    Each power object's ``unit`` field is checked: ``"kW"`` means the
+    value is already in kW; anything else (``"W"``, absent) means watts
+    and is divided by 1000.  This handles mixed units within a single
+    message.
     """
     node = ws_msg.get("result", {}).get("node", {})
     if not node:
@@ -84,50 +81,30 @@ def map_ws_to_coordinator(ws_msg: dict[str, Any]) -> dict[str, Any]:
         with contextlib.suppress(ValueError, TypeError):
             data["SoC"] = float(soc)
 
-    # Collect all raw power values to detect kW-vs-watts unit.
-    bat_raw = _parse_power(bat.get("power"))
-    solar_raw = _parse_power(node.get("solar", {}).get("power"))
-    load_raw = _parse_power(node.get("load", {}).get("power"))
-    grid = node.get("grid", {})
-    grid_raw = _parse_power(grid.get("power"))
-
-    raw_values = [v for v in (bat_raw, solar_raw, load_raw, grid_raw) if v is not None]
-    already_kw = _detect_kw_unit(raw_values)
-    divisor = 1.0 if already_kw else 1000.0
-
-    if already_kw:
-        _LOGGER.warning(
-            "WS power values appear to be in kW (max raw=%.2f < 50), "
-            "skipping /1000 conversion. raw: bat=%s solar=%s load=%s grid=%s",
-            max(raw_values) if raw_values else 0,
-            bat_raw,
-            solar_raw,
-            load_raw,
-            grid_raw,
-        )
-
     # Battery power — direction indicated by bat.charge (1=charging)
-    if bat_raw is not None:
-        bat_kw = bat_raw / divisor
+    bat_kw = _to_kw(_parse_power(bat.get("power")))
+    if bat_kw is not None:
         is_charging = str(bat.get("charge")) == "1"
         data["batChargePower"] = bat_kw if is_charging else 0.0
         data["batDischargePower"] = bat_kw if not is_charging else 0.0
 
     # Solar power
-    if solar_raw is not None:
-        data["pvPower"] = solar_raw / divisor
+    solar_kw = _to_kw(_parse_power(node.get("solar", {}).get("power")))
+    if solar_kw is not None:
+        data["pvPower"] = solar_kw
 
     # House load
-    if load_raw is not None:
-        data["loadsPower"] = load_raw / divisor
+    load_kw = _to_kw(_parse_power(node.get("load", {}).get("power")))
+    if load_kw is not None:
+        data["loadsPower"] = load_kw
 
     # Grid power — derive direction from the power balance rather than
     # the unreliable gridStatus field (whose meaning varies by firmware).
     # grid = load + bat_charge - bat_discharge - solar
     # Positive → importing from grid; negative → exporting to grid.
-    if grid_raw is not None:
-        grid_kw = grid_raw / divisor
-        # Use power balance when all components are available (already kW).
+    grid = node.get("grid", {})
+    grid_kw = _to_kw(_parse_power(grid.get("power")))
+    if grid_kw is not None:
         solar = data.get("pvPower")
         load = data.get("loadsPower")
         bat_charge = data.get("batChargePower", 0.0)
@@ -137,7 +114,6 @@ def map_ws_to_coordinator(ws_msg: dict[str, Any]) -> dict[str, Any]:
             net = load + bat_charge - bat_discharge - solar
             importing = net > 0
         else:
-            # Fall back to gridStatus (best effort)
             importing = str(grid.get("gridStatus", "")) == "3"
 
         if importing:
