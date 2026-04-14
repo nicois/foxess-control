@@ -1673,6 +1673,149 @@ class TestCallbackExceptionSafety:
         assert "_smart_discharge_state" not in hass.data[DOMAIN]
 
 
+class TestSessionBoundaryCleanness:
+    """Tests for C-025: no transient state leaks between sessions."""
+
+    @pytest.mark.asyncio
+    async def test_discharge_state_isolated_between_sessions(self) -> None:
+        """Transient state from one discharge session doesn't leak to the next."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(inverter=inv, coordinator_data={"SoC": 80.0})
+
+        from custom_components.foxess_control import (
+            _cancel_smart_discharge,
+            _register_services,
+        )
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        async def _start_session() -> None:
+            with (
+                patch(
+                    "custom_components.foxess_control.dt_util.now",
+                    return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+                ),
+                patch(
+                    "custom_components.foxess_control.async_track_point_in_time",
+                    return_value=MagicMock(),
+                ),
+                patch(
+                    "custom_components.foxess_control.async_track_time_interval",
+                    return_value=MagicMock(),
+                ),
+            ):
+                await handler(
+                    _make_call(
+                        {
+                            "start_time": datetime.time(17, 0),
+                            "end_time": datetime.time(20, 0),
+                            "min_soc": 30,
+                        }
+                    )
+                )
+
+        # Session 1: start and inject transient state
+        await _start_session()
+        state1 = hass.data[DOMAIN]["_smart_discharge_state"]
+        state1["consumption_peak_kw"] = 7.5
+        state1["taper_tick"] = 42
+        state1["feedin_prev_kwh"] = 123.4
+        state1["feedin_stop_scheduled"] = True
+        state1["soc_unavailable_count"] = 2
+
+        session1_id = state1["session_id"]
+
+        # Cancel session 1
+        _cancel_smart_discharge(hass)
+        assert "_smart_discharge_state" not in hass.data[DOMAIN]
+
+        # Session 2: start fresh
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        await _start_session()
+        state2 = hass.data[DOMAIN]["_smart_discharge_state"]
+
+        # Different session
+        assert state2["session_id"] != session1_id
+
+        # No leaked transient state
+        assert state2.get("taper_tick") is None
+        assert state2.get("feedin_prev_kwh") is None
+        assert state2.get("feedin_stop_scheduled") is None
+        assert state2["soc_unavailable_count"] == 0
+        assert state2["soc_below_min_count"] == 0
+        # consumption_peak_kw is initialised from current net consumption
+        # (not leaked from previous session's 7.5)
+        assert state2["consumption_peak_kw"] != 7.5
+
+    @pytest.mark.asyncio
+    async def test_charge_state_isolated_between_sessions(self) -> None:
+        """Transient state from one charge session doesn't leak to the next."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=60.0,
+            coordinator_data={"SoC": 20.0},
+        )
+
+        from custom_components.foxess_control import (
+            _cancel_smart_charge,
+            _register_services,
+        )
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        async def _start_session() -> None:
+            with (
+                patch(
+                    "custom_components.foxess_control.dt_util.now",
+                    return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
+                ),
+                patch(
+                    "custom_components.foxess_control.async_track_point_in_time",
+                    return_value=MagicMock(),
+                ),
+                patch(
+                    "custom_components.foxess_control.async_track_time_interval",
+                    return_value=MagicMock(),
+                ),
+            ):
+                await handler(
+                    _make_call(
+                        {
+                            "start_time": datetime.time(2, 0),
+                            "end_time": datetime.time(6, 0),
+                            "target_soc": 80,
+                        }
+                    )
+                )
+
+        # Session 1: start and inject transient state
+        await _start_session()
+        state1 = hass.data[DOMAIN]["_smart_charge_state"]
+        state1["taper_tick"] = 99
+        state1["soc_unavailable_count"] = 2
+        session1_id = state1["session_id"]
+
+        # Cancel session 1
+        _cancel_smart_charge(hass)
+        assert "_smart_charge_state" not in hass.data[DOMAIN]
+
+        # Session 2: start fresh
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        await _start_session()
+        state2 = hass.data[DOMAIN]["_smart_charge_state"]
+
+        assert state2["session_id"] != session1_id
+        assert state2.get("taper_tick") is None
+        assert state2["soc_unavailable_count"] == 0
+
+
 class TestHandleSmartCharge:
     """Tests for handle_smart_charge service handler."""
 

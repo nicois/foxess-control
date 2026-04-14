@@ -34,7 +34,7 @@ Traceability from constraints through design decisions to tests.
 | C-020 Operational transparency | D-021 | `TestDataSourceTracking` (3), `TestFoxESSPolledSensor::test_data_source_*` (2) | COVERED |
 | C-021 Brand-agnostic code in common package | -- | `test_vendored_copy_matches_canonical` (indirect) | PARTIAL |
 | C-026 Proactive error surfacing | -- | -- | GAP |
-| C-025 Session boundary cleanliness | -- | -- (cancellation removes overrides, but no state-isolation test) | PARTIAL |
+| C-025 Session boundary cleanliness | -- | `TestSessionBoundaryCleanness` (2) | COVERED |
 | C-024 Safe state on failure | -- | `TestCallbackExceptionSafety` (2), C-012, unload_entry | COVERED |
 | C-023 Solar-aware charge reduction | -- | -- | GAP |
 | C-022 Unreachable charge target surfaced | -- | -- | GAP |
@@ -91,7 +91,7 @@ Traceability from constraints through design decisions to tests.
 ## Summary
 
 - **Total constraints**: 26
-- **Fully covered**: 18 (69%)
-- **Partial**: 4 (15%)
+- **Fully covered**: 19 (73%)
+- **Partial**: 3 (12%)
 - **Gaps**: 4 (15%) — C-016 (structural), C-022, C-023, C-026 (proposed)
 - **Orphan tests**: 80+ (test_services.py largely unmapped)
