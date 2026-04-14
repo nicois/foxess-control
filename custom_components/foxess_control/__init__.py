@@ -76,6 +76,9 @@ from .smart_battery.algorithms import (
 from .smart_battery.algorithms import (
     calculate_discharge_power as _calculate_discharge_power,
 )
+from .smart_battery.algorithms import (  # noqa: F401
+    should_suspend_discharge as _should_suspend_discharge,
+)
 from .smart_battery.config_flow_base import build_entity_map as _build_entity_map
 from .smart_battery.listeners import (
     setup_smart_charge_listeners as _sb_setup_smart_charge_listeners,
