@@ -29,7 +29,15 @@ def ensure_password_hash(password_or_hash: str) -> str:
     return it as-is (lowercased).  Otherwise, hash the raw password.
     """
     if _MD5_RE.match(password_or_hash):
+        _LOGGER.debug(
+            "Password input recognised as MD5 hash (len=%d)",
+            len(password_or_hash),
+        )
         return password_or_hash.lower()
+    _LOGGER.debug(
+        "Password input is not MD5 (len=%d), hashing",
+        len(password_or_hash),
+    )
     return hashlib.md5(password_or_hash.encode()).hexdigest()
 
 

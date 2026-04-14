@@ -182,6 +182,14 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
 
             if username and raw_password:
                 password_hash = ensure_password_hash(raw_password)
+                _LOGGER.debug(
+                    "Web credentials: user=%s, input_len=%d, hash=%s...%s, source=%s",
+                    username,
+                    len(raw_password),
+                    password_hash[:6],
+                    password_hash[-4:],
+                    self.source,
+                )
                 errors = await self._validate_web_credentials(username, password_hash)
 
             if not errors:
