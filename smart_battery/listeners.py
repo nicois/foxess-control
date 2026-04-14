@@ -490,7 +490,7 @@ def setup_smart_discharge_listeners(
     hass: HomeAssistant,
     domain: str,
     adapter: InverterAdapter,
-) -> None:
+) -> Any:
     """Register HA listeners for an active smart discharge session.
 
     Reads all parameters from ``hass.data[domain]["_smart_discharge_state"]``.
@@ -887,3 +887,4 @@ def setup_smart_discharge_listeners(
         async_track_point_in_time(hass, _on_timer_expire, end_utc),
     ]
     hass.data[domain]["_smart_discharge_unsubs"] = unsubs
+    return _check_discharge_soc

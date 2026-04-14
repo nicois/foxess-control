@@ -519,7 +519,7 @@ class TestHandleFeedin:
         handler = hass.services.async_register.call_args_list[1].args[2]
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 14, 0, 0),
         ):
             await handler(_make_call({"duration": datetime.timedelta(hours=2)}))
@@ -545,7 +545,7 @@ class TestHandleFeedin:
         handler = hass.services.async_register.call_args_list[1].args[2]
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 14, 0, 0),
         ):
             await handler(
@@ -577,7 +577,7 @@ class TestHandleForceCharge:
         handler = hass.services.async_register.call_args_list[2].args[2]
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 14, 0, 0),
         ):
             await handler(_make_call({"duration": datetime.timedelta(hours=1)}))
@@ -603,7 +603,7 @@ class TestHandleForceCharge:
         handler = hass.services.async_register.call_args_list[2].args[2]
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 14, 0, 0),
         ):
             await handler(
@@ -635,7 +635,7 @@ class TestHandleForceCharge:
         handler = hass.services.async_register.call_args_list[2].args[2]
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 14, 0, 0),
         ):
             await handler(_make_call({"duration": datetime.timedelta(hours=1)}))
@@ -661,7 +661,7 @@ class TestHandleForceDischarge:
         handler = hass.services.async_register.call_args_list[3].args[2]
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
         ):
             await handler(_make_call({"duration": datetime.timedelta(hours=2)}))
@@ -687,7 +687,7 @@ class TestHandleForceDischarge:
         handler = hass.services.async_register.call_args_list[3].args[2]
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
         ):
             await handler(
@@ -720,7 +720,7 @@ class TestHandleForceDischarge:
         handler = hass.services.async_register.call_args_list[3].args[2]
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
         ):
             await handler(_make_call({"duration": datetime.timedelta(hours=2)}))
@@ -743,7 +743,7 @@ class TestHandleForceDischarge:
         handler = hass.services.async_register.call_args_list[3].args[2]
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
         ):
             await handler(_make_call({"duration": datetime.timedelta(hours=2)}))
@@ -774,15 +774,15 @@ class TestSmartChargeCoordinatorFallback:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -818,15 +818,15 @@ class TestSmartChargeCoordinatorFallback:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -861,15 +861,15 @@ class TestHandleSmartDischarge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -914,15 +914,15 @@ class TestHandleSmartDischarge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=mock_timer_unsub,
             ) as mock_track_time,
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=mock_interval_unsub,
             ) as mock_track_interval,
         ):
@@ -955,7 +955,7 @@ class TestHandleSmartDischarge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
             ),
             pytest.raises(ServiceValidationError, match="Battery SoC is not available"),
@@ -988,15 +988,15 @@ class TestHandleSmartDischarge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -1034,15 +1034,15 @@ class TestHandleSmartDischarge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -1095,15 +1095,15 @@ class TestHandleSmartDischarge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -1145,15 +1145,15 @@ class TestHandleSmartDischarge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -1194,15 +1194,15 @@ class TestHandleSmartDischarge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -1239,15 +1239,15 @@ class TestHandleSmartDischarge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -1292,15 +1292,15 @@ class TestHandleSmartDischarge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -1325,7 +1325,7 @@ class TestHandleSmartDischarge:
 
         # At 19:40, only 20 min remain — deferral should end, discharge starts
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 19, 40, 0),
         ):
             await captured_interval(datetime.datetime(2026, 4, 7, 19, 40, 0))
@@ -1358,15 +1358,15 @@ class TestHandleSmartDischarge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -1421,15 +1421,15 @@ class TestDischargeSocUnavailability:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -1451,7 +1451,7 @@ class TestDischargeSocUnavailability:
 
         for i in range(MAX_SOC_UNAVAILABLE_COUNT):
             with patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, i + 1, 0),
             ):
                 await captured_interval_callback(
@@ -1487,15 +1487,15 @@ class TestDischargeSocUnavailability:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -1515,7 +1515,7 @@ class TestDischargeSocUnavailability:
         hass.data[DOMAIN]["entry1"]["coordinator"].data = None
         for t in [1, 2]:
             with patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, t, 0),
             ):
                 await captured_interval_callback(
@@ -1528,7 +1528,7 @@ class TestDischargeSocUnavailability:
         # One available reading resets the counter
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 70.0}
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 18, 0, 0),
         ):
             await captured_interval_callback(datetime.datetime(2026, 4, 7, 18, 0, 0))
@@ -1565,15 +1565,15 @@ class TestCallbackExceptionSafety:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture,
             ),
         ):
@@ -1593,11 +1593,11 @@ class TestCallbackExceptionSafety:
         # Make _get_current_soc raise an exception
         with (
             patch(
-                "custom_components.foxess_control._get_current_soc",
+                "custom_components.foxess_control.smart_battery.listeners._get_current_soc",
                 side_effect=RuntimeError("sensor exploded"),
             ),
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 5, 0),
             ),
         ):
@@ -1631,15 +1631,15 @@ class TestCallbackExceptionSafety:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture,
             ),
         ):
@@ -1659,11 +1659,11 @@ class TestCallbackExceptionSafety:
         # Make _get_net_consumption raise (first thing after session guard)
         with (
             patch(
-                "custom_components.foxess_control._get_net_consumption",
+                "custom_components.foxess_control.smart_battery.listeners._get_net_consumption",
                 side_effect=RuntimeError("sensor exploded"),
             ),
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, 1, 0),
             ),
         ):
@@ -1705,15 +1705,15 @@ class TestErrorSurfacing:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture,
             ),
         ):
@@ -1734,7 +1734,7 @@ class TestErrorSurfacing:
         hass.data[DOMAIN]["entry1"]["coordinator"].data = None
         for i in range(MAX_SOC_UNAVAILABLE_COUNT):
             with patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 5 * (i + 1), 0),
             ):
                 await captured(datetime.datetime(2026, 4, 7, 2, 5 * (i + 1), 0))
@@ -1771,15 +1771,15 @@ class TestErrorSurfacing:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -1819,15 +1819,15 @@ class TestSessionBoundaryCleanness:
         async def _start_session() -> None:
             with (
                 patch(
-                    "custom_components.foxess_control.dt_util.now",
+                    "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                     return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
                 ),
                 patch(
-                    "custom_components.foxess_control.async_track_point_in_time",
+                    "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                     return_value=MagicMock(),
                 ),
                 patch(
-                    "custom_components.foxess_control.async_track_time_interval",
+                    "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                     return_value=MagicMock(),
                 ),
             ):
@@ -1897,15 +1897,15 @@ class TestSessionBoundaryCleanness:
         async def _start_session() -> None:
             with (
                 patch(
-                    "custom_components.foxess_control.dt_util.now",
+                    "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                     return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
                 ),
                 patch(
-                    "custom_components.foxess_control.async_track_point_in_time",
+                    "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                     return_value=MagicMock(),
                 ),
                 patch(
-                    "custom_components.foxess_control.async_track_time_interval",
+                    "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                     return_value=MagicMock(),
                 ),
             ):
@@ -1962,15 +1962,15 @@ class TestHandleSmartCharge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -2013,15 +2013,15 @@ class TestHandleSmartCharge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -2066,15 +2066,15 @@ class TestHandleSmartCharge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=mock_timer_unsub,
             ) as mock_track_time,
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=mock_interval_unsub,
             ) as mock_track_interval,
         ):
@@ -2110,7 +2110,7 @@ class TestHandleSmartCharge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             pytest.raises(ServiceValidationError, match="Battery SoC is not available"),
@@ -2142,7 +2142,7 @@ class TestHandleSmartCharge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             pytest.raises(ServiceValidationError, match="Battery capacity"),
@@ -2174,7 +2174,7 @@ class TestHandleSmartCharge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             pytest.raises(ServiceValidationError, match="already at or above"),
@@ -2210,15 +2210,15 @@ class TestHandleSmartCharge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -2260,15 +2260,15 @@ class TestHandleSmartCharge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -2288,7 +2288,7 @@ class TestHandleSmartCharge:
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 80.0}
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 5, 0, 0),
         ):
             await captured_interval(datetime.datetime(2026, 4, 7, 5, 0, 0))
@@ -2336,15 +2336,15 @@ class TestHandleSmartCharge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -2372,7 +2372,7 @@ class TestHandleSmartCharge:
         }
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 4, 0, 0),
         ):
             await captured_interval_callback(datetime.datetime(2026, 4, 7, 4, 0, 0))
@@ -2407,15 +2407,15 @@ class TestHandleSmartCharge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -2437,7 +2437,7 @@ class TestHandleSmartCharge:
         # At 05:50, SoC still 20% → deferred_start ≈ 05:17 → now past it
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 5, 50, 0),
         ):
             await captured_interval_callback(datetime.datetime(2026, 4, 7, 5, 50, 0))
@@ -2474,15 +2474,15 @@ class TestHandleSmartCharge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -2505,7 +2505,7 @@ class TestHandleSmartCharge:
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 60.0}
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 5, 20, 0),
         ):
             await captured_interval_callback(datetime.datetime(2026, 4, 7, 5, 20, 0))
@@ -2542,15 +2542,15 @@ class TestHandleSmartCharge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -2570,7 +2570,7 @@ class TestHandleSmartCharge:
         # SoC barely changed — power delta should be below threshold
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 2, 5, 0),
         ):
             await captured_interval_callback(datetime.datetime(2026, 4, 7, 2, 5, 0))
@@ -2604,15 +2604,15 @@ class TestHandleSmartCharge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -2633,7 +2633,7 @@ class TestHandleSmartCharge:
         hass.data[DOMAIN]["entry1"]["coordinator"].data = None
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 3, 0, 0),
         ):
             await captured_interval_callback(datetime.datetime(2026, 4, 7, 3, 0, 0))
@@ -2671,15 +2671,15 @@ class TestHandleSmartCharge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -2702,7 +2702,7 @@ class TestHandleSmartCharge:
         # Fire unavailable checks up to threshold
         for i in range(MAX_SOC_UNAVAILABLE_COUNT):
             with patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 5 * (i + 1), 0),
             ):
                 await captured_interval_callback(
@@ -2740,15 +2740,15 @@ class TestHandleSmartCharge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -2769,7 +2769,7 @@ class TestHandleSmartCharge:
 
         for t in [5, 10]:
             with patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, t, 0),
             ):
                 await captured_interval_callback(datetime.datetime(2026, 4, 7, 2, t, 0))
@@ -2782,7 +2782,7 @@ class TestHandleSmartCharge:
 
         inv.set_schedule.reset_mock()
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 4, 0, 0),
         ):
             await captured_interval_callback(datetime.datetime(2026, 4, 7, 4, 0, 0))
@@ -2816,15 +2816,15 @@ class TestHandleSmartCharge:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -2863,7 +2863,7 @@ class TestHandleSmartCharge:
         # At 05:50, deferred start has passed → tries to start charging
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 5, 50, 0),
         ):
             await captured_interval_callback(datetime.datetime(2026, 4, 7, 5, 50, 0))
@@ -2897,15 +2897,15 @@ class TestSessionPersistence:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 8, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -2947,15 +2947,15 @@ class TestSessionPersistence:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 8, 10, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -3036,7 +3036,7 @@ class TestRecoverSessions:
         from custom_components.foxess_control import _recover_sessions
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 8, 3, 0, 0),
         ):
             await _recover_sessions(hass, inv)
@@ -3078,7 +3078,7 @@ class TestRecoverSessions:
 
         # Time is after the end window
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 8, 7, 0, 0),
         ):
             await _recover_sessions(hass, inv)
@@ -3136,15 +3136,15 @@ class TestRecoverSessions:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 8, 4, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -3209,15 +3209,15 @@ class TestRecoverSessions:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 8, 3, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -3257,7 +3257,7 @@ class TestRecoverSessions:
         from custom_components.foxess_control import _recover_sessions
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 8, 4, 0, 0),
         ):
             await _recover_sessions(hass, inv)
@@ -3299,15 +3299,15 @@ class TestRecoverSessions:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 8, 3, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -3362,15 +3362,15 @@ class TestRecoverSessions:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 8, 18, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 return_value=MagicMock(),
             ),
         ):
@@ -3412,7 +3412,7 @@ class TestRecoverSessions:
         from custom_components.foxess_control import _recover_sessions
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 9, 3, 0, 0),
         ):
             await _recover_sessions(hass, inv)
@@ -3434,7 +3434,7 @@ class TestRecoverSessions:
         from custom_components.foxess_control import _recover_sessions
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 9, 12, 0, 0),
         ):
             await _recover_sessions(hass, inv)
@@ -3472,15 +3472,15 @@ class TestSocStabilityCounters:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -3500,7 +3500,7 @@ class TestSocStabilityCounters:
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 80.0}
 
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 4, 0, 0),
         ):
             await captured_interval(datetime.datetime(2026, 4, 7, 4, 0, 0))
@@ -3536,15 +3536,15 @@ class TestSocStabilityCounters:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -3563,7 +3563,7 @@ class TestSocStabilityCounters:
         # SoC at target → count=1
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 80.0}
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 4, 0, 0),
         ):
             await captured_interval(datetime.datetime(2026, 4, 7, 4, 0, 0))
@@ -3573,7 +3573,7 @@ class TestSocStabilityCounters:
         # SoC drops back → target_reached clears, session resumes
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 78.0}
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 4, 5, 0),
         ):
             await captured_interval(datetime.datetime(2026, 4, 7, 4, 5, 0))
@@ -3603,15 +3603,15 @@ class TestSocStabilityCounters:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -3658,15 +3658,15 @@ class TestSocStabilityCounters:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 10, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -3722,15 +3722,15 @@ class TestFeedinEnergyLimit:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -3787,15 +3787,15 @@ class TestFeedinEnergyLimit:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -3863,15 +3863,15 @@ class TestFeedinEnergyLimit:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -3921,15 +3921,15 @@ class TestFeedinEnergyLimit:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -3983,18 +3983,18 @@ class TestFeedinEnergyLimit:
         handler = hass.services.async_register.call_args_list[5].args[2]
 
         pit_patch = patch(
-            "custom_components.foxess_control.async_track_point_in_time",
+            "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
             side_effect=capture_point_in_time,
         )
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
             ),
             pit_patch,
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -4113,18 +4113,18 @@ class TestFeedinEnergyLimit:
         handler = hass.services.async_register.call_args_list[5].args[2]
 
         pit_patch = patch(
-            "custom_components.foxess_control.async_track_point_in_time",
+            "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
             side_effect=capture_point_in_time,
         )
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
             ),
             pit_patch,
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -4213,15 +4213,15 @@ class TestRemainingZeroCancels:
 
         with (
             patch(
-                "custom_components.foxess_control.dt_util.now",
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
             patch(
-                "custom_components.foxess_control.async_track_point_in_time",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.foxess_control.async_track_time_interval",
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
                 side_effect=capture_interval,
             ),
         ):
@@ -4240,7 +4240,7 @@ class TestRemainingZeroCancels:
 
         # Simulate callback firing after window has expired
         with patch(
-            "custom_components.foxess_control.dt_util.now",
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 6, 1, 0),
         ):
             await captured_interval(datetime.datetime(2026, 4, 7, 6, 1, 0))
