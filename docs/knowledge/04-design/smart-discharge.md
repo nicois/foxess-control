@@ -1,0 +1,119 @@
+---
+project: FoxESS Control
+level: 4
+feature: Smart Discharge
+last_verified: 2026-04-14
+traces_up: [../02-constraints.md, ../03-architecture.md]
+traces_down: [../05-coverage.md, ../06-tests.md]
+---
+# Design: Smart Discharge
+
+## Overview
+
+Smart discharge paces battery discharge power across a user-defined time
+window to meet SoC and feed-in energy targets without importing from
+the grid. It defers the start of forced discharge as long as possible
+(staying in self-use mode), then switches to forced discharge only when
+a calculated deadline requires it.
+
+## Design Decisions
+
+### D-001: Strict priority ordering (P1 > P2 > P3 > P4)
+**Decision**: Discharge power is computed using strict priorities:
+P1 no-import floor > P2 min-SoC protection > P3 energy target >
+P4 maximise feed-in. Lower priorities never override higher ones.
+**Context**: Users have conflicting objectives: maximise feed-in revenue,
+avoid grid import costs, protect battery longevity. A single power value
+must satisfy all.
+**Rationale**: Safety constraints (no import, min SoC) must be absolute,
+not traded off against revenue. A weighted multi-objective approach would
+allow small grid imports for marginal feed-in gains, which users find
+unacceptable.
+**Alternatives considered**:
+- Weighted multi-objective: rejected because even small grid imports are
+  visible on smart meters and frustrate users
+- Configurable priority order: rejected as too complex for the benefit
+**Traces**: C-001, C-002;
+`tests/test_smart_battery_algorithms.py::TestCalculateDischargePower`
+
+### D-002: Deferred start with self-use
+**Decision**: Stay in self-use mode as long as possible, switching to
+forced discharge only when a deadline calculation shows it's necessary.
+**Context**: During forced discharge, if paced power is below house load,
+the grid supplies the shortfall. Self-use mode lets the inverter
+intelligently supply house load from battery without exporting.
+**Rationale**: Maximises the self-use period (avoiding grid import risk)
+while still hitting the discharge target by the end of the window.
+**Alternatives considered**:
+- Immediate forced discharge at window start: rejected because low
+  paced power causes grid import when house load exceeds it
+- Complex house-load-aware forced discharge: rejected in favour of
+  the simpler deferred-start approach
+**Traces**: C-001;
+`tests/test_smart_battery_algorithms.py::TestCalculateDischargeDeferredStart`
+
+### D-003: End-of-discharge guard (10 min early switch to self-use)
+**Decision**: When remaining energy above min_soc can't sustain the
+safety floor for ~10 minutes, switch from forced discharge to self-use.
+**Context**: Near the end of a discharge window, paced power drops to
+~100W minimum — well below typical house load. Continuing forced
+discharge at this point causes grid import.
+**Rationale**: Switching to self-use 10 minutes early lets the inverter
+serve house load directly from the battery without the forced-discharge
+power floor constraint.
+**Alternatives considered**:
+- Continue forced discharge to the end: rejected because the last
+  10 minutes of grid import offset the feed-in revenue
+**Traces**: C-001;
+`tests/test_smart_battery_algorithms.py::TestShouldSuspendDischarge`
+
+### D-004: Peak consumption tracking with exponential decay
+**Decision**: Track highest observed household consumption with
+`PEAK_DECAY_PER_TICK = 0.85` (~21-minute half-life at 5-min polling).
+Floor discharge power at `peak * 1.5`.
+**Context**: House load varies unpredictably. A single spike shouldn't
+permanently inflate the discharge floor, but recent spikes should
+be respected.
+**Rationale**: 21-minute half-life is long enough to protect against
+recurring spikes (e.g., oven cycling) but short enough to adapt when
+loads decrease.
+**Alternatives considered**:
+- Fixed consumption estimate: rejected because household load is highly
+  variable
+- Sliding window max: rejected in favour of simpler EMA approach
+**Traces**: C-001;
+`tests/test_smart_battery_algorithms.py::TestCalculateDischargePower`
+
+### D-005: Feed-in energy budget spreading
+**Decision**: When `feedin_energy_limit_kwh` is set, cap the discharge
+rate so the export budget is spread across the full window rather than
+exhausted early.
+**Context**: Some tariffs limit export kWh per day. Without spreading,
+the session exhausts the limit in the first hour and stops, failing to
+reach min_soc.
+**Rationale**: Spreading ensures both the energy target and the SoC
+target are achievable within the window.
+**Alternatives considered**:
+- Export at max until limit hit, then switch to self-use: rejected
+  because min_soc target would be missed
+**Traces**: C-001;
+`tests/test_smart_battery_algorithms.py::TestDischargePowerFeedinConstraint`
+
+## Key Behaviours
+
+- Deferred start has doubled headroom when feed-in limit is set (up to
+  40% vs normal 10%) because variable house consumption reduces net
+  export unpredictably.
+- Discharge check interval is 1 minute (vs 5 minutes for charge)
+  because discharge power changes have immediate grid-import risk.
+- After suspension (SoC at min), the session re-evaluates on every
+  check and resumes if SoC recovers (e.g., from solar input).
+
+## Edge Cases
+
+- **House load > max discharge power**: Floor at consumption × 1.5
+  means requesting more than inverter can deliver. Clamped to
+  max_power_w.
+- **Feed-in budget already exhausted**: Returns minimum power (100W)
+  plus any house load offset.
+- **Zero remaining time**: Returns max_power_w (best effort).
