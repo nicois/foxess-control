@@ -55,7 +55,7 @@ still winding down, the old session's timers may fire and corrupt the
 new session's state or send conflicting inverter commands.
 **Violation consequence**: Race condition — old session overwrites new
 session's power setting or cancels it.
-**Traces**: D-009;
+**Traces**: D-017, D-018;
 `tests/test_init.py` (session lifecycle tests)
 
 ## Data Integrity Constraints
@@ -82,7 +82,7 @@ seconds stale (cached cloud data).
 to briefly show incorrect or missing values on the overview card.
 **Violation consequence**: Dashboard shows "—" or wrong values for
 grid/battery/solar power immediately after WS connects.
-**Traces**: D-010;
+**Traces**: D-008;
 `tests/test_realtime_ws.py::TestStaleness::test_stale_messages_skipped`
 
 ### C-006: Grid direction derived from power balance
@@ -107,7 +107,7 @@ trapezoidal integration of feed-in power is an approximation between
 polls. Accumulated error must not persist.
 **Violation consequence**: Feed-in energy drifts from actual meter
 reading over time.
-**Traces**: D-010;
+**Traces**: D-009;
 `tests/test_coordinator.py::TestInjectRealtimeData::test_rest_poll_resets_integration_state`
 
 ## FoxESS API Constraints
@@ -162,7 +162,7 @@ must be sanitised to the known-good field set before writing.
 **Rationale**: Operating blind without SoC data risks over-charging or
 over-discharging.
 **Violation consequence**: Battery damage from uncontrolled charge/discharge.
-**Traces**: `smart_battery/const.py:52`
+**Traces**: D-019; `smart_battery/const.py:52`;
 
 ### C-013: Maximum override duration is 4 hours
 **Statement**: Service calls for force charge/discharge/feedin are
@@ -230,6 +230,18 @@ as the baseline mode.
 `tests/test_init.py::TestCheckScheduleSafe`,
 `tests/test_init.py::TestMergeWithExisting::test_rejects_schedule_with_backup_mode`
 
+### C-019: Discharge SoC unavailability is unprotected
+**Statement**: Unlike the charge path (C-012), the discharge listener
+does not count consecutive SoC-unavailable checks and has no abort
+threshold. When SoC is unavailable, the discharge listener silently
+skips the check and returns.
+**Rationale**: Unknown — likely an omission rather than a deliberate
+design choice. The inverter remains in forced discharge mode with no
+SoC monitoring.
+**Violation consequence**: Inverter stays in forced discharge
+indefinitely with no SoC feedback, risking over-discharge.
+**Traces**: -- (no test, no design doc — **known gap**)
+
 ### C-020: Operational transparency
 **Statement**: The user must be able to determine the system's current
 state, what it is doing, and why, from the UI alone — without
@@ -243,15 +255,3 @@ the issue themselves. Opacity creates support burden and erodes trust.
 (e.g. deferred start waiting) from a fault, leading to unnecessary
 manual intervention or missed issues.
 **Traces**: D-021
-
-### C-019: Discharge SoC unavailability is unprotected
-**Statement**: Unlike the charge path (C-012), the discharge listener
-does not count consecutive SoC-unavailable checks and has no abort
-threshold. When SoC is unavailable, the discharge listener silently
-skips the check and returns.
-**Rationale**: Unknown — likely an omission rather than a deliberate
-design choice. The inverter remains in forced discharge mode with no
-SoC monitoring.
-**Violation consequence**: Inverter stays in forced discharge
-indefinitely with no SoC feedback, risking over-discharge.
-**Traces**: -- (no test, no design doc — **known gap**)

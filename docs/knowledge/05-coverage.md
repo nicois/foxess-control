@@ -13,7 +13,7 @@ Traceability from constraints through design decisions to tests.
 
 | Constraint | Design | Tests | Status |
 |---|---|---|---|
-| C-001 No grid import during discharge | D-001, D-002, D-003, D-004, D-005 | `TestCalculateDischargePower` (21), `TestShouldSuspendDischarge` (13), `TestDischargePowerFeedinConstraint` (8), `TestCalculateDischargeDeferredStart` (13) | COVERED |
+| C-001 No grid import during discharge | D-001, D-002, D-003, D-004, D-005 | `TestCalculateDischargePower` (21), `TestShouldSuspendDischarge` (21), `TestDischargePowerFeedinConstraint` (10), `TestCalculateDischargeDeferredStart` (13) | COVERED |
 | C-002 Never discharge below min SoC | D-001 | `TestShouldSuspendDischarge::test_soc_at_min_suspends`, `test_soc_below_min_suspends` | COVERED |
 | C-003 Session identity prevents races | D-017, D-018 | -- (tested via integration, not isolated unit tests) | PARTIAL |
 | C-004 WS watts / coordinator kW | D-010 | `TestMapWsToCoordinator::test_real_world_sample`, `test_basic_mapping_export` | COVERED |

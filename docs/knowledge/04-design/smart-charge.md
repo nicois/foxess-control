@@ -48,7 +48,7 @@ consumption is low (it may spike overnight, e.g., hot water heater).
 - Use actual consumption only: rejected because overnight loads are
   unpredictable
 - Fixed consumption estimate: rejected in favour of hybrid approach
-**Traces**:
+**Traces**: C-001 (discharge deferred start timing);
 `tests/test_smart_battery_algorithms.py::TestCalculateDeferredStart::test_consumption_affects_deferral`,
 `tests/test_smart_battery_algorithms.py::TestCalculateDeferredStart::test_taper_consumption_affects_deferral`
 
