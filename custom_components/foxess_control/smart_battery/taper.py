@@ -36,6 +36,11 @@ MAX_RATIO = 1.0
 # to avoid pollution from ramp-up/ramp-down transients.
 MIN_REQUESTED_W = 500
 
+# Minimum actual power (W) to accept an observation.  If the inverter
+# reports less than this when a significant charge/discharge was requested,
+# the reading is likely a sensor error or unit mismatch, not real taper.
+MIN_ACTUAL_W = 50
+
 
 @dataclass
 class TaperBin:
@@ -70,6 +75,10 @@ class TaperProfile:
         actual_w: float,
     ) -> None:
         if requested_w < MIN_REQUESTED_W:
+            return
+        if actual_w < MIN_ACTUAL_W:
+            # Implausibly low — likely a sensor error or unit mismatch,
+            # not genuine BMS taper.  Skip to avoid corrupting the profile.
             return
         raw_ratio = actual_w / requested_w
         ratio = max(MIN_RATIO, min(MAX_RATIO, raw_ratio))
@@ -187,6 +196,24 @@ class TaperProfile:
                 total_hours += energy_per_pct / effective_kw
 
         return total_hours
+
+    # -- Validation ---------------------------------------------------------
+
+    def is_plausible(self) -> bool:
+        """Check whether the stored profile looks sane.
+
+        A healthy profile has most ratios well above MIN_RATIO.  If the
+        median trusted ratio is suspiciously low, the profile was likely
+        corrupted (e.g. by a sensor unit mismatch) and should be discarded.
+        """
+        for bins in (self.charge, self.discharge):
+            trusted = [b.ratio for b in bins.values() if b.count >= MIN_TRUST_COUNT]
+            if not trusted:
+                continue
+            median = sorted(trusted)[len(trusted) // 2]
+            if median <= MIN_RATIO * 2:
+                return False
+        return True
 
     # -- Serialization ------------------------------------------------------
 

@@ -2224,9 +2224,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         store: Store[dict[str, Any]] = hass.data[DOMAIN]["_store"]
         stored = await store.async_load() or {}
         raw_taper = stored.get("taper_profile")
-        hass.data[DOMAIN]["_taper_profile"] = (
-            _TaperProfile.from_dict(raw_taper) if raw_taper else _TaperProfile()
-        )
+        profile = _TaperProfile.from_dict(raw_taper) if raw_taper else _TaperProfile()
+        if raw_taper and not profile.is_plausible():
+            _LOGGER.warning(
+                "Taper profile has implausible ratios (likely corrupted "
+                "by a sensor unit mismatch); resetting to empty"
+            )
+            profile = _TaperProfile()
+            stored.pop("taper_profile", None)
+            await store.async_save(stored)
+        hass.data[DOMAIN]["_taper_profile"] = profile
 
     entity_map = _build_entity_map(entry.options)
     entity_mode = bool(entity_map)

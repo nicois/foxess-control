@@ -45,8 +45,13 @@ class TestRecordCharge:
 
     def test_ratio_clamped_below(self) -> None:
         tp = TaperProfile()
-        tp.record_charge(99.0, 10000, 10.0)  # ratio ~0.001
+        tp.record_charge(99.0, 10000, 500.0)  # ratio 0.05
         assert tp.charge[99].ratio == MIN_RATIO
+
+    def test_ignores_implausibly_low_actual(self) -> None:
+        tp = TaperProfile()
+        tp.record_charge(50.0, 10000, 10.0)  # 10W actual is implausible
+        assert 50 not in tp.charge
 
     def test_ignores_low_requested_power(self) -> None:
         tp = TaperProfile()
@@ -275,3 +280,36 @@ class TestSerialization:
         tp.charge[90] = TaperBin(ratio=0.7, count=5)
         data = tp.to_dict()
         assert all(isinstance(k, str) for k in data["charge"])
+
+
+class TestIsPlausible:
+    def test_empty_profile_is_plausible(self) -> None:
+        tp = TaperProfile()
+        assert tp.is_plausible()
+
+    def test_healthy_profile_is_plausible(self) -> None:
+        tp = TaperProfile()
+        tp.charge[80] = TaperBin(ratio=0.95, count=5)
+        tp.charge[90] = TaperBin(ratio=0.7, count=3)
+        assert tp.is_plausible()
+
+    def test_corrupted_profile_not_plausible(self) -> None:
+        """Profile with all ratios at MIN_RATIO is corrupted."""
+        tp = TaperProfile()
+        for soc in range(60, 95):
+            tp.charge[soc] = TaperBin(ratio=MIN_RATIO, count=5)
+        assert not tp.is_plausible()
+
+    def test_mixed_profile_plausible(self) -> None:
+        """High-SoC taper is fine as long as median is healthy."""
+        tp = TaperProfile()
+        for soc in range(60, 90):
+            tp.charge[soc] = TaperBin(ratio=0.9, count=5)
+        tp.charge[95] = TaperBin(ratio=MIN_RATIO, count=3)
+        assert tp.is_plausible()
+
+    def test_untrusted_bins_ignored(self) -> None:
+        """Bins with count < MIN_TRUST_COUNT are not considered."""
+        tp = TaperProfile()
+        tp.charge[80] = TaperBin(ratio=MIN_RATIO, count=1)
+        assert tp.is_plausible()
