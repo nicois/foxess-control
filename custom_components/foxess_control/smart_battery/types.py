@@ -85,3 +85,4 @@ class DischargeSessionState(TypedDict, total=False):
     consumption_peak_kw: float
     groups: list[ScheduleGroup]
     soc_below_min_count: int
+    soc_unavailable_count: int

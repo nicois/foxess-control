@@ -38,7 +38,7 @@ Traceability from constraints through design decisions to tests.
 | C-024 Safe state on failure | -- | -- (C-012, unload_entry provide partial coverage) | PARTIAL |
 | C-023 Solar-aware charge reduction | -- | -- | GAP |
 | C-022 Unreachable charge target surfaced | -- | -- | GAP |
-| C-019 Discharge SoC unavailability unprotected | -- | -- | GAP |
+| C-019 Discharge SoC unavailability abort | D-019 | `TestDischargeSocUnavailability` (2) | COVERED |
 
 ## Gaps
 
@@ -46,9 +46,7 @@ Traceability from constraints through design decisions to tests.
 - **C-016**: Cancel-before-await ordering — the race-prevention pattern
   in `__init__.py` is structural and not verified by any test. A test
   would need to simulate concurrent timer firing during cancellation.
-- **C-019**: Discharge SoC unavailability — the discharge listener has
-  no counter or abort for prolonged SoC unavailability, unlike the
-  charge path (C-012). This is a code gap, not just a test gap.
+- ~~C-019~~: Fixed — discharge SoC unavailability now has counter+abort.
 - **C-022**: Unreachable charge target — no detection or user
   notification when the target SoC cannot be reached in the remaining
   window. Proposed feature.
@@ -93,7 +91,7 @@ Traceability from constraints through design decisions to tests.
 ## Summary
 
 - **Total constraints**: 26
-- **Fully covered**: 16 (62%)
+- **Fully covered**: 17 (65%)
 - **Partial**: 5 (19%)
-- **Gaps**: 5 (19%) — C-016 (structural), C-019 (code gap), C-022, C-023, C-026 (proposed)
+- **Gaps**: 4 (15%) — C-016 (structural), C-022, C-023, C-026 (proposed)
 - **Orphan tests**: 80+ (test_services.py largely unmapped)

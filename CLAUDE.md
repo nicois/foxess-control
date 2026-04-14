@@ -20,7 +20,7 @@ pre-commit run --all-files      # ruff + mypy
 - **C-015**: Vendored smart_battery/ must be byte-identical to canonical root copy
 - **C-017**: End-of-discharge guard: suspend when energy can't sustain safety floor for 10 min
 - **C-018**: Refuse to modify schedule when unmanaged modes (e.g. Backup) are present
-- **C-019**: **Known gap** — discharge path has no SoC-unavailability abort (unlike charge)
+- **C-019**: Discharge SoC unavailability aborts session after 3 checks (matching charge C-012)
 
 ## Architecture
 

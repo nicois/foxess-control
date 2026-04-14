@@ -1397,7 +1397,23 @@ def _setup_smart_discharge_listeners(
         # --- Power pacing ---
         soc_value = _get_current_soc(hass)
         if soc_value is None:
+            cur_state["soc_unavailable_count"] = (
+                cur_state.get("soc_unavailable_count", 0) + 1
+            )
+            if cur_state["soc_unavailable_count"] >= MAX_SOC_UNAVAILABLE_COUNT:
+                _LOGGER.warning(
+                    "Smart discharge: SoC unavailable for %d checks, aborting",
+                    cur_state["soc_unavailable_count"],
+                )
+                discharging_started = cur_state.get("discharging_started", False)
+                if _is_my_session():
+                    _cancel_smart_discharge(hass)
+                    if discharging_started:
+                        await _remove_discharge_override()
+                return
+            _LOGGER.debug("Smart discharge: SoC unavailable, skipping adjustment")
             return
+        cur_state["soc_unavailable_count"] = 0
 
         # Record taper observation for discharge
         taper = _get_taper_profile(hass)
@@ -1865,6 +1881,7 @@ async def _recover_discharge_session(
             "max_power_w": max_power_w,
             "last_power_w": recovered_power,
             "soc_below_min_count": 0,
+            "soc_unavailable_count": 0,
             "feedin_energy_limit_kwh": discharge_data.get("feedin_energy_limit_kwh"),
             "feedin_start_kwh": discharge_data.get("feedin_start_kwh"),
             "pacing_enabled": pacing_enabled,
@@ -2720,6 +2737,7 @@ def _register_services(hass: HomeAssistant) -> None:
             "max_power_w": max_power_w,
             "last_power_w": initial_power,
             "soc_below_min_count": 0,
+            "soc_unavailable_count": 0,
             "feedin_energy_limit_kwh": feedin_energy_limit,
             "feedin_start_kwh": _get_feedin_energy_kwh(hass),
             "battery_capacity_kwh": battery_capacity_kwh,

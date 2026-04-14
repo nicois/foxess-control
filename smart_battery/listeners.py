@@ -662,7 +662,23 @@ def setup_smart_discharge_listeners(
         # --- Power pacing ---
         soc_value = _get_current_soc(hass, domain)
         if soc_value is None:
+            cur_state["soc_unavailable_count"] = (
+                cur_state.get("soc_unavailable_count", 0) + 1
+            )
+            if cur_state["soc_unavailable_count"] >= MAX_SOC_UNAVAILABLE_COUNT:
+                _LOGGER.warning(
+                    "Smart discharge: SoC unavailable for %d checks, aborting",
+                    cur_state["soc_unavailable_count"],
+                )
+                discharging_started = cur_state.get("discharging_started", False)
+                if _is_my_session():
+                    cancel_smart_discharge(hass, domain)
+                    if discharging_started:
+                        await _remove_discharge_override()
+                return
+            _LOGGER.debug("Smart discharge: SoC unavailable, skipping adjustment")
             return
+        cur_state["soc_unavailable_count"] = 0
 
         # Record taper observation for discharge
         taper = _get_taper_profile(hass, domain)

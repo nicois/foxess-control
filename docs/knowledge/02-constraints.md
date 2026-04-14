@@ -305,17 +305,19 @@ leave the battery underprepared for the next discharge window.
 after the window has closed, too late to take corrective action.
 **Traces**: -- (no implementation — **proposed feature**)
 
-### C-019: Discharge SoC unavailability is unprotected
-**Statement**: Unlike the charge path (C-012), the discharge listener
-does not count consecutive SoC-unavailable checks and has no abort
-threshold. When SoC is unavailable, the discharge listener silently
-skips the check and returns.
-**Rationale**: Unknown — likely an omission rather than a deliberate
-design choice. The inverter remains in forced discharge mode with no
-SoC monitoring.
-**Violation consequence**: Inverter stays in forced discharge
-indefinitely with no SoC feedback, risking over-discharge.
-**Traces**: -- (no test, no design doc — **known gap**)
+### C-019: Discharge SoC unavailability aborts session
+**Statement**: If the SoC entity is unavailable for
+`MAX_SOC_UNAVAILABLE_COUNT` (3) consecutive checks, the smart
+discharge session is cancelled and the inverter reverted to self-use,
+matching the charge path (C-012).
+**Rationale**: Operating blind without SoC data during forced discharge
+risks over-discharge past min SoC. Reverting to self-use is the
+safest option (C-001 no-import priority).
+**Violation consequence**: Inverter stuck in forced discharge with no
+SoC feedback, risking over-discharge.
+**Traces**: D-019;
+`tests/test_services.py::TestDischargeSocUnavailability::test_discharge_soc_unavailable_aborts`,
+`tests/test_services.py::TestDischargeSocUnavailability::test_discharge_soc_available_resets_count`
 
 ### C-020: Operational transparency
 **Statement**: The user must be able to determine the system's current
