@@ -230,6 +230,81 @@ as the baseline mode.
 `tests/test_init.py::TestCheckScheduleSafe`,
 `tests/test_init.py::TestMergeWithExisting::test_rejects_schedule_with_backup_mode`
 
+### C-026: Proactive error surfacing
+**Statement**: When the system encounters a persistent error state —
+API returning errors, inverter not responding to mode changes,
+schedule writes failing, or session unable to make progress — it must
+surface the error to the user via the UI (sensor state or attribute),
+not only to the log.
+**Rationale**: C-020 ensures the user can see what the system is
+*doing*. But when the system is *failing*, log-only errors are
+invisible to the dashboard user. The user sees "active" on the card
+while the system is silently retrying or stuck. This erodes trust
+more than an explicit error state would.
+**Violation consequence**: User believes the system is operating
+normally when it is actually failing, leading to missed targets,
+stale overrides, or unexpected battery state.
+**Traces**: C-020 (extends); -- (no implementation — **proposed
+feature**)
+
+### C-025: Session boundary cleanliness
+**Statement**: When a smart session ends (normally, by cancellation,
+or by failure), all inverter overrides created by that session must
+be fully removed and the inverter returned to self-use before a new
+session can start. Transient state from the previous session (peak
+consumption tracking, taper tick counters, feed-in baselines) must
+not leak into the next session.
+**Rationale**: Back-to-back sessions are a supported use case (C-013).
+If the previous session's overrides or state linger, the new session
+inherits incorrect assumptions — e.g. an inflated peak consumption
+from a kettle boil in the previous window artificially floors
+discharge power in the next window.
+**Violation consequence**: New session operates on stale state from
+the previous one, causing incorrect pacing or unexpected forced mode
+retention.
+**Traces**: C-003 (stale callback prevention); -- (**partial
+implementation** — cancellation removes overrides and fresh state is
+initialised, but no test verifies state isolation between sessions)
+
+### C-024: Safe state on failure
+**Statement**: On any unhandled failure — uncaught exception in a
+session callback, API becoming unresponsive, or integration unload —
+the system must ensure that forced charge/discharge overrides do not
+persist long enough to cause serious inconvenience to the user.
+**Rationale**: Self-use is the only mode where the inverter manages
+itself safely without external control. A forced mode left active
+after the controlling session has failed will run unchecked —
+charging indefinitely or discharging past min SoC with no pacing.
+**Violation consequence**: Inverter stuck in forced charge
+(overcharging, wasted grid import) or forced discharge
+(over-discharge, grid import) with no active session monitoring it.
+**Traces**: C-012 (specific case); -- (**partial implementation**)
+
+### C-023: Solar-aware charge reduction
+**Statement**: During smart charge, when solar generation exceeds
+household consumption, the system must reduce grid charge power to
+allow solar surplus to contribute to the battery. The effective grid
+charge rate should be `max(0, target_rate - solar_surplus)`.
+**Rationale**: Charging at full grid power while solar is producing
+wastes free energy — solar output goes to the grid at the feed-in
+rate (often zero or low) instead of into the battery for free.
+Reducing grid charge lets solar fill the battery first.
+**Violation consequence**: User pays for grid energy that solar could
+have provided for free, directly reducing ROI.
+**Traces**: -- (no implementation — **proposed feature**)
+
+### C-022: Unreachable charge target must be surfaced
+**Statement**: When the system detects that the target SoC is
+unreachable within the remaining window (accounting for consumption
+headroom, taper, and current SoC), it must surface this to the user
+via the UI.
+**Rationale**: The user scheduled a charge expecting to reach the
+target. Silent failure to reach it wastes cheap-rate hours and may
+leave the battery underprepared for the next discharge window.
+**Violation consequence**: User discovers the charge fell short only
+after the window has closed, too late to take corrective action.
+**Traces**: -- (no implementation — **proposed feature**)
+
 ### C-019: Discharge SoC unavailability is unprotected
 **Statement**: Unlike the charge path (C-012), the discharge listener
 does not count consecutive SoC-unavailable checks and has no abort

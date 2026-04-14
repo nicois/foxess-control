@@ -33,6 +33,11 @@ Traceability from constraints through design decisions to tests.
 | C-018 Unmanaged work mode protection | D-016 | `TestCheckScheduleSafe` (7), `test_rejects_schedule_with_backup_mode` | COVERED |
 | C-020 Operational transparency | D-021 | `TestDataSourceTracking` (3), `TestFoxESSPolledSensor::test_data_source_*` (2) | COVERED |
 | C-021 Brand-agnostic code in common package | -- | `test_vendored_copy_matches_canonical` (indirect) | PARTIAL |
+| C-026 Proactive error surfacing | -- | -- | GAP |
+| C-025 Session boundary cleanliness | -- | -- (cancellation removes overrides, but no state-isolation test) | PARTIAL |
+| C-024 Safe state on failure | -- | -- (C-012, unload_entry provide partial coverage) | PARTIAL |
+| C-023 Solar-aware charge reduction | -- | -- | GAP |
+| C-022 Unreachable charge target surfaced | -- | -- | GAP |
 | C-019 Discharge SoC unavailability unprotected | -- | -- | GAP |
 
 ## Gaps
@@ -44,6 +49,14 @@ Traceability from constraints through design decisions to tests.
 - **C-019**: Discharge SoC unavailability — the discharge listener has
   no counter or abort for prolonged SoC unavailability, unlike the
   charge path (C-012). This is a code gap, not just a test gap.
+- **C-022**: Unreachable charge target — no detection or user
+  notification when the target SoC cannot be reached in the remaining
+  window. Proposed feature.
+- **C-023**: Solar-aware charge reduction — grid charge power is not
+  reduced when solar surplus is available. Proposed feature.
+- **C-026**: Proactive error surfacing — persistent errors (API
+  failures, mode change failures) are logged but not surfaced to the
+  UI. Proposed feature extending C-020.
 
 ### Constraints without design docs (PARTIAL)
 - **C-013**: 4-hour max override — this is a simple constant guard, not
@@ -51,6 +64,14 @@ Traceability from constraints through design decisions to tests.
 - **C-021**: Brand-agnostic code in common package — architectural
   constraint enforced by code review, not a testable invariant. C-015
   (vendored sync) provides indirect verification.
+- **C-024**: Safe state on failure — `async_unload_entry` cleans up on
+  integration unload, C-012 handles SoC unavailability, but no
+  systematic guarantee across all failure paths (uncaught exceptions,
+  API failures mid-session).
+- **C-025**: Session boundary cleanliness — cancellation removes
+  overrides and new sessions initialise fresh state, but no test
+  verifies that transient state (peak consumption, taper ticks,
+  feed-in baselines) doesn't leak between back-to-back sessions.
 
 ### Design decisions without tests (UNVERIFIED)
 - **D-002**: Deferred start with self-use — the deferred start
@@ -71,8 +92,8 @@ Traceability from constraints through design decisions to tests.
 
 ## Summary
 
-- **Total constraints**: 21
-- **Fully covered**: 16 (76%)
-- **Partial**: 3 (14%)
-- **Gaps**: 2 (10%) — C-016 (structural), C-019 (code gap)
+- **Total constraints**: 26
+- **Fully covered**: 16 (62%)
+- **Partial**: 5 (19%)
+- **Gaps**: 5 (19%) — C-016 (structural), C-019 (code gap), C-022, C-023, C-026 (proposed)
 - **Orphan tests**: 80+ (test_services.py largely unmapped)
