@@ -81,13 +81,27 @@ def map_ws_to_coordinator(ws_msg: dict[str, Any]) -> dict[str, Any]:
     if load_kw is not None:
         data["loadsPower"] = load_kw
 
-    # Grid power — direction from gridStatus (compare as string for
-    # robustness; the WS may send int or str depending on version).
+    # Grid power — derive direction from the power balance rather than
+    # the unreliable gridStatus field (whose meaning varies by firmware).
+    # grid = load + bat_charge - bat_discharge - solar
+    # Positive → importing from grid; negative → exporting to grid.
     grid = node.get("grid", {})
     grid_kw = _parse_power(grid.get("power"))
     if grid_kw is not None:
-        grid_status = str(grid.get("gridStatus", ""))
-        if grid_status == "3":
+        # Use power balance when all components are available.
+        solar = data.get("pvPower")
+        load = data.get("loadsPower")
+        bat_charge = data.get("batChargePower", 0.0)
+        bat_discharge = data.get("batDischargePower", 0.0)
+
+        if solar is not None and load is not None:
+            net = load + bat_charge - bat_discharge - solar
+            importing = net > 0
+        else:
+            # Fall back to gridStatus (best effort)
+            importing = str(grid.get("gridStatus", "")) == "3"
+
+        if importing:
             data["gridConsumptionPower"] = grid_kw
             data["feedinPower"] = 0.0
         else:
@@ -95,7 +109,11 @@ def map_ws_to_coordinator(ws_msg: dict[str, Any]) -> dict[str, Any]:
             data["feedinPower"] = grid_kw
 
     if data:
-        _LOGGER.debug("WS mapped data: %s (raw node keys: %s)", data, list(node.keys()))
+        _LOGGER.debug(
+            "WS mapped data: %s (gridStatus=%s)",
+            data,
+            grid.get("gridStatus") if grid else None,
+        )
 
     return data
 
