@@ -16,7 +16,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util  # noqa: F401 — test patching target
 
-from .const import DOMAIN
+from .const import CONF_WEB_USERNAME, DOMAIN
 from .coordinator import FoxESSDataCoordinator
 from .smart_battery.sensor_base import (
     BatteryForecastSensor as _BatteryForecastSensor,
@@ -505,6 +505,8 @@ class FoxESSPolledSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity)
         self._attr_state_class = desc.state_class
         self._attr_icon = desc.icon
         self._attr_device_info = _device_info(entry)
+        # Only expose data_source when multiple sources are configured
+        self._has_multiple_sources = bool(entry.data.get(CONF_WEB_USERNAME))
 
     @property
     def native_value(self) -> float | None:
@@ -520,7 +522,7 @@ class FoxESSPolledSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        if self.coordinator.data is None:
+        if not self._has_multiple_sources or self.coordinator.data is None:
             return None
         source = self.coordinator.data.get("_data_source")
         if source is None:

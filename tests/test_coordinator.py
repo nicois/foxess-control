@@ -236,3 +236,40 @@ class TestInjectRealtimeData:
 
         assert coord.data is not None
         assert "feedin" not in coord.data
+
+
+class TestDataSourceTracking:
+    """Tests for _data_source provenance tracking (C-020)."""
+
+    def _make_coord_with_data(
+        self, data: dict[str, object] | None = None
+    ) -> FoxESSDataCoordinator:
+        coord = _make_coordinator()
+        coord.data = data if data is not None else {"SoC": 50.0}
+        return coord
+
+    @pytest.mark.asyncio
+    async def test_rest_poll_sets_api_source(self) -> None:
+        inv = MagicMock(spec=Inverter)
+        inv.get_real_time.return_value = {"SoC": 50.0}
+        inv.get_current_mode.return_value = WorkMode.SELF_USE
+        coord = _make_coordinator(inverter=inv)
+        result = await coord._async_update_data()
+        assert result["_data_source"] == "api"
+
+    def test_ws_injection_sets_ws_source(self) -> None:
+        coord = self._make_coord_with_data({"SoC": 50.0, "_data_source": "api"})
+        coord.inject_realtime_data({"SoC": 55.0})
+        assert coord.data is not None
+        assert coord.data["_data_source"] == "ws"
+
+    @pytest.mark.asyncio
+    async def test_rest_poll_resets_source_after_ws(self) -> None:
+        inv = MagicMock(spec=Inverter)
+        inv.get_real_time.return_value = {"SoC": 50.0}
+        inv.get_current_mode.return_value = WorkMode.SELF_USE
+        coord = _make_coordinator(inverter=inv)
+        # Simulate WS having set the source
+        coord.data = {"SoC": 50.0, "_data_source": "ws"}
+        result = await coord._async_update_data()
+        assert result["_data_source"] == "api"

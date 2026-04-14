@@ -53,9 +53,10 @@ def _make_hass(
     return hass
 
 
-def _make_entry(entry_id: str = "entry1") -> MagicMock:
+def _make_entry(entry_id: str = "entry1", web_username: str | None = None) -> MagicMock:
     entry = MagicMock()
     entry.entry_id = entry_id
+    entry.data = {"web_username": web_username} if web_username else {}
     return entry
 
 
@@ -999,6 +1000,23 @@ class TestFoxESSPolledSensor:
         desc = POLLED_SENSOR_DESCRIPTIONS[0]
         sensor = FoxESSPolledSensor(coordinator, entry, desc)
         assert sensor.unique_id == "myentry_battery_soc"
+
+    def test_data_source_exposed_when_multi_source(self) -> None:
+        """Sensor exposes data_source when WS credentials configured."""
+        coordinator = self._make_coordinator({"SoC": 75.0, "_data_source": "api"})
+        entry = _make_entry(web_username="user@example.com")
+        sensor = FoxESSPolledSensor(coordinator, entry, POLLED_SENSOR_DESCRIPTIONS[0])
+        attrs = sensor.extra_state_attributes
+        assert attrs is not None
+        assert attrs["data_source"] == "api"
+
+    def test_data_source_hidden_when_single_source(self) -> None:
+        """No attribute when only API configured (no ambiguity)."""
+        coordinator = self._make_coordinator({"SoC": 75.0, "_data_source": "api"})
+        sensor = FoxESSPolledSensor(
+            coordinator, _make_entry(), POLLED_SENSOR_DESCRIPTIONS[0]
+        )
+        assert sensor.extra_state_attributes is None
 
     def test_all_descriptors_create_sensors(self) -> None:
         coordinator = self._make_coordinator(
