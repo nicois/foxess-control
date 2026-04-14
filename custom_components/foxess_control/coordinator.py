@@ -115,6 +115,26 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         ws_data["_data_source"] = "ws"
 
+        # Instrumentation: warn when WS power values are >10x different
+        # from existing coordinator values (catches unit mismatch).
+        for key in ("batChargePower", "batDischargePower"):
+            ws_val = ws_data.get(key)
+            cur_val = self.data.get(key)
+            if (
+                ws_val is not None
+                and cur_val is not None
+                and cur_val > 0.1
+                and ws_val > 0
+                and (ws_val / cur_val > 10 or cur_val / ws_val > 10)
+            ):
+                _LOGGER.warning(
+                    "WS %s diverges >10x from coordinator: ws=%.4f, "
+                    "existing=%.4f (possible unit mismatch)",
+                    key,
+                    ws_val,
+                    cur_val,
+                )
+
         # Skip if nothing actually changed (avoids redundant entity updates)
         if all(self.data.get(k) == v for k, v in ws_data.items()):
             return

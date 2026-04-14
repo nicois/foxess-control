@@ -217,6 +217,46 @@ class TestMapWsToCoordinator:
         data = map_ws_to_coordinator(msg)
         assert data == {}
 
+    def test_kw_values_detected_and_not_divided(self) -> None:
+        """When WS sends kW instead of watts, detect and skip /1000."""
+        msg = {
+            "errno": 0,
+            "result": {
+                "node": {
+                    "solar": {"power": {"value": "0"}},
+                    "grid": {"power": {"value": "4.7"}, "gridStatus": 2},
+                    "bat": {"power": {"value": "5.29"}, "soc": 46, "charge": 0},
+                    "load": {"power": {"value": "0.3"}},
+                },
+                "timeDiff": 5,
+            },
+        }
+        data = map_ws_to_coordinator(msg)
+        # All raw values < 50 → detected as kW → used directly
+        assert data["batDischargePower"] == pytest.approx(5.29)
+        assert data["loadsPower"] == pytest.approx(0.3)
+        assert data["feedinPower"] == pytest.approx(4.7)
+
+    def test_watts_values_divided_normally(self) -> None:
+        """When WS sends watts (normal case), divide by 1000."""
+        msg = {
+            "errno": 0,
+            "result": {
+                "node": {
+                    "solar": {"power": {"value": "0"}},
+                    "grid": {"power": {"value": "4700"}, "gridStatus": 2},
+                    "bat": {"power": {"value": "5290"}, "soc": 46, "charge": 0},
+                    "load": {"power": {"value": "300"}},
+                },
+                "timeDiff": 5,
+            },
+        }
+        data = map_ws_to_coordinator(msg)
+        # Max raw = 5290 > 50 → watts → divide by 1000
+        assert data["batDischargePower"] == pytest.approx(5.29)
+        assert data["loadsPower"] == pytest.approx(0.3)
+        assert data["feedinPower"] == pytest.approx(4.7)
+
     def test_real_world_sample(self) -> None:
         """Test with actual FoxESS WebSocket message structure.
 
