@@ -193,8 +193,17 @@ class FoxESSOverviewCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (!this._entityMap && !this._fetchPending) {
-      this._fetchEntityMap();
+    // Retry discovery if the map is missing or empty (e.g. after reload)
+    const needsFetch =
+      !this._entityMap ||
+      (typeof this._entityMap === "object" &&
+        Object.keys(this._entityMap).length === 0);
+    if (needsFetch && !this._fetchPending) {
+      const now = Date.now();
+      if (!this._lastFetchAttempt || now - this._lastFetchAttempt > 10000) {
+        this._lastFetchAttempt = now;
+        this._fetchEntityMap();
+      }
     }
     this._render();
   }
