@@ -294,8 +294,8 @@ class FoxESSOverviewCard extends HTMLElement {
   }
 
   _dataSourceBadge(source) {
-    if (!source) return "";
-    const labels = { ws: "WS", api: "API", modbus: "Modbus" };
+    if (!source || source === "api") return "";
+    const labels = { ws: "WS", modbus: "Modbus" };
     const label = labels[source] || source;
     return `<span class="data-source" title="Data: ${label}">${label}</span>`;
   }

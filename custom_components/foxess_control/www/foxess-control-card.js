@@ -471,7 +471,7 @@ class FoxESSControlCard extends HTMLElement {
   }
 
   _dataSourceBadge(source) {
-    if (!source) return "";
+    if (!source || source === "api") return "";
     const labels = { ws: "WS", api: "API", modbus: "Modbus" };
     const label = labels[source] || source;
     return `<span class="data-source" title="Data: ${label}">${label}</span>`;
