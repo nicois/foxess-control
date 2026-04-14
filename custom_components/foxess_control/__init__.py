@@ -2190,12 +2190,21 @@ async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
 
 
 async def _stop_realtime_ws(hass: HomeAssistant) -> None:
-    """Disconnect the WebSocket if running."""
+    """Disconnect the WebSocket if running and refresh coordinator data."""
     domain_data = hass.data.get(DOMAIN, {})
     ws: FoxESSRealtimeWS | None = domain_data.pop("_realtime_ws", None)
     if ws is not None:
         await ws.async_disconnect()
         _LOGGER.info("FoxESS WebSocket real-time data stream stopped")
+        # Trigger an immediate REST poll so sensors don't show stale
+        # WS-injected values until the next scheduled poll.
+        try:
+            entry = _get_first_entry(hass)
+            coordinator = domain_data.get(entry.entry_id, {}).get("coordinator")
+            if coordinator is not None:
+                await coordinator.async_request_refresh()
+        except Exception:
+            _LOGGER.debug("Could not trigger refresh after WS stop", exc_info=True)
 
 
 def _trigger_discharge_listener(hass: HomeAssistant) -> None:
