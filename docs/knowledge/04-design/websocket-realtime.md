@@ -71,6 +71,13 @@ load data is missing.
 **Traces**: C-006;
 `tests/test_realtime_ws.py::TestMapWsToCoordinator::test_grid_importing_from_balance`
 
+
+### D-021: Visibility of data source on lovelace cards
+**Decision**: whenever there is ambiguity about the source of data being displayed,
+include an indicator on each lovelace card to indicate the source.
+**Context**: The lovelace cards, when there is more than one potential data source
+(for example, when FoxESS is configured with modbus entities or websocket credentials).
+
 ## Key Behaviours
 
 - WebSocket requires web portal credentials (username + MD5(password)),

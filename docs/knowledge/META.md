@@ -77,3 +77,23 @@ last_updated: 2026-04-14
   from file reads. Constraint-test mapping should cross-reference
   test_services.py more thoroughly — it's the largest integration test
   file and was largely missed.
+
+### 2026-04-14 — Update pass (D-007 fix + trace integrity failure)
+- **What was fixed**: D-007 taper-path consumption bypass — both charge
+  and discharge deferred start now account for consumption in the taper
+  path. 4 new tests added (523 total). Test counts corrected across
+  06-tests.md and 05-coverage.md (multiple files had stale counts).
+  D-006 test trace pointed to wrong class name (fixed).
+- **What was wrong**: D-008 lists `ws_all_sessions` as a rejected
+  alternative, but the code implements it as a supported configuration
+  toggle that fundamentally changes the WebSocket activation conditions.
+  This is an **UNDOCUMENTED code path** — it has no upward trace through
+  the knowledge tree. The update verification agents missed it because
+  they only checked top-down (does doc match code?) and never bottom-up
+  (does code match doc?). The "Alternatives considered" framing caused
+  the agent to treat implemented behaviour as historical context.
+- **Skill improvement**: Added bidirectional trace integrity checking
+  to the skill (Check step 5, Update after-step, Coverage gap types).
+  Verification must now walk code → design → constraint, not just the
+  reverse. "Alternatives considered" entries are audited to confirm
+  they are genuinely rejected, not implemented.

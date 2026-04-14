@@ -50,7 +50,8 @@ while still hitting the discharge target by the end of the window.
 - Complex house-load-aware forced discharge: rejected in favour of
   the simpler deferred-start approach
 **Traces**: C-001;
-`tests/test_smart_battery_algorithms.py::TestCalculateDischargeDeferredStart`
+`tests/test_smart_battery_algorithms.py::TestCalculateDischargeDeferredStart`,
+`tests/test_smart_battery_algorithms.py::TestCalculateDischargeDeferredStart::test_taper_consumption_affects_soc_deadline`
 
 ### D-003: End-of-discharge guard (10 min early switch to self-use)
 **Decision**: When remaining energy above min_soc can't sustain the

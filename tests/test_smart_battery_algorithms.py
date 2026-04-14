@@ -16,6 +16,7 @@ from custom_components.foxess_control.smart_battery.algorithms import (
     should_suspend_discharge,
     soc_energy_kwh,
 )
+from custom_components.foxess_control.smart_battery.taper import TaperBin, TaperProfile
 
 
 class TestSocEnergyKwh:
@@ -154,6 +155,26 @@ class TestCalculateDeferredStart:
         )
         # With load, effective charge rate is lower → needs to start earlier
         assert with_load < no_load
+
+    def test_taper_consumption_affects_deferral(self) -> None:
+        """Taper path must also account for consumption headroom (D-007)."""
+        tp = TaperProfile(charge={i: TaperBin(ratio=0.8, count=5) for i in range(101)})
+        end = datetime.datetime(2025, 1, 1, 6, 0)
+        no_load = calculate_deferred_start(50.0, 100, 10.0, 5000, end, taper_profile=tp)
+        with_load = calculate_deferred_start(
+            50.0, 100, 10.0, 5000, end, net_consumption_kw=2.0, taper_profile=tp
+        )
+        # With load, effective charge rate is lower → needs to start earlier
+        assert with_load < no_load
+
+    def test_taper_starts_earlier_than_linear(self) -> None:
+        """Taper ratios < 1 should produce an earlier start than linear."""
+        tp = TaperProfile(charge={i: TaperBin(ratio=0.6, count=5) for i in range(101)})
+        end = datetime.datetime(2025, 1, 1, 6, 0)
+        linear = calculate_deferred_start(50.0, 100, 10.0, 5000, end)
+        tapered = calculate_deferred_start(50.0, 100, 10.0, 5000, end, taper_profile=tp)
+        # 60% taper → longer charge time → earlier start
+        assert tapered < linear
 
 
 class TestCalculateDischargePower:
@@ -507,6 +528,58 @@ class TestCalculateDischargeDeferredStart:
         )
         # Peak 5kW reduces effective export from 10.5-1=9.5kW to 10.5-5=5.5kW
         assert with_peak < no_peak
+
+    def test_taper_consumption_affects_soc_deadline(self) -> None:
+        """Taper path must also account for consumption (D-007)."""
+        tp = TaperProfile(
+            discharge={i: TaperBin(ratio=0.8, count=5) for i in range(101)}
+        )
+        no_load = calculate_discharge_deferred_start(
+            80.0,
+            30,
+            10.0,
+            10500,
+            self._end(),
+            net_consumption_kw=0.0,
+            start=self._start(),
+            taper_profile=tp,
+        )
+        with_load = calculate_discharge_deferred_start(
+            80.0,
+            30,
+            10.0,
+            10500,
+            self._end(),
+            net_consumption_kw=2.0,
+            start=self._start(),
+            taper_profile=tp,
+        )
+        # Consumption reduces effective discharge rate → earlier start
+        assert with_load < no_load
+
+    def test_taper_starts_earlier_than_linear(self) -> None:
+        """Taper ratios < 1 → longer discharge time → earlier start."""
+        tp = TaperProfile(
+            discharge={i: TaperBin(ratio=0.6, count=5) for i in range(101)}
+        )
+        linear = calculate_discharge_deferred_start(
+            80.0,
+            30,
+            10.0,
+            10500,
+            self._end(),
+            start=self._start(),
+        )
+        tapered = calculate_discharge_deferred_start(
+            80.0,
+            30,
+            10.0,
+            10500,
+            self._end(),
+            start=self._start(),
+            taper_profile=tp,
+        )
+        assert tapered < linear
 
     def test_peak_without_feedin_no_effect(self) -> None:
         """Peak only affects feedin deadline — SoC deadline unaffected."""

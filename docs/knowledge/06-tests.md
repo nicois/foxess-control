@@ -6,7 +6,7 @@ traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-519 tests across 13 files, grouped by behavioural domain.
+523 tests across 13 files, grouped by behavioural domain.
 
 > **Note**: This inventory covers the major constraint-mapped tests.
 > Many tests (particularly in `test_services.py`, `test_sensor.py`, and
@@ -31,7 +31,7 @@ traces_up: [02-constraints.md, 04-design/]
 | `TestShouldSuspendDischarge::test_soc_at_min_suspends` | Suspend at min SoC | C-002 |
 | `TestShouldSuspendDischarge::test_soc_below_min_suspends` | Suspend below min SoC | C-002 |
 | `TestShouldSuspendDischarge::test_high_consumption_suspends` | End-guard suspension | C-001 |
-| `TestCalculateDischargeDeferredStart::*` (11 tests) | Deferred start timing | C-001 |
+| `TestCalculateDischargeDeferredStart::*` (13 tests) | Deferred start timing | C-001 |
 
 ## Smart Charge Pacing
 
@@ -45,7 +45,9 @@ traces_up: [02-constraints.md, 04-design/]
 | `TestCalculateChargePower::test_trajectory_ahead_resumes_normal` | Normal pacing after catch-up | C-014 |
 | `TestCalculateChargePower::test_consumption_increases_power` | Load adds to charge power | -- |
 | `TestCalculateDeferredStart::test_clamps_to_start` | Deferred never before window | -- |
-| `TestCalculateDeferredStart::test_consumption_brings_start_earlier` | Load awareness | -- |
+| `TestCalculateDeferredStart::test_consumption_affects_deferral` | Load awareness | -- |
+| `TestCalculateDeferredStart::test_taper_consumption_affects_deferral` | Taper path consumption headroom | C-014 |
+| `TestCalculateDeferredStart::test_taper_starts_earlier_than_linear` | Taper ratios extend charge time | C-014 |
 
 ## WebSocket Data Mapping
 
@@ -121,7 +123,7 @@ traces_up: [02-constraints.md, 04-design/]
 ## Sensor Display
 
 **Constraints**: --
-**Source**: `tests/test_sensor.py` (93 tests)
+**Source**: `tests/test_sensor.py` (83 tests)
 
 Key tests:
 - Override status formatting (charge/discharge/deferred/idle)
@@ -132,7 +134,7 @@ Key tests:
 ## Entity Mode (Modbus Interop)
 
 **Constraints**: --
-**Source**: `tests/test_entity_mode.py` (17 tests)
+**Source**: `tests/test_entity_mode.py` (18 tests)
 
 Key tests:
 - Work mode mapping (SelfUse/ForceCharge/ForceDischarge)
@@ -142,7 +144,7 @@ Key tests:
 ## Config Flow
 
 **Constraints**: --
-**Source**: `tests/test_config_flow.py` (15 tests)
+**Source**: `tests/test_config_flow.py` (16 tests)
 
 Key tests:
 - API key validation, error handling
@@ -153,7 +155,7 @@ Key tests:
 ## API Client
 
 **Constraints**: --
-**Source**: `tests/test_client.py` (13 tests)
+**Source**: `tests/test_client.py` (9 tests)
 
 Key tests:
 - Request signing (MD5 with CRLF separators)
@@ -163,7 +165,7 @@ Key tests:
 ## Binary Sensors
 
 **Constraints**: --
-**Source**: `tests/test_binary_sensor.py` (12 tests)
+**Source**: `tests/test_binary_sensor.py` (14 tests)
 
 Key tests:
 - Smart charge/discharge active status
