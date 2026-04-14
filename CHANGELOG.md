@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1-beta.20
+
+### Added
+- **Data source indicator on Lovelace cards**: both the overview and control cards now show a small badge (`WS`, `API`, or `Modbus`) next to the title indicating the current data source. Exposed via a `data_source` attribute on all polled sensor entities.
+
+### Fixed
+- **WebSocket power values 1000x too large**: the WebSocket sends values in watts, not kW — restored the /1000 conversion that was incorrectly removed in beta.14. Overview card was showing e.g. "340 kW" house load instead of 340 W.
+
 ## 1.0.1-beta.17
 
 ### Added
@@ -10,7 +18,7 @@
 
 ### Fixed
 - **WebSocket token URL encoding**: tokens containing `+` and `=` were not URL-encoded, causing the FoxESS server to reject the WebSocket handshake (HTTP 200 instead of 101 Upgrade)
-- **WebSocket power values 1000x too small**: the WebSocket sends values in kW (matching the REST API), not watts as assumed — removed erroneous /1000 division
+- **WebSocket power values 1000x too small** (beta.14, reverted in beta.20): the /1000 removal was based on incorrect assumptions — the WebSocket does send watts, and the division is required
 - **WebSocket grid direction**: replaced unreliable `gridStatus` field with power-balance-derived direction (load + charge - discharge - solar) for correct import/export detection
 - **Taper profile corruption from unit mismatch**: the 1000x power error caused taper observations with ~0.1% acceptance ratios, making the behind-schedule detector always fire at max power. Added minimum actual power guard (50W) and plausibility check on profile load to auto-reset corrupted profiles
 - **Smart charge finishing early**: consequence of the corrupted taper profile — charge rate was pinned at maximum every tick instead of pacing to the target

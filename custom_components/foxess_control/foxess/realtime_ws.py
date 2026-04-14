@@ -29,10 +29,11 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _parse_power(power_obj: dict[str, Any] | None) -> float | None:
-    """Extract numeric kW from a WebSocket power object.
+    """Extract numeric watts from a WebSocket power object.
 
-    The WebSocket reports power values in kW (matching the REST API),
-    despite the ``unit`` field sometimes reading ``"W"``.
+    The WebSocket reports power values in **watts** (as strings),
+    despite the ``unit`` field sometimes reading ``"W"`` or being
+    absent.  Returns the raw watt value; callers convert to kW.
     """
     if power_obj is None:
         return None
@@ -48,7 +49,8 @@ def _parse_power(power_obj: dict[str, Any] | None) -> float | None:
 def map_ws_to_coordinator(ws_msg: dict[str, Any]) -> dict[str, Any]:
     """Map a WebSocket message to coordinator variable names.
 
-    WebSocket reports kW (as strings), matching the REST API.
+    The WebSocket sends power values in **watts** (as strings).
+    The coordinator (and REST API) use **kW**, so we divide by 1000.
     Only populates fields that are present in the message.
     """
     node = ws_msg.get("result", {}).get("node", {})
@@ -65,30 +67,32 @@ def map_ws_to_coordinator(ws_msg: dict[str, Any]) -> dict[str, Any]:
             data["SoC"] = float(soc)
 
     # Battery power — direction indicated by bat.charge (1=charging)
-    bat_kw = _parse_power(bat.get("power"))
-    if bat_kw is not None:
+    bat_w = _parse_power(bat.get("power"))
+    if bat_w is not None:
+        bat_kw = bat_w / 1000.0
         is_charging = str(bat.get("charge")) == "1"
         data["batChargePower"] = bat_kw if is_charging else 0.0
         data["batDischargePower"] = bat_kw if not is_charging else 0.0
 
     # Solar power
-    solar_kw = _parse_power(node.get("solar", {}).get("power"))
-    if solar_kw is not None:
-        data["pvPower"] = solar_kw
+    solar_w = _parse_power(node.get("solar", {}).get("power"))
+    if solar_w is not None:
+        data["pvPower"] = solar_w / 1000.0
 
     # House load
-    load_kw = _parse_power(node.get("load", {}).get("power"))
-    if load_kw is not None:
-        data["loadsPower"] = load_kw
+    load_w = _parse_power(node.get("load", {}).get("power"))
+    if load_w is not None:
+        data["loadsPower"] = load_w / 1000.0
 
     # Grid power — derive direction from the power balance rather than
     # the unreliable gridStatus field (whose meaning varies by firmware).
     # grid = load + bat_charge - bat_discharge - solar
     # Positive → importing from grid; negative → exporting to grid.
     grid = node.get("grid", {})
-    grid_kw = _parse_power(grid.get("power"))
-    if grid_kw is not None:
-        # Use power balance when all components are available.
+    grid_w = _parse_power(grid.get("power"))
+    if grid_w is not None:
+        grid_kw = grid_w / 1000.0
+        # Use power balance when all components are available (already kW).
         solar = data.get("pvPower")
         load = data.get("loadsPower")
         bat_charge = data.get("batChargePower", 0.0)

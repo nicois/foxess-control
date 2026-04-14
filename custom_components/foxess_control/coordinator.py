@@ -73,6 +73,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # REST poll is authoritative — reset WebSocket integration state
         self._ws_last_time = None
         self._ws_feedin_power_kw = 0.0
+        data["_data_source"] = "api"
         return data
 
     def inject_realtime_data(self, ws_data: dict[str, Any]) -> None:
@@ -111,6 +112,8 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if feedin_power_kw is not None:
             self._ws_feedin_power_kw = feedin_power_kw
             self._ws_last_time = now
+
+        ws_data["_data_source"] = "ws"
 
         # Skip if nothing actually changed (avoids redundant entity updates)
         if all(self.data.get(k) == v for k, v in ws_data.items()):

@@ -94,21 +94,21 @@ class TestMapWsToCoordinator:
     def _make_msg(self, **node_overrides: object) -> dict[str, object]:
         """Build a minimal WebSocket message with node data.
 
-        Default: solar 3.5 kW, load 2.0 kW, bat discharging 1.5 kW.
-        Power balance: 2.0 + 0 - 1.5 - 3.5 = -3.0 → exporting.
+        Default: solar 3500 W, load 2000 W, bat discharging 1500 W.
+        Power balance (kW): 2.0 + 0 - 1.5 - 3.5 = -3.0 → exporting.
         """
         node = {
-            "solar": {"power": {"value": "3.5"}},
+            "solar": {"power": {"value": "3500"}},
             "grid": {
-                "power": {"value": "2.0"},
+                "power": {"value": "2000"},
                 "gridStatus": 2,
             },
             "bat": {
-                "power": {"value": "1.5"},
+                "power": {"value": "1500"},
                 "soc": 65,
                 "charge": 0,
             },
-            "load": {"power": {"value": "2.0"}},
+            "load": {"power": {"value": "2000"}},
         }
         node.update(node_overrides)
         return {"errno": 0, "result": {"node": node, "timeDiff": 5}}
@@ -117,51 +117,53 @@ class TestMapWsToCoordinator:
         """Default scenario: solar excess → grid export."""
         data = map_ws_to_coordinator(self._make_msg())
         assert data["SoC"] == 65.0
-        assert data["pvPower"] == 3.5
-        assert data["loadsPower"] == 2.0
-        assert data["batDischargePower"] == 1.5  # charge=0 -> discharging
+        assert data["pvPower"] == pytest.approx(3.5)
+        assert data["loadsPower"] == pytest.approx(2.0)
+        assert data["batDischargePower"] == pytest.approx(
+            1.5
+        )  # charge=0 -> discharging
         assert data["batChargePower"] == 0.0
         # Power balance negative → exporting
-        assert data["feedinPower"] == 2.0
+        assert data["feedinPower"] == pytest.approx(2.0)
         assert data["gridConsumptionPower"] == 0.0
 
     def test_battery_charging(self) -> None:
-        msg = self._make_msg(bat={"power": {"value": "2.0"}, "soc": 45, "charge": 1})
+        msg = self._make_msg(bat={"power": {"value": "2000"}, "soc": 45, "charge": 1})
         data = map_ws_to_coordinator(msg)
         assert data["SoC"] == 45.0
-        assert data["batChargePower"] == 2.0
+        assert data["batChargePower"] == pytest.approx(2.0)
         assert data["batDischargePower"] == 0.0
 
     def test_battery_charge_flag_as_string(self) -> None:
         """WS may send charge flag as string or int."""
-        msg = self._make_msg(bat={"power": {"value": "2.0"}, "soc": 45, "charge": "1"})
+        msg = self._make_msg(bat={"power": {"value": "2000"}, "soc": 45, "charge": "1"})
         data = map_ws_to_coordinator(msg)
-        assert data["batChargePower"] == 2.0
+        assert data["batChargePower"] == pytest.approx(2.0)
         assert data["batDischargePower"] == 0.0
 
     def test_grid_importing_from_balance(self) -> None:
         """Grid direction derived from power balance: load > solar → import."""
         msg = self._make_msg(
-            solar={"power": {"value": "0.5"}},
-            load={"power": {"value": "2.0"}},
-            bat={"power": {"value": "10.0"}, "soc": 45, "charge": 1},
-            grid={"power": {"value": "11.5"}, "gridStatus": 99},
+            solar={"power": {"value": "500"}},
+            load={"power": {"value": "2000"}},
+            bat={"power": {"value": "10000"}, "soc": 45, "charge": 1},
+            grid={"power": {"value": "11500"}, "gridStatus": 99},
         )
         data = map_ws_to_coordinator(msg)
-        # balance: 2.0 + 10.0 - 0 - 0.5 = 11.5 > 0 → importing
+        # balance (kW): 2.0 + 10.0 - 0 - 0.5 = 11.5 > 0 → importing
         assert data["gridConsumptionPower"] == pytest.approx(11.5)
         assert data["feedinPower"] == 0.0
 
     def test_grid_exporting_from_balance(self) -> None:
         """Grid direction derived from power balance: solar > load → export."""
         msg = self._make_msg(
-            solar={"power": {"value": "5.0"}},
-            load={"power": {"value": "1.0"}},
-            bat={"power": {"value": "1.0"}, "soc": 80, "charge": 1},
-            grid={"power": {"value": "3.0"}, "gridStatus": 99},
+            solar={"power": {"value": "5000"}},
+            load={"power": {"value": "1000"}},
+            bat={"power": {"value": "1000"}, "soc": 80, "charge": 1},
+            grid={"power": {"value": "3000"}, "gridStatus": 99},
         )
         data = map_ws_to_coordinator(msg)
-        # balance: 1.0 + 1.0 - 0 - 5.0 = -3.0 < 0 → exporting
+        # balance (kW): 1.0 + 1.0 - 0 - 5.0 = -3.0 < 0 → exporting
         assert data["gridConsumptionPower"] == 0.0
         assert data["feedinPower"] == pytest.approx(3.0)
 
@@ -171,13 +173,13 @@ class TestMapWsToCoordinator:
             "errno": 0,
             "result": {
                 "node": {
-                    "grid": {"power": {"value": "1.5"}, "gridStatus": "3"},
+                    "grid": {"power": {"value": "1500"}, "gridStatus": "3"},
                 },
                 "timeDiff": 5,
             },
         }
         data = map_ws_to_coordinator(msg)
-        assert data["gridConsumptionPower"] == 1.5
+        assert data["gridConsumptionPower"] == pytest.approx(1.5)
         assert data["feedinPower"] == 0.0
 
     def test_empty_message(self) -> None:
@@ -215,32 +217,32 @@ class TestMapWsToCoordinator:
     def test_real_world_sample(self) -> None:
         """Test with actual FoxESS WebSocket message structure.
 
-        Values are in kW (matching the REST API), despite the unit
-        field sometimes reading "W".
+        Values are in watts (as strings), despite the unit field
+        sometimes reading "W".  The coordinator expects kW.
         """
         msg = {
             "errno": 0,
             "msg": "",
             "result": {
                 "node": {
-                    "solar": {"power": {"value": "0.809", "unit": "W"}},
+                    "solar": {"power": {"value": "809", "unit": "W"}},
                     "grid": {
-                        "power": {"value": "0.019", "unit": "W"},
+                        "power": {"value": "19", "unit": "W"},
                         "gridStatus": 3,
                         "gridToHidden": -1,
                     },
                     "bat": {
-                        "power": {"value": "0.607", "unit": "W"},
+                        "power": {"value": "607", "unit": "W"},
                         "soc": 34,
                         "charge": 1,
                         "batToDevice": -1,
                     },
                     "load": {
-                        "power": {"value": "0.183", "unit": "W"},
-                        "normalLoad": {"power": {"value": "0.183", "unit": "W"}},
+                        "power": {"value": "183", "unit": "W"},
+                        "normalLoad": {"power": {"value": "183", "unit": "W"}},
                         "backupLoad": {"power": {"value": "0", "unit": "W"}},
                     },
-                    "device": {"power": {"value": "0.202", "unit": "W"}},
+                    "device": {"power": {"value": "202", "unit": "W"}},
                     "charger": {"display": False},
                     "heatpump": {"display": False},
                 },
@@ -255,6 +257,6 @@ class TestMapWsToCoordinator:
         assert data["batChargePower"] == pytest.approx(0.607)
         assert data["batDischargePower"] == 0.0
         assert data["loadsPower"] == pytest.approx(0.183)
-        # balance: 0.183 + 0.607 - 0 - 0.809 = -0.019 → slight export
+        # balance (kW): 0.183 + 0.607 - 0 - 0.809 = -0.019 → slight export
         assert data["gridConsumptionPower"] == 0.0
         assert data["feedinPower"] == pytest.approx(0.019)

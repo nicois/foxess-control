@@ -11,7 +11,7 @@
  *   # soc_entity: sensor.foxess_battery_soc
  */
 
-const CARD_VERSION = "1.3.0";
+const CARD_VERSION = "1.4.0";
 
 // -- i18n --------------------------------------------------------------------
 
@@ -464,6 +464,19 @@ class FoxESSControlCard extends HTMLElement {
     return e ? e.state : null;
   }
 
+  /** Read the data_source attribute from the SoC entity. */
+  _getDataSource() {
+    const e = this._entity(this._config.soc_entity);
+    return e && e.attributes && e.attributes.data_source ? e.attributes.data_source : null;
+  }
+
+  _dataSourceBadge(source) {
+    if (!source) return "";
+    const labels = { ws: "WS", api: "API", modbus: "Modbus" };
+    const label = labels[source] || source;
+    return `<span class="data-source" title="Data: ${label}">${label}</span>`;
+  }
+
   _formatPower(watts) {
     if (watts == null) return "";
     const w = Number(watts);
@@ -556,10 +569,12 @@ class FoxESSControlCard extends HTMLElement {
     if (socPct <= 15) barColor = "var(--error-color, #f44336)";
     else if (socPct <= 30) barColor = "var(--warning-color, #ff9800)";
 
+    const dataSource = this._getDataSource();
+
     return `
       <div class="header">
         <div class="header-left">
-          <div class="title">${this._t("title")}</div>
+          <div class="title">${this._t("title")}${this._dataSourceBadge(dataSource)}</div>
         </div>
         <div class="header-right">
           <div class="soc-group">
@@ -874,6 +889,17 @@ class FoxESSControlCard extends HTMLElement {
         font-weight: 600;
         color: var(--primary-text-color);
         letter-spacing: -0.01em;
+      }
+      .data-source {
+        font-size: 9px;
+        font-weight: 600;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: var(--secondary-background-color, rgba(0,0,0,0.06));
+        color: var(--secondary-text-color);
+        margin-left: 6px;
+        vertical-align: middle;
+        letter-spacing: 0.03em;
       }
       .header-right {
         display: flex;

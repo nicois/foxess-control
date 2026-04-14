@@ -518,6 +518,15 @@ class FoxESSPolledSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity)
         except (ValueError, TypeError):
             return None
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        if self.coordinator.data is None:
+            return None
+        source = self.coordinator.data.get("_data_source")
+        if source is None:
+            return None
+        return {"data_source": source}
+
 
 class FoxESSWorkModeSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity):
     """Sensor showing the inverter's current work mode."""

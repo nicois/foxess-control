@@ -69,6 +69,7 @@ class EntityCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             data["_work_mode"] = None
 
+        data["_data_source"] = "modbus"
         return data
 
 

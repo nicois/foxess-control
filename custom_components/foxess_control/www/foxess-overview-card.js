@@ -16,7 +16,7 @@
  *   # etc.
  */
 
-const OVERVIEW_VERSION = "2.2.0";
+const OVERVIEW_VERSION = "2.3.0";
 
 // -- i18n --------------------------------------------------------------------
 
@@ -280,6 +280,26 @@ class FoxESSOverviewCard extends HTMLElement {
     return `${w} W`;
   }
 
+  /** Read the data_source attribute from any resolved entity. */
+  _getDataSource(eid) {
+    for (const key of Object.keys(_ROLE_MAP)) {
+      const entityId = eid[key];
+      if (!entityId || !this._hass) continue;
+      const e = this._hass.states[entityId];
+      if (e && e.attributes && e.attributes.data_source) {
+        return e.attributes.data_source;
+      }
+    }
+    return null;
+  }
+
+  _dataSourceBadge(source) {
+    if (!source) return "";
+    const labels = { ws: "WS", api: "API", modbus: "Modbus" };
+    const label = labels[source] || source;
+    return `<span class="data-source" title="Data: ${label}">${label}</span>`;
+  }
+
   // -- Rendering -------------------------------------------------------------
 
   _render() {
@@ -326,11 +346,13 @@ class FoxESSOverviewCard extends HTMLElement {
     if (socPct <= 15) socColor = "var(--error-color, #f44336)";
     else if (socPct <= 30) socColor = "var(--warning-color, #ff9800)";
 
+    const dataSource = this._getDataSource(eid);
+
     this.shadowRoot.innerHTML = `
       <style>${FoxESSOverviewCard._styles()}</style>
       <ha-card>
         <div class="header">
-          <div class="title">${this._t("title")}</div>
+          <div class="title">${this._t("title")}${this._dataSourceBadge(dataSource)}</div>
           ${workMode && workMode !== "SelfUse" ? `<span class="work-mode">${this._formatWorkMode(workMode)}</span>` : ""}
         </div>
         <div class="flow-grid">
@@ -467,6 +489,17 @@ class FoxESSOverviewCard extends HTMLElement {
         background: rgba(var(--rgb-primary-color, 3, 169, 244), 0.12);
         color: var(--primary-color);
         white-space: nowrap;
+      }
+      .data-source {
+        font-size: 9px;
+        font-weight: 600;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: var(--secondary-background-color, rgba(0,0,0,0.06));
+        color: var(--secondary-text-color);
+        margin-left: 6px;
+        vertical-align: middle;
+        letter-spacing: 0.03em;
       }
 
       .flow-grid {
