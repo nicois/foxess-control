@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1-beta.24
+
+### Fixed
+- **Taper-path consumption bypass (D-007)**: deferred start calculations using the adaptive taper model now account for household consumption, matching the linear path. Previously the taper path ignored consumption, causing charge to start too late and discharge to start too early.
+- **Data source badge hidden for API (D-021)**: the data source badge now shows "API" when WebSocket credentials are configured but WS is not active. Previously API was treated as "no badge", leaving users unable to tell whether WS was connected. Single-source (API-only) users continue to see no badge.
+
 ## 1.0.1-beta.23
 
 ### Fixed
