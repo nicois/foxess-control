@@ -61,6 +61,17 @@ consumption is low (it may spike overnight, e.g., hot water heater).
 - Tolerance for trajectory check shrinks as window closes (smaller
   deficit is tolerated early, but any deficit late triggers burst).
 
+### C-023 Investigation: Solar-aware charge reduction
+**Status**: Under investigation.
+**Discharge observation (2026-04-15)**: During forced discharge with solar,
+the power balance is `grid_export = discharge + solar - load`. Solar
+and discharge are additive — the inverter manages the power flow
+internally without software intervention. If this holds for charge
+(i.e. `grid_import = charge - solar + load`), then the inverter
+already uses solar first and C-023 is satisfied by hardware.
+**Pending**: Empirical charge test with solar producing > 1 kW needed
+to confirm. Scheduled for 11am AEST 2026-04-15.
+
 ## Edge Cases
 
 - **Already at target SoC**: Returns minimum power (100W), effectively
