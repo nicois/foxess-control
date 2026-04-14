@@ -84,6 +84,7 @@ def session_data_from_charge_state(state: dict[str, Any]) -> dict[str, Any]:
             else None
         ),
         "charging_started_energy_kwh": state.get("charging_started_energy_kwh"),
+        "start_soc": state.get("start_soc"),
     }
 
 
@@ -111,6 +112,7 @@ def session_data_from_discharge_state(state: dict[str, Any]) -> dict[str, Any]:
     started_at = state.get("discharging_started_at")
     data["discharging_started_at"] = started_at.isoformat() if started_at else None
     data["consumption_peak_kw"] = state.get("consumption_peak_kw", 0.0)
+    data["start_soc"] = state.get("start_soc")
     return data
 
 

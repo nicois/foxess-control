@@ -1719,6 +1719,7 @@ async def _recover_charge_session(
             "force": charge_data.get("force", False),
             "soc_unavailable_count": 0,
             "soc_above_target_count": 0,
+            "start_soc": charge_data.get("start_soc"),
         }
         _setup_smart_charge_listeners(hass, inverter)
     else:
@@ -1864,6 +1865,7 @@ async def _recover_discharge_session(
                 else None
             ),
             "consumption_peak_kw": discharge_data.get("consumption_peak_kw", 0.0),
+            "start_soc": discharge_data.get("start_soc"),
         }
         _setup_smart_discharge_listeners(hass, inverter)
     else:
@@ -2647,6 +2649,7 @@ def _register_services(hass: HomeAssistant) -> None:
             "discharging_started": not should_defer,
             "discharging_started_at": None if should_defer else now,
             "consumption_peak_kw": max(0.0, net_consumption),
+            "start_soc": current_soc,
         }
 
         _setup_smart_discharge_listeners(hass, inverter)
