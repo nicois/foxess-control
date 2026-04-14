@@ -691,6 +691,7 @@ class SmartOperationsOverviewSensor(SensorEntity):
                     "charge_start_time": cs["start"].isoformat(),
                     "charge_end_time": cs["end"].isoformat(),
                     "charge_start_soc": cs.get("start_soc", soc),
+                    "charge_target_reachable": self._is_charge_reachable(cs, soc),
                 }
             )
 
@@ -750,6 +751,32 @@ class SmartOperationsOverviewSensor(SensorEntity):
             )
 
         return attrs
+
+    def _is_charge_reachable(
+        self, cs: dict[str, Any], soc: float | None
+    ) -> bool | None:
+        """Check if the charge target can be reached in remaining time."""
+        from .algorithms import is_charge_target_reachable
+
+        if soc is None:
+            return None
+        now = dt_util.now()
+        end: datetime.datetime = cs["end"]
+        if end.tzinfo is None and now.tzinfo is not None:
+            now = now.replace(tzinfo=None)
+        remaining_h = (end - now).total_seconds() / 3600.0
+        if remaining_h <= 0:
+            return None
+        capacity = get_battery_capacity_kwh(self.hass, self._domain)
+        taper = self.hass.data.get(self._domain, {}).get("_taper_profile")
+        return is_charge_target_reachable(
+            soc,
+            cs.get("target_soc", 100),
+            capacity,
+            remaining_h,
+            cs.get("max_power_w", 0),
+            taper_profile=taper,
+        )
 
 
 class ChargePowerSensor(SensorEntity):

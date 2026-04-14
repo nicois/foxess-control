@@ -13,6 +13,7 @@ from custom_components.foxess_control.smart_battery.algorithms import (
     calculate_deferred_start,
     calculate_discharge_deferred_start,
     calculate_discharge_power,
+    is_charge_target_reachable,
     should_suspend_discharge,
     soc_energy_kwh,
 )
@@ -175,6 +176,48 @@ class TestCalculateDeferredStart:
         tapered = calculate_deferred_start(50.0, 100, 10.0, 5000, end, taper_profile=tp)
         # 60% taper → longer charge time → earlier start
         assert tapered < linear
+
+
+class TestIsChargeTargetReachable:
+    """Tests for is_charge_target_reachable (C-022)."""
+
+    def test_already_at_target(self) -> None:
+        assert is_charge_target_reachable(80.0, 80, 10.0, 1.0, 5000) is True
+
+    def test_above_target(self) -> None:
+        assert is_charge_target_reachable(90.0, 80, 10.0, 1.0, 5000) is True
+
+    def test_plenty_of_time(self) -> None:
+        # 30% of 10kWh = 3kWh, 5kW max → ~0.67h needed, 4h available
+        assert is_charge_target_reachable(50.0, 80, 10.0, 4.0, 5000) is True
+
+    def test_insufficient_time(self) -> None:
+        # 50% of 10kWh = 5kWh, 5kW max → ~1.1h needed (with headroom), 0.5h available
+        assert is_charge_target_reachable(50.0, 100, 10.0, 0.5, 5000) is False
+
+    def test_zero_remaining(self) -> None:
+        assert is_charge_target_reachable(50.0, 100, 10.0, 0.0, 5000) is False
+
+    def test_high_consumption_reduces_reachability(self) -> None:
+        # Without consumption: reachable
+        assert is_charge_target_reachable(50.0, 80, 10.0, 2.0, 5000) is True
+        # With 4kW consumption eating into 5kW max: unreachable
+        assert (
+            is_charge_target_reachable(
+                50.0, 80, 10.0, 2.0, 5000, net_consumption_kw=4.0
+            )
+            is False
+        )
+
+    def test_taper_reduces_reachability(self) -> None:
+        tp = TaperProfile(charge={i: TaperBin(ratio=0.3, count=5) for i in range(101)})
+        # Without taper: reachable (3kWh at 5kW = ~0.67h, 2h available)
+        assert is_charge_target_reachable(50.0, 80, 10.0, 2.0, 5000) is True
+        # With 30% taper: effective ~1.5kW → ~2.2h needed, 2h not enough
+        assert (
+            is_charge_target_reachable(50.0, 80, 10.0, 2.0, 5000, taper_profile=tp)
+            is False
+        )
 
 
 class TestCalculateDischargePower:

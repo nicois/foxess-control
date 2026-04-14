@@ -37,7 +37,7 @@ Traceability from constraints through design decisions to tests.
 | C-025 Session boundary cleanliness | -- | `TestSessionBoundaryCleanness` (2) | COVERED |
 | C-024 Safe state on failure | -- | `TestCallbackExceptionSafety` (2), C-012, unload_entry | COVERED |
 | C-023 Solar-aware charge reduction | -- | -- | GAP |
-| C-022 Unreachable charge target surfaced | -- | -- | GAP |
+| C-022 Unreachable charge target surfaced | -- | `TestIsChargeTargetReachable` (7) | COVERED |
 | C-019 Discharge SoC unavailability abort | D-019 | `TestDischargeSocUnavailability` (2) | COVERED |
 
 ## Gaps
@@ -91,7 +91,7 @@ Traceability from constraints through design decisions to tests.
 ## Summary
 
 - **Total constraints**: 26
-- **Fully covered**: 19 (73%)
+- **Fully covered**: 20 (77%)
 - **Partial**: 3 (12%)
-- **Gaps**: 4 (15%) — C-016 (structural), C-022, C-023, C-026 (proposed)
+- **Gaps**: 3 (12%) — C-016 (structural), C-023, C-026 (proposed)
 - **Orphan tests**: 80+ (test_services.py largely unmapped)
