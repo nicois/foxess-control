@@ -1223,6 +1223,10 @@ async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
     def on_disconnect() -> None:
         _LOGGER.warning("FoxESS WebSocket disconnected, falling back to REST polling")
         domain_data.pop("_realtime_ws", None)
+        # Update data source immediately so the badge reflects reality
+        if coordinator.data is not None:
+            coordinator.data["_data_source"] = "api"
+            coordinator.async_set_updated_data(dict(coordinator.data))
 
     ws = FoxESSRealtimeWS(plant_id, web_session, on_data, on_disconnect)
     try:
@@ -1279,6 +1283,15 @@ async def _stop_realtime_ws(hass: HomeAssistant) -> None:
 
     await ws.async_disconnect()
     _LOGGER.info("FoxESS WebSocket real-time data stream stopped")
+
+    # Update data source badge immediately so the user sees "API"
+    # instead of stale "WS" for up to 5 minutes.
+    for _eid, entry_data in domain_data.items():
+        if isinstance(entry_data, dict) and "coordinator" in entry_data:
+            coord = entry_data["coordinator"]
+            if coord.data is not None and coord.data.get("_data_source") == "ws":
+                coord.data["_data_source"] = "api"
+                coord.async_set_updated_data(dict(coord.data))
 
 
 def _trigger_discharge_listener(hass: HomeAssistant) -> None:
