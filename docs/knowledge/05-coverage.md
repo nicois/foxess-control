@@ -33,7 +33,7 @@ Traceability from constraints through design decisions to tests.
 | C-018 Unmanaged work mode protection | D-016 | `TestCheckScheduleSafe` (7), `test_rejects_schedule_with_backup_mode` | COVERED |
 | C-020 Operational transparency | D-021 | `TestDataSourceTracking` (3), `TestFoxESSPolledSensor::test_data_source_*` (2) | COVERED |
 | C-021 Brand-agnostic code in common package | -- | `test_vendored_copy_matches_canonical` (indirect) | PARTIAL |
-| C-026 Proactive error surfacing | -- | -- | GAP |
+| C-026 Proactive error surfacing | -- | `TestErrorSurfacing` (2) | COVERED |
 | C-025 Session boundary cleanliness | -- | `TestSessionBoundaryCleanness` (2) | COVERED |
 | C-024 Safe state on failure | -- | `TestCallbackExceptionSafety` (2), C-012, unload_entry | COVERED |
 | C-023 Solar-aware charge reduction | -- | -- | GAP |
@@ -52,9 +52,7 @@ Traceability from constraints through design decisions to tests.
   window. Proposed feature.
 - **C-023**: Solar-aware charge reduction — grid charge power is not
   reduced when solar surplus is available. Proposed feature.
-- **C-026**: Proactive error surfacing — persistent errors (API
-  failures, mode change failures) are logged but not surfaced to the
-  UI. Proposed feature extending C-020.
+- ~~C-026~~: Fixed — error state surfaced via sensor attributes.
 
 ### Constraints without design docs (PARTIAL)
 - **C-013**: 4-hour max override — this is a simple constant guard, not
@@ -91,7 +89,7 @@ Traceability from constraints through design decisions to tests.
 ## Summary
 
 - **Total constraints**: 26
-- **Fully covered**: 20 (77%)
+- **Fully covered**: 21 (81%)
 - **Partial**: 3 (12%)
-- **Gaps**: 3 (12%) — C-016 (structural), C-023, C-026 (proposed)
+- **Gaps**: 2 (8%) — C-016 (structural), C-023 (investigation needed)
 - **Orphan tests**: 80+ (test_services.py largely unmapped)

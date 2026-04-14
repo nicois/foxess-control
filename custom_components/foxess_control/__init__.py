@@ -116,6 +116,20 @@ SMART_DISCHARGE_CHECK_INTERVAL = datetime.timedelta(seconds=60)
 # consecutive periodic checks (3 × 5 min = 15 minutes).
 MAX_SOC_UNAVAILABLE_COUNT = 3
 
+
+def _record_error(hass: HomeAssistant, message: str) -> None:
+    """Record a session error for UI surfacing (C-026)."""
+    domain_data = hass.data.get(DOMAIN)
+    if domain_data is None:
+        return
+    prev = domain_data.get("_smart_error_state", {})
+    domain_data["_smart_error_state"] = {
+        "last_error": message,
+        "last_error_at": dt_util.now().isoformat(),
+        "error_count": prev.get("error_count", 0) + 1,
+    }
+
+
 # Persist the taper profile to HA Store every N taper observations.
 # Charge ticks every 5 min, discharge every 1 min — real-time save
 # frequency is 25 min (charge) and 5 min (discharge).
@@ -823,6 +837,7 @@ def _setup_smart_charge_listeners(
             await _adjust_charge_power_inner(cur_state)
         except Exception:
             _LOGGER.exception("Smart charge: unexpected error, aborting session")
+            _record_error(hass, "Charge session aborted: unexpected error")
             try:
                 charging_started = cur_state.get("charging_started", False)
                 if _is_my_session():
@@ -845,6 +860,7 @@ def _setup_smart_charge_listeners(
                     "Smart charge: SoC unavailable for %d checks, aborting",
                     cur_state["soc_unavailable_count"],
                 )
+                _record_error(hass, "Charge aborted: SoC unavailable for 15 min")
                 charging_started = cur_state.get("charging_started", False)
                 if _is_my_session():
                     _cancel_smart_charge(hass)
@@ -1224,6 +1240,7 @@ def _setup_smart_discharge_listeners(
             await _check_discharge_soc_inner(cur_state)
         except Exception:
             _LOGGER.exception("Smart discharge: unexpected error, aborting session")
+            _record_error(hass, "Discharge session aborted: unexpected error")
             try:
                 discharging_started = cur_state.get("discharging_started", False)
                 if _is_my_session():
@@ -1438,6 +1455,7 @@ def _setup_smart_discharge_listeners(
                     "Smart discharge: SoC unavailable for %d checks, aborting",
                     cur_state["soc_unavailable_count"],
                 )
+                _record_error(hass, "Discharge aborted: SoC unavailable")
                 discharging_started = cur_state.get("discharging_started", False)
                 if _is_my_session():
                     _cancel_smart_discharge(hass)
@@ -2760,6 +2778,9 @@ def _register_services(hass: HomeAssistant) -> None:
             " OR ".join(conditions),
         )
 
+        # Clear any previous error — new session is starting
+        hass.data[DOMAIN].pop("_smart_error_state", None)
+
         # Store state for binary sensor and diagnostics
         hass.data[DOMAIN]["_smart_discharge_state"] = {
             "session_id": str(uuid.uuid4()),
@@ -2960,6 +2981,9 @@ def _register_services(hass: HomeAssistant) -> None:
                 )
 
         min_power_change = _get_min_power_change(hass)
+
+        # Clear any previous error — new session is starting
+        hass.data[DOMAIN].pop("_smart_error_state", None)
 
         # Store state for periodic adjustments
         hass.data[DOMAIN]["_smart_charge_state"] = {

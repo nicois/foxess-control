@@ -1673,6 +1673,130 @@ class TestCallbackExceptionSafety:
         assert "_smart_discharge_state" not in hass.data[DOMAIN]
 
 
+class TestErrorSurfacing:
+    """Tests for C-026: proactive error surfacing."""
+
+    @pytest.mark.asyncio
+    async def test_soc_abort_records_error_state(self) -> None:
+        """SoC unavailability abort writes to _smart_error_state."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=60.0,
+            coordinator_data={"SoC": 20.0},
+        )
+
+        captured = None
+
+        def capture(_h: Any, cb: Any, _i: Any) -> MagicMock:
+            nonlocal captured
+            captured = cb
+            return MagicMock()
+
+        from custom_components.foxess_control import (
+            MAX_SOC_UNAVAILABLE_COUNT,
+            _register_services,
+        )
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(2, 0),
+                        "end_time": datetime.time(6, 0),
+                        "target_soc": 80,
+                    }
+                )
+            )
+
+        assert captured is not None
+        assert "_smart_error_state" not in hass.data[DOMAIN]
+
+        # Make SoC unavailable and fire until abort
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = None
+        for i in range(MAX_SOC_UNAVAILABLE_COUNT):
+            with patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 5 * (i + 1), 0),
+            ):
+                await captured(datetime.datetime(2026, 4, 7, 2, 5 * (i + 1), 0))
+
+        # Error state should exist
+        err = hass.data[DOMAIN].get("_smart_error_state")
+        assert err is not None
+        assert "SoC unavailable" in err["last_error"]
+        assert err["error_count"] == 1
+        assert err["last_error_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_new_session_clears_error(self) -> None:
+        """Starting a new session clears the previous error state."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 80.0},
+        )
+
+        # Inject a previous error
+        hass.data[DOMAIN]["_smart_error_state"] = {
+            "last_error": "old error",
+            "last_error_at": "2026-04-07T00:00:00",
+            "error_count": 5,
+        }
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 30,
+                    }
+                )
+            )
+
+        # Error should be cleared
+        assert "_smart_error_state" not in hass.data[DOMAIN]
+
+
 class TestSessionBoundaryCleanness:
     """Tests for C-025: no transient state leaks between sessions."""
 

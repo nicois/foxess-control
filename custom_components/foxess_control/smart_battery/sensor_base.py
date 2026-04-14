@@ -604,6 +604,7 @@ class SmartOperationsOverviewSensor(SensorEntity):
         self._attr_device_info = device_info
         self._attr_options = [
             "idle",
+            "error",
             "charging",
             "deferred",
             "target_reached",
@@ -643,6 +644,10 @@ class SmartOperationsOverviewSensor(SensorEntity):
                 return "discharge_suspended"
             return "discharging"
 
+        err = self.hass.data.get(self._domain, {}).get("_smart_error_state")
+        if err and err.get("last_error"):
+            return "error"
+
         return "idle"
 
     @property
@@ -664,9 +669,14 @@ class SmartOperationsOverviewSensor(SensorEntity):
         cs = get_charge_state(self.hass, self._domain)
         ds = get_discharge_state(self.hass, self._domain)
 
+        err = self.hass.data.get(self._domain, {}).get("_smart_error_state", {})
         attrs: dict[str, Any] = {
             "charge_active": cs is not None,
             "discharge_active": ds is not None,
+            "has_error": bool(err.get("last_error")),
+            "last_error": err.get("last_error"),
+            "last_error_at": err.get("last_error_at"),
+            "error_count": err.get("error_count", 0),
         }
 
         if cs is not None:
