@@ -30,15 +30,20 @@ windows, inflating electricity costs.
 
 ### C-002: Never discharge below minimum SoC
 **Statement**: Discharge must suspend when battery SoC reaches or drops
-below the configured `min_soc`. The `should_suspend_discharge()` function
-enforces this with a consecutive-check counter.
+below the configured `min_soc`. Two mechanisms enforce this:
+(a) `should_suspend_discharge()` (pure function) returns True when
+remaining energy above min_soc is zero or insufficient to sustain the
+safety floor; (b) the listener layer (`__init__.py`) requires 2
+consecutive checks with SoC at/below min_soc before ending the session,
+preventing premature termination from transient SoC dips.
 **Rationale**: Deep discharge damages battery longevity and may leave
 insufficient reserve for backup power during outages.
 **Violation consequence**: Battery over-discharge, reduced cycle life,
 no backup reserve.
 **Traces**: D-001;
 `tests/test_smart_battery_algorithms.py::TestShouldSuspendDischarge::test_soc_at_min_suspends`,
-`tests/test_smart_battery_algorithms.py::TestShouldSuspendDischarge::test_soc_below_min_suspends`
+`tests/test_smart_battery_algorithms.py::TestShouldSuspendDischarge::test_soc_below_min_suspends`,
+`tests/test_services.py::TestSocStabilityCounters`
 
 ### C-003: Session identity prevents stale callback races
 **Statement**: Every smart session receives a unique `session_id`.
@@ -172,7 +177,7 @@ the first one has finished.
 
 ### C-014: Taper profile plausibility check
 **Statement**: On load, the taper profile is checked for plausibility
-(median trusted ratio > 0.1). Implausible profiles are auto-reset.
+(median trusted ratio > 0.10). Implausible profiles are auto-reset.
 **Rationale**: A corrupted taper profile (e.g., from a unit mismatch
 bug) causes the behind-schedule detector to always fire at max power,
 breaking pacing.
@@ -199,4 +204,40 @@ between the cancellation decision and the actual unsubscription,
 corrupting state.
 **Violation consequence**: Race condition — stale callback fires during
 cancellation, re-enabling an override that should be removed.
-**Traces**: D-009
+**Traces**: D-018
+
+### C-017: End-of-discharge guard
+**Statement**: When remaining energy above min_soc cannot sustain the
+discharge safety floor for `_END_GUARD_MINUTES` (10 minutes), forced
+discharge must suspend and switch to self-use.
+**Rationale**: Near the end of a discharge window, paced power drops to
+the 100W minimum — well below house load. Continuing forced discharge
+causes grid import for the remaining minutes.
+**Violation consequence**: Tail-end grid import when paced power is
+below house load.
+**Traces**: D-003;
+`tests/test_smart_battery_algorithms.py::TestShouldSuspendDischarge::test_high_consumption_suspends`
+
+### C-018: Unmanaged work mode protection
+**Statement**: Service calls must refuse to modify the inverter schedule
+when non-managed work modes (e.g. Backup) are present in existing
+schedule groups.
+**Rationale**: Silently overwriting a Backup schedule could leave the
+home unprotected during a grid outage. The integration assumes SelfUse
+as the baseline mode.
+**Violation consequence**: User's Backup protection silently removed.
+**Traces**: D-016;
+`tests/test_init.py::TestCheckScheduleSafe`,
+`tests/test_init.py::TestMergeWithExisting::test_rejects_schedule_with_backup_mode`
+
+### C-019: Discharge SoC unavailability is unprotected
+**Statement**: Unlike the charge path (C-012), the discharge listener
+does not count consecutive SoC-unavailable checks and has no abort
+threshold. When SoC is unavailable, the discharge listener silently
+skips the check and returns.
+**Rationale**: Unknown — likely an omission rather than a deliberate
+design choice. The inverter remains in forced discharge mode with no
+SoC monitoring.
+**Violation consequence**: Inverter stays in forced discharge
+indefinitely with no SoC feedback, risking over-discharge.
+**Traces**: -- (no test, no design doc — **known gap**)

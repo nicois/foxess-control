@@ -48,6 +48,14 @@ consumption is low (it may spike overnight, e.g., hot water heater).
 - Use actual consumption only: rejected because overnight loads are
   unpredictable
 - Fixed consumption estimate: rejected in favour of hybrid approach
+**Known issue**: When a taper profile is available, the deferred start
+calculation uses `taper_profile.estimate_charge_hours()` which does NOT
+subtract consumption from the charge power. The time buffer
+(`hours / (1 - headroom)`) partially compensates but is insufficient.
+Example: with 5kW max power and 1kW consumption, the non-taper path
+reserves 1kW for consumption (20% reduction) but the taper path only
+applies an 11% time buffer. This can cause the taper-aware deferred
+start to be ~20 minutes too late, risking a missed charge target.
 **Traces**:
 `tests/test_smart_battery_algorithms.py::TestCalculateDeferredStart::test_consumption_brings_start_earlier`
 

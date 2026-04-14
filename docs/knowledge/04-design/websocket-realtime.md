@@ -18,15 +18,22 @@ where stale data risks grid import from undetected load spikes.
 ## Design Decisions
 
 ### D-008: Conditional WebSocket activation
-**Decision**: The WebSocket connects only when discharge power is paced
-below inverter maximum (`last_power_w < max_power_w`). At full power,
-5-minute REST polling is sufficient because there's ample headroom.
+**Decision**: The WebSocket connects only when ALL of:
+(a) web credentials are configured,
+(b) NOT in entity mode (WS is cloud-API only),
+(c) discharge has actually started (`discharging_started=True`),
+(d) discharge is paced below max (`last_power_w < max_power_w`).
+At full power, 5-minute REST polling is sufficient because there's
+ample headroom.
 **Context**: WebSocket uses a separate web session (username + MD5
 password) from the Open API key. It's an extra connection with
-reconnect complexity.
+reconnect complexity. Entity mode uses local Modbus with faster
+polling, making the cloud WebSocket unnecessary.
 **Rationale**: The risk window is specifically when paced power is near
 house load — that's when a load spike can cause grid import. At full
-power, there's >10x headroom and no risk.
+power, there's >10x headroom and no risk. WS-triggered discharge
+recalculations are debounced at 10 seconds (`_WS_DEBOUNCE_SECONDS`)
+to avoid excessive power changes from noisy data.
 **Alternatives considered**:
 - Always-on WebSocket: rejected as unnecessary connection overhead
   and complexity

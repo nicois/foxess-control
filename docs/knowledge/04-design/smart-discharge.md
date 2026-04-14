@@ -69,20 +69,23 @@ power floor constraint.
 
 ### D-004: Peak consumption tracking with exponential decay
 **Decision**: Track highest observed household consumption with
-`PEAK_DECAY_PER_TICK = 0.85` (~21-minute half-life at 5-min polling).
-Floor discharge power at `peak * 1.5`.
+`PEAK_DECAY_PER_TICK = 0.85` applied at the discharge check interval
+(1 minute), giving a ~4.3-minute half-life. Floor discharge power at
+`peak * 1.5`.
 **Context**: House load varies unpredictably. A single spike shouldn't
 permanently inflate the discharge floor, but recent spikes should
 be respected.
-**Rationale**: 21-minute half-life is long enough to protect against
-recurring spikes (e.g., oven cycling) but short enough to adapt when
-loads decrease.
+**Rationale**: At 1-minute ticks, 0.85 decay gives half-life of ~4.3
+minutes (`0.85^4.27 = 0.5`). This is responsive enough to protect
+against active spikes while adapting within minutes when loads decrease.
+The 1.5x safety factor provides margin above the tracked peak.
 **Alternatives considered**:
 - Fixed consumption estimate: rejected because household load is highly
   variable
 - Sliding window max: rejected in favour of simpler EMA approach
 **Traces**: C-001;
-`tests/test_smart_battery_algorithms.py::TestCalculateDischargePower`
+`tests/test_smart_battery_algorithms.py::TestCalculateDischargePower`,
+`tests/test_smart_battery_algorithms.py::TestDischargePowerPeakSafetyFloor`
 
 ### D-005: Feed-in energy budget spreading
 **Decision**: When `feedin_energy_limit_kwh` is set, cap the discharge

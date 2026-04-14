@@ -133,4 +133,5 @@ via `async_set_updated_data()`, giving sensors immediate updates.
 | `wasmtime` | WASM runtime for signature generation | FoxESS web portal requires a specific signature algorithm; WASM is the only available implementation (reverse-engineered from JS) |
 | `aiohttp` | WebSocket client | Standard async HTTP/WS library; HA already uses it |
 | `requests` | REST API client (sync) | Used in the FoxESS client for synchronous API calls within HA's executor |
+| `voluptuous` | Schema validation | Used for service call and config flow schemas; ships with HA but used directly |
 | `homeassistant` | HA framework | Target platform |

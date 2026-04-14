@@ -24,22 +24,24 @@ Traceability from constraints through design decisions to tests.
 | C-009 No midnight-crossing schedules | D-014 | `TestResolveStartEnd::test_crosses_midnight_rejected` | COVERED |
 | C-010 Placeholder groups filtered | D-014 | `TestIsPlaceholder` (5 tests) | COVERED |
 | C-011 Extra fields stripped | D-014 | `TestSanitizeGroup::test_strips_unknown_keys` | COVERED |
-| C-012 SoC unavailability cancels session | D-019 | -- | GAP |
+| C-012 SoC unavailability cancels charge session | D-019 | `TestHandleSmartCharge::test_soc_unavailable_aborts_after_threshold`, `test_soc_available_resets_unavailable_count` | COVERED |
 | C-013 4-hour max override duration | -- | `TestResolveStartEnd::test_exceeds_max_hours` | PARTIAL |
 | C-014 Taper profile plausibility | D-011, D-012, D-013 | `TestIsPlausible` (3), `TestRecordCharge` (8), `TestSerialization` (6) | COVERED |
 | C-015 Vendored smart_battery matches canonical | -- | `test_vendored_copy_matches_canonical` | COVERED |
 | C-016 Cancel listeners before awaits | D-018 | -- | GAP |
+| C-017 End-of-discharge guard | D-003 | `TestShouldSuspendDischarge::test_high_consumption_suspends` | COVERED |
+| C-018 Unmanaged work mode protection | D-016 | `TestCheckScheduleSafe` (7), `test_rejects_schedule_with_backup_mode` | COVERED |
+| C-019 Discharge SoC unavailability unprotected | -- | -- | GAP |
 
 ## Gaps
 
 ### Constraints without tests (GAP)
-- **C-012**: SoC unavailability cancellation — the 15-minute threshold
-  logic in `listeners.py` is not directly unit-tested. The constant
-  `MAX_SOC_UNAVAILABLE_COUNT` exists but its enforcement path lacks
-  an isolated test.
 - **C-016**: Cancel-before-await ordering — the race-prevention pattern
   in `__init__.py` is structural and not verified by any test. A test
   would need to simulate concurrent timer firing during cancellation.
+- **C-019**: Discharge SoC unavailability — the discharge listener has
+  no counter or abort for prolonged SoC unavailability, unlike the
+  charge path (C-012). This is a code gap, not just a test gap.
 
 ### Constraints without design docs (PARTIAL)
 - **C-013**: 4-hour max override — this is a simple constant guard, not
@@ -64,8 +66,8 @@ Traceability from constraints through design decisions to tests.
 
 ## Summary
 
-- **Total constraints**: 16
-- **Fully covered**: 11 (69%)
-- **Partial**: 2 (12%)
-- **Gaps**: 3 (19%)
-- **Orphan tests**: ~16
+- **Total constraints**: 19
+- **Fully covered**: 14 (74%)
+- **Partial**: 2 (10%)
+- **Gaps**: 3 (16%) — C-016 (structural), C-019 (code gap)
+- **Orphan tests**: 80+ (test_services.py largely unmapped)

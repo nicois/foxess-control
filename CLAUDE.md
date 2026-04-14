@@ -16,8 +16,11 @@ pre-commit run --all-files      # ruff + mypy
 - **C-005**: WebSocket messages with timeDiff > 30s are stale — discard them
 - **C-008**: FoxESS API: fdSoc >= 11 and minSocOnGrid <= fdSoc
 - **C-009**: FoxESS API: schedule windows must not cross midnight
-- **C-014**: Taper profiles auto-reset if plausibility check fails (median ratio <= 0.1)
+- **C-014**: Taper profiles auto-reset if plausibility check fails (median ratio <= 0.10)
 - **C-015**: Vendored smart_battery/ must be byte-identical to canonical root copy
+- **C-017**: End-of-discharge guard: suspend when energy can't sustain safety floor for 10 min
+- **C-018**: Refuse to modify schedule when unmanaged modes (e.g. Backup) are present
+- **C-019**: **Known gap** — discharge path has no SoC-unavailability abort (unlike charge)
 
 ## Architecture
 

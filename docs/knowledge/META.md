@@ -58,3 +58,22 @@ last_updated: 2026-04-14
   of questions, perhaps a more iterative approach would avoid this, as well
   as allowing some questions to naturally lead to others, making the process
   more like a real interview or dialogue.
+
+### 2026-04-14 — Reconciliation pass
+- **What was wrong**:
+  - C-002 conflated two mechanisms (pure function vs listener counter)
+  - D-004 half-life wrong: ~4.3 min at 1-min ticks, not ~21 min at 5-min
+  - D-007 incomplete: taper path skips consumption headroom (likely a bug)
+  - D-008 incomplete: omitted entity-mode exclusion and WS debounce
+  - C-014 boundary imprecise: 0.10 itself fails plausibility
+  - C-012 falsely marked as GAP (3 tests exist in test_services.py)
+  - Test count was 519, not ~378 (test_services.py 79 tests nearly absent)
+  - 3 constraints missing: end-guard, unmanaged mode, discharge SoC gap
+- **What was found**:
+  - C-019: discharge path has no SoC-unavailability abort (code gap)
+  - Taper-aware deferred start ignores consumption (D-007, potential bug)
+- **What could be better**: The initial analysis agents should run
+  `pytest --co -q` for authoritative test counts rather than estimating
+  from file reads. Constraint-test mapping should cross-reference
+  test_services.py more thoroughly — it's the largest integration test
+  file and was largely missed.

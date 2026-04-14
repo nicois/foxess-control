@@ -6,7 +6,12 @@ traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-~378 tests across 13 files, grouped by behavioural domain.
+519 tests across 13 files, grouped by behavioural domain.
+
+> **Note**: This inventory covers the major constraint-mapped tests.
+> Many tests (particularly in `test_services.py`, `test_sensor.py`, and
+> `test_init.py`) verify operational correctness without tracing to a
+> specific constraint. These are listed under Unmapped Tests.
 
 ## Smart Discharge Pacing
 
@@ -97,15 +102,21 @@ traces_up: [02-constraints.md, 04-design/]
 | `TestResolveStartEnd::test_crosses_midnight_rejected` | No midnight crossing | C-009 |
 | `TestMergeWithExisting::test_rejects_schedule_with_backup_mode` | Unmanaged mode guard | -- |
 
-## Session Management
+## Session Management & Service Handlers
 
 **Constraints**: C-003, C-012, C-013, C-016
-**Source**: `tests/test_init.py`, `tests/test_services.py`
+**Source**: `tests/test_init.py`, `tests/test_services.py` (79 tests)
 
 | Test | Verifies | Constraint |
 |---|---|---|
 | `TestResolveStartEnd::test_exceeds_max_hours` | 4-hour cap | C-013 |
 | `TestResolveStartEnd::test_zero_duration_rejected` | Positive duration required | C-013 |
+| `TestHandleSmartCharge::test_soc_unavailable_aborts_after_threshold` | SoC unavailable cancels charge | C-012 |
+| `TestHandleSmartCharge::test_soc_available_resets_unavailable_count` | Available SoC resets counter | C-012 |
+| `TestSessionPersistence::*` (3 tests) | Session survives restarts | C-003 |
+| `TestRecoverSessions::*` (10 tests) | Session recovery on startup | C-003 |
+| `TestSocStabilityCounters::*` (4 tests) | Below-min confirmation counter | C-002 |
+| `TestCheckScheduleSafe::*` (7 tests) | Unmanaged mode rejection | C-018 |
 
 ## Sensor Display
 
@@ -169,10 +180,25 @@ Key tests:
 
 ## Unmapped Tests
 
-Tests not yet traced to a specific constraint.
+Tests not yet traced to a specific constraint. ~80+ tests across multiple
+files verify operational correctness, display logic, and setup plumbing.
 
 | Test | Appears to verify |
 |---|---|
-| `test_sensor.py::TestBatteryForecastSensor::*` | Forecast trajectory calculations — may encode unstated constraints about forecast shape |
-| `test_sensor.py::TestDebugLog::*` | Debug sensor lifecycle — operational utility, no constraint |
-| `test_inverter.py::test_max_power_cached` | Capacity-to-power conversion caching — performance optimisation |
+| `test_sensor.py::TestBatteryForecastSensor` (8 tests) | Forecast trajectory calculations |
+| `test_sensor.py::TestDebugLog` (6 tests) | Debug sensor lifecycle |
+| `test_sensor.py::TestFoxESSPolledSensor` (5 tests) | Sensor plumbing |
+| `test_sensor.py::TestFoxESSWorkModeSensor` (5 tests) | Work mode sensor |
+| `test_sensor.py` display tests (~25 tests) | Charge/discharge remaining, power, window formatting |
+| `test_inverter.py` (11 tests) | Inverter API interactions |
+| `test_entity_mode.py` (18 tests) | Entity-mode interop |
+| `test_services.py::TestHandleClearOverrides` (9 tests) | Override clearing |
+| `test_services.py::TestHandleFeedin` (2 tests) | Feed-in service |
+| `test_services.py::TestHandleForceCharge` (3 tests) | Force charge service |
+| `test_services.py::TestHandleForceDischarge` (4 tests) | Force discharge service |
+| `test_services.py::TestHandleSmartDischarge` (11 tests) | Smart discharge lifecycle |
+| `test_services.py::TestFeedinEnergyLimit` (6 tests) | Feed-in energy tracking |
+| `test_init.py::TestRemoveModeFromSchedule` (7 tests) | Schedule mode removal |
+| `test_init.py::TestGetNetConsumption` (6 tests) | Consumption calculation |
+| `test_init.py::TestGetFeedinEnergyKwh` (6 tests) | Feed-in energy reading |
+| `test_smart_battery_algorithms.py::TestDischargePowerPeakSafetyFloor` (5 tests) | Peak safety floor |
