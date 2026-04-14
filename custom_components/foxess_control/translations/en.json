@@ -309,7 +309,8 @@
           "min_power_change": "Minimum Power Change for Smart Charge (W)",
           "api_min_soc": "Minimum API fdSoc (%) — ⚠️ Values below 11 may not work with all firmware versions",
           "polling_interval": "API Polling Interval (seconds)",
-          "smart_headroom": "Smart Headroom (%)"
+          "smart_headroom": "Smart Headroom (%)",
+          "ws_all_sessions": "Use real-time WebSocket for all smart sessions (not just forced discharge)"
         }
       },
       "modbus": {

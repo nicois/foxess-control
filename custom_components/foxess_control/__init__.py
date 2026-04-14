@@ -35,6 +35,7 @@ from .const import (
     CONF_WEB_PASSWORD,
     CONF_WEB_USERNAME,
     CONF_WORK_MODE_ENTITY,
+    CONF_WS_ALL_SESSIONS,
     DEFAULT_API_MIN_SOC,
     DEFAULT_ENTITY_POLLING_INTERVAL,
     DEFAULT_INVERTER_POWER,
@@ -557,6 +558,9 @@ def _cancel_smart_charge(hass: HomeAssistant, *, clear_storage: bool = True) -> 
     hass.data[DOMAIN].pop("_smart_charge_state", None)
     if clear_storage and hass.data.get(DOMAIN, {}).get("_store") is not None:
         hass.async_create_task(_clear_stored_session(hass, "smart_charge"))
+    # Stop WebSocket if no longer needed (discharge may still need it)
+    if not _should_start_realtime_ws(hass):
+        hass.async_create_task(_stop_realtime_ws(hass))
 
 
 def _to_minutes(hour: int, minute: int) -> int:
@@ -1722,6 +1726,7 @@ async def _recover_charge_session(
             "start_soc": charge_data.get("start_soc"),
         }
         _setup_smart_charge_listeners(hass, inverter)
+        await _maybe_start_realtime_ws(hass)
     else:
         _LOGGER.info(
             "Smart charge: no matching schedule group on inverter, discarding session"
@@ -2094,8 +2099,11 @@ _WS_DEBOUNCE_SECONDS = 10.0
 def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
     """Return True if the WebSocket should be active right now.
 
-    Criteria: cloud mode, web credentials configured, active forced discharge
-    with min_soc < 100 (i.e. discharge is actually paced/constrained).
+    Default criteria: cloud mode, web credentials configured, active forced
+    discharge with min_soc < 100 (i.e. discharge is actually paced).
+
+    When the ``ws_all_sessions`` option is enabled, the WebSocket is also
+    activated during smart charge sessions.
     """
     if _is_entity_mode(hass):
         return False
@@ -2105,12 +2113,23 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
         return False
     if not entry.data.get(CONF_WEB_USERNAME):
         return False
-    ds = hass.data.get(DOMAIN, {}).get("_smart_discharge_state")
-    if ds is None:
-        return False
-    if not ds.get("discharging_started", False):
-        return False
-    return not ds.get("min_soc", 0) >= 100
+
+    domain_data = hass.data.get(DOMAIN, {})
+    ws_all = entry.options.get(CONF_WS_ALL_SESSIONS, False)
+
+    # Active forced discharge (always eligible when web creds exist)
+    ds = domain_data.get("_smart_discharge_state")
+    if (
+        ds is not None
+        and ds.get("discharging_started", False)
+        and not ds.get("min_soc", 0) >= 100
+    ):
+        return True
+
+    # Any smart session when ws_all_sessions is enabled
+    return ws_all and (
+        ds is not None or domain_data.get("_smart_charge_state") is not None
+    )
 
 
 async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
@@ -2867,6 +2886,7 @@ def _register_services(hass: HomeAssistant) -> None:
             "smart_charge",
             _session_data_from_charge_state(hass.data[DOMAIN]["_smart_charge_state"]),
         )
+        await _maybe_start_realtime_ws(hass)
 
     hass.services.async_register(
         DOMAIN,

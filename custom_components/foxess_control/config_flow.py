@@ -28,6 +28,7 @@ from .const import (
     CONF_WEB_PASSWORD,
     CONF_WEB_USERNAME,
     CONF_WORK_MODE_ENTITY,
+    CONF_WS_ALL_SESSIONS,
     DOMAIN,
 )
 from .foxess import FoxESSClient, FoxESSRealtimeWS, FoxESSWebSession, Inverter
@@ -252,10 +253,19 @@ class FoxessControlOptionsFlow(OptionsFlow):
                 user_input.pop(key, None)
             return self.async_create_entry(data=user_input)
 
-        return self.async_show_form(
-            step_id="init",
-            data_schema=battery_options_schema(self._config_entry),
-        )
+        schema = battery_options_schema(self._config_entry)
+        # Show WebSocket option only when web credentials are configured
+        if self._config_entry.data.get(CONF_WEB_USERNAME):
+            opts = self._config_entry.options
+            schema = schema.extend(
+                {
+                    vol.Optional(
+                        CONF_WS_ALL_SESSIONS,
+                        default=opts.get(CONF_WS_ALL_SESSIONS, False),
+                    ): bool,
+                }
+            )
+        return self.async_show_form(step_id="init", data_schema=schema)
 
     async def async_step_modbus(
         self, user_input: dict[str, Any] | None = None

@@ -87,6 +87,7 @@ CONF_DEVICE_SERIAL = "device_serial"
 # Web portal credentials (optional, for WebSocket real-time data)
 CONF_WEB_USERNAME = "web_username"
 CONF_WEB_PASSWORD = "web_password"
+CONF_WS_ALL_SESSIONS = "ws_all_sessions"
 
 POLLED_VARIABLES = [
     "SoC",
