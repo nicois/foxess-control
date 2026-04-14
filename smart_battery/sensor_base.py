@@ -690,7 +690,7 @@ class SmartOperationsOverviewSensor(SensorEntity):
                     ),
                     "charge_start_time": cs["start"].isoformat(),
                     "charge_end_time": cs["end"].isoformat(),
-                    "charge_start_soc": cs.get("start_soc"),
+                    "charge_start_soc": cs.get("start_soc", soc),
                 }
             )
 
@@ -742,7 +742,7 @@ class SmartOperationsOverviewSensor(SensorEntity):
                     ),
                     "discharge_start_time": ds["start"].isoformat(),
                     "discharge_end_time": ds["end"].isoformat(),
-                    "discharge_start_soc": ds.get("start_soc"),
+                    "discharge_start_soc": ds.get("start_soc", soc),
                     "discharge_feedin_limit_kwh": feedin_limit,
                     "discharge_feedin_used_kwh": feedin_used,
                     "discharge_feedin_projected_kwh": feedin_projected,
