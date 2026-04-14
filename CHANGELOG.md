@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.1-beta.28
+
+### Added
+- **Discharge SoC unavailability abort (C-019)**: discharge sessions now abort after 3 consecutive SoC-unavailable checks, matching charge path behaviour. Previously discharge continued with no SoC feedback.
+- **Safe state on failure (C-024)**: listener callbacks now catch unexpected exceptions, cancel the session, and revert to self-use. Previously an uncaught exception left the inverter in forced mode with no monitoring.
+- **Unreachable charge target detection (C-022)**: new `charge_target_reachable` attribute on the smart operations sensor. When even max power can't reach the target SoC in remaining time (accounting for taper and consumption), this attribute is `false`.
+- **Proactive error surfacing (C-026)**: session errors (SoC unavailability abort, uncaught exceptions) are now surfaced via sensor attributes (`has_error`, `last_error`, `last_error_at`, `error_count`). The smart operations sensor shows "error" state when no session is active but an error exists. New sessions clear the error.
+
+### Fixed
+- **Session boundary cleanliness (C-025)**: confirmed and tested that transient state (peak consumption, taper ticks, feed-in baselines) does not leak between back-to-back sessions.
+
 ## 1.0.1-beta.27
 
 ### Fixed
