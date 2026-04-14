@@ -69,6 +69,13 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._fetch_all
             )
         except Exception as err:
+            # If we already have data (from a previous poll or WS injection),
+            # keep showing it rather than making all entities unavailable.
+            # This avoids a brief "—" flash when REST is temporarily down
+            # but WS was just providing valid data.
+            if self.data is not None:
+                _LOGGER.warning("REST poll failed, keeping last-known data: %s", err)
+                return dict(self.data)
             raise UpdateFailed(f"Error fetching FoxESS data: {err}") from err
         # REST poll is authoritative — reset WebSocket integration state
         self._ws_last_time = None

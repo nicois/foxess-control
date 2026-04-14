@@ -52,6 +52,31 @@ class TestAsyncUpdateData:
             await coord._async_update_data()
 
     @pytest.mark.asyncio
+    async def test_rest_failure_keeps_last_data(self) -> None:
+        """When REST fails but we have data, return last-known."""
+        inv = MagicMock(spec=Inverter)
+        inv.get_real_time.side_effect = RuntimeError("API error")
+        coord = _make_coordinator(inverter=inv)
+        # Simulate having existing data (e.g. from a previous poll or WS)
+        coord.data = {"SoC": 46.0, "_data_source": "ws"}
+
+        result = await coord._async_update_data()
+        assert result["SoC"] == 46.0
+        # Should NOT raise UpdateFailed
+
+    @pytest.mark.asyncio
+    async def test_rest_failure_raises_when_no_data(self) -> None:
+        """When REST fails with no existing data, raise UpdateFailed."""
+        inv = MagicMock(spec=Inverter)
+        inv.get_real_time.side_effect = RuntimeError("API error")
+        coord = _make_coordinator(inverter=inv)
+        # No existing data — use object.__setattr__ to bypass type check
+        object.__setattr__(coord, "data", None)
+
+        with pytest.raises(UpdateFailed, match="API error"):
+            await coord._async_update_data()
+
+    @pytest.mark.asyncio
     async def test_returns_empty_dict_from_api(self) -> None:
         inv = MagicMock(spec=Inverter)
         inv.get_real_time.return_value = {}
