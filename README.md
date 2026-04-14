@@ -491,6 +491,18 @@ That's it — no configuration required. The card auto-discovers the `sensor.fox
 - **Idle**: Clean message when no smart operation is active.
 - **Forecast**: SVG sparkline of projected SoC with time axis labels and a "now" marker. Y-axis scales to fit the data range.
 
+To hide the card when no smart operation is active, wrap it in a conditional card:
+
+```yaml
+type: conditional
+conditions:
+  - condition: state
+    entity: sensor.foxess_smart_operations
+    state_not: Idle
+card:
+  type: custom:foxess-control-card
+```
+
 To override the default entity IDs (e.g. if you renamed them):
 
 ```yaml
