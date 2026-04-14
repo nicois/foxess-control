@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1-beta.25
+
+### Fixed
+- **WebSocket kW/watts unit mismatch**: the FoxESS cloud WebSocket sometimes sends power values in kW instead of watts. The integration now auto-detects this (when all raw power values are < 50) and skips the /1000 conversion. Also adds warning-level logging when the mismatch is detected and when WS values diverge >10x from existing coordinator values.
+
 ## 1.0.1-beta.24
 
 ### Fixed
