@@ -135,6 +135,7 @@ class FoxESSRealtimeWS:
     RECONNECT_BASE_DELAY = 5.0
     RECONNECT_MAX_DELAY = 60.0
     STALE_TIMEOUT = 30.0  # no message in this many seconds = dead
+    MAX_TIME_DIFF = 30  # skip messages older than this (seconds)
 
     def __init__(
         self,
@@ -233,6 +234,17 @@ class FoxESSRealtimeWS:
 
             if data.get("errno", 0) != 0:
                 _LOGGER.debug("FoxESS WebSocket error message: %s", data.get("msg"))
+                continue
+
+            # Skip stale messages — timeDiff is seconds since the
+            # inverter last reported.  The first message after connect is
+            # typically 30-200+ seconds old; fresh updates have timeDiff ≈ 5.
+            time_diff = data.get("result", {}).get("timeDiff")
+            if isinstance(time_diff, int | float) and time_diff > self.MAX_TIME_DIFF:
+                _LOGGER.debug(
+                    "FoxESS WebSocket: skipping stale message (timeDiff=%s)",
+                    time_diff,
+                )
                 continue
 
             mapped = map_ws_to_coordinator(data)

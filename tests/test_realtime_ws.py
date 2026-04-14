@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
 
 from custom_components.foxess_control.foxess.realtime_ws import (
+    FoxESSRealtimeWS,
     map_ws_to_coordinator,
 )
 from custom_components.foxess_control.foxess.web_session import (
@@ -260,3 +263,78 @@ class TestMapWsToCoordinator:
         # balance (kW): 0.183 + 0.607 - 0 - 0.809 = -0.019 → slight export
         assert data["gridConsumptionPower"] == 0.0
         assert data["feedinPower"] == pytest.approx(0.019)
+
+
+# ---------------------------------------------------------------------------
+# WS warmup — first N messages after connect are skipped
+# ---------------------------------------------------------------------------
+
+
+class TestStaleness:
+    """Verify the WebSocket skips stale messages based on timeDiff."""
+
+    @staticmethod
+    def _make_ws_msg(time_diff: int = 5, soc: int = 65) -> aiohttp.WSMessage:
+        import json
+
+        return aiohttp.WSMessage(
+            type=aiohttp.WSMsgType.TEXT,
+            data=json.dumps(
+                {
+                    "errno": 0,
+                    "result": {
+                        "node": {
+                            "solar": {"power": {"value": "3500"}},
+                            "grid": {"power": {"value": "2000"}, "gridStatus": 2},
+                            "bat": {
+                                "power": {"value": "1500"},
+                                "soc": soc,
+                                "charge": 0,
+                            },
+                            "load": {"power": {"value": "2000"}},
+                        },
+                        "timeDiff": time_diff,
+                    },
+                }
+            ),
+            extra=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_stale_messages_skipped(self) -> None:
+        """Messages with timeDiff > MAX_TIME_DIFF are not forwarded."""
+        on_data = AsyncMock()
+        on_disconnect = MagicMock()
+        web_session = AsyncMock()
+        web_session.async_ensure_token = AsyncMock(return_value="tok")
+
+        ws = FoxESSRealtimeWS("plant1", web_session, on_data, on_disconnect)
+
+        messages = [
+            self._make_ws_msg(time_diff=215),  # stale — skip
+            self._make_ws_msg(time_diff=60),  # stale — skip
+            self._make_ws_msg(time_diff=5),  # fresh — forward
+            self._make_ws_msg(time_diff=5),  # fresh — forward
+            aiohttp.WSMessage(type=aiohttp.WSMsgType.CLOSED, data=None, extra=None),
+        ]
+
+        mock_ws = AsyncMock()
+        mock_ws.receive = AsyncMock(side_effect=messages)
+        mock_ws.closed = True
+
+        ws._ws = mock_ws
+        ws._connected = True
+        ws._stop_event.clear()
+
+        with patch.object(
+            ws, "_try_reconnect", new_callable=AsyncMock
+        ) as mock_reconnect:
+
+            async def _fail_reconnect() -> None:
+                ws._connected = False
+
+            mock_reconnect.side_effect = _fail_reconnect
+            await ws._listen_loop()
+
+        # Only the 2 fresh messages (timeDiff=5) should be forwarded
+        assert on_data.call_count == 2

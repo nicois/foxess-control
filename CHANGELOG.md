@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1-beta.23
+
+### Fixed
+- **WebSocket stale data filter**: messages are now skipped when `timeDiff` exceeds 30 seconds. The first message after connecting is typically 30-200+ seconds old (stale cached data from the cloud); fresh updates have `timeDiff ≈ 5`. Previously the stale first message overwrote valid REST data, causing grid and battery values to briefly show "—" on the overview card.
+
 ## 1.0.1-beta.22
 
 ### Fixed
