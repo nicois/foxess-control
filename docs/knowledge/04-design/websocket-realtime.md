@@ -116,3 +116,22 @@ sources are configured is itself a source of confusion.
 - **Connection lost**: Reconnects with backoff. After 5 failures, gives
   up and calls `on_disconnect`.
 - **First message stale**: Filtered by `timeDiff > 30` check.
+
+## UI Principles
+
+Lightweight patterns that enforce C-020 (operational transparency) on
+the Lovelace cards. These don't warrant full D-NNN entries but should
+be preserved during refactoring.
+
+- **Never hide real data**: if a sensor has a numeric value, show it
+  regardless of magnitude. A 3W house load is useful information —
+  greying it out or replacing with "—" implies the data is missing.
+- **Progress section only when meaningful**: the progress header and
+  bars are hidden during "scheduled" phase (before the session window
+  opens) to avoid an empty section.
+- **Data source badge only when ambiguous**: the badge appears when
+  the user has configured multiple potential sources (WS credentials
+  or entity mode). Single-source users see no badge.
+- **Error state over false idle**: when no session is active but the
+  last session ended with an error, show "error" rather than "idle"
+  so the user knows something went wrong.
