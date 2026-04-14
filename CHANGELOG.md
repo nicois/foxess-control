@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1-beta.29
+
+### Changed
+- **Session orchestration extracted via adapter pattern (C-021)**: `__init__.py` reduced from 3056 to ~2030 lines (-34%). Duplicate listener code eliminated by delegating to the brand-agnostic `smart_battery/listeners.py` through `FoxESSCloudAdapter` (schedule-based control) and `FoxESSEntityAdapter` (entity-mode control). Schedule utility functions moved to `foxess_adapter.py`.
+
 ## 1.0.1-beta.28
 
 ### Added
