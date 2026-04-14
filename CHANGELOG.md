@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1-beta.26
+
+### Fixed
+- **SoC shows "—" after session ends**: when the REST API is temporarily failing, the coordinator now keeps the last-known data instead of marking all entities unavailable. Previously, WS data masked REST failures during smart sessions, and entities would flash unavailable the moment WS disconnected.
+
 ## 1.0.1-beta.25
 
 ### Fixed
