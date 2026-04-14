@@ -12,6 +12,7 @@ import contextlib
 import logging
 import random
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 import aiohttp
 
@@ -141,8 +142,10 @@ class FoxESSRealtimeWS:
         """Establish the WebSocket connection."""
         if self._http_session is None or self._http_session.closed:
             self._http_session = aiohttp.ClientSession()
+        encoded_token = quote(token, safe="")
         url = (
-            f"{self.WS_URL}?plantId={self._plant_id}&token={token}&platform=web&lang=en"
+            f"{self.WS_URL}?plantId={self._plant_id}"
+            f"&token={encoded_token}&platform=web&lang=en"
         )
         self._ws = await self._http_session.ws_connect(
             url,
