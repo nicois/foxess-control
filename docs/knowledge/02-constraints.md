@@ -255,3 +255,18 @@ the issue themselves. Opacity creates support burden and erodes trust.
 (e.g. deferred start waiting) from a fault, leading to unnecessary
 manual intervention or missed issues.
 **Traces**: D-021
+
+### C-021: Brand-agnostic code belongs in the common package
+**Statement**: Code, algorithms, types, and related assets that do not
+directly relate to a specific inverter brand must be placed in the
+`smart_battery/` common package, not in brand-specific integration
+directories.
+**Rationale**: The strategic direction is multi-brand support. Code
+that lives in `custom_components/foxess_control/` but has no FoxESS
+dependency becomes an obstacle — it must be duplicated or extracted
+when adding a second brand. Placing it in `smart_battery/` from the
+start avoids this.
+**Violation consequence**: Brand-agnostic logic trapped in a
+brand-specific directory, requiring extraction work before each new
+brand integration and risking divergence between copies.
+**Traces**: C-015

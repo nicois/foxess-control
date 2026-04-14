@@ -32,6 +32,7 @@ Traceability from constraints through design decisions to tests.
 | C-017 End-of-discharge guard | D-003 | `TestShouldSuspendDischarge::test_high_consumption_suspends` | COVERED |
 | C-018 Unmanaged work mode protection | D-016 | `TestCheckScheduleSafe` (7), `test_rejects_schedule_with_backup_mode` | COVERED |
 | C-020 Operational transparency | D-021 | `TestDataSourceTracking` (3), `TestFoxESSPolledSensor::test_data_source_*` (2) | COVERED |
+| C-021 Brand-agnostic code in common package | -- | `test_vendored_copy_matches_canonical` (indirect) | PARTIAL |
 | C-019 Discharge SoC unavailability unprotected | -- | -- | GAP |
 
 ## Gaps
@@ -47,6 +48,9 @@ Traceability from constraints through design decisions to tests.
 ### Constraints without design docs (PARTIAL)
 - **C-013**: 4-hour max override — this is a simple constant guard, not
   a significant design decision. Covered by test but no design doc.
+- **C-021**: Brand-agnostic code in common package — architectural
+  constraint enforced by code review, not a testable invariant. C-015
+  (vendored sync) provides indirect verification.
 
 ### Design decisions without tests (UNVERIFIED)
 - **D-002**: Deferred start with self-use — the deferred start
@@ -67,8 +71,8 @@ Traceability from constraints through design decisions to tests.
 
 ## Summary
 
-- **Total constraints**: 20
-- **Fully covered**: 16 (80%)
-- **Partial**: 2 (10%)
+- **Total constraints**: 21
+- **Fully covered**: 16 (76%)
+- **Partial**: 3 (14%)
 - **Gaps**: 2 (10%) — C-016 (structural), C-019 (code gap)
 - **Orphan tests**: 80+ (test_services.py largely unmapped)
