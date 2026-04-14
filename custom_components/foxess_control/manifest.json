@@ -7,7 +7,7 @@
   "dependencies": ["http"],
   "documentation": "https://github.com/nicois/foxess-control",
   "iot_class": "cloud_polling",
-  "requirements": ["wasmtime>=29.0.0"],
   "issue_tracker": "https://github.com/nicois/foxess-control/issues",
+  "requirements": ["wasmtime>=29.0.0"],
   "version": "1.0.1-beta.7"
 }
