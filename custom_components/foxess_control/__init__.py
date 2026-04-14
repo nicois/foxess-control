@@ -819,6 +819,22 @@ def _setup_smart_charge_listeners(
         if cur_state is None or cur_state.get("session_id") != my_session_id:
             return
 
+        try:
+            await _adjust_charge_power_inner(cur_state)
+        except Exception:
+            _LOGGER.exception("Smart charge: unexpected error, aborting session")
+            try:
+                charging_started = cur_state.get("charging_started", False)
+                if _is_my_session():
+                    _cancel_smart_charge(hass)
+                    if charging_started:
+                        await _remove_charge_override()
+            except Exception:
+                _LOGGER.exception("Smart charge: cleanup also failed")
+
+    async def _adjust_charge_power_inner(
+        cur_state: dict[str, Any],
+    ) -> None:
         cur_soc = _get_current_soc(hass)
         if cur_soc is None:
             cur_state["soc_unavailable_count"] = (
@@ -1204,6 +1220,22 @@ def _setup_smart_discharge_listeners(
         if cur_state is None or cur_state.get("session_id") != my_session_id:
             return
 
+        try:
+            await _check_discharge_soc_inner(cur_state)
+        except Exception:
+            _LOGGER.exception("Smart discharge: unexpected error, aborting session")
+            try:
+                discharging_started = cur_state.get("discharging_started", False)
+                if _is_my_session():
+                    _cancel_smart_discharge(hass)
+                    if discharging_started:
+                        await _remove_discharge_override()
+            except Exception:
+                _LOGGER.exception("Smart discharge: cleanup also failed")
+
+    async def _check_discharge_soc_inner(
+        cur_state: dict[str, Any],
+    ) -> None:
         # --- Update peak consumption tracker ---
         current_consumption = max(0.0, _get_net_consumption(hass))
         old_peak = cur_state.get("consumption_peak_kw", 0.0)
@@ -1349,9 +1381,10 @@ def _setup_smart_discharge_listeners(
                     # rather than the configured discharge power, since
                     # the actual rate is limited by the inverter's grid
                     # export limit and household consumption.
-                    feedin_prev = cur_state.get("feedin_prev_kwh")
+                    feedin_prev: float | None = cur_state.get("feedin_prev_kwh")
                     has_observed = feedin_prev is not None and feedin_now != feedin_prev
                     if has_observed:
+                        assert feedin_prev is not None  # narrowed above
                         observed_rate_kw = (feedin_now - feedin_prev) / poll_hours
                     cur_state["feedin_prev_kwh"] = feedin_now
 

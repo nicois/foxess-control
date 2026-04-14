@@ -1536,6 +1536,143 @@ class TestDischargeSocUnavailability:
         assert state["soc_unavailable_count"] == 0
 
 
+class TestCallbackExceptionSafety:
+    """Tests for C-024: session aborts on uncaught exception in callback."""
+
+    @pytest.mark.asyncio
+    async def test_charge_callback_exception_cancels(self) -> None:
+        """Uncaught exception in charge callback cancels session."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=60.0,
+            coordinator_data={"SoC": 20.0},
+        )
+
+        captured = None
+
+        def capture(_h: Any, cb: Any, _i: Any) -> MagicMock:
+            nonlocal captured
+            captured = cb
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(2, 0),
+                        "end_time": datetime.time(6, 0),
+                        "target_soc": 80,
+                    }
+                )
+            )
+
+        assert captured is not None
+        assert "_smart_charge_state" in hass.data[DOMAIN]
+
+        # Make _get_current_soc raise an exception
+        with (
+            patch(
+                "custom_components.foxess_control._get_current_soc",
+                side_effect=RuntimeError("sensor exploded"),
+            ),
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 5, 0),
+            ),
+        ):
+            await captured(datetime.datetime(2026, 4, 7, 2, 5, 0))
+
+        # Session should be cancelled
+        assert "_smart_charge_state" not in hass.data[DOMAIN]
+
+    @pytest.mark.asyncio
+    async def test_discharge_callback_exception_cancels(self) -> None:
+        """Uncaught exception in discharge callback cancels session."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 80.0},
+        )
+
+        captured = None
+
+        def capture(_h: Any, cb: Any, _i: Any) -> MagicMock:
+            nonlocal captured
+            captured = cb
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                side_effect=capture,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 30,
+                    }
+                )
+            )
+
+        assert captured is not None
+        assert "_smart_discharge_state" in hass.data[DOMAIN]
+
+        # Make _get_net_consumption raise (first thing after session guard)
+        with (
+            patch(
+                "custom_components.foxess_control._get_net_consumption",
+                side_effect=RuntimeError("sensor exploded"),
+            ),
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 1, 0),
+            ),
+        ):
+            await captured(datetime.datetime(2026, 4, 7, 17, 1, 0))
+
+        # Session should be cancelled
+        assert "_smart_discharge_state" not in hass.data[DOMAIN]
+
+
 class TestHandleSmartCharge:
     """Tests for handle_smart_charge service handler."""
 

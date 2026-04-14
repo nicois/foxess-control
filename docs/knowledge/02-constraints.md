@@ -278,7 +278,9 @@ charging indefinitely or discharging past min SoC with no pacing.
 **Violation consequence**: Inverter stuck in forced charge
 (overcharging, wasted grid import) or forced discharge
 (over-discharge, grid import) with no active session monitoring it.
-**Traces**: C-012 (specific case); -- (**partial implementation**)
+**Traces**: C-012 (specific case);
+`tests/test_services.py::TestCallbackExceptionSafety::test_charge_callback_exception_cancels`,
+`tests/test_services.py::TestCallbackExceptionSafety::test_discharge_callback_exception_cancels`
 
 ### C-023: Solar-aware charge reduction
 **Statement**: During smart charge, when solar generation exceeds
