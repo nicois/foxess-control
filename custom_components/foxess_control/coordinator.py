@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -41,6 +42,9 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             update_interval=datetime.timedelta(seconds=update_interval_seconds),
         )
         self.inverter = inverter
+        # WebSocket feed-in energy integration state
+        self._ws_last_time: float | None = None
+        self._ws_feedin_power_kw: float = 0.0
 
     def _fetch_all(self) -> dict[str, Any]:
         """Fetch real-time data and work mode in a single executor job."""
@@ -66,6 +70,9 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         except Exception as err:
             raise UpdateFailed(f"Error fetching FoxESS data: {err}") from err
+        # REST poll is authoritative — reset WebSocket integration state
+        self._ws_last_time = None
+        self._ws_feedin_power_kw = 0.0
         return data
 
     def inject_realtime_data(self, ws_data: dict[str, Any]) -> None:
@@ -75,9 +82,36 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         (SoC, power values).  The full REST-polled dataset remains the
         base, so variables not in the WebSocket stream (cumulative energy
         counters, temperatures, etc.) stay current from the last REST poll.
+
+        Additionally, integrates the instantaneous ``feedinPower`` (kW)
+        over time to approximate the cumulative ``feedin`` energy counter
+        between REST polls.  The REST value is authoritative and resets
+        the integration when a new poll arrives.
         """
         if self.data is None:
             return
+
+        # Integrate feedinPower into the cumulative feedin energy counter
+        now = time.monotonic()
+        feedin_power_kw = ws_data.get("feedinPower")
+        if feedin_power_kw is not None and self._ws_last_time is not None:
+            elapsed_hours = (now - self._ws_last_time) / 3600.0
+            if elapsed_hours > 0:
+                # Use average of previous and current power (trapezoidal)
+                avg_kw = (self._ws_feedin_power_kw + feedin_power_kw) / 2.0
+                delta_kwh = avg_kw * elapsed_hours
+                if delta_kwh > 0:
+                    base_feedin = self.data.get("feedin")
+                    if base_feedin is not None:
+                        try:
+                            ws_data = dict(ws_data)  # don't mutate caller's dict
+                            ws_data["feedin"] = float(base_feedin) + delta_kwh
+                        except (ValueError, TypeError):
+                            pass
+        if feedin_power_kw is not None:
+            self._ws_feedin_power_kw = feedin_power_kw
+            self._ws_last_time = now
+
         # Skip if nothing actually changed (avoids redundant entity updates)
         if all(self.data.get(k) == v for k, v in ws_data.items()):
             return

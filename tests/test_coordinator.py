@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -107,3 +108,129 @@ class TestWorkMode:
         assert result["pvPower"] == 3.2
         # Work mode should be None (not raise)
         assert result["_work_mode"] is None
+
+
+class TestInjectRealtimeData:
+    """Tests for inject_realtime_data and feed-in energy integration."""
+
+    def _make_coord_with_data(
+        self, data: dict[str, object] | None = None
+    ) -> FoxESSDataCoordinator:
+        coord = _make_coordinator()
+        coord.data = data if data is not None else {"SoC": 50.0, "feedin": 100.0}
+        return coord
+
+    def test_basic_merge(self) -> None:
+        coord = self._make_coord_with_data()
+        coord.inject_realtime_data({"SoC": 55.0})
+        assert coord.data is not None
+        assert coord.data["SoC"] == 55.0
+        assert coord.data["feedin"] == 100.0  # unchanged
+
+    def test_skip_when_data_is_none(self) -> None:
+        coord = _make_coordinator()
+        # Explicitly ensure data is None (not set by helper)
+        object.__setattr__(coord, "data", None)
+        coord.inject_realtime_data({"SoC": 55.0})  # should not raise
+
+    def test_skip_when_nothing_changed(self) -> None:
+        coord = self._make_coord_with_data({"SoC": 50.0, "feedin": 100.0})
+        # Patch to detect if async_set_updated_data is called
+        coord.async_set_updated_data = MagicMock()  # type: ignore[method-assign]
+        coord.inject_realtime_data({"SoC": 50.0})
+        coord.async_set_updated_data.assert_not_called()
+
+    def test_feedin_not_integrated_on_first_ws_update(self) -> None:
+        """First WS message establishes baseline — no integration yet."""
+        coord = self._make_coord_with_data({"SoC": 50.0, "feedin": 100.0})
+        coord.inject_realtime_data({"feedinPower": 5.0, "SoC": 51.0})
+        assert coord.data is not None
+        # feedin should not change on first update (no elapsed time)
+        assert coord.data["feedin"] == 100.0
+
+    def test_feedin_integrated_on_second_ws_update(self) -> None:
+        """Second WS message integrates power over elapsed time."""
+        coord = self._make_coord_with_data({"SoC": 50.0, "feedin": 100.0})
+
+        # First update: establishes baseline
+        coord.inject_realtime_data({"feedinPower": 5.0, "SoC": 50.0})
+
+        # Simulate 5 seconds elapsed
+        coord._ws_last_time = time.monotonic() - 5.0
+
+        # Second update: 5kW for 5 seconds = 5 * (5/3600) ≈ 0.00694 kWh
+        coord.inject_realtime_data({"feedinPower": 5.0, "SoC": 50.0})
+        assert coord.data is not None
+        delta = coord.data["feedin"] - 100.0
+        assert delta == pytest.approx(5.0 * 5.0 / 3600.0, rel=0.01)
+
+    def test_feedin_trapezoidal_integration(self) -> None:
+        """Integration uses average of previous and current power."""
+        coord = self._make_coord_with_data({"SoC": 50.0, "feedin": 100.0})
+
+        # First update at 2kW
+        coord.inject_realtime_data({"feedinPower": 2.0, "SoC": 50.0})
+        coord._ws_last_time = time.monotonic() - 10.0
+
+        # Second update at 4kW — average should be 3kW
+        coord.inject_realtime_data({"feedinPower": 4.0, "SoC": 50.0})
+        assert coord.data is not None
+        delta = coord.data["feedin"] - 100.0
+        expected = 3.0 * 10.0 / 3600.0  # avg 3kW for 10s
+        assert delta == pytest.approx(expected, rel=0.01)
+
+    def test_feedin_accumulates_across_updates(self) -> None:
+        """Multiple WS updates accumulate into the feedin counter."""
+        coord = self._make_coord_with_data({"SoC": 50.0, "feedin": 100.0})
+
+        coord.inject_realtime_data({"feedinPower": 5.0, "SoC": 50.0})
+        coord._ws_last_time = time.monotonic() - 5.0
+
+        coord.inject_realtime_data({"feedinPower": 5.0, "SoC": 50.0})
+        first_feedin = coord.data["feedin"]
+        assert first_feedin > 100.0
+
+        coord._ws_last_time = time.monotonic() - 5.0
+        coord.inject_realtime_data({"feedinPower": 5.0, "SoC": 50.0})
+        assert coord.data["feedin"] > first_feedin
+
+    def test_zero_feedin_power_no_accumulation(self) -> None:
+        """Zero feedinPower should not increase the feedin counter."""
+        coord = self._make_coord_with_data({"SoC": 50.0, "feedin": 100.0})
+
+        coord.inject_realtime_data({"feedinPower": 0.0, "SoC": 50.0})
+        coord._ws_last_time = time.monotonic() - 5.0
+        coord.inject_realtime_data({"feedinPower": 0.0, "SoC": 50.0})
+
+        assert coord.data is not None
+        assert coord.data["feedin"] == 100.0
+
+    @pytest.mark.asyncio
+    async def test_rest_poll_resets_integration_state(self) -> None:
+        """REST poll should reset WS integration and restore authoritative feedin."""
+        inv = MagicMock(spec=Inverter)
+        inv.get_real_time.return_value = {"SoC": 50.0, "feedin": 200.0}
+        inv.get_current_mode.return_value = WorkMode.SELF_USE
+        coord = _make_coordinator(inverter=inv)
+        coord.data = {"SoC": 50.0, "feedin": 100.0}
+
+        # Simulate WS integration state
+        coord._ws_last_time = time.monotonic()
+        coord._ws_feedin_power_kw = 5.0
+
+        # REST poll resets everything
+        result = await coord._async_update_data()
+        assert result["feedin"] == 200.0
+        assert coord._ws_last_time is None
+        assert coord._ws_feedin_power_kw == 0.0
+
+    def test_no_feedin_in_base_data(self) -> None:
+        """If coordinator has no feedin value, WS integration is skipped."""
+        coord = self._make_coord_with_data({"SoC": 50.0})  # no feedin key
+
+        coord.inject_realtime_data({"feedinPower": 5.0, "SoC": 51.0})
+        coord._ws_last_time = time.monotonic() - 5.0
+        coord.inject_realtime_data({"feedinPower": 5.0, "SoC": 52.0})
+
+        assert coord.data is not None
+        assert "feedin" not in coord.data
