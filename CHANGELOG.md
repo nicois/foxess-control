@@ -1,9 +1,16 @@
 # Changelog
 
+## 1.0.1-beta.21
+
+### Fixed
+- **WebSocket connecting before session starts**: with `ws_all_sessions` enabled, the WebSocket now only connects once charging/discharging has actually started, not when the session is merely scheduled or deferred
+- **Progress bars shown for scheduled discharge**: the control card no longer renders progress bars during the pre-window "scheduled" phase
+- **Data source badge shown for API-only users**: the `WS`/`Modbus` badge is now hidden when the source is plain API (no badge = API)
+
 ## 1.0.1-beta.20
 
 ### Added
-- **Data source indicator on Lovelace cards**: both the overview and control cards now show a small badge (`WS`, `API`, or `Modbus`) next to the title indicating the current data source. Exposed via a `data_source` attribute on all polled sensor entities.
+- **Data source indicator on Lovelace cards**: both the overview and control cards now show a small badge (`WS` or `Modbus`) next to the title indicating the current data source. Exposed via a `data_source` attribute on all polled sensor entities.
 
 ### Fixed
 - **WebSocket power values 1000x too large**: the WebSocket sends values in watts, not kW — restored the /1000 conversion that was incorrectly removed in beta.14. Overview card was showing e.g. "340 kW" house load instead of 340 W.
