@@ -757,7 +757,7 @@ class FoxESSControlCard extends HTMLElement {
     const now = Date.now();
     let bars = "";
 
-    if (chargeActive) {
+    if (chargeActive && a.charge_phase !== "deferred") {
       const startSoc = a.charge_start_soc;
       const current = a.charge_current_soc;
       const target = a.charge_target_soc;
