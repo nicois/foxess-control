@@ -711,6 +711,26 @@ class FoxESSControlCard extends HTMLElement {
     `;
   }
 
+  _socProgressBar(label, value, confirmedPct, projectedPct, fillClass, tooltip, tipKey) {
+    // Two-zone SoC bar: solid confirmed + semi-transparent projected.
+    // When only integer SoC is available, both are equal (no projected zone).
+    const hasTip = !!tooltip;
+    const expanded = hasTip && tipKey && this._expandedTips.has(tipKey);
+    const projectedWidth = Math.max(0, projectedPct - confirmedPct);
+    return `
+      <div class="progress-row${hasTip ? " has-tip" : ""}${expanded ? " expanded" : ""}"${tipKey ? ` data-tip-key="${tipKey}"` : ""}>
+        <div class="detail-row">
+          <span class="detail-label">${label}</span>
+          <span class="detail-value">${value}</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill ${fillClass}" style="width:${confirmedPct}%"></div>${projectedWidth > 0.2 ? `<div class="progress-fill ${fillClass} projected" style="width:${projectedWidth}%"></div>` : ""}
+        </div>
+        ${hasTip ? `<div class="progress-tip">${tooltip}</div>` : ""}
+      </div>
+    `;
+  }
+
   _energyScheduleBar(label, value, actualPct, expectedPct, tooltip, tipKey) {
     // Show energy progress with a coloured gap segment indicating
     // whether discharge is ahead of or behind the ideal schedule.
@@ -760,13 +780,16 @@ class FoxESSControlCard extends HTMLElement {
     if (chargeActive && a.charge_phase !== "deferred") {
       const startSoc = a.charge_start_soc;
       const current = a.charge_current_soc;
+      const confirmed = a.charge_confirmed_soc ?? current;
       const target = a.charge_target_soc;
 
       let socPct = 0;
+      let confirmedPct = 0;
       if (startSoc != null && target != null && current != null && target > startSoc) {
         socPct = Math.min(100, Math.max(0, ((current - startSoc) / (target - startSoc)) * 100));
+        confirmedPct = Math.min(100, Math.max(0, ((confirmed - startSoc) / (target - startSoc)) * 100));
       }
-      const curStr = current != null ? Math.round(current) + "%" : "?%";
+      const curStr = current != null ? current.toFixed(1) + "%" : "?%";
       const tgtStr = target != null ? target + "%" : "?%";
       const socLabel = startSoc != null && Math.round(startSoc) !== Math.round(current ?? startSoc)
         ? `${Math.round(startSoc)}% → ${curStr} → ${tgtStr}`
@@ -788,7 +811,7 @@ class FoxESSControlCard extends HTMLElement {
         ? this._t("tip_power_charge_deferred")
         : this._t("tip_power_active").replace("{0}", this._formatPower(chargePower)).replace("{1}", this._formatPower(chargeMax));
 
-      bars += this._progressBar(this._t("soc"), socLabel, socPct, "charge-fill", socTip, "charge-soc");
+      bars += this._socProgressBar(this._t("soc"), socLabel, confirmedPct, socPct, "charge-fill", socTip, "charge-soc");
       bars += this._progressBar(this._t("power"), this._formatPower(chargePower), chargePowerPct, "charge-fill", chargePowerTip, "charge-power");
       bars += this._progressBar(this._t("time"), time.label, time.pct, "time-fill", timeTip, "charge-time");
     }
@@ -796,22 +819,25 @@ class FoxESSControlCard extends HTMLElement {
     if (dischargeActive && a.discharge_phase !== "scheduled") {
       const startSoc = a.discharge_start_soc;
       const current = a.discharge_current_soc;
+      const confirmed = a.discharge_confirmed_soc ?? current;
       const minSoc = a.discharge_min_soc;
 
       let socPct = 0;
+      let confirmedPct = 0;
       if (startSoc != null && minSoc != null && current != null && startSoc > minSoc) {
         socPct = Math.min(100, Math.max(0, ((startSoc - current) / (startSoc - minSoc)) * 100));
+        confirmedPct = Math.min(100, Math.max(0, ((startSoc - confirmed) / (startSoc - minSoc)) * 100));
       }
-      const curStr = current != null ? Math.round(current) + "%" : "?%";
+      const curStr = current != null ? current.toFixed(1) + "%" : "?%";
       const minStr = minSoc != null ? minSoc + "%" : "?%";
       const socLabel = startSoc != null && Math.round(startSoc) !== Math.round(current ?? startSoc)
         ? `${Math.round(startSoc)}% → ${curStr} → ${minStr}`
         : `${curStr} → ${minStr}`;
 
       const socTip = current != null && minSoc != null
-        ? this._t("tip_soc_discharge").replace("{0}", Math.round(current)).replace("{1}", minSoc).replace("{2}", Math.max(0, Math.round(current) - minSoc))
+        ? this._t("tip_soc_discharge").replace("{0}", current.toFixed(1)).replace("{1}", minSoc).replace("{2}", Math.max(0, current - minSoc).toFixed(1))
         : "";
-      bars += this._progressBar(this._t("soc"), socLabel, socPct, "discharge-fill", socTip, "discharge-soc");
+      bars += this._socProgressBar(this._t("soc"), socLabel, confirmedPct, socPct, "discharge-fill", socTip, "discharge-soc");
 
       const dischPower = a.discharge_power_w || 0;
       const dischMax = a.discharge_max_power_w || 1;
@@ -1081,6 +1107,9 @@ class FoxESSControlCard extends HTMLElement {
       }
       .discharge-fill {
         background: linear-gradient(90deg, var(--fc-discharge), #ffb74d);
+      }
+      .progress-fill.projected {
+        opacity: 0.35;
       }
       .energy-fill {
         background: linear-gradient(90deg, var(--fc-energy), #64b5f6);

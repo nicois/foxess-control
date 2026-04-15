@@ -712,6 +712,7 @@ class SmartOperationsOverviewSensor(SensorEntity):
                     "charge_max_power_w": cs.get("max_power_w"),
                     "charge_target_soc": cs.get("target_soc"),
                     "charge_current_soc": soc,
+                    "charge_confirmed_soc": get_soc_value(self.hass, self._domain),
                     "charge_window": (
                         f"{format_time(cs['start'])} – {format_time(cs['end'])}"
                     ),
@@ -765,6 +766,7 @@ class SmartOperationsOverviewSensor(SensorEntity):
                     "discharge_max_power_w": ds.get("max_power_w"),
                     "discharge_min_soc": ds.get("min_soc"),
                     "discharge_current_soc": soc,
+                    "discharge_confirmed_soc": get_soc_value(self.hass, self._domain),
                     "discharge_window": (
                         f"{format_time(ds['start'])} – {format_time(ds['end'])}"
                     ),
