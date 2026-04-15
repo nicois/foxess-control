@@ -3,7 +3,8 @@
 ## 1.0.3-beta.2
 
 ### Fixed
-- **WS not starting during smart charge with ws_all_sessions**: another regression from the adapter extraction — the charge listener wrapper didn't trigger `_maybe_start_realtime_ws` after setup.
+- **WS not starting during smart charge with ws_all_sessions**: regression from the adapter extraction — the charge listener wrapper didn't trigger `_maybe_start_realtime_ws` after setup
+- **Persistent notifications lost on schedule conflict**: the adapter extraction removed `pn_create` calls that notified users about unmanaged work modes during power adjustments. Restored by pre-checking schedule safety from the async context.
 
 ## 1.0.3-beta.1
 
