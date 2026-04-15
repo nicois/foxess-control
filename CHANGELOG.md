@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.3-beta.2
+
+### Fixed
+- **WS not starting during smart charge with ws_all_sessions**: another regression from the adapter extraction — the charge listener wrapper didn't trigger `_maybe_start_realtime_ws` after setup.
+
 ## 1.0.3-beta.1
 
 ### Added

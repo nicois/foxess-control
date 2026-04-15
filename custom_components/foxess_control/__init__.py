@@ -592,6 +592,8 @@ def _setup_smart_charge_listeners(
     state = hass.data[DOMAIN]["_smart_charge_state"]
     adapter = _build_foxess_adapter(hass, inverter, state)
     _sb_setup_smart_charge_listeners(hass, DOMAIN, adapter)  # type: ignore[arg-type]
+    # Trigger WS check — needed when ws_all_sessions is enabled
+    hass.async_create_task(_maybe_start_realtime_ws(hass))
 
 
 def _setup_smart_discharge_listeners(
