@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "minor_version": 2,
+  "key": "auth",
+  "data": {
+    "users": [
+      {
+        "id": "e2e-user-001",
+        "group_ids": ["system-admin"],
+        "is_owner": true,
+        "is_active": true,
+        "name": "E2E Test",
+        "system_generated": false,
+        "local_only": false
+      }
+    ],
+    "credentials": [
+      {
+        "id": "e2e-cred-001",
+        "user_id": "e2e-user-001",
+        "auth_provider_type": "homeassistant",
+        "auth_provider_id": null,
+        "data": {
+          "username": "e2e-test"
+        }
+      }
+    ],
+    "refresh_tokens": [
+      {
+        "id": "e2e-refresh-001",
+        "user_id": "e2e-user-001",
+        "client_id": null,
+        "client_name": "E2E Test Long-Lived Token",
+        "client_icon": null,
+        "token_type": "long_lived_access_token",
+        "created_at": "2026-01-01T00:00:00.000000+00:00",
+        "access_token_expiration": 315360000.0,
+        "token": "e2e-test-token-foxess-simulator-access",
+        "jwt_key": "e2e-jwt-key-not-used-for-long-lived",
+        "last_used_at": null,
+        "last_used_ip": null,
+        "credential_id": "e2e-cred-001",
+        "version": "2026.4.2"
+      }
+    ]
+  }
+}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+import os
 import time as _time
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -1204,7 +1205,8 @@ async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
     # Get or create web session (reused across discharge sessions)
     web_session: FoxESSWebSession | None = domain_data.get("_web_session")
     if web_session is None:
-        web_session = FoxESSWebSession(username, password_md5)
+        _sim = os.environ.get("FOXESS_SIMULATOR_URL")
+        web_session = FoxESSWebSession(username, password_md5, base_url=_sim)
         domain_data["_web_session"] = web_session
 
     # Discover plantId (cached after first call)
@@ -1238,7 +1240,9 @@ async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
             coordinator.data["_data_source"] = "api"
             coordinator.async_set_updated_data(dict(coordinator.data))
 
-    ws = FoxESSRealtimeWS(plant_id, web_session, on_data, on_disconnect)
+    _sim = os.environ.get("FOXESS_SIMULATOR_URL")
+    _ws_url = _sim.replace("http://", "ws://") + "/dew/v0/wsmaitian" if _sim else None
+    ws = FoxESSRealtimeWS(plant_id, web_session, on_data, on_disconnect, ws_url=_ws_url)
     try:
         await ws.async_connect()
         domain_data["_realtime_ws"] = ws
@@ -1345,9 +1349,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entity_mode = bool(entity_map)
     api_key = entry.data.get(CONF_API_KEY, "")
 
+    sim_url = os.environ.get("FOXESS_SIMULATOR_URL")
+
     inverter: Inverter | None = None
     if api_key:
-        client = FoxESSClient(api_key)
+        client = FoxESSClient(api_key, base_url=sim_url)
         inverter = Inverter(client, entry.data[CONF_DEVICE_SERIAL])
         # Pre-warm max_power_w (validates connection, caches rated power)
         await hass.async_add_executor_job(lambda: inverter.max_power_w)

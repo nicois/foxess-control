@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "minor_version": 4,
+  "key": "core.config_entries",
+  "data": {
+    "entries": [
+      {
+        "created_at": "2026-01-01T00:00:00.000000+00:00",
+        "data": {
+          "api_key": "e2e-test-api-key",
+          "device_serial": "SIM0001",
+          "web_username": "e2e-test",
+          "web_password": "e2e-test-password-md5"
+        },
+        "disabled_by": null,
+        "discovery_keys": {},
+        "domain": "foxess_control",
+        "entry_id": "e2e-foxess-001",
+        "minor_version": 2,
+        "modified_at": "2026-01-01T00:00:00.000000+00:00",
+        "options": {
+          "battery_capacity_kwh": 10.0,
+          "min_soc_on_grid": 15,
+          "api_min_soc": 11,
+          "polling_interval": 60,
+          "min_power_change": 100,
+          "smart_headroom": 0.1,
+          "ws_all_sessions": true
+        },
+        "pref_disable_new_entities": false,
+        "pref_disable_polling": false,
+        "source": "user",
+        "title": "FoxESS SIM0001",
+        "unique_id": "SIM0001",
+        "version": 2
+      }
+    ]
+  }
+}

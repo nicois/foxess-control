@@ -1,0 +1,3 @@
+FROM ghcr.io/home-assistant/home-assistant:stable
+# Pre-install wasmtime to avoid first-boot delay
+RUN pip install --no-cache-dir 'wasmtime>=29.0.0'

@@ -27,6 +27,9 @@ where = ["."]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: end-to-end tests requiring podman and HA container (run with pytest e2e/ -m slow)",
+]
 
 [tool.mypy]
 strict = true
