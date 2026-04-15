@@ -47,7 +47,7 @@ class TestSmartDischarge:
         """Service call → schedule written → state transitions."""
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
 
-        start, end = _tight_window(30)
+        start, end = _tight_window(10)
         ha_e2e.call_service(
             "foxess_control",
             "smart_discharge",
@@ -71,7 +71,7 @@ class TestSmartDischarge:
         """Fast-forward and verify SoC decreases."""
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
 
-        start, end = _tight_window(30)
+        start, end = _tight_window(10)
         ha_e2e.call_service(
             "foxess_control",
             "smart_discharge",
@@ -98,7 +98,7 @@ class TestSmartCharge:
         """Service call starts a charge session."""
         foxess_sim.set(soc=20, solar_kw=0, load_kw=0.3)
 
-        start, end = _tight_window(30)
+        start, end = _tight_window(10)
         ha_e2e.call_service(
             "foxess_control",
             "smart_charge",
@@ -121,7 +121,7 @@ class TestFaultInjection:
         """WS sends kW instead of W — integration handles it."""
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
 
-        start, end = _tight_window(30)
+        start, end = _tight_window(10)
         ha_e2e.call_service(
             "foxess_control",
             "smart_discharge",

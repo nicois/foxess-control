@@ -185,7 +185,7 @@ class TestOverviewCard:
     ) -> None:
         """PV1 + PV2 ≈ solar total during smart operations."""
         foxess_sim.set(soc=80, solar_kw=3.0, load_kw=0.5)
-        start, end = _tight_window(30)
+        start, end = _tight_window(10)
         ha_e2e.call_service(
             "foxess_control",
             "smart_discharge",
@@ -232,17 +232,19 @@ class TestOverviewCard:
         )
         assert solar_texts, "Solar node not found in overview card"
         assert solar_texts["total"], "Solar total not displayed"
-        assert solar_texts["detail"], "PV detail not displayed"
 
-        total_kw = _parse_power_kw(solar_texts["total"])
-        # Detail format: "PV1 1.50 kW · PV2 1.50 kW"
-        pv_parts = solar_texts["detail"].split("·")
-        pv_sum = sum(_parse_power_kw(part) for part in pv_parts)
-
-        # Tolerance accounts for simulator fuzzing (±2% jitter)
-        assert abs(pv_sum - total_kw) < 0.15, (
-            f"PV sum {pv_sum:.3f} kW != solar total {total_kw:.3f} kW"
-        )
+        if data_source == "ws":
+            # WS mode hides PV detail (stale REST values) — verify
+            # the total is displayed but don't check PV breakdown.
+            assert not solar_texts["detail"], "PV detail should be hidden in WS mode"
+        else:
+            assert solar_texts["detail"], "PV detail not displayed"
+            total_kw = _parse_power_kw(solar_texts["total"])
+            pv_parts = solar_texts["detail"].split("·")
+            pv_sum = sum(_parse_power_kw(part) for part in pv_parts)
+            assert abs(pv_sum - total_kw) < 0.15, (
+                f"PV sum {pv_sum:.3f} kW != solar total {total_kw:.3f} kW"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +279,7 @@ class TestControlCard:
     ) -> None:
         """Progress section appears during active discharge."""
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
-        start, end = _tight_window(30)
+        start, end = _tight_window(10)
         ha_e2e.call_service(
             "foxess_control",
             "smart_discharge",
@@ -360,7 +362,7 @@ class TestScreenshots:
         # SoC=80 with min_soc=30 and 30-min window forces immediate
         # discharge start (avoids deferred-start timeout).
         foxess_sim.set(soc=80, solar_kw=1.0, load_kw=0.8)
-        start, end = _tight_window(30)
+        start, end = _tight_window(10)
         ha_e2e.call_service(
             "foxess_control",
             "smart_discharge",

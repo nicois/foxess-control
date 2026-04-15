@@ -1,13 +1,16 @@
 # Changelog
 
-## 1.0.4-beta.4
+## 1.0.4-beta.5
 
 ### Added
 - **Progressive schedule extension**: discharge schedule end time is set to a safe horizon computed from current SoC, discharge rate, and safety factor (1.5×). If HA loses connectivity, the inverter's schedule expires and reverts to self-use — battery protected without HA. Horizon extends naturally on each power adjustment.
 - **pytest-xdist parallel test execution**: auto-selects worker count based on `min(cpu_count, total_ram / 6 GB)`. Tests randomised via `pytest-randomly` to expose ordering dependencies. Override with `-n 0` for serial.
 - **Playwright browser tests** (`e2e/test_ui.py`): 19 tests (all passing) validating Lovelace card rendering in a real HA instance via Chromium — card presence, SoC display, progress bars during discharge, PV1+PV2 consistency with solar total, data source badge across API/WS modes, screenshot regression captures.
 - **`data_source` parametrized fixture**: E2E tests that start smart sessions run under both API-only and WebSocket modes. The `ws_refuse` simulator fault gates WS connections. Extensible to Modbus when a simulator exists.
-- **E2E timing instrumentation**: `e2e.timing` logger on all fixture phases (simulator, container build, HA ready, entities, page, reset) for diagnosing slow runs.
+- **E2E timing instrumentation**: per-test duration breakdown in terminal summary, timing on all fixture phases and wait helpers. E2E suite runs 19 tests in ~68s with 10 workers.
+
+### Changed
+- **E2E performance**: zero API throttle when talking to the simulator (5s sleep eliminated per request), 10-minute discharge windows to avoid deferred-start waits, tighter reset timeouts. Total wall time reduced from 3:20 to 1:08.
 
 ### Fixed
 - **Work mode label stuck after session ends**: overview card showed "Force Discharge" for minutes after the discharge window finished because the coordinator only updated `_work_mode` on the next REST poll. Now cleared immediately via `_on_session_cancel`.

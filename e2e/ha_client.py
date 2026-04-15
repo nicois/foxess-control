@@ -45,10 +45,18 @@ class HAClient:
         self, domain: str, service: str, data: dict[str, Any] | None = None
     ) -> None:
         """Call a HA service."""
+        t0 = time.monotonic()
         r = self._session.post(
             f"{self.base_url}/api/services/{domain}/{service}",
             json=data or {},
             timeout=30,
+        )
+        _log.warning(
+            "call_service %s/%s: %.1fs (%d)",
+            domain,
+            service,
+            time.monotonic() - t0,
+            r.status_code,
         )
         if not r.ok:
             raise RuntimeError(

@@ -1,12 +1,16 @@
 ---
 project: FoxESS Control
 level: 6
-last_verified: 2026-04-14
+last_verified: 2026-04-16
 traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-528 tests across 13 files, grouped by behavioural domain.
+546 unit tests + 19 E2E tests = 565 total.
+
+Unit tests run with pytest-xdist (`-n auto`, randomised via
+pytest-randomly). E2E tests use Podman containers with a FoxESS
+simulator and Playwright browser automation.
 
 > **Note**: This inventory covers the major constraint-mapped tests.
 > Many tests (particularly in `test_services.py`, `test_sensor.py`, and
@@ -179,6 +183,34 @@ Key tests:
 | Test | Verifies | Constraint |
 |---|---|---|
 | `test_vendored_copy_matches_canonical` | Byte-identical copies | C-015 |
+
+## E2E Tests (Containerised HA + Simulator + Playwright)
+
+**Source**: `e2e/test_e2e.py` (5 tests), `e2e/test_ui.py` (14 tests)
+**Infrastructure**: Podman HA container, FoxESS simulator, Playwright Chromium
+
+| Test | Verifies | Constraint |
+|---|---|---|
+| `TestSmartDischarge::test_discharge_starts` | Service → schedule → state transition | C-001 |
+| `TestSmartDischarge::test_discharge_drains_battery` | SoC decreases during discharge | C-001, C-002 |
+| `TestSmartCharge::test_charge_starts` | Charge service + state transition | -- |
+| `TestFaultInjection::test_ws_unit_mismatch_handled` | WS kW/W unit detection | C-004 |
+| `TestDataSource::test_api_source_when_idle` | data_source attribute = "api" | C-020 |
+| `TestOverviewCard::test_card_renders` | Overview card in shadow DOM | -- |
+| `TestOverviewCard::test_shows_soc` | SoC displayed on card | -- |
+| `TestOverviewCard::test_house_load_never_greyed` | House node active at low load | C-020 |
+| `TestOverviewCard::test_data_source_badge_matches_mode[api/ws]` | Badge reflects active data path | C-020 |
+| `TestOverviewCard::test_pv_values_consistent_with_solar_total[api/ws]` | PV1+PV2 ≈ total solar | C-020 |
+| `TestControlCard::test_card_renders` | Control card in shadow DOM | -- |
+| `TestControlCard::test_soc_displayed` | SoC percentage in header | -- |
+| `TestControlCard::test_progress_hidden_when_idle` | No progress section when idle | C-020 |
+| `TestControlCard::test_progress_visible_during_discharge[api/ws]` | Progress section during discharge | C-020 |
+| `TestScreenshots::test_idle_screenshot` | Visual regression capture | -- |
+| `TestScreenshots::test_discharging_screenshot` | Visual regression capture | -- |
+
+Tests parametrized with `[api/ws]` run under both data sources via the
+`data_source` fixture, which uses the `ws_refuse` simulator fault to
+block WS connections for API-only mode.
 
 ## Unmapped Tests
 

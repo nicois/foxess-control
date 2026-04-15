@@ -21,6 +21,7 @@ pre-commit run --all-files      # ruff + mypy
 - **C-017**: End-of-discharge guard: suspend when energy can't sustain safety floor for 10 min
 - **C-018**: Refuse to modify schedule when unmanaged modes (e.g. Backup) are present
 - **C-019**: Discharge SoC unavailability aborts session after 3 checks (matching charge C-012)
+- **C-027**: Schedule end time set to safe horizon (SoC/rate/safety_factor), not full window
 
 ## Architecture
 

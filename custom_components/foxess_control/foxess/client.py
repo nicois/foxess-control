@@ -37,6 +37,8 @@ class FoxESSClient:
         self.api_key = api_key
         if base_url is not None:
             self.BASE_URL = base_url
+            # No throttle needed when talking to a local simulator
+            self.MIN_REQUEST_INTERVAL = 0.0
         self.session = requests.Session()
         self.session.headers.update({"Content-Type": "application/json", "lang": "en"})
         self._last_request_time = 0.0

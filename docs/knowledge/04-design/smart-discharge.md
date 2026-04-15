@@ -113,6 +113,28 @@ projected completion time stops discharge precisely.
 `tests/test_smart_battery_algorithms.py::TestDischargePowerFeedinConstraint`,
 `tests/test_services.py::TestFeedinEnergyLimit`
 
+### D-023: Progressive schedule extension (safe horizon)
+**Decision**: Instead of setting the inverter schedule end time to the
+full user-requested window, `FoxESSCloudAdapter.apply_mode` computes a
+safe horizon: `energy_above_min / drain_rate / safety_factor`. The
+schedule end is `min(now + safe_hours, window_end)`. This is
+recomputed on each power adjustment (both fast and slow paths).
+**Context**: If HA loses connectivity, the inverter runs the schedule
+unsupervised. With the full window end, it drains to fdSoc. With a
+safe horizon, the schedule expires and the inverter reverts to self-use.
+**Rationale**: The safety factor (1.5×) provides 33% margin. Between
+power adjustments the margin *grows* (SoC drops proportionally but the
+schedule end stays fixed), so there is no need for heartbeat extensions
+on every tick — only when `apply_mode` is already called.
+**Alternatives considered**:
+- Fixed 5-minute extension on every tick: rejected — unnecessary API
+  calls and doesn't scale with battery headroom
+- HA-side watchdog timer: rejected — doesn't protect against HA
+  being completely unreachable
+**Traces**: C-024, C-027;
+`smart_battery/algorithms.py::compute_safe_schedule_end`,
+`tests/test_smart_battery_algorithms.py` (via `compute_safe_schedule_end`)
+
 ## Key Behaviours
 
 - Deferred start has doubled headroom when feed-in limit is set (up to

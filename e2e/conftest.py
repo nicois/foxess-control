@@ -36,12 +36,37 @@ from .ha_client import HAClient
 _log = logging.getLogger("e2e.timing")
 
 
+_test_durations: dict[str, float] = {}
+
+
 def pytest_configure(config: Any) -> None:
     """Ensure e2e.timing messages appear in pytest output."""
     logging.getLogger("e2e.timing").setLevel(logging.WARNING)
     handler = logging.StreamHandler()
     handler.setFormatter(logging.Formatter("%(message)s"))
     logging.getLogger("e2e.timing").addHandler(handler)
+
+
+def pytest_runtest_logreport(report: Any) -> None:
+    """Collect test durations (works on xdist controller)."""
+    if report.when == "call":
+        _test_durations[report.nodeid] = report.duration
+    elif report.when == "setup" and report.duration > 1.0:
+        _test_durations[f"{report.nodeid} [setup]"] = report.duration
+
+
+def pytest_terminal_summary(terminalreporter: Any, config: Any) -> None:
+    if not _test_durations:
+        return
+    terminalreporter.section("E2E timing breakdown")
+    for name, dur in sorted(_test_durations.items(), key=lambda x: -x[1]):
+        short = name.split("::")[-1]
+        terminalreporter.write_line(f"  {dur:6.1f}s  {short}")
+    total = sum(d for k, d in _test_durations.items() if "[setup]" not in k)
+    terminalreporter.write_line(f"  {'─' * 40}")
+    terminalreporter.write_line(
+        f"  {total:6.1f}s  total test time (wall < this due to parallelism)"
+    )
 
 
 if TYPE_CHECKING:
@@ -402,7 +427,7 @@ def _e2e_reset(
     with contextlib.suppress(Exception):
         ha_e2e.call_service("foxess_control", "clear_overrides", {})
     with contextlib.suppress(TimeoutError):
-        ha_e2e.wait_for_state("sensor.foxess_smart_operations", "idle", timeout_s=30)
+        ha_e2e.wait_for_state("sensor.foxess_smart_operations", "idle", timeout_s=10)
     _log.warning("[%s] reset: %.1fs", _worker_id(), time.monotonic() - t0)
 
     yield
