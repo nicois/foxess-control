@@ -1,19 +1,20 @@
 # Changelog
 
-## 1.0.4-beta.3
+## 1.0.4-beta.4
 
 ### Added
-- **pytest-xdist parallel test execution**: auto-selects worker count based on `min(cpu_count, total_ram / 6 GB)`. E2E capped at 2 workers. Tests randomised via `pytest-randomly` to expose ordering dependencies. Override with `-n 0` for serial.
-- **Playwright browser tests** (`e2e/test_ui.py`): 14 tests validating Lovelace card rendering in a real HA instance via Chromium — card presence, SoC display, progress bars during discharge, PV1+PV2 consistency with solar total, data source badge, screenshot regression captures.
-- **`data_source` parametrized fixture**: E2E tests that start smart sessions now run under both API-only and WebSocket modes. The `ws_refuse` simulator fault gates WS connections. Extensible to Modbus when a simulator exists.
-- **`wait_for_attribute()` on HAClient**: polls an entity attribute until it reaches an expected value, used to verify data source transitions.
+- **Progressive schedule extension**: discharge schedule end time is set to a safe horizon computed from current SoC, discharge rate, and safety factor (1.5×). If HA loses connectivity, the inverter's schedule expires and reverts to self-use — battery protected without HA. Horizon extends naturally on each power adjustment.
+- **pytest-xdist parallel test execution**: auto-selects worker count based on `min(cpu_count, total_ram / 6 GB)`. Tests randomised via `pytest-randomly` to expose ordering dependencies. Override with `-n 0` for serial.
+- **Playwright browser tests** (`e2e/test_ui.py`): 19 tests (all passing) validating Lovelace card rendering in a real HA instance via Chromium — card presence, SoC display, progress bars during discharge, PV1+PV2 consistency with solar total, data source badge across API/WS modes, screenshot regression captures.
+- **`data_source` parametrized fixture**: E2E tests that start smart sessions run under both API-only and WebSocket modes. The `ws_refuse` simulator fault gates WS connections. Extensible to Modbus when a simulator exists.
+- **E2E timing instrumentation**: `e2e.timing` logger on all fixture phases (simulator, container build, HA ready, entities, page, reset) for diagnosing slow runs.
 
 ### Fixed
 - **Work mode label stuck after session ends**: overview card showed "Force Discharge" for minutes after the discharge window finished because the coordinator only updated `_work_mode` on the next REST poll. Now cleared immediately via `_on_session_cancel`.
-- **Stale REST-only values shown during WS mode**: overview card hid PV1/PV2 detail, grid voltage/frequency, battery temperature, and residual energy when WebSocket is the active data source — these values only update on REST polls and would be misleadingly stale.
+- **Stale REST-only values shown during WS mode**: overview card hides PV1/PV2 detail, grid voltage/frequency, battery temperature, and residual energy when WebSocket is the active data source — these values only update on REST polls and would be misleadingly stale.
+- **E2E SELinux bind mount**: `:Z` (private label) → `:z` (shared label) for the `custom_components` mount so multiple xdist containers can read the same host directory.
 - **E2E resource lifecycle**: named containers (`ha-e2e-{worker_id}`), atexit safety nets, setup try/except cleanup, and pre-push orphan cleanup prevent leaked Podman containers from cascading into subsequent test failures.
 - **WASM signature test ordering dependency**: `test_known_signature` failed when run after other signature tests due to WASM heap state accumulation in the module singleton. Fixed by resetting the engine before the deterministic check.
-- **Playwright auth with HA container**: `trusted_networks` auth provider with `allow_bypass_login: true` and IPv6 `::/0` (browser connects via `::1`). Podman port mapping (`-p {port}:8123`) instead of `--network=host` for xdist worker isolation.
 
 ## 1.0.4-beta.1
 
