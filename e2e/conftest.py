@@ -172,14 +172,17 @@ def ha_e2e(
     try:
         ha.wait_ready(timeout_s=120)
     except TimeoutError:
-        proc.kill()
         # Dump container logs for debugging
         if proc.stdout:
-            print(proc.stdout.read().decode(errors="replace")[-2000:])
+            print(proc.stdout.read().decode(errors="replace")[-3000:])
+        proc.kill()
         raise
+
+    # Extra wait for integration to fully load
+    time.sleep(10)
 
     yield ha
 
     proc.terminate()
-    proc.wait(timeout=10)
+    proc.wait(timeout=30)
     shutil.rmtree(tmpdir, ignore_errors=True)

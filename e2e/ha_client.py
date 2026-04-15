@@ -42,7 +42,11 @@ class HAClient:
             json=data or {},
             timeout=30,
         )
-        r.raise_for_status()
+        if not r.ok:
+            raise RuntimeError(
+                f"Service call {domain}/{service} failed: "
+                f"{r.status_code} {r.text[:200]}"
+            )
 
     def wait_for_state(
         self,
