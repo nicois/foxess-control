@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.4-beta.1
+
+### Fixed
+- **WS not stopping when session ends via timer**: the brand-agnostic `cancel_smart_session` didn't trigger WebSocket shutdown. Added `_on_session_cancel` hook so WS stops through ALL cancel paths (timer expiry, SoC abort, exception, clear_overrides, target reached).
+
+### Added
+- **FoxESS simulator** (`simulator/`): standalone aiohttp server with REST API, WebSocket, web auth, and backchannel endpoints for E2E testing. Supports fault injection, fast-forward, and fuzzing (±2% jitter on power readings).
+- **Containerised E2E tests** (`e2e/`): real HA instance in Podman container, configured to talk to the simulator via `FOXESS_SIMULATOR_URL` env var. 5 tests covering discharge, charge, WS unit mismatch, and data source badge.
+- **Simulator-backed unit tests**: `test_client.py` and `test_inverter.py` migrated from `responses` library to real HTTP against the simulator.
+- **`FOXESS_SIMULATOR_URL` env var**: when set, all FoxESS clients (REST, WebSocket, web auth) point at the specified URL instead of foxesscloud.com.
+
 ## 1.0.3
 
 ### Added
