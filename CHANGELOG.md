@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.4-beta.2
+## 1.0.4-beta.3
 
 ### Added
 - **pytest-xdist parallel test execution**: auto-selects worker count based on `min(cpu_count, total_ram / 6 GB)`. E2E capped at 2 workers. Tests randomised via `pytest-randomly` to expose ordering dependencies. Override with `-n 0` for serial.

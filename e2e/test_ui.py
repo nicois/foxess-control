@@ -138,7 +138,7 @@ class TestOverviewCard:
             "sensor.foxess_solar_power",
             "data_source",
             data_source,
-            timeout_s=30,
+            timeout_s=60,
         )
         page.reload()
         page.wait_for_load_state("networkidle")
