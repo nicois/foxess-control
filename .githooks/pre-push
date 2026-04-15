@@ -21,6 +21,18 @@ while read -r local_ref local_oid remote_ref remote_oid; do
   tag="${local_ref#refs/tags/}"
   commit=$(git rev-list -n1 "$tag" 2>/dev/null || echo "$local_oid")
 
+  # Run E2E tests before allowing a tag push
+  if command -v podman &>/dev/null; then
+    echo "Running E2E tests before tagging $tag..."
+    if ! python -m pytest e2e/ -m slow --tb=short -q; then
+      echo "❌ E2E tests failed — fix before pushing tag $tag"
+      exit 1
+    fi
+    echo "✅ E2E tests passed"
+  else
+    echo "⚠  podman not found — skipping E2E tests"
+  fi
+
   echo "Checking CI status for $tag ($commit)..."
 
   # Get check status — gh returns non-zero if any check failed
