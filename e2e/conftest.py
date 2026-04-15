@@ -190,23 +190,26 @@ def ha_e2e(
         for d in dirs:
             os.chmod(os.path.join(root, d), 0o777)
 
-    # Write dynamic configuration.yaml with the worker's HA port
-    config_yaml = Path(tmpdir) / "configuration.yaml"
-    config_yaml.write_text(f"default_config:\n\nhttp:\n  server_port: {ha_port}\n")
-
+    # HA listens on 8123 inside the container. Podman maps the
+    # worker's unique external port to the container's internal 8123.
+    # The simulator runs on the host — use host gateway so the
+    # container can reach it.
+    sim_port = foxess_sim.url.rsplit(":", 1)[1]  # extract port number
     proc = subprocess.Popen(
         [
             "podman",
             "run",
             "--rm",
-            "--network=host",
+            "-p",
+            f"{ha_port}:8123",
+            "--add-host=host.containers.internal:host-gateway",
             "-v",
             f"{REPO_ROOT}/custom_components/foxess_control"
             f":/config/custom_components/foxess_control:ro,Z",
             "-v",
             f"{tmpdir}:/config:Z",
             "-e",
-            f"FOXESS_SIMULATOR_URL={foxess_sim.url}",
+            f"FOXESS_SIMULATOR_URL=http://host.containers.internal:{sim_port}",
             CONTAINER_IMAGE,
         ],
         stdout=subprocess.PIPE,
@@ -251,87 +254,16 @@ def ha_e2e(
 @pytest.fixture(scope="session")
 def browser_context(
     playwright: Playwright,
-    ha_port: int,
     ha_e2e: HAClient,  # ensure HA is running
 ) -> Generator[BrowserContext, None, None]:
-    """Session-scoped browser context, authenticated via HA login form.
+    """Session-scoped browser context.
 
-    Logs in once at session start. The auth state persists across
-    all pages in this context (session cookies).
+    Auth is bypassed via pre-seeded http.auth content_user
+    (same approach as home-assistant-query-selector E2E tests).
+    No login form interaction needed.
     """
     browser = playwright.chromium.launch(headless=True)
     context = browser.new_context()
-
-    # Log in via the HA UI
-    login_page = context.new_page()
-    login_page.goto(
-        f"http://localhost:{ha_port}",
-        wait_until="networkidle",
-        timeout=60000,
-    )
-    # HA redirects to /auth/authorize — fill in credentials
-    # The login form uses web components but the inputs are accessible
-    login_page.wait_for_timeout(3000)  # let frontend JS load
-    # HA uses Material Design web components with shadow DOM.
-    # Fill inputs and click button via JavaScript evaluation.
-    login_page.evaluate("""() => {
-        function findInShadows(root, selector) {
-            const el = root.querySelector(selector);
-            if (el) return el;
-            for (const child of root.querySelectorAll('*')) {
-                if (child.shadowRoot) {
-                    const found = findInShadows(child.shadowRoot, selector);
-                    if (found) return found;
-                }
-            }
-            return null;
-        }
-        const inputs = [];
-        function findAllInputs(root) {
-            for (const input of root.querySelectorAll('input')) {
-                inputs.push(input);
-            }
-            for (const child of root.querySelectorAll('*')) {
-                if (child.shadowRoot) findAllInputs(child.shadowRoot);
-            }
-        }
-        findAllInputs(document);
-        // First text input = username, first password input = password
-        const username = inputs.find(i => i.type === 'text' || i.type === 'email');
-        const password = inputs.find(i => i.type === 'password');
-        if (username) {
-            username.value = 'e2e-test';
-            username.dispatchEvent(new Event('input', {bubbles: true}));
-        }
-        if (password) {
-            password.value = 'e2e-test-password';
-            password.dispatchEvent(new Event('input', {bubbles: true}));
-        }
-    }""")
-    login_page.wait_for_timeout(500)
-    # Click the Log in button
-    login_page.evaluate("""() => {
-        function findInShadows(root, text) {
-            for (const btn of root.querySelectorAll('button, mwc-button, ha-button')) {
-                if (btn.textContent && btn.textContent.trim().includes(text))
-                    return btn;
-            }
-            for (const child of root.querySelectorAll('*')) {
-                if (child.shadowRoot) {
-                    const found = findInShadows(child.shadowRoot, text);
-                    if (found) return found;
-                }
-            }
-            return null;
-        }
-        const btn = findInShadows(document, 'Log in');
-        if (btn) btn.click();
-    }""")
-    # Debug: screenshot after login attempt
-    # Wait for redirect to dashboard after successful login
-    login_page.wait_for_url("**/lovelace/**", timeout=30000)
-    login_page.close()
-
     yield context
     context.close()
     browser.close()
@@ -342,13 +274,17 @@ def page(
     browser_context: BrowserContext,
     ha_port: int,
 ) -> Generator[Page, None, None]:
-    """Function-scoped page navigated to HA dashboard."""
+    """Function-scoped page navigated to HA dashboard.
+
+    HA's trusted_networks with allow_bypass_login auto-completes the
+    OAuth flow: browser → /auth/authorize → auto-approve → redirect
+    back to dashboard. We wait for this chain to complete.
+    """
     p = browser_context.new_page()
-    p.goto(
-        f"http://localhost:{ha_port}/lovelace/0",
-        wait_until="networkidle",
-        timeout=30000,
-    )
+    p.goto(f"http://localhost:{ha_port}/lovelace/0", timeout=60000)
+    # Wait for the auth redirect chain to complete and dashboard to load
+    p.wait_for_url("**/lovelace/**", timeout=60000)
+    p.wait_for_load_state("networkidle", timeout=30000)
     p.wait_for_timeout(5000)  # let custom cards load and render
     yield p
     p.close()

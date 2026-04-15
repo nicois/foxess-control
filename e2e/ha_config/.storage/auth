@@ -12,6 +12,15 @@
         "name": "E2E Test",
         "system_generated": false,
         "local_only": false
+      },
+      {
+        "id": "e2e-content-user",
+        "group_ids": ["system-read-only"],
+        "is_owner": false,
+        "is_active": true,
+        "name": "Home Assistant Content",
+        "system_generated": true,
+        "local_only": false
       }
     ],
     "credentials": [
