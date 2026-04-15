@@ -339,6 +339,68 @@ normally when it is actually failing.
 **Traces**: C-020;
 `tests/test_services.py::TestErrorSurfacing`
 
+## Invariants — Testing
+
+### C-028: Simulator over mocks
+**Statement**: Tests that exercise FoxESS API or WebSocket behaviour
+must use the FoxESS simulator (`simulator/`) rather than response
+mocking libraries. Mocks are acceptable only for HA framework
+internals that the simulator cannot replace.
+**Rationale**: Mocks encode assumptions about API behaviour that
+drift from reality. The simulator implements the actual API contract
+(REST, WS, schedule validation, fault injection) and is authoritative
+for the integration's external interface. Tests that mock the API
+pass when the mock is wrong.
+**Violation consequence**: Tests pass against a mock that doesn't
+match real API behaviour, masking integration bugs.
+**Traces**: `tests/test_client.py`, `tests/test_inverter.py`
+(migrated from `responses` library to simulator)
+
+### C-029: E2E tests for HA-dependent behaviour
+**Statement**: Behaviour that depends on HA's runtime environment —
+config flow, entity lifecycle, service registration, Lovelace card
+rendering, auth, coordinator polling — must have E2E tests against
+a real HA instance (containerised). Unit tests with mocked HA
+internals are insufficient for these code paths.
+**Rationale**: HA's internal APIs (config entries, entity platforms,
+service calls, frontend WebSocket) have undocumented behaviours and
+version-specific quirks that mocks cannot reproduce. The E2E suite
+(`e2e/`) uses a Podman HA container with pre-seeded config to test
+the actual integration lifecycle.
+**Violation consequence**: Code works in unit tests but fails in a
+real HA installation due to auth, entity discovery, shadow DOM, or
+service registration differences.
+**Traces**: `e2e/test_e2e.py`, `e2e/test_ui.py`
+
+### C-030: E2E tests run in parallel before tagging
+**Statement**: E2E tests must run with `pytest -n auto` (xdist
+parallel workers) and must pass before any version tag is pushed.
+The pre-push hook enforces this gate.
+**Rationale**: Serial E2E takes 25+ min; parallel takes ~4 min with
+10 workers. The parallel infrastructure (named containers, atexit
+cleanup, shared SELinux labels) is designed for concurrent execution
+and serial runs waste development time. Running before tagging
+ensures no release ships with broken E2E.
+**Violation consequence**: Slow feedback loop or regressions shipping
+in tagged releases.
+**Traces**: `.githooks/pre-push`, `conftest.py::pytest_xdist_auto_num_workers`
+
+### C-027: Progressive schedule extension (discharge safety)
+**Statement**: The inverter schedule end time for forced discharge must
+be set to a safe horizon — the time at which the battery would reach
+min_soc at the current discharge rate, divided by the safety factor —
+not the full user-requested window end. The horizon is recomputed and
+extended on each power adjustment.
+**Rationale**: If HA loses connectivity (crash, network outage, power
+loss), the inverter continues executing the schedule unsupervised.
+With the full window end, this means draining to fdSoc for the entire
+window. With a safe horizon, the schedule expires within minutes and
+the inverter reverts to self-use automatically.
+**Violation consequence**: Battery drains to fdSoc during HA downtime
+instead of reverting to self-use.
+**Traces**: C-024 (safe state on failure);
+D-023; `smart_battery/algorithms.py::compute_safe_schedule_end`
+
 ## Proposed
 
 Constraints identified from vision gap analysis but not yet implemented.

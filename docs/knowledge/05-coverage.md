@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 5
-last_verified: 2026-04-14
+last_verified: 2026-04-16
 traces_up: [02-constraints.md, 04-design/]
 traces_down: [06-tests.md]
 ---
@@ -39,6 +39,10 @@ Traceability from constraints through design decisions to tests.
 | C-023 Solar-aware charge reduction | -- | -- | GAP |
 | C-022 Unreachable charge target surfaced | -- | `TestIsChargeTargetReachable` (7) | COVERED |
 | C-019 Discharge SoC unavailability abort | D-019 | `TestDischargeSocUnavailability` (2) | COVERED |
+| C-027 Progressive schedule extension | D-023 | `compute_safe_schedule_end` tested via `TestHandleSmartDischarge` | COVERED |
+| C-028 Simulator over mocks | -- | `test_client.py`, `test_inverter.py` use simulator | COVERED |
+| C-029 E2E for HA-dependent behaviour | -- | `e2e/test_e2e.py` (5), `e2e/test_ui.py` (14) | COVERED |
+| C-030 E2E parallel before tagging | -- | `.githooks/pre-push` enforces gate | COVERED |
 
 ## Gaps
 
@@ -88,8 +92,9 @@ Traceability from constraints through design decisions to tests.
 
 ## Summary
 
-- **Total constraints**: 26
-- **Fully covered**: 21 (81%)
-- **Partial**: 3 (12%)
-- **Gaps**: 2 (8%) — C-016 (structural), C-023 (investigation needed)
-- **Orphan tests**: 80+ (test_services.py largely unmapped)
+- **Total constraints**: 30
+- **Fully covered**: 25 (83%)
+- **Partial**: 3 (11%)
+- **Gaps**: 2 (7%) — C-016 (structural), C-023 (investigation needed)
+- **Orphan tests**: 80+ unit (test_services.py largely unmapped)
+- **E2E tests**: 19 (5 REST + 14 Playwright) across API and WS modes
