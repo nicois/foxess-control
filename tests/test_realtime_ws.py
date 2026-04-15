@@ -61,11 +61,14 @@ class TestEnsurePasswordHash:
 
 class TestGenerateSignature:
     def test_known_signature(self) -> None:
-        from custom_components.foxess_control.foxess.signature import (
-            generate_signature,
-        )
+        import custom_components.foxess_control.foxess.signature as sig_mod
 
-        sig = generate_signature("/basic/v0/user/login", "", "en", "1776124242356")
+        # Reset the WASM singleton — prior tests' calls leave residual
+        # heap state that changes the output suffix.
+        sig_mod._engine = None
+        sig = sig_mod.generate_signature(
+            "/basic/v0/user/login", "", "en", "1776124242356"
+        )
         assert sig == "02ed69731394e020c1a7e28d56a51013.5245784"
 
     def test_different_timestamp_gives_different_signature(self) -> None:

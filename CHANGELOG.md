@@ -1,14 +1,16 @@
 # Changelog
 
-## 1.0.4-beta.2
+## 1.0.4-beta.3
 
 ### Added
+- **pytest-xdist parallel test execution**: auto-selects worker count based on `min(cpu_count, total_ram / 6 GB)`. Tests randomised via `pytest-randomly` to expose ordering dependencies. Override with `-n 0` for serial.
 - **Playwright browser tests** (`e2e/test_ui.py`): 14 tests validating Lovelace card rendering in a real HA instance via Chromium — card presence, SoC display, progress bars during discharge, PV1+PV2 consistency with solar total, data source badge, screenshot regression captures.
 - **`data_source` parametrized fixture**: E2E tests that start smart sessions now run under both API-only and WebSocket modes. The `ws_refuse` simulator fault gates WS connections. Extensible to Modbus when a simulator exists.
 - **`wait_for_attribute()` on HAClient**: polls an entity attribute until it reaches an expected value, used to verify data source transitions.
 
 ### Fixed
-- **Playwright auth with HA container**: `trusted_networks` auth provider with `allow_bypass_login: true` and IPv6 `::/ 0` (browser connects via `::1`). Podman port mapping (`-p {port}:8123`) instead of `--network=host` for xdist worker isolation.
+- **WASM signature test ordering dependency**: `test_known_signature` failed when run after other signature tests due to WASM heap state accumulation in the module singleton. Fixed by resetting the engine before the deterministic check.
+- **Playwright auth with HA container**: `trusted_networks` auth provider with `allow_bypass_login: true` and IPv6 `::/0` (browser connects via `::1`). Podman port mapping (`-p {port}:8123`) instead of `--network=host` for xdist worker isolation.
 
 ## 1.0.4-beta.1
 

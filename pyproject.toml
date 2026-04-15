@@ -21,6 +21,8 @@ dev = [
     "voluptuous",
     "PyJWT",
     "pytest-playwright",
+    "pytest-xdist>=3.0",
+    "pytest-randomly>=3.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -28,6 +30,7 @@ where = ["."]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-n auto"
 markers = [
     "slow: end-to-end tests requiring podman and HA container (run with pytest e2e/ -m slow)",
 ]

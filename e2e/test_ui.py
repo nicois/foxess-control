@@ -7,6 +7,7 @@ Requires: podman, playwright (chromium), PyJWT
 from __future__ import annotations
 
 import datetime
+import os
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -23,7 +24,8 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.slow
 
-SCREENSHOT_DIR = Path(__file__).parent / "screenshots"
+_WORKER = os.environ.get("PYTEST_XDIST_WORKER", "main")
+SCREENSHOT_DIR = Path(__file__).parent / "screenshots" / _WORKER
 
 
 def _find_card(page: Page, tag: str, timeout: int = 30000) -> bool:
