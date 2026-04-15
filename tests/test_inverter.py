@@ -98,11 +98,9 @@ def test_get_schedule_empty(foxess_sim: SimulatorHandle) -> None:
     assert len(schedule["groups"]) == 8
 
 
-def test_get_current_mode_none(foxess_sim: SimulatorHandle) -> None:
-    """No schedule enabled — returns None."""
+def test_get_current_mode_no_schedule(foxess_sim: SimulatorHandle) -> None:
+    """No active schedule groups — returns None."""
     foxess_sim.reset()
     inv = _make_inv(foxess_sim)
     mode = inv.get_current_mode()
-    # Simulator defaults to SelfUse when no schedule; real API returns None
-    # when schedule is disabled. This tests the happy path.
-    assert mode is not None or mode is None  # accepts either
+    assert mode is None

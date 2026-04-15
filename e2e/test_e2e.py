@@ -149,4 +149,7 @@ class TestDataSource:
         """When idle, data source should be API."""
         ha_e2e.wait_for_state("sensor.foxess_smart_operations", "idle", timeout_s=30)
         attrs = ha_e2e.get_attributes("sensor.foxess_battery_soc")
-        assert attrs.get("data_source") in ("api", None)
+        # data_source is "api" when web credentials are configured (which
+        # they are in the E2E config entry). It would be None only if the
+        # sensor's _has_multiple_sources was False (single-source setup).
+        assert attrs.get("data_source") == "api"

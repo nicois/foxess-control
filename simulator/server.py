@@ -278,6 +278,12 @@ async def handle_sim_clear_fault(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+async def handle_sim_fuzzing(request: web.Request) -> web.Response:
+    body = await request.json()
+    _model.fuzzing = body.get("enabled", True)
+    return web.json_response({"ok": True, "fuzzing": _model.fuzzing})
+
+
 async def handle_sim_ws_unit(request: web.Request) -> web.Response:
     body = await request.json()
     _model.ws_unit = body.get("unit", "W")
@@ -326,6 +332,7 @@ def create_app() -> web.Application:
     app.router.add_post("/sim/fast_forward", handle_sim_fast_forward)
     app.router.add_post("/sim/fault", handle_sim_fault)
     app.router.add_post("/sim/clear_fault", handle_sim_clear_fault)
+    app.router.add_post("/sim/fuzzing", handle_sim_fuzzing)
     app.router.add_post("/sim/ws_unit", handle_sim_ws_unit)
     app.router.add_post("/sim/ws_stale", handle_sim_ws_stale)
     app.router.add_post("/sim/reset", handle_sim_reset)

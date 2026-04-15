@@ -185,8 +185,16 @@ def ha_e2e(foxess_sim: SimulatorHandle) -> Generator[HAClient, None, None]:
         proc.kill()
         raise
 
-    # Extra wait for integration to fully load
-    time.sleep(10)
+    # Wait for integration to fully load (entity exists = integration ready)
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        try:
+            ha.get_state("sensor.foxess_battery_soc")
+            break
+        except Exception:
+            time.sleep(2)
+    else:
+        raise TimeoutError("Integration entities not created within 60s")
 
     yield ha
 

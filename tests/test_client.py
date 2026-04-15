@@ -45,9 +45,10 @@ def test_real_query(foxess_sim: SimulatorHandle) -> None:
         {"sn": "SIM0001", "variables": ["SoC", "pvPower", "loadsPower"]},
     )
     datas = {d["variable"]: d["value"] for d in result[0]["datas"]}
+    # SoC is integer (no fuzz), power values have ±2% jitter
     assert datas["SoC"] == 75.0
-    assert datas["pvPower"] == 2.0
-    assert datas["loadsPower"] == 0.5
+    assert datas["pvPower"] == pytest.approx(2.0, rel=0.05)
+    assert datas["loadsPower"] == pytest.approx(0.5, rel=0.05)
 
 
 def test_rate_limit_retry_succeeds(foxess_sim: SimulatorHandle) -> None:

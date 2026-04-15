@@ -59,9 +59,23 @@ def _make_placeholder() -> dict[str, Any]:
     }
 
 
+def _jitter(value: float, pct: float = 0.02) -> float:
+    """Add ±pct random noise to a value (default ±2%)."""
+    import random
+
+    if abs(value) < 0.001:
+        return value
+    return value * (1.0 + random.uniform(-pct, pct))
+
+
 @dataclass
 class InverterModel:
-    """Simulated FoxESS inverter."""
+    """Simulated FoxESS inverter.
+
+    When ``fuzzing`` is enabled, power values and SoC readings include
+    small random jitter (±2%) to prevent tests from overfitting to
+    exact values.
+    """
 
     # Identity
     device_sn: str = "SIM0001"
@@ -75,6 +89,9 @@ class InverterModel:
     # External power (set via backchannel)
     solar_kw: float = 0.0
     load_kw: float = 0.5
+
+    # Fuzzing: add noise to readings to prevent test overfitting
+    fuzzing: bool = True
 
     # Derived power flows (computed by tick)
     bat_charge_kw: float = 0.0
@@ -255,17 +272,22 @@ class InverterModel:
         ]
         self.schedule_enabled = bool(self.schedule_groups)
 
+    def _fuzz(self, value: float) -> float:
+        """Apply jitter if fuzzing is enabled."""
+        return _jitter(value) if self.fuzzing else value
+
     def get_real_time_response(self, variables: list[str]) -> list[dict[str, Any]]:
-        """Return real-time data in API format."""
+        """Return real-time data in API format (with optional fuzzing)."""
+        f = self._fuzz
         var_map: dict[str, float] = {
-            "SoC": float(int(self.soc)),  # integer like real API
-            "batChargePower": self.bat_charge_kw,
-            "batDischargePower": self.bat_discharge_kw,
-            "loadsPower": self.load_kw,
-            "pvPower": self.solar_kw,
-            "gridConsumptionPower": self.grid_import_kw,
-            "feedinPower": self.grid_export_kw,
-            "generationPower": self.solar_kw,
+            "SoC": float(int(self.soc)),  # integer like real API (no fuzz)
+            "batChargePower": f(self.bat_charge_kw),
+            "batDischargePower": f(self.bat_discharge_kw),
+            "loadsPower": f(self.load_kw),
+            "pvPower": f(self.solar_kw),
+            "gridConsumptionPower": f(self.grid_import_kw),
+            "feedinPower": f(self.grid_export_kw),
+            "generationPower": f(self.solar_kw),
             "batTemperature": 25.0,
             "batVolt": 52.0,
             "batCurrent": (self.bat_charge_kw - self.bat_discharge_kw) * 1000 / 52,
@@ -294,20 +316,25 @@ class InverterModel:
         return [{"datas": datas, "deviceSN": self.device_sn}]
 
     def get_ws_message(self) -> dict[str, Any]:
-        """Build a WebSocket push message from current state."""
+        """Build a WebSocket push message from current state (with fuzzing)."""
         is_charging = self.bat_charge_kw > self.bat_discharge_kw
-        bat_power = self.bat_charge_kw if is_charging else self.bat_discharge_kw
+        bat_power = self._fuzz(
+            self.bat_charge_kw if is_charging else self.bat_discharge_kw
+        )
+        solar = self._fuzz(self.solar_kw)
+        load = self._fuzz(self.load_kw)
+        grid = self._fuzz(self.grid_import_kw + self.grid_export_kw)
 
         if self.ws_unit == "kW":
             bat_val = f"{bat_power:.3f}"
-            solar_val = f"{self.solar_kw:.3f}"
-            load_val = f"{self.load_kw:.3f}"
-            grid_val = f"{(self.grid_import_kw + self.grid_export_kw):.3f}"
+            solar_val = f"{solar:.3f}"
+            load_val = f"{load:.3f}"
+            grid_val = f"{grid:.3f}"
         else:
             bat_val = str(int(bat_power * 1000))
-            solar_val = str(int(self.solar_kw * 1000))
-            load_val = str(int(self.load_kw * 1000))
-            grid_val = str(int((self.grid_import_kw + self.grid_export_kw) * 1000))
+            solar_val = str(int(solar * 1000))
+            load_val = str(int(load * 1000))
+            grid_val = str(int(grid * 1000))
 
         return {
             "errno": 0,
