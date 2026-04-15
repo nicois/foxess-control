@@ -121,11 +121,16 @@ def _find_free_port() -> int:
 
 
 def _build_container() -> None:
-    subprocess.run(
-        ["podman", "build", "-t", CONTAINER_IMAGE, str(REPO_ROOT / "e2e")],
-        check=True,
-        capture_output=True,
-    )
+    """Build the HA container image, serialised across xdist workers."""
+    import filelock
+
+    lock = filelock.FileLock(str(REPO_ROOT / ".e2e-build.lock"), timeout=300)
+    with lock:
+        subprocess.run(
+            ["podman", "build", "-t", CONTAINER_IMAGE, str(REPO_ROOT / "e2e")],
+            check=True,
+            capture_output=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -225,8 +230,9 @@ def ha_e2e(
         proc.kill()
         raise
 
-    # Wait for integration entities
-    deadline = time.monotonic() + 60
+    # Wait for integration entities — longer timeout when multiple
+    # xdist workers start containers simultaneously.
+    deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
         try:
             ha.get_state("sensor.foxess_battery_soc")
@@ -234,7 +240,7 @@ def ha_e2e(
         except Exception:
             time.sleep(2)
     else:
-        raise TimeoutError("Integration entities not created within 60s")
+        raise TimeoutError("Integration entities not created within 120s")
 
     yield ha
 
