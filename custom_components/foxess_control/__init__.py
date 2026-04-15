@@ -1329,6 +1329,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "_store", Store[dict[str, Any]](hass, STORAGE_VERSION, STORAGE_KEY)
     )
 
+    # Post-cancel hook: stop WebSocket if no session needs it.
+    # Called by the brand-agnostic cancel_smart_session after clearing state.
+    def _on_session_cancel() -> None:
+        if not _should_start_realtime_ws(hass):
+            hass.async_create_task(_stop_realtime_ws(hass))
+
+    hass.data[DOMAIN]["_on_session_cancel"] = _on_session_cancel
+
     # Load adaptive taper profile from persistent storage
     if "_taper_profile" not in hass.data[DOMAIN]:
         store: Store[dict[str, Any]] = hass.data[DOMAIN]["_store"]
