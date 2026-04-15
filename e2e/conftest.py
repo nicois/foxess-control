@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -17,8 +18,25 @@ from .ha_client import HAClient
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-# Fixed token matching the pre-seeded .storage/auth file
-E2E_TOKEN = "e2e-test-token-foxess-simulator-access"
+
+# Generate a valid HA JWT token matching the pre-seeded .storage/auth file
+def _generate_ha_token() -> str:
+    import datetime as _dt
+
+    import jwt
+
+    return jwt.encode(
+        {
+            "iss": "e2e-refresh-001",  # matches refresh_tokens[0].id in auth
+            "iat": _dt.datetime(2026, 1, 1, tzinfo=_dt.UTC),
+            "exp": _dt.datetime(2036, 1, 1, tzinfo=_dt.UTC),
+        },
+        "e2e-jwt-key-not-used-for-long-lived",  # matches jwt_key in auth
+        algorithm="HS256",
+    )
+
+
+E2E_TOKEN = _generate_ha_token()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HA_CONFIG_SEED = REPO_ROOT / "e2e" / "ha_config"
 CONTAINER_IMAGE = "ha-foxess-e2e"
@@ -122,9 +140,14 @@ def ha_e2e(
     """Start a HA container pointed at the simulator."""
     _build_container()
 
-    # Copy ha_config to a temp dir (HA needs write access to .storage)
+    # Copy ha_config to a temp dir (HA needs write access to .storage and deps)
     tmpdir = tempfile.mkdtemp(prefix="ha-e2e-")
     shutil.copytree(str(HA_CONFIG_SEED), tmpdir, dirs_exist_ok=True)
+    # Ensure the container user (root in HA image) can write
+    os.chmod(tmpdir, 0o777)
+    for root, dirs, _files in os.walk(tmpdir):
+        for d in dirs:
+            os.chmod(os.path.join(root, d), 0o777)
 
     proc = subprocess.Popen(
         [
@@ -134,9 +157,9 @@ def ha_e2e(
             "--network=host",
             "-v",
             f"{REPO_ROOT}/custom_components/foxess_control"
-            f":/config/custom_components/foxess_control:ro",
+            f":/config/custom_components/foxess_control:ro,Z",
             "-v",
-            f"{tmpdir}:/config",
+            f"{tmpdir}:/config:Z",
             "-e",
             f"FOXESS_SIMULATOR_URL={foxess_sim.url}",
             CONTAINER_IMAGE,

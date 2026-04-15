@@ -32,8 +32,8 @@ class TestSmartDischarge:
             "foxess_control",
             "smart_discharge",
             {
-                "start_time": "00:00",
-                "end_time": "23:59",
+                "start_time": "00:00:00",
+                "end_time": "23:59:00",
                 "min_soc": 30,
             },
         )
@@ -58,8 +58,8 @@ class TestSmartDischarge:
             "foxess_control",
             "smart_discharge",
             {
-                "start_time": "00:00",
-                "end_time": "23:59",
+                "start_time": "00:00:00",
+                "end_time": "23:59:00",
                 "min_soc": 30,
             },
         )
@@ -88,8 +88,8 @@ class TestSmartCharge:
             "foxess_control",
             "smart_charge",
             {
-                "start_time": "00:00",
-                "end_time": "23:59",
+                "start_time": "00:00:00",
+                "end_time": "23:59:00",
                 "target_soc": 80,
             },
         )
@@ -115,8 +115,8 @@ class TestFaultInjection:
             "foxess_control",
             "smart_discharge",
             {
-                "start_time": "00:00",
-                "end_time": "23:59",
+                "start_time": "00:00:00",
+                "end_time": "23:59:00",
                 "min_soc": 20,
             },
         )
@@ -140,8 +140,6 @@ class TestDataSource:
     ) -> None:
         """When idle, data source should be API."""
         foxess_sim.reset()
-        # Clear any active sessions
-        ha_e2e.call_service("foxess_control", "clear_overrides", {})
         time.sleep(5)
 
         attrs = ha_e2e.get_attributes("sensor.foxess_battery_soc")
