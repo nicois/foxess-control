@@ -606,7 +606,15 @@ def _setup_smart_discharge_listeners(
     state = hass.data[DOMAIN]["_smart_discharge_state"]
     adapter = _build_foxess_adapter(hass, inverter, state)
     cb = _sb_setup_smart_discharge_listeners(hass, DOMAIN, adapter)  # type: ignore[arg-type]
-    hass.data[DOMAIN]["_ws_discharge_callback"] = cb
+
+    # Wrap the callback to manage WebSocket lifecycle after each check.
+    # The brand-agnostic listener doesn't know about WS — this is
+    # FoxESS-specific policy that was previously inline in the listener.
+    async def _ws_aware_discharge_cb(now: datetime.datetime) -> None:
+        await cb(now)
+        await _maybe_start_realtime_ws(hass)
+
+    hass.data[DOMAIN]["_ws_discharge_callback"] = _ws_aware_discharge_cb
 
 
 def _has_matching_schedule_group(
