@@ -67,6 +67,45 @@ class HAClient:
             f"(last: '{self.get_state(entity_id)}')"
         )
 
+    def wait_for_numeric_state(
+        self,
+        entity_id: str,
+        condition: str,
+        value: float,
+        timeout_s: float = 60,
+        poll_interval: float = 2.0,
+    ) -> float:
+        """Poll until entity's numeric state satisfies the condition.
+
+        condition: "lt", "gt", "le", "ge", "eq", "ne"
+        """
+        import operator
+
+        ops = {
+            "lt": operator.lt,
+            "gt": operator.gt,
+            "le": operator.le,
+            "ge": operator.ge,
+            "eq": operator.eq,
+            "ne": operator.ne,
+        }
+        op = ops[condition]
+        deadline = time.monotonic() + timeout_s
+        last = None
+        while time.monotonic() < deadline:
+            raw = self.get_state(entity_id)
+            try:
+                last = float(raw)
+                if op(last, value):
+                    return last
+            except (ValueError, TypeError):
+                pass
+            time.sleep(poll_interval)
+        raise TimeoutError(
+            f"{entity_id} did not satisfy {condition} {value} "
+            f"within {timeout_s}s (last: {last})"
+        )
+
     def is_ready(self) -> bool:
         """Check if HA is responding."""
         try:
