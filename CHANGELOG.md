@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2
+
+### Fixed
+- **WebSocket not connecting during discharge**: regression from 1.0.1 adapter extraction — the brand-agnostic listeners don't trigger WS lifecycle. The discharge callback is now wrapped to call `_maybe_start_realtime_ws` after each check.
+
 ## 1.0.1
 
 ### Added
