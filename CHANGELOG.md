@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2-beta.1
+
+### Added
+- **SoC interpolation between integer ticks**: the coordinator integrates battery power over time to maintain a sub-percent SoC estimate for display. Progress bars and forecasts update smoothly between the ~6-minute integer SoC ticks instead of appearing stuck. Resyncs to the authoritative value on each tick change and REST poll. Algorithm decisions continue to use raw integer SoC.
+
 ## 1.0.2
 
 ### Fixed
