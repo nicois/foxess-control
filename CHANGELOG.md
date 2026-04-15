@@ -1,16 +1,19 @@
 # Changelog
 
-## 1.0.1-beta.30
+## 1.0.1-beta.31
 
 ### Fixed
-- **Progress header shown for scheduled discharge**: the progress section header no longer appears when discharge is in "scheduled" phase with no bars visible
-- **House load greyed out at low values**: the overview card house node is now always shown at full opacity regardless of load magnitude
-- **WS badge shown after disconnect**: data source badge immediately switches from "WS" to "API" when the WebSocket disconnects, instead of showing stale "WS" for up to 5 minutes
+- **Progress section shown prematurely**: progress header and bars are now hidden during charge "deferred" and discharge "scheduled" phases when nothing is happening yet
+- **House load greyed out at low values**: the overview card house node is always shown at full opacity regardless of load magnitude
+- **WS badge shown after disconnect**: data source badge immediately switches from "WS" to "API" when the WebSocket disconnects
+- **Reconfigure password with trailing newline**: `ensure_password_hash` now strips whitespace, preventing a trailing `\n` from `echo` (without `-n`) from producing a wrong MD5 hash
+
+### Added
+- **MD5 hash instructions in README**: documents `echo -n 'password' | md5sum` for users who prefer not to type raw passwords in the HA UI
+- **Debug logging for reconfigure flow**: password hash recognition and config flow source logged for diagnosis
 
 ### Changed
 - **Constraints restructured**: three-tier organisation (Principles / Invariants / Proposed) for clearer traceability from vision through specific rules
-- **UI Principles** section added to websocket-realtime design doc
-- **Debug logging for reconfigure flow**: password hash recognition and config flow source now logged for diagnosis
 
 ## 1.0.1-beta.29
 
