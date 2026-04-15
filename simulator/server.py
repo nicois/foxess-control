@@ -51,10 +51,32 @@ def _api_response(result: Any, errno: int = 0, msg: str = "success") -> web.Resp
 
 
 def _check_fault() -> web.Response | None:
+    if _model.active_fault is None:
+        return None
+    # Decrement remaining count; auto-clear when exhausted
+    if _model.fault_remaining > 0:
+        _model.fault_remaining -= 1
+        if _model.fault_remaining == 0:
+            fault = _model.active_fault
+            _model.active_fault = None
+            # Return fault response for this last faulted request
+            if fault == "api_down":
+                return web.Response(status=503, text="Service Unavailable")
+            if fault == "rate_limit":
+                return _api_response(None, errno=40400, msg="Rate limit")
+            if fault == "api_400":
+                return web.Response(status=400, text="Bad Request")
+            if fault == "api_500":
+                return web.Response(status=500, text="Internal Server Error")
+            return None
     if _model.active_fault == "api_down":
         return web.Response(status=503, text="Service Unavailable")
     if _model.active_fault == "rate_limit":
         return _api_response(None, errno=40400, msg="Rate limit")
+    if _model.active_fault == "api_400":
+        return web.Response(status=400, text="Bad Request")
+    if _model.active_fault == "api_500":
+        return web.Response(status=500, text="Internal Server Error")
     return None
 
 
@@ -238,8 +260,10 @@ async def handle_sim_fast_forward(request: web.Request) -> web.Response:
 async def handle_sim_fault(request: web.Request) -> web.Response:
     body = await request.json()
     fault_type = body.get("type")
+    count = body.get("count", 0)  # 0 = permanent
     _model.active_fault = fault_type
-    _LOGGER.info("Fault injected: %s", fault_type)
+    _model.fault_remaining = count
+    _LOGGER.info("Fault injected: %s (count=%d)", fault_type, count)
 
     if fault_type == "ws_disconnect":
         for ws in list(_ws_clients):

@@ -62,9 +62,13 @@ class FoxESSWebSession:
     TIMEZONE = "Australia/Melbourne"
     LANG = "en"
 
-    def __init__(self, username: str, password_md5: str) -> None:
+    def __init__(
+        self, username: str, password_md5: str, base_url: str | None = None
+    ) -> None:
         self._username = username
         self._password_md5 = password_md5
+        if base_url is not None:
+            self.BASE_URL = base_url
         self._token: str | None = None
         self._last_login: float = 0.0
         self._session: aiohttp.ClientSession | None = None

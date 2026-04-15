@@ -105,6 +105,7 @@ class InverterModel:
 
     # Fault injection
     active_fault: str | None = None
+    fault_remaining: int = 0  # auto-clear after N requests (0 = permanent)
 
     # WS config overrides
     ws_unit: str = "W"  # "W" or "kW"

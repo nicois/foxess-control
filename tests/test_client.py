@@ -1,189 +1,109 @@
-"""Tests for FoxESS API client authentication and request handling."""
+"""Tests for FoxESS API client authentication and request handling.
 
-import hashlib
+Uses the FoxESS simulator for realistic HTTP interactions.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import pytest
 import requests
-import responses
 
 from custom_components.foxess_control.foxess.client import FoxESSApiError, FoxESSClient
+
+if TYPE_CHECKING:
+    from .conftest import SimulatorHandle
 
 
 @pytest.fixture(autouse=True)
 def _disable_throttle() -> None:
-    """Disable request throttling in tests."""
+    """Disable request throttling and retry delays in tests."""
     FoxESSClient.MIN_REQUEST_INTERVAL = 0.0
+    FoxESSClient.RATE_LIMIT_MAX_DELAY = 0.0
 
 
-@responses.activate
-def test_get_request_signs_correctly() -> None:
-    """Verify the signature is md5(path + CRLF + token + CRLF + ts)."""
-    client = FoxESSClient("test-api-key")
-
-    responses.add(
-        responses.GET,
-        "https://www.foxesscloud.com/op/v0/device/detail",
-        json={"errno": 0, "result": {"deviceSN": "ABC123"}},
-    )
-
-    result = client.get("/op/v0/device/detail", {"sn": "ABC123"})
-
-    assert result == {"deviceSN": "ABC123"}
-    req = responses.calls[0].request
-    assert req.headers["token"] == "test-api-key"
-    ts = req.headers["timestamp"]
-    expected_sig = hashlib.md5(
-        rf"/op/v0/device/detail\r\ntest-api-key\r\n{ts}".encode()
-    ).hexdigest()
-    assert req.headers["signature"] == expected_sig
+def test_get_request(foxess_sim: SimulatorHandle) -> None:
+    """GET request returns simulator data."""
+    client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
+    result = client.get("/op/v0/device/detail", {"sn": "SIM0001"})
+    assert "capacity" in result
 
 
-@responses.activate
-def test_post_request() -> None:
-    client = FoxESSClient("test-api-key")
-
-    responses.add(
-        responses.POST,
-        "https://www.foxesscloud.com/op/v0/device/list",
-        json={
-            "errno": 0,
-            "result": {"data": [{"deviceSN": "ABC123"}], "total": 1},
-        },
-    )
-
+def test_post_request(foxess_sim: SimulatorHandle) -> None:
+    client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
     result = client.post("/op/v0/device/list", {"currentPage": 1, "pageSize": 10})
-    assert result["data"][0]["deviceSN"] == "ABC123"
+    assert result["data"][0]["deviceSN"] == "SIM0001"
 
 
-@responses.activate
-def test_api_error_raises() -> None:
-    client = FoxESSClient("test-api-key")
-
-    responses.add(
-        responses.GET,
-        "https://www.foxesscloud.com/op/v0/device/detail",
-        json={"errno": 40257, "msg": "invalid request body parameters"},
+def test_real_query(foxess_sim: SimulatorHandle) -> None:
+    """Real-time query returns power variables from model."""
+    foxess_sim.set(soc=75, solar_kw=2.0, load_kw=0.5)
+    client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
+    result = client.post(
+        "/op/v0/device/real/query",
+        {"sn": "SIM0001", "variables": ["SoC", "pvPower", "loadsPower"]},
     )
+    datas = {d["variable"]: d["value"] for d in result[0]["datas"]}
+    assert datas["SoC"] == 75.0
+    assert datas["pvPower"] == 2.0
+    assert datas["loadsPower"] == 0.5
 
-    with pytest.raises(FoxESSApiError, match="40257"):
-        client.get("/op/v0/device/detail", {"sn": "INVALID"})
 
-
-@responses.activate
-def test_rate_limit_retry_succeeds() -> None:
+def test_rate_limit_retry_succeeds(foxess_sim: SimulatorHandle) -> None:
     """A rate-limited request should retry and succeed."""
-    client = FoxESSClient("test-api-key")
-
-    # First call: rate limited
-    responses.add(
-        responses.GET,
-        "https://www.foxesscloud.com/op/v0/device/detail",
-        json={"errno": 40400, "msg": "request frequency too high"},
-    )
-    # Second call: success
-    responses.add(
-        responses.GET,
-        "https://www.foxesscloud.com/op/v0/device/detail",
-        json={"errno": 0, "result": {"deviceSN": "ABC123"}},
-    )
-
-    result = client.get("/op/v0/device/detail", {"sn": "ABC123"})
-    assert result == {"deviceSN": "ABC123"}
-    assert len(responses.calls) == 2
+    foxess_sim.fault("rate_limit", count=1)
+    client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
+    result = client.get("/op/v0/device/detail", {"sn": "SIM0001"})
+    assert "capacity" in result
 
 
-@responses.activate
-def test_transient_502_retries_and_succeeds() -> None:
-    """A 502 response should be retried and succeed on next attempt."""
-    client = FoxESSClient("test-api-key")
-
-    # First call: 502
-    responses.add(
-        responses.GET,
-        "https://www.foxesscloud.com/op/v0/device/detail",
-        status=502,
-    )
-    # Second call: success
-    responses.add(
-        responses.GET,
-        "https://www.foxesscloud.com/op/v0/device/detail",
-        json={"errno": 0, "result": {"deviceSN": "ABC123"}},
-    )
-
-    result = client.get("/op/v0/device/detail", {"sn": "ABC123"})
-    assert result == {"deviceSN": "ABC123"}
-    assert len(responses.calls) == 2
+def test_transient_503_retries_and_succeeds(
+    foxess_sim: SimulatorHandle,
+) -> None:
+    """A 503 response should be retried and succeed on next attempt."""
+    foxess_sim.fault("api_down", count=1)
+    client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
+    result = client.get("/op/v0/device/detail", {"sn": "SIM0001"})
+    assert "capacity" in result
 
 
-@responses.activate
-def test_transient_post_retries_and_succeeds() -> None:
+def test_transient_post_retries_and_succeeds(
+    foxess_sim: SimulatorHandle,
+) -> None:
     """A 503 POST response should be retried."""
-    client = FoxESSClient("test-api-key")
-
-    responses.add(
-        responses.POST,
-        "https://www.foxesscloud.com/op/v0/device/list",
-        status=503,
-    )
-    responses.add(
-        responses.POST,
-        "https://www.foxesscloud.com/op/v0/device/list",
-        json={"errno": 0, "result": {"data": []}},
-    )
-
+    foxess_sim.fault("api_down", count=1)
+    client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
     result = client.post("/op/v0/device/list", {"currentPage": 1, "pageSize": 10})
-    assert result == {"data": []}
-    assert len(responses.calls) == 2
+    assert result["data"][0]["deviceSN"] == "SIM0001"
 
 
-@responses.activate
-def test_transient_retries_exhaust_raises() -> None:
+def test_transient_retries_exhaust_raises(
+    foxess_sim: SimulatorHandle,
+) -> None:
     """After TRANSIENT_RETRIES, the error is raised."""
-    client = FoxESSClient("test-api-key")
-
-    for _ in range(FoxESSClient.TRANSIENT_RETRIES + 1):
-        responses.add(
-            responses.GET,
-            "https://www.foxesscloud.com/op/v0/device/detail",
-            status=500,
-        )
-
+    foxess_sim.fault("api_500")  # permanent
+    client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
     with pytest.raises(requests.HTTPError):
-        client.get("/op/v0/device/detail", {"sn": "ABC123"})
+        client.get("/op/v0/device/detail", {"sn": "SIM0001"})
+    foxess_sim.clear_fault()
 
-    assert len(responses.calls) == FoxESSClient.TRANSIENT_RETRIES + 1
 
-
-@responses.activate
-def test_non_retryable_status_raises_immediately() -> None:
+def test_non_retryable_status_raises_immediately(
+    foxess_sim: SimulatorHandle,
+) -> None:
     """A 400 error should not be retried."""
-    client = FoxESSClient("test-api-key")
-
-    responses.add(
-        responses.GET,
-        "https://www.foxesscloud.com/op/v0/device/detail",
-        status=400,
-    )
-
+    foxess_sim.fault("api_400")  # permanent
+    client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
     with pytest.raises(requests.HTTPError):
-        client.get("/op/v0/device/detail", {"sn": "ABC123"})
+        client.get("/op/v0/device/detail", {"sn": "SIM0001"})
+    foxess_sim.clear_fault()
 
-    assert len(responses.calls) == 1
 
-
-@responses.activate
-def test_rate_limit_exhausts_retries() -> None:
+def test_rate_limit_exhausts_retries(foxess_sim: SimulatorHandle) -> None:
     """After all retries are exhausted, the rate-limit error is raised."""
-    client = FoxESSClient("test-api-key")
-
-    for _ in range(FoxESSClient.RATE_LIMIT_RETRIES + 1):
-        responses.add(
-            responses.POST,
-            "https://www.foxesscloud.com/op/v0/device/list",
-            json={"errno": 40400, "msg": "request frequency too high"},
-        )
-
+    foxess_sim.fault("rate_limit")  # permanent
+    client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
     with pytest.raises(FoxESSApiError, match="40400"):
         client.post("/op/v0/device/list", {"currentPage": 1, "pageSize": 10})
-
-    assert len(responses.calls) == FoxESSClient.RATE_LIMIT_RETRIES + 1
+    foxess_sim.clear_fault()

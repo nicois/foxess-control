@@ -33,8 +33,10 @@ class FoxESSClient:
     RATE_LIMIT_ERRNO = 40400
     TRANSIENT_RETRIES = 3
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, base_url: str | None = None) -> None:
         self.api_key = api_key
+        if base_url is not None:
+            self.BASE_URL = base_url
         self.session = requests.Session()
         self.session.headers.update({"Content-Type": "application/json", "lang": "en"})
         self._last_request_time = 0.0

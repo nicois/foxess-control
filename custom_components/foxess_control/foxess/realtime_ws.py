@@ -154,11 +154,14 @@ class FoxESSRealtimeWS:
         web_session: FoxESSWebSession,
         on_data: Callable[[dict[str, Any]], Awaitable[None]],
         on_disconnect: Callable[[], None],
+        ws_url: str | None = None,
     ) -> None:
         self._plant_id = plant_id
         self._web_session = web_session
         self._on_data = on_data
         self._on_disconnect = on_disconnect
+        if ws_url is not None:
+            self.WS_URL = ws_url
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._http_session: aiohttp.ClientSession | None = None
         self._listen_task: asyncio.Task[None] | None = None
