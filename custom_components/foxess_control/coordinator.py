@@ -45,6 +45,21 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # WebSocket feed-in energy integration state
         self._ws_last_time: float | None = None
         self._ws_feedin_power_kw: float = 0.0
+        # SoC interpolation state — integrates power between integer ticks
+        self._soc_interpolated: float | None = None
+        self._soc_last_reported: float | None = None
+        self._soc_last_bat_kw: float = 0.0  # net: positive=charging
+
+    def _get_capacity_kwh(self) -> float:
+        """Read battery capacity from config (needed for SoC integration)."""
+        from .const import CONF_BATTERY_CAPACITY_KWH
+
+        for key in self.hass.data.get(DOMAIN, {}):
+            if not str(key).startswith("_"):
+                entry = self.hass.config_entries.async_get_entry(str(key))
+                if entry is not None:
+                    return float(entry.options.get(CONF_BATTERY_CAPACITY_KWH, 0))
+        return 0.0
 
     def _fetch_all(self) -> dict[str, Any]:
         """Fetch real-time data and work mode in a single executor job."""
@@ -80,6 +95,13 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # REST poll is authoritative — reset WebSocket integration state
         self._ws_last_time = None
         self._ws_feedin_power_kw = 0.0
+        # Resync SoC interpolation to authoritative REST value
+        rest_soc = data.get("SoC")
+        if rest_soc is not None:
+            self._soc_interpolated = float(rest_soc)
+            self._soc_last_reported = float(rest_soc)
+            data["_soc_interpolated"] = round(self._soc_interpolated, 1)
+        self._soc_last_bat_kw = 0.0
         data["_data_source"] = "api"
         return data
 
@@ -119,6 +141,40 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if feedin_power_kw is not None:
             self._ws_feedin_power_kw = feedin_power_kw
             self._ws_last_time = now
+
+        # Integrate battery power into sub-percent SoC estimate.
+        # Uses the same trapezoidal approach as feedin integration.
+        charge_kw = ws_data.get("batChargePower", 0.0)
+        discharge_kw = ws_data.get("batDischargePower", 0.0)
+        net_bat_kw = charge_kw - discharge_kw  # positive = charging
+        reported_soc = ws_data.get("SoC")
+
+        if reported_soc is not None:
+            if self._soc_interpolated is None:
+                # First reading — initialise
+                self._soc_interpolated = reported_soc
+                self._soc_last_reported = reported_soc
+            elif reported_soc != self._soc_last_reported:
+                # Integer SoC tick changed — resync to authoritative value
+                self._soc_interpolated = reported_soc
+                self._soc_last_reported = reported_soc
+
+        if self._soc_interpolated is not None and self._ws_last_time is not None:
+            elapsed_hours = (now - self._ws_last_time) / 3600.0
+            if elapsed_hours > 0:
+                avg_kw = (self._soc_last_bat_kw + net_bat_kw) / 2.0
+                capacity = self._get_capacity_kwh()
+                if capacity > 0:
+                    delta_pct = avg_kw * elapsed_hours / capacity * 100.0
+                    self._soc_interpolated = max(
+                        0.0, min(100.0, self._soc_interpolated + delta_pct)
+                    )
+        self._soc_last_bat_kw = net_bat_kw
+
+        # Expose interpolated SoC for display (sensors, progress bars)
+        if self._soc_interpolated is not None:
+            ws_data = dict(ws_data) if not isinstance(ws_data, dict) else ws_data
+            ws_data["_soc_interpolated"] = round(self._soc_interpolated, 1)
 
         ws_data["_data_source"] = "ws"
 

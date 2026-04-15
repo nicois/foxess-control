@@ -160,8 +160,16 @@ class TestInjectRealtimeData:
 
     def test_skip_when_nothing_changed(self) -> None:
         coord = self._make_coord_with_data(
-            {"SoC": 50.0, "feedin": 100.0, "_data_source": "ws"}
+            {
+                "SoC": 50.0,
+                "feedin": 100.0,
+                "_data_source": "ws",
+                "_soc_interpolated": 50.0,
+            }
         )
+        # Seed interpolation state so no new data is generated
+        coord._soc_interpolated = 50.0
+        coord._soc_last_reported = 50.0
         # Patch to detect if async_set_updated_data is called
         coord.async_set_updated_data = MagicMock()  # type: ignore[method-assign]
         coord.inject_realtime_data({"SoC": 50.0})
