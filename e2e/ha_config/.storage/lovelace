@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "minor_version": 1,
+  "key": "lovelace",
+  "data": {
+    "config": {
+      "views": [
+        {
+          "title": "E2E Test",
+          "path": "e2e",
+          "cards": [
+            {
+              "type": "custom:foxess-overview-card"
+            },
+            {
+              "type": "custom:foxess-control-card"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
