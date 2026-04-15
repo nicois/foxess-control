@@ -70,6 +70,14 @@ FoxESS Control polls real-time inverter data (battery SoC, charge/discharge powe
 
 After entering your API key and serial, an optional second step allows you to provide your **FoxESS Cloud web portal** username and password (the same credentials you use to log in at [foxesscloud.com](https://www.foxesscloud.com/)). These enable the real-time WebSocket data feature (see below). You can skip this step and add credentials later via **Configure > Reconfigure**.
 
+You can enter either your raw password or its MD5 hash. If you prefer not to type your password into the HA UI, generate the hash beforehand:
+
+```bash
+echo -n 'YourPassword' | md5sum | cut -d' ' -f1
+```
+
+> **Important:** Use `echo -n` (no trailing newline). Plain `echo` adds a newline which produces a different hash.
+
 ### Real-time WebSocket data
 
 When web credentials are configured, the integration can connect to an undocumented FoxESS Cloud WebSocket that streams inverter data every ~5 seconds (vs the standard 5-minute REST API polls). This is used during smart sessions to detect and react to load spikes faster, reducing the risk of accidental grid import.

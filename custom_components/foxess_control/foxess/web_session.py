@@ -27,7 +27,11 @@ def ensure_password_hash(password_or_hash: str) -> str:
 
     If *password_or_hash* already looks like an MD5 hash (32 hex chars),
     return it as-is (lowercased).  Otherwise, hash the raw password.
+
+    Strips whitespace to avoid common issues like trailing newlines
+    from ``echo`` vs ``echo -n`` when generating hashes.
     """
+    password_or_hash = password_or_hash.strip()
     if _MD5_RE.match(password_or_hash):
         _LOGGER.debug(
             "Password input recognised as MD5 hash (len=%d)",
