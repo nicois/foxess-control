@@ -356,10 +356,10 @@ class FoxESSOverviewCard extends HTMLElement {
           ${workMode && workMode !== "SelfUse" ? `<span class="work-mode">${this._formatWorkMode(workMode)}</span>` : ""}
         </div>
         <div class="flow-grid">
-          ${this._renderNode("solar", "☀️", this._t("solar"), solarFound, this._formatKw(solar), solarActive, pv1 != null || pv2 != null ? this._pvDetail(pv1, pv2) : "", eid.solar_entity)}
+          ${this._renderNode("solar", "☀️", this._t("solar"), solarFound, this._formatKw(solar), solarActive, dataSource !== "ws" && (pv1 != null || pv2 != null) ? this._pvDetail(pv1, pv2) : "", eid.solar_entity)}
           ${this._renderNode("house", "🏠", this._t("house"), houseFound, this._formatKw(house), houseActive, "", eid.house_entity)}
-          ${this._renderGridNode(gridFound, gridNet, gridImporting, gridExporting, gridV, gridHz, eid.grid_import_entity)}
-          ${this._renderBatteryNode(soc, socPct, socColor, batNet, batCharging, batDischarging, batTemp, residual, batFound)}
+          ${this._renderGridNode(gridFound, gridNet, gridImporting, gridExporting, dataSource !== "ws" ? gridV : null, dataSource !== "ws" ? gridHz : null, eid.grid_import_entity)}
+          ${this._renderBatteryNode(soc, socPct, socColor, batNet, batCharging, batDischarging, dataSource !== "ws" ? batTemp : null, dataSource !== "ws" ? residual : null, batFound)}
         </div>
       </ha-card>
     `;

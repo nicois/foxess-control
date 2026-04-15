@@ -9,6 +9,8 @@
 - **`wait_for_attribute()` on HAClient**: polls an entity attribute until it reaches an expected value, used to verify data source transitions.
 
 ### Fixed
+- **Work mode label stuck after session ends**: overview card showed "Force Discharge" for minutes after the discharge window finished because the coordinator only updated `_work_mode` on the next REST poll. Now cleared immediately via `_on_session_cancel`.
+- **Stale REST-only values shown during WS mode**: overview card hid PV1/PV2 detail, grid voltage/frequency, battery temperature, and residual energy when WebSocket is the active data source — these values only update on REST polls and would be misleadingly stale.
 - **E2E resource lifecycle**: named containers (`ha-e2e-{worker_id}`), atexit safety nets, setup try/except cleanup, and pre-push orphan cleanup prevent leaked Podman containers from cascading into subsequent test failures.
 - **WASM signature test ordering dependency**: `test_known_signature` failed when run after other signature tests due to WASM heap state accumulation in the module singleton. Fixed by resetting the engine before the deterministic check.
 - **Playwright auth with HA container**: `trusted_networks` auth provider with `allow_bypass_login: true` and IPv6 `::/0` (browser connects via `::1`). Podman port mapping (`-p {port}:8123`) instead of `--network=host` for xdist worker isolation.

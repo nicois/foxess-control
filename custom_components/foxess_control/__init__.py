@@ -1329,11 +1329,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "_store", Store[dict[str, Any]](hass, STORAGE_VERSION, STORAGE_KEY)
     )
 
-    # Post-cancel hook: stop WebSocket if no session needs it.
+    # Post-cancel hook: stop WebSocket and clear stale work mode.
     # Called by the brand-agnostic cancel_smart_session after clearing state.
     def _on_session_cancel() -> None:
         if not _should_start_realtime_ws(hass):
             hass.async_create_task(_stop_realtime_ws(hass))
+        # Clear work mode immediately so the overview card drops the
+        # label without waiting for the next REST poll.
+        entry_id = _first_entry_id(hass)
+        coordinator = hass.data[DOMAIN][entry_id]["coordinator"]
+        if coordinator.data is not None:
+            coordinator.data["_work_mode"] = None
+            coordinator.async_set_updated_data(dict(coordinator.data))
 
     hass.data[DOMAIN]["_on_session_cancel"] = _on_session_cancel
 
