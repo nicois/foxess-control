@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from .ha_client import FATAL_FOR_ACTIVE
+
 if TYPE_CHECKING:
     from .conftest import SimulatorHandle
     from .ha_client import HAClient
@@ -56,6 +58,7 @@ class TestSmartDischarge:
             "sensor.foxess_smart_operations",
             "discharging",
             timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
         )
         assert state == "discharging"
 
@@ -79,6 +82,7 @@ class TestSmartDischarge:
             "sensor.foxess_smart_operations",
             "discharging",
             timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
         )
 
         foxess_sim.fast_forward(600, step=5)
@@ -105,6 +109,7 @@ class TestSmartCharge:
             "sensor.foxess_smart_operations",
             "charging",
             timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
         )
         assert state == "charging"
 
@@ -127,6 +132,7 @@ class TestFaultInjection:
             "sensor.foxess_smart_operations",
             "discharging",
             timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
         )
 
         # Switch to kW units AFTER discharge starts

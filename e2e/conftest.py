@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import atexit
 import contextlib
+import logging
 import os
 import shutil
 import subprocess
@@ -31,6 +32,17 @@ import pytest
 import requests
 
 from .ha_client import HAClient
+
+_log = logging.getLogger("e2e.timing")
+
+
+def pytest_configure(config: Any) -> None:
+    """Ensure e2e.timing messages appear in pytest output."""
+    logging.getLogger("e2e.timing").setLevel(logging.WARNING)
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logging.getLogger("e2e.timing").addHandler(handler)
+
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -192,6 +204,8 @@ def foxess_sim(
     _worker_ports: dict[str, int],
 ) -> Generator[SimulatorHandle, None, None]:
     """Start the FoxESS simulator."""
+    wid = _worker_id()
+    t0 = time.monotonic()
     port = _worker_ports["sim"]
     proc = subprocess.Popen(
         ["python", "-m", "simulator", "--port", str(port)],
@@ -219,6 +233,7 @@ def foxess_sim(
         atexit.unregister(_cleanup)
         raise RuntimeError("Simulator did not start")
 
+    _log.warning("[%s] simulator ready in %.1fs", wid, time.monotonic() - t0)
     yield SimulatorHandle(f"http://localhost:{port}")
 
     _cleanup()
@@ -243,7 +258,10 @@ def ha_e2e(
     ensures the container is stopped even if the fixture teardown
     is skipped (setup failure, worker crash, SIGTERM).
     """
+    wid = _worker_id()
+    t0 = time.monotonic()
     _build_container()
+    _log.warning("[%s] container build: %.1fs", wid, time.monotonic() - t0)
 
     name = _container_name()
     # Stop any stale container with our name from a prior failed run.
@@ -269,7 +287,7 @@ def ha_e2e(
             "--add-host=host.containers.internal:host-gateway",
             "-v",
             f"{REPO_ROOT}/custom_components/foxess_control"
-            f":/config/custom_components/foxess_control:ro,Z",
+            f":/config/custom_components/foxess_control:ro,z",
             "-v",
             f"{tmpdir}:/config:Z",
             "-e",
@@ -289,9 +307,12 @@ def ha_e2e(
 
     try:
         ha = HAClient(f"http://localhost:{ha_port}", E2E_TOKEN)
+        t1 = time.monotonic()
         ha.wait_ready(timeout_s=120)
+        _log.warning("[%s] HA ready: %.1fs", wid, time.monotonic() - t1)
 
         # Wait for integration entities
+        t2 = time.monotonic()
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
             try:
@@ -303,6 +324,12 @@ def ha_e2e(
             if proc.stdout:
                 print(proc.stdout.read().decode(errors="replace")[-3000:])
             raise TimeoutError("Integration entities not created within 120s")
+        _log.warning(
+            "[%s] entities ready: %.1fs (total: %.1fs)",
+            wid,
+            time.monotonic() - t2,
+            time.monotonic() - t0,
+        )
     except:
         _cleanup()
         atexit.unregister(_cleanup)
@@ -348,12 +375,13 @@ def page(
     OAuth flow: browser → /auth/authorize → auto-approve → redirect
     back to dashboard. We wait for this chain to complete.
     """
+    t0 = time.monotonic()
     p = browser_context.new_page()
     p.goto(f"http://localhost:{ha_port}/lovelace/0", timeout=60000)
-    # Wait for the auth redirect chain to complete and dashboard to load
     p.wait_for_url("**/lovelace/**", timeout=60000)
     p.wait_for_load_state("networkidle", timeout=30000)
-    p.wait_for_timeout(5000)  # let custom cards load and render
+    p.wait_for_timeout(2000)  # let custom cards render
+    _log.warning("[%s] page ready: %.1fs", _worker_id(), time.monotonic() - t0)
     yield p
     p.close()
 
@@ -369,11 +397,13 @@ def _e2e_reset(
     ha_e2e: HAClient,
 ) -> Generator[None, None, None]:
     """Reset simulator and clear HA sessions before each test."""
+    t0 = time.monotonic()
     foxess_sim.reset()
     with contextlib.suppress(Exception):
         ha_e2e.call_service("foxess_control", "clear_overrides", {})
     with contextlib.suppress(TimeoutError):
         ha_e2e.wait_for_state("sensor.foxess_smart_operations", "idle", timeout_s=30)
+    _log.warning("[%s] reset: %.1fs", _worker_id(), time.monotonic() - t0)
 
     yield
 

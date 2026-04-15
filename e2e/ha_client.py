@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
 import requests
+
+_log = logging.getLogger("e2e.timing")
+
+# States from which an active session is unreachable.
+# "idle" is excluded: there's a brief window after call_service where the
+# sensor hasn't updated yet, so the first poll sees "idle" legitimately.
+FATAL_FOR_ACTIVE = frozenset({"error"})
 
 
 class HAClient:
@@ -54,13 +62,32 @@ class HAClient:
         expected: str,
         timeout_s: float = 30,
         poll_interval: float = 1.0,
+        fatal_states: frozenset[str] | None = None,
     ) -> str:
-        """Poll until entity reaches the expected state or timeout."""
-        deadline = time.monotonic() + timeout_s
+        """Poll until entity reaches the expected state or timeout.
+
+        If *fatal_states* is provided and the entity enters one of
+        those states, raise immediately instead of polling until
+        timeout — the expected state is unreachable.
+        """
+        t0 = time.monotonic()
+        deadline = t0 + timeout_s
         while time.monotonic() < deadline:
             state = self.get_state(entity_id)
             if state == expected:
+                _log.warning(
+                    "wait_for_state %s=%s: %.1fs",
+                    entity_id,
+                    expected,
+                    time.monotonic() - t0,
+                )
                 return state
+            if fatal_states and state in fatal_states:
+                raise RuntimeError(
+                    f"{entity_id} reached fatal state '{state}' "
+                    f"while waiting for '{expected}' "
+                    f"(after {time.monotonic() - t0:.1f}s)"
+                )
             time.sleep(poll_interval)
         raise TimeoutError(
             f"{entity_id} did not reach '{expected}' within {timeout_s}s "
@@ -115,12 +142,20 @@ class HAClient:
         poll_interval: float = 2.0,
     ) -> str:
         """Poll until an entity attribute reaches the expected value."""
-        deadline = time.monotonic() + timeout_s
+        t0 = time.monotonic()
+        deadline = t0 + timeout_s
         last = None
         while time.monotonic() < deadline:
             attrs = self.get_attributes(entity_id)
             last = attrs.get(attr)
             if last == expected:
+                _log.warning(
+                    "wait_for_attribute %s.%s=%s: %.1fs",
+                    entity_id,
+                    attr,
+                    expected,
+                    time.monotonic() - t0,
+                )
                 return str(last)
             time.sleep(poll_interval)
         raise TimeoutError(

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from .ha_client import FATAL_FOR_ACTIVE
 from .selectors import ControlCard, OverviewCard
 
 if TYPE_CHECKING:
@@ -121,16 +122,9 @@ class TestOverviewCard:
         foxess_sim: SimulatorHandle,
         data_source: str,
     ) -> None:
-        """Data source badge reflects the active data path.
-
-        The [ws] variant requires the HA integration to establish a
-        WebSocket connection to the simulator from inside the Podman
-        container.  If the WS connection fails (e.g. DNS resolution
-        of host.containers.internal for ws:// protocol), the badge
-        stays "API" and the test is skipped with a clear message.
-        """
-        foxess_sim.set(soc=80, solar_kw=2.0, load_kw=0.5)
-        start, end = _tight_window(30)
+        """Data source badge reflects the active data path."""
+        foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
+        start, end = _tight_window(10)
         ha_e2e.call_service(
             "foxess_control",
             "smart_discharge",
@@ -140,24 +134,19 @@ class TestOverviewCard:
             "sensor.foxess_smart_operations",
             "discharging",
             timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
         )
-        try:
-            ha_e2e.wait_for_attribute(
-                "sensor.foxess_solar_power",
-                "data_source",
-                data_source,
-                timeout_s=60,
-            )
-        except TimeoutError:
-            if data_source == "ws":
-                pytest.skip(
-                    "WS did not activate — container may not reach "
-                    "simulator WS endpoint"
-                )
-            raise
+        # WS needs time to: web login → discover plantId → connect
+        # WS → receive first message → coordinator sets data_source.
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_solar_power",
+            "data_source",
+            data_source,
+            timeout_s=90,
+        )
         page.reload()
         page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(5000)
+        page.wait_for_timeout(2000)
 
         badge_text = page.evaluate(
             """() => {
@@ -206,6 +195,7 @@ class TestOverviewCard:
             "sensor.foxess_smart_operations",
             "discharging",
             timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
         )
         page.reload()
         page.wait_for_load_state("networkidle")
@@ -297,6 +287,7 @@ class TestControlCard:
             "sensor.foxess_smart_operations",
             "discharging",
             timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
         )
         page.reload()
         page.wait_for_load_state("networkidle")
@@ -379,6 +370,7 @@ class TestScreenshots:
             "sensor.foxess_smart_operations",
             "discharging",
             timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
         )
         page.reload()
         page.wait_for_load_state("networkidle")

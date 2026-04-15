@@ -225,6 +225,42 @@ The guard scales with consumption: high loads produce a larger guard
 """
 
 
+def compute_safe_schedule_end(
+    current_soc: float,
+    min_soc: float,
+    capacity_kwh: float,
+    power_w: int,
+    window_end: datetime.datetime,
+    *,
+    safety_factor: float = DISCHARGE_SAFETY_FACTOR,
+    now: datetime.datetime | None = None,
+) -> datetime.datetime:
+    """Compute the latest safe schedule end time for forced discharge.
+
+    Returns the time at which the battery would reach *min_soc* at the
+    current *power_w* discharge rate, divided by *safety_factor*.
+    Capped at *window_end*.
+
+    If HA loses connectivity, the inverter's schedule expires at this
+    time and reverts to self-use — the battery is protected without
+    HA intervention.
+    """
+    energy_kwh = (current_soc - min_soc) / 100 * capacity_kwh
+    drain_kw = power_w / 1000
+    if drain_kw <= 0 or energy_kwh <= 0:
+        return window_end
+    safe_hours = energy_kwh / drain_kw / safety_factor
+    if now is None:
+        # Match window_end's timezone awareness
+        now = (
+            datetime.datetime.now(tz=window_end.tzinfo)
+            if window_end.tzinfo
+            else datetime.datetime.now()
+        )
+    safe_end = now + datetime.timedelta(hours=safe_hours)
+    return min(safe_end, window_end)
+
+
 def safety_floor_w(peak_kw: float) -> int:
     """Return the discharge safety floor in watts for a given peak consumption."""
     return int(peak_kw * DISCHARGE_SAFETY_FACTOR * 1000)

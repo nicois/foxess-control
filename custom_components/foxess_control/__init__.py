@@ -566,6 +566,8 @@ def _build_foxess_adapter(
             max_power_w=_get_max_power_w(hass),
         )
     inv = inverter or _get_inverter(hass)
+    entry_id = _first_entry_id(hass)
+    coordinator = hass.data[DOMAIN][entry_id]["coordinator"]
     adapter = FoxESSCloudAdapter(
         hass=hass,
         inverter=inv,
@@ -574,6 +576,8 @@ def _build_foxess_adapter(
         start=state["start"],
         end=state["end"],
         force=state.get("force", False),
+        capacity_kwh=state.get("battery_capacity_kwh", 0),
+        soc_getter=lambda: coordinator.data.get("SoC") if coordinator.data else None,
     )
     # Seed the adapter with groups built by the service handler
     if state.get("groups"):

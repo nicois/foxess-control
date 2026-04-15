@@ -27,6 +27,10 @@ from .const import (
     DEFAULT_API_MIN_SOC,
 )
 from .foxess import Inverter, WorkMode
+from .smart_battery.algorithms import (
+    DISCHARGE_SAFETY_FACTOR,
+    compute_safe_schedule_end,
+)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -287,6 +291,8 @@ class FoxESSCloudAdapter:
         start: datetime.datetime,
         end: datetime.datetime,
         force: bool = False,
+        capacity_kwh: float = 0,
+        soc_getter: Any = None,
     ) -> None:
         self._hass = hass
         self._inverter = inverter
@@ -295,6 +301,8 @@ class FoxESSCloudAdapter:
         self._start = start
         self._end = end
         self._force = force
+        self._capacity_kwh = capacity_kwh
+        self._soc_getter = soc_getter
         self._groups: list[ScheduleGroup] = []
 
     def get_max_power_w(self) -> int:
@@ -308,6 +316,30 @@ class FoxESSCloudAdapter:
         """Return current cached groups for session persistence."""
         return list(self._groups)
 
+    def _safe_end(
+        self, mode: WorkMode, power_w: int | None, fd_soc: int
+    ) -> datetime.datetime:
+        """Compute safe schedule end for discharge; full end for other modes."""
+        if (
+            mode != WorkMode.FORCE_DISCHARGE
+            or not power_w
+            or power_w <= 0
+            or self._capacity_kwh <= 0
+            or self._soc_getter is None
+        ):
+            return self._end
+        soc = self._soc_getter()
+        if soc is None:
+            return self._end
+        return compute_safe_schedule_end(
+            soc,
+            fd_soc,
+            self._capacity_kwh,
+            power_w,
+            self._end,
+            safety_factor=DISCHARGE_SAFETY_FACTOR,
+        )
+
     async def apply_mode(
         self,
         hass: HomeAssistant,
@@ -317,16 +349,21 @@ class FoxESSCloudAdapter:
     ) -> None:
         """Set inverter mode via schedule merge.
 
-        If cached groups exist with a matching mode, mutates ``fdPwr``
-        in-place (avoids re-reading the schedule from the API on every
-        tick).  Otherwise builds a new override group and merges.
+        For forced discharge, the schedule end time is set to a safe
+        horizon based on current SoC, discharge rate, and safety factor.
+        If HA loses connectivity, the inverter's schedule expires at
+        this horizon and reverts to self-use.
         """
-        # Fast path: mutate fdPwr in cached groups
+        safe_end = self._safe_end(mode, power_w, fd_soc)
+
+        # Fast path: mutate fdPwr and end time in cached groups
         if self._groups:
             for g in self._groups:
                 if g.get("workMode") == mode.value:
                     if power_w is not None:
                         g["fdPwr"] = power_w
+                    g["endHour"] = safe_end.hour
+                    g["endMinute"] = safe_end.minute
                     break
             await hass.async_add_executor_job(self._inverter.set_schedule, self._groups)
             return
@@ -335,7 +372,7 @@ class FoxESSCloudAdapter:
         now = dt_util.now()
         group = _build_override_group(
             now,
-            self._end,
+            safe_end,
             mode,
             self._inverter,
             self._min_soc_on_grid,
