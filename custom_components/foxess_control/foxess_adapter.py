@@ -344,6 +344,11 @@ class FoxESSCloudAdapter:
             api_min_soc=self._api_min_soc,
         )
         try:
+            # Pre-check schedule safety from async context so persistent
+            # notifications can be created if unmanaged modes are found.
+            schedule = await hass.async_add_executor_job(self._inverter.get_schedule)
+            _check_schedule_safe(schedule.get("groups", []), hass)
+
             groups = await hass.async_add_executor_job(
                 _merge_with_existing,
                 self._inverter,
