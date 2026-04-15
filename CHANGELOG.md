@@ -1,21 +1,15 @@
 # Changelog
 
-## 1.0.3-beta.2
-
-### Fixed
-- **WS not starting during smart charge with ws_all_sessions**: regression from the adapter extraction — the charge listener wrapper didn't trigger `_maybe_start_realtime_ws` after setup
-- **Persistent notifications lost on schedule conflict**: the adapter extraction removed `pn_create` calls that notified users about unmanaged work modes during power adjustments. Restored by pre-checking schedule safety from the async context.
-
-## 1.0.3-beta.1
+## 1.0.3
 
 ### Added
 - **SoC interpolation between integer ticks**: the coordinator integrates battery power over time to maintain a sub-percent SoC estimate for display. Progress bars and forecasts update smoothly between the ~6-minute integer SoC ticks instead of appearing stuck. Resyncs to the authoritative value on each tick change and REST poll. Algorithm decisions continue to use raw integer SoC.
-- **Two-zone SoC progress bar**: the SoC bar now shows a solid fill for the inverter-confirmed value and a semi-transparent extension for the power-integrated estimate. When the next SoC tick arrives, the solid fill catches up to the projected zone.
-
-## 1.0.2
+- **Two-zone SoC progress bar**: solid fill for the inverter-confirmed SoC + semi-transparent extension for the power-integrated estimate. When the next SoC tick arrives, the solid fill catches up to the projected zone.
 
 ### Fixed
-- **WebSocket not connecting during discharge**: regression from 1.0.1 adapter extraction — the brand-agnostic listeners don't trigger WS lifecycle. The discharge callback is now wrapped to call `_maybe_start_realtime_ws` after each check.
+- **WebSocket not connecting during discharge**: the adapter extraction removed inline `_maybe_start_realtime_ws` calls from the listener code. The discharge callback is now wrapped to trigger WS lifecycle after each check.
+- **WebSocket not connecting during smart charge**: the charge listener wrapper didn't trigger `_maybe_start_realtime_ws` when `ws_all_sessions` was enabled.
+- **Persistent notifications lost on schedule conflict**: restored `pn_create` for unmanaged work mode detection by pre-checking schedule safety from the async context in the cloud adapter.
 
 ## 1.0.1
 
