@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.4-beta.2
+
+### Added
+- **Playwright browser tests** (`e2e/test_ui.py`): 14 tests validating Lovelace card rendering in a real HA instance via Chromium — card presence, SoC display, progress bars during discharge, PV1+PV2 consistency with solar total, data source badge, screenshot regression captures.
+- **`data_source` parametrized fixture**: E2E tests that start smart sessions now run under both API-only and WebSocket modes. The `ws_refuse` simulator fault gates WS connections. Extensible to Modbus when a simulator exists.
+- **`wait_for_attribute()` on HAClient**: polls an entity attribute until it reaches an expected value, used to verify data source transitions.
+
+### Fixed
+- **Playwright auth with HA container**: `trusted_networks` auth provider with `allow_bypass_login: true` and IPv6 `::/ 0` (browser connects via `::1`). Podman port mapping (`-p {port}:8123`) instead of `--network=host` for xdist worker isolation.
+
 ## 1.0.4-beta.1
 
 ### Fixed

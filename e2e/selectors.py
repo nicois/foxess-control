@@ -39,6 +39,7 @@ class OverviewCard:
 
     ROOT = "foxess-overview-card"
     SOLAR_VALUE = f"{ROOT} >>> .node.solar .node-value"
+    SOLAR_SUB = f"{ROOT} >>> .node.solar .node-sub"
     HOUSE_NODE = f"{ROOT} >>> .node.house"
     HOUSE_VALUE = f"{ROOT} >>> .node.house .node-value"
     BATTERY_SOC = f"{ROOT} >>> .bat-soc"

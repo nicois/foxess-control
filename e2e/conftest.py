@@ -311,3 +311,22 @@ def _e2e_reset(
 
     with contextlib.suppress(Exception):
         ha_e2e.call_service("foxess_control", "clear_overrides", {})
+
+
+@pytest.fixture(params=["api", "ws"])
+def data_source(
+    request: pytest.FixtureRequest,
+    foxess_sim: SimulatorHandle,
+    _e2e_reset: None,
+) -> Generator[str, None, None]:
+    """Control the active data source for the test.
+
+    Depends on _e2e_reset so the fault is injected AFTER reset clears
+    all faults.  Tests that use this fixture run twice — once per mode.
+
+    Extensible: add "modbus" to params when a Modbus simulator exists.
+    """
+    mode: str = request.param
+    if mode == "api":
+        foxess_sim.fault("ws_refuse")
+    yield mode

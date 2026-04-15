@@ -182,6 +182,8 @@ async def handle_login(request: web.Request) -> web.Response:
 
 
 async def handle_ws(request: web.Request) -> web.WebSocketResponse:
+    if _model.active_fault == "ws_refuse":
+        raise web.HTTPForbidden(text="WebSocket refused")
     ws = web.WebSocketResponse(heartbeat=20.0)
     await ws.prepare(request)
     _LOGGER.info("WebSocket connected (clients=%d)", len(_ws_clients) + 1)

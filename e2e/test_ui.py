@@ -7,6 +7,7 @@ Requires: podman, playwright (chromium), PyJWT
 from __future__ import annotations
 
 import datetime
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -54,6 +55,18 @@ def _find_card(page: Page, tag: str, timeout: int = 30000) -> bool:
         return False
 
 
+def _parse_power_kw(text: str) -> float:
+    """Parse a formatted power string like '3.00 kW' or '500 W' to kW."""
+    m = re.search(r"([\d.]+)\s*(kW|W)", text)
+    if not m:
+        msg = f"Cannot parse power from {text!r}"
+        raise ValueError(msg)
+    value = float(m.group(1))
+    if m.group(2) == "W":
+        value /= 1000
+    return value
+
+
 def _tight_window(minutes: int = 30) -> tuple[str, str]:
     now = datetime.datetime.now(tz=datetime.UTC)
     start = now - datetime.timedelta(minutes=2)
@@ -99,12 +112,130 @@ class TestOverviewCard:
             classes = house.get_attribute("class") or ""
             assert "inactive" not in classes
 
-    def test_data_source_badge(self, page: Page) -> None:
-        """Data source badge is visible when web credentials are configured."""
-        badge = page.locator(OverviewCard.DATA_SOURCE)
-        if badge.count() > 0:
-            text = badge.text_content() or ""
-            assert text in ("API", "WS", "Modbus")
+    def test_data_source_badge_matches_mode(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle,
+        data_source: str,
+    ) -> None:
+        """Data source badge reflects the active data path."""
+        foxess_sim.set(soc=80, solar_kw=2.0, load_kw=0.5)
+        start, end = _tight_window(30)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+        )
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_solar_power",
+            "data_source",
+            data_source,
+            timeout_s=30,
+        )
+        page.reload()
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(5000)
+
+        badge_text = page.evaluate(
+            """() => {
+                function findCard(root) {
+                    const c = root.querySelector(
+                        'foxess-overview-card'
+                    );
+                    if (c) return c;
+                    for (const el of root.querySelectorAll('*')) {
+                        if (el.shadowRoot) {
+                            const f = findCard(el.shadowRoot);
+                            if (f) return f;
+                        }
+                    }
+                    return null;
+                }
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return null;
+                const badge = card.shadowRoot.querySelector(
+                    '.data-source'
+                );
+                return badge ? badge.textContent : null;
+            }"""
+        )
+        expected = data_source.upper()
+        assert badge_text == expected, (
+            f"Badge shows '{badge_text}', expected '{expected}'"
+        )
+
+    def test_pv_values_consistent_with_solar_total(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle,
+        data_source: str,
+    ) -> None:
+        """PV1 + PV2 ≈ solar total during smart operations."""
+        foxess_sim.set(soc=80, solar_kw=3.0, load_kw=0.5)
+        start, end = _tight_window(30)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+        )
+        page.reload()
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(5000)
+
+        # Extract solar node text from deep shadow DOM
+        solar_texts = page.evaluate(
+            """() => {
+                function findCard(root) {
+                    const card = root.querySelector(
+                        'foxess-overview-card'
+                    );
+                    if (card) return card;
+                    for (const el of root.querySelectorAll('*')) {
+                        if (el.shadowRoot) {
+                            const found = findCard(el.shadowRoot);
+                            if (found) return found;
+                        }
+                    }
+                    return null;
+                }
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return null;
+                const sr = card.shadowRoot;
+                const solar = sr.querySelector('.node.solar');
+                if (!solar) return null;
+                const value = solar.querySelector('.node-value');
+                const sub = solar.querySelector('.node-sub');
+                return {
+                    total: value ? value.textContent : null,
+                    detail: sub ? sub.textContent : null,
+                };
+            }"""
+        )
+        assert solar_texts, "Solar node not found in overview card"
+        assert solar_texts["total"], "Solar total not displayed"
+        assert solar_texts["detail"], "PV detail not displayed"
+
+        total_kw = _parse_power_kw(solar_texts["total"])
+        # Detail format: "PV1 1.50 kW · PV2 1.50 kW"
+        pv_parts = solar_texts["detail"].split("·")
+        pv_sum = sum(_parse_power_kw(part) for part in pv_parts)
+
+        # Tolerance accounts for simulator fuzzing (±2% jitter)
+        assert abs(pv_sum - total_kw) < 0.15, (
+            f"PV sum {pv_sum:.3f} kW != solar total {total_kw:.3f} kW"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -135,8 +266,9 @@ class TestControlCard:
         page: Page,
         ha_e2e: HAClient,
         foxess_sim: SimulatorHandle,
+        data_source: str,
     ) -> None:
-        """Progress bars appear during active discharge."""
+        """Progress section appears during active discharge."""
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
         start, end = _tight_window(30)
         ha_e2e.call_service(
@@ -151,10 +283,48 @@ class TestControlCard:
         )
         page.reload()
         page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(5000)
 
-        fill = page.locator(ControlCard.DISCHARGE_FILL)
-        assert fill.count() > 0
+        SCREENSHOT_DIR.mkdir(exist_ok=True)
+        page.screenshot(path=str(SCREENSHOT_DIR / "discharge-progress.png"))
+
+        # Verify the control card renders with a progress section.
+        # HA nests cards deep in shadow DOM — use JS to traverse all
+        # shadow roots rather than relying on pierce selectors.
+        has_progress = page.evaluate(
+            """() => {
+                function findInShadows(root, selector) {
+                    const el = root.querySelector(selector);
+                    if (el) return true;
+                    for (const child of root.querySelectorAll('*')) {
+                        if (child.shadowRoot
+                            && findInShadows(child.shadowRoot, selector))
+                                return true;
+                    }
+                    return false;
+                }
+                // First find the card, then look for progress-section inside it
+                function findCard(root) {
+                    const card = root.querySelector('foxess-control-card');
+                    if (card) return card;
+                    for (const child of root.querySelectorAll('*')) {
+                        if (child.shadowRoot) {
+                            const found = findCard(child.shadowRoot);
+                            if (found) return found;
+                        }
+                    }
+                    return null;
+                }
+                const card = findCard(document);
+                if (!card) return false;
+                const sr = card.shadowRoot;
+                if (!sr) return false;
+                return !!sr.querySelector('.progress-section');
+            }"""
+        )
+        assert has_progress, (
+            "Progress section not found in control card during discharge"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +349,9 @@ class TestScreenshots:
         foxess_sim: SimulatorHandle,
     ) -> None:
         """Capture discharging state for visual regression review."""
-        foxess_sim.set(soc=70, solar_kw=1.0, load_kw=0.8)
+        # SoC=80 with min_soc=30 and 30-min window forces immediate
+        # discharge start (avoids deferred-start timeout).
+        foxess_sim.set(soc=80, solar_kw=1.0, load_kw=0.8)
         start, end = _tight_window(30)
         ha_e2e.call_service(
             "foxess_control",

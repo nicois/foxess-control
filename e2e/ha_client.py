@@ -106,6 +106,28 @@ class HAClient:
             f"within {timeout_s}s (last: {last})"
         )
 
+    def wait_for_attribute(
+        self,
+        entity_id: str,
+        attr: str,
+        expected: str,
+        timeout_s: float = 30,
+        poll_interval: float = 2.0,
+    ) -> str:
+        """Poll until an entity attribute reaches the expected value."""
+        deadline = time.monotonic() + timeout_s
+        last = None
+        while time.monotonic() < deadline:
+            attrs = self.get_attributes(entity_id)
+            last = attrs.get(attr)
+            if last == expected:
+                return str(last)
+            time.sleep(poll_interval)
+        raise TimeoutError(
+            f"{entity_id}.{attr} did not reach '{expected}' "
+            f"within {timeout_s}s (last: '{last}')"
+        )
+
     def is_ready(self) -> bool:
         """Check if HA is responding."""
         try:
