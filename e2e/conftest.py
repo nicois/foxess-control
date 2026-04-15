@@ -7,10 +7,17 @@ Scoping model (xdist-compatible):
 - browser_context: session — one authenticated browser per worker
 - page: function — fresh tab per test
 - _e2e_reset: function (autouse) — resets sim + clears HA
+
+Resource lifecycle:
+- Named containers (ha-e2e-{worker_id}) enable deterministic cleanup
+- atexit handlers catch abnormal exits (SIGTERM, unhandled exceptions)
+- Setup failures trigger immediate cleanup before re-raising
+- Per-worker self-cleanup removes own stale container from prior runs
 """
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import os
 import shutil
@@ -133,6 +140,42 @@ def _build_container() -> None:
         )
 
 
+def _worker_id() -> str:
+    """Return the xdist worker ID, or 'main' for serial runs."""
+    return os.environ.get("PYTEST_XDIST_WORKER", "main")
+
+
+def _container_name() -> str:
+    """Deterministic container name for this worker."""
+    return f"ha-e2e-{_worker_id()}"
+
+
+def _stop_container(name: str) -> None:
+    """Stop and remove a container by name (idempotent)."""
+    with contextlib.suppress(Exception):
+        subprocess.run(
+            ["podman", "stop", "-t", "5", name],
+            capture_output=True,
+            timeout=15,
+        )
+    with contextlib.suppress(Exception):
+        subprocess.run(
+            ["podman", "rm", "-f", name],
+            capture_output=True,
+            timeout=15,
+        )
+
+
+def _kill_process(proc: subprocess.Popen[bytes]) -> None:
+    """Terminate a subprocess, escalating to kill."""
+    with contextlib.suppress(Exception):
+        proc.terminate()
+        proc.wait(timeout=5)
+    if proc.poll() is None:
+        with contextlib.suppress(Exception):
+            proc.kill()
+
+
 # ---------------------------------------------------------------------------
 # Session-scoped fixtures (one per xdist worker)
 # ---------------------------------------------------------------------------
@@ -156,6 +199,12 @@ def foxess_sim(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
+
+    def _cleanup() -> None:
+        _kill_process(proc)
+
+    atexit.register(_cleanup)
+
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         try:
@@ -166,12 +215,14 @@ def foxess_sim(
             pass
         time.sleep(0.2)
     else:
-        proc.kill()
+        _cleanup()
+        atexit.unregister(_cleanup)
         raise RuntimeError("Simulator did not start")
 
     yield SimulatorHandle(f"http://localhost:{port}")
-    proc.terminate()
-    proc.wait(timeout=5)
+
+    _cleanup()
+    atexit.unregister(_cleanup)
 
 
 @pytest.fixture(scope="session")
@@ -185,8 +236,18 @@ def ha_e2e(
     foxess_sim: SimulatorHandle,
     ha_port: int,
 ) -> Generator[HAClient, None, None]:
-    """Start a HA container with unique port."""
+    """Start a HA container with unique port.
+
+    The container is named ``ha-e2e-{worker_id}`` so it can be
+    found and cleaned up deterministically.  An atexit handler
+    ensures the container is stopped even if the fixture teardown
+    is skipped (setup failure, worker crash, SIGTERM).
+    """
     _build_container()
+
+    name = _container_name()
+    # Stop any stale container with our name from a prior failed run.
+    _stop_container(name)
 
     tmpdir = tempfile.mkdtemp(prefix="ha-e2e-")
     shutil.copytree(str(HA_CONFIG_SEED), tmpdir, dirs_exist_ok=True)
@@ -195,16 +256,14 @@ def ha_e2e(
         for d in dirs:
             os.chmod(os.path.join(root, d), 0o777)
 
-    # HA listens on 8123 inside the container. Podman maps the
-    # worker's unique external port to the container's internal 8123.
-    # The simulator runs on the host — use host gateway so the
-    # container can reach it.
-    sim_port = foxess_sim.url.rsplit(":", 1)[1]  # extract port number
+    sim_port = foxess_sim.url.rsplit(":", 1)[1]
     proc = subprocess.Popen(
         [
             "podman",
             "run",
             "--rm",
+            "--name",
+            name,
             "-p",
             f"{ha_port}:8123",
             "--add-host=host.containers.internal:host-gateway",
@@ -221,35 +280,38 @@ def ha_e2e(
         stderr=subprocess.STDOUT,
     )
 
-    ha = HAClient(f"http://localhost:{ha_port}", E2E_TOKEN)
-    try:
-        ha.wait_ready(timeout_s=120)
-    except TimeoutError:
-        if proc.stdout:
-            print(proc.stdout.read().decode(errors="replace")[-3000:])
-        proc.kill()
-        raise
+    def _cleanup() -> None:
+        _stop_container(name)
+        _kill_process(proc)
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
-    # Wait for integration entities — longer timeout when multiple
-    # xdist workers start containers simultaneously.
-    deadline = time.monotonic() + 120
-    while time.monotonic() < deadline:
-        try:
-            ha.get_state("sensor.foxess_battery_soc")
-            break
-        except Exception:
-            time.sleep(2)
-    else:
-        raise TimeoutError("Integration entities not created within 120s")
+    atexit.register(_cleanup)
+
+    try:
+        ha = HAClient(f"http://localhost:{ha_port}", E2E_TOKEN)
+        ha.wait_ready(timeout_s=120)
+
+        # Wait for integration entities
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            try:
+                ha.get_state("sensor.foxess_battery_soc")
+                break
+            except Exception:
+                time.sleep(2)
+        else:
+            if proc.stdout:
+                print(proc.stdout.read().decode(errors="replace")[-3000:])
+            raise TimeoutError("Integration entities not created within 120s")
+    except:
+        _cleanup()
+        atexit.unregister(_cleanup)
+        raise
 
     yield ha
 
-    proc.terminate()
-    try:
-        proc.wait(timeout=30)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-    shutil.rmtree(tmpdir, ignore_errors=True)
+    _cleanup()
+    atexit.unregister(_cleanup)
 
 
 # ---------------------------------------------------------------------------

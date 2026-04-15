@@ -23,6 +23,13 @@ while read -r local_ref local_oid remote_ref remote_oid; do
 
   # Run E2E tests before allowing a tag push
   if command -v podman &>/dev/null; then
+    # Clean up orphaned E2E containers from prior failed runs
+    stale=$(podman ps -q --filter "name=ha-e2e-" 2>/dev/null)
+    if [ -n "$stale" ]; then
+      echo "Cleaning up orphaned E2E containers..."
+      echo "$stale" | xargs podman stop -t 5 2>/dev/null || true
+    fi
+
     echo "Running E2E tests before tagging $tag..."
     if ! python -m pytest e2e/ -m slow --tb=short -q; then
       echo "❌ E2E tests failed — fix before pushing tag $tag"
