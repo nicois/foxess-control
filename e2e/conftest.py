@@ -461,7 +461,10 @@ def _e2e_reset(
     """Reset simulator/entities and clear HA sessions before each test."""
     t0 = time.monotonic()
     if connection_mode == "cloud" and foxess_sim is not None:
-        foxess_sim.reset()
+        # Reset state but preserve faults — the data_source fixture
+        # manages ws_refuse, and clearing it here creates a window
+        # where WS reconnects before the next fault injection.
+        foxess_sim.set(soc=50, solar_kw=0, load_kw=0.5)
     elif connection_mode == "entity":
         with contextlib.suppress(Exception):
             ha_e2e.set_input_select("input_select.foxess_work_mode", "Self Use")

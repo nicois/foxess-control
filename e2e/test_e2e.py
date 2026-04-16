@@ -12,7 +12,6 @@ Fixture scoping:
 from __future__ import annotations
 
 import datetime
-import time
 from typing import TYPE_CHECKING
 
 import pytest
@@ -201,9 +200,8 @@ class TestDataSource:
         """When idle with WS blocked, data source should be API."""
         if connection_mode != "cloud":
             pytest.skip("data_source attribute is cloud-specific")
-        # Block WS to ensure data_source is deterministically "api".
-        # Without this, a lingering WS from a prior test's session
-        # may keep data_source at "ws" for 30+ seconds.
+        # Block WS to ensure data_source deterministically reverts to
+        # "api".  ws_refuse also disconnects existing WS clients.
         if foxess_sim is not None:
             foxess_sim.fault("ws_refuse")
         ha_e2e.wait_for_state("sensor.foxess_smart_operations", "idle", timeout_s=30)
@@ -295,19 +293,16 @@ class TestEntityMode:
             fatal_states=FATAL_FOR_ACTIVE,
         )
 
-        # Wait for the entity adapter to write power
-        deadline = time.monotonic() + 90
-        power = 0.0
-        while time.monotonic() < deadline:
-            try:
-                state = ha_e2e.get_state("input_number.foxess_discharge_power")
-                power = float(state)
-                if power > 0:
-                    break
-            except (ValueError, TypeError):
-                pass
-            time.sleep(2)
-
+        # Wait for the entity adapter to write power — use REST polling
+        # with a long timeout since the initial apply_mode happens on
+        # the first listener tick after deferred start completes.
+        power = ha_e2e.wait_for_numeric_state(
+            "input_number.foxess_discharge_power",
+            "gt",
+            0,
+            timeout_s=120,
+            poll_interval=2.0,
+        )
         assert power > 0, "Discharge power entity should be set"
 
     def test_self_use_on_clear(

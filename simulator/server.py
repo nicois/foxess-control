@@ -267,7 +267,7 @@ async def handle_sim_fault(request: web.Request) -> web.Response:
     _model.fault_remaining = count
     _LOGGER.info("Fault injected: %s (count=%d)", fault_type, count)
 
-    if fault_type == "ws_disconnect":
+    if fault_type in ("ws_disconnect", "ws_refuse"):
         for ws in list(_ws_clients):
             await ws.close()
         _ws_clients.clear()
