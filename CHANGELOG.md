@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.5-beta.2
+## 1.0.5-beta.3
 
 ### Changed
 - **Min SoC floor lowered to 0%**: `min_soc` (smart discharge) and `min_soc_on_grid` (config) now accept 0, removing the previous 5% floor. The FoxESS API minimum (`fdSoc >= 11`) is enforced separately — HA monitors SoC and stops the session at the user's chosen threshold.
