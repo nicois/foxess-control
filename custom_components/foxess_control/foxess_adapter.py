@@ -356,6 +356,14 @@ class FoxESSCloudAdapter:
         """
         safe_end = self._safe_end(mode, power_w, fd_soc)
 
+        # Surface the horizon in session state for the Lovelace card
+        if mode == WorkMode.FORCE_DISCHARGE and safe_end != self._end:
+            from .const import DOMAIN
+
+            ds = hass.data.get(DOMAIN, {}).get("_smart_discharge_state")
+            if ds is not None:
+                ds["schedule_horizon"] = safe_end.isoformat()
+
         # Fast path: mutate fdPwr and end time in cached groups
         if self._groups:
             for g in self._groups:

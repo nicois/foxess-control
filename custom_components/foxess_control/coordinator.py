@@ -92,16 +92,43 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.warning("REST poll failed, keeping last-known data: %s", err)
                 return dict(self.data)
             raise UpdateFailed(f"Error fetching FoxESS data: {err}") from err
-        # REST poll is authoritative — reset WebSocket integration state
-        self._ws_last_time = None
+        # REST poll is authoritative — reset WebSocket feed-in integration
         self._ws_feedin_power_kw = 0.0
-        # Resync SoC interpolation to authoritative REST value
+
+        # SoC interpolation: integrate battery power between polls.
+        # On each REST poll, advance the interpolated SoC by the power
+        # delta since the last poll, then resync to the authoritative
+        # integer SoC when it ticks.  This provides sub-percent
+        # estimates even in REST-only mode (no WS).
         rest_soc = data.get("SoC")
+        now = time.monotonic()
+        charge_kw = data.get("batChargePower", 0.0)
+        discharge_kw = data.get("batDischargePower", 0.0)
+        net_bat_kw = charge_kw - discharge_kw
+
         if rest_soc is not None:
-            self._soc_interpolated = float(rest_soc)
-            self._soc_last_reported = float(rest_soc)
+            if self._soc_interpolated is None:
+                self._soc_interpolated = float(rest_soc)
+                self._soc_last_reported = float(rest_soc)
+            elif float(rest_soc) != self._soc_last_reported:
+                # Integer SoC tick changed — resync
+                self._soc_interpolated = float(rest_soc)
+                self._soc_last_reported = float(rest_soc)
+            elif self._ws_last_time is not None:
+                # Same integer tick — advance by power integration
+                elapsed_h = (now - self._ws_last_time) / 3600.0
+                if elapsed_h > 0:
+                    avg_kw = (self._soc_last_bat_kw + net_bat_kw) / 2.0
+                    capacity = self._get_capacity_kwh()
+                    if capacity > 0:
+                        delta_pct = avg_kw * elapsed_h / capacity * 100.0
+                        self._soc_interpolated = max(
+                            0.0, min(100.0, self._soc_interpolated + delta_pct)
+                        )
             data["_soc_interpolated"] = round(self._soc_interpolated, 1)
-        self._soc_last_bat_kw = 0.0
+
+        self._soc_last_bat_kw = net_bat_kw
+        self._ws_last_time = now
         data["_data_source"] = "api"
         return data
 

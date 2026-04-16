@@ -711,6 +711,26 @@ class FoxESSControlCard extends HTMLElement {
     `;
   }
 
+  _timeProgressBar(label, value, pct, horizonPct, tooltip, tipKey) {
+    const hasTip = !!tooltip;
+    const expanded = hasTip && tipKey && this._expandedTips.has(tipKey);
+    const marker = horizonPct != null
+      ? `<div class="horizon-marker" style="left:${horizonPct}%" title="Schedule horizon"></div>`
+      : "";
+    return `
+      <div class="progress-row${hasTip ? " has-tip" : ""}${expanded ? " expanded" : ""}"${tipKey ? ` data-tip-key="${tipKey}"` : ""}>
+        <div class="detail-row">
+          <span class="detail-label">${label}</span>
+          <span class="detail-value">${value}</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill time-fill" style="width:${pct}%"></div>${marker}
+        </div>
+        ${hasTip ? `<div class="progress-tip">${tooltip}</div>` : ""}
+      </div>
+    `;
+  }
+
   _socProgressBar(label, value, confirmedPct, projectedPct, fillClass, tooltip, tipKey) {
     // Two-zone SoC bar: solid confirmed + semi-transparent projected.
     // When only integer SoC is available, both are equal (no projected zone).
@@ -874,7 +894,22 @@ class FoxESSControlCard extends HTMLElement {
       const timeTip = time.label
         ? this._t("tip_time").replace("{0}", this._formatDuration(now - new Date(a.discharge_start_time).getTime())).replace("{1}", this._formatDuration(new Date(a.discharge_end_time).getTime() - new Date(a.discharge_start_time).getTime())).replace("{2}", this._formatDuration(time.remaining))
         : "";
-      bars += this._progressBar(this._t("time"), time.label, time.pct, "time-fill", timeTip, "discharge-time");
+
+      // Schedule horizon marker — shows how far ahead the inverter
+      // schedule extends.  If HA goes down, the schedule expires at
+      // this point and the inverter reverts to self-use.
+      const horizon = a.discharge_schedule_horizon;
+      let horizonPct = null;
+      if (horizon) {
+        const hTime = new Date(horizon).getTime();
+        const startTime = new Date(a.discharge_start_time).getTime();
+        const endTime = new Date(a.discharge_end_time).getTime();
+        const total = endTime - startTime;
+        if (total > 0) {
+          horizonPct = Math.min(100, Math.max(0, ((hTime - startTime) / total) * 100));
+        }
+      }
+      bars += this._timeProgressBar(this._t("time"), time.label, time.pct, horizonPct, timeTip, "discharge-time");
     }
 
     if (!bars) return "";
@@ -1091,6 +1126,7 @@ class FoxESSControlCard extends HTMLElement {
         opacity: 1;
       }
       .progress-track {
+        position: relative;
         display: flex;
         height: 6px;
         background: var(--secondary-background-color, rgba(0, 0, 0, 0.08));
@@ -1110,6 +1146,16 @@ class FoxESSControlCard extends HTMLElement {
       }
       .progress-fill.projected {
         opacity: 0.35;
+      }
+      .horizon-marker {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: var(--primary-text-color, #333);
+        opacity: 0.5;
+        border-radius: 1px;
+        z-index: 1;
       }
       .energy-fill {
         background: linear-gradient(90deg, var(--fc-energy), #64b5f6);

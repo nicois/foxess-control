@@ -336,6 +336,86 @@ class TestControlCard:
             "Progress section not found in control card during discharge"
         )
 
+    def test_schedule_horizon_during_discharge(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle,
+    ) -> None:
+        """Schedule horizon attribute is set and marker renders on card."""
+        # Low SoC headroom so the safe horizon is shorter than the
+        # window — with SoC=35/min=30, only 0.5kWh available, so
+        # the horizon is ~4 min vs the 10 min window.
+        foxess_sim.set(soc=35, solar_kw=0, load_kw=0.5)
+        start, end = _tight_window(10)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        # Wait for the first listener tick to set the horizon
+        # (apply_mode runs on power adjustments, ~60s tick interval)
+        import time as _time
+
+        deadline = _time.monotonic() + 90
+        horizon = None
+        while _time.monotonic() < deadline:
+            attrs = ha_e2e.get_attributes("sensor.foxess_smart_operations")
+            horizon = attrs.get("discharge_schedule_horizon")
+            if horizon:
+                break
+            _time.sleep(2)
+        assert horizon, "discharge_schedule_horizon not set within 90s"
+        assert "T" in horizon, f"Expected ISO timestamp, got: {horizon}"
+
+        # Verify the horizon is between now and the session end
+        end_time = attrs.get("discharge_end_time")
+        assert horizon < end_time, (
+            f"Horizon {horizon} should be before session end {end_time}"
+        )
+
+        # Verify the marker renders on the card
+        page.reload()
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(2000)
+
+        has_marker = page.evaluate(
+            """() => {
+                function findCard(root) {
+                    const card = root.querySelector(
+                        'foxess-control-card'
+                    );
+                    if (card) return card;
+                    for (const el of root.querySelectorAll('*')) {
+                        if (el.shadowRoot) {
+                            const f = findCard(el.shadowRoot);
+                            if (f) return f;
+                        }
+                    }
+                    return null;
+                }
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return null;
+                const marker = card.shadowRoot.querySelector(
+                    '.horizon-marker'
+                );
+                if (!marker) return null;
+                return {
+                    left: marker.style.left,
+                    visible: marker.offsetWidth > 0,
+                };
+            }"""
+        )
+        assert has_marker, "Horizon marker not found in control card"
+        assert has_marker["left"], "Horizon marker has no position"
+
 
 # ---------------------------------------------------------------------------
 # Screenshot regression

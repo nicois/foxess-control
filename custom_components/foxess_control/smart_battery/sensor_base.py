@@ -775,6 +775,7 @@ class SmartOperationsOverviewSensor(SensorEntity):
                     ),
                     "discharge_start_time": ds["start"].isoformat(),
                     "discharge_end_time": ds["end"].isoformat(),
+                    "discharge_schedule_horizon": ds.get("schedule_horizon"),
                     "discharge_start_soc": ds.get("start_soc", soc),
                     "discharge_feedin_limit_kwh": feedin_limit,
                     "discharge_feedin_used_kwh": feedin_used,

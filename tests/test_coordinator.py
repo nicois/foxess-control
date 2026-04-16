@@ -253,11 +253,12 @@ class TestInjectRealtimeData:
         coord._ws_last_time = time.monotonic()
         coord._ws_feedin_power_kw = 5.0
 
-        # REST poll resets everything
+        # REST poll resets WS feed-in integration state
         result = await coord._async_update_data()
         assert result["feedin"] == 200.0
-        assert coord._ws_last_time is None
         assert coord._ws_feedin_power_kw == 0.0
+        # _ws_last_time is preserved (used for SoC interpolation between polls)
+        assert coord._ws_last_time is not None
 
     def test_no_feedin_in_base_data(self) -> None:
         """If coordinator has no feedin value, WS integration is skipped."""
