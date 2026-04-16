@@ -1197,6 +1197,11 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
 
     # Any *started* smart session when ws_all_sessions is enabled
     if not ws_all:
+        _LOGGER.debug(
+            "WS check: ws_all_sessions=%s (options=%s)",
+            ws_all,
+            {k: v for k, v in entry.options.items() if "password" not in k.lower()},
+        )
         return False
     cs = domain_data.get("_smart_charge_state")
     if (ds is not None and ds.get("discharging_started", False)) or (
