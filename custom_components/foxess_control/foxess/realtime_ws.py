@@ -167,6 +167,7 @@ class FoxESSRealtimeWS:
         self._listen_task: asyncio.Task[None] | None = None
         self._connected = False
         self._stop_event = asyncio.Event()
+        self._last_useful_data: float = asyncio.get_event_loop().time()
 
     @property
     def is_connected(self) -> bool:
@@ -197,6 +198,7 @@ class FoxESSRealtimeWS:
         )
         await self._ws.send_str("getdata")
         self._connected = True
+        self._last_useful_data = asyncio.get_event_loop().time()
         _LOGGER.info("FoxESS WebSocket connected (plant=%s)", self._plant_id)
 
     async def _listen_loop(self) -> None:
@@ -259,10 +261,25 @@ class FoxESSRealtimeWS:
                     "FoxESS WebSocket: skipping stale message (timeDiff=%s)",
                     time_diff,
                 )
+                # Check if we've gone too long without useful data.
+                # Stale keepalive frames from the cloud (e.g. after
+                # another client steals the stream) reset receive()
+                # but carry no useful data.
+                now = asyncio.get_event_loop().time()
+                if now - self._last_useful_data > self.STALE_TIMEOUT:
+                    _LOGGER.warning(
+                        "FoxESS WebSocket: no useful data in %.0fs "
+                        "(only stale frames), reconnecting",
+                        now - self._last_useful_data,
+                    )
+                    await self._try_reconnect()
+                    if not self._connected:
+                        break
                 continue
 
             mapped = map_ws_to_coordinator(data)
             if mapped:
+                self._last_useful_data = asyncio.get_event_loop().time()
                 try:
                     await self._on_data(mapped)
                 except Exception:
@@ -302,6 +319,10 @@ class FoxESSRealtimeWS:
                 return  # success
             except Exception:
                 _LOGGER.debug("FoxESS WebSocket reconnect failed", exc_info=True)
+                # Invalidate the cached token — the cloud may have
+                # revoked it (e.g. another client logged in).  The
+                # next attempt will do a fresh login.
+                self._web_session._token = None  # noqa: SLF001
 
         _LOGGER.warning("FoxESS WebSocket: max reconnect attempts reached, giving up")
 
