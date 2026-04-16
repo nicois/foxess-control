@@ -27,10 +27,18 @@ pytestmark = pytest.mark.slow
 
 
 def _tight_window(minutes: int = 30) -> tuple[str, str]:
-    """Return a tight window starting ~now (UTC)."""
+    """Return a tight window starting ~now (UTC).
+
+    Avoids midnight crossings (C-009): if end would fall past 23:59,
+    clamp end to 23:59 and push start back to stay within *minutes*.
+    """
     now = datetime.datetime.now(tz=datetime.UTC)
     start = now - datetime.timedelta(minutes=2)
     end = start + datetime.timedelta(minutes=minutes)
+    midnight = now.replace(hour=23, minute=59, second=0, microsecond=0)
+    if end > midnight:
+        end = midnight
+        start = max(start, end - datetime.timedelta(minutes=minutes))
     return (
         f"{start.hour:02d}:{start.minute:02d}:00",
         f"{end.hour:02d}:{end.minute:02d}:00",
@@ -205,13 +213,15 @@ class TestFeedinPacing:
         for field in flow.get("data_schema", []):
             submit_data[field["name"]] = field.get("default")
         submit_data["min_power_change"] = 500
-        session.post(
+        options_r = session.post(
             f"{ha_e2e.base_url}/api/config/config_entries/options/flow/{flow_id}",
             json=submit_data,
         )
-        session.post(
+        assert options_r.ok, f"Options flow failed: {options_r.status_code} {options_r.text[:500]}"
+        reload_r = session.post(
             f"{ha_e2e.base_url}/api/config/config_entries/entry/{entry_id}/reload"
         )
+        assert reload_r.ok, f"Reload failed: {reload_r.status_code} {reload_r.text[:500]}"
 
         import time as _time
 

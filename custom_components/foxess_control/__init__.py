@@ -1408,6 +1408,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data.get(CONF_DEVICE_SERIAL, "?"),
         bool(entry.options.get(CONF_WORK_MODE_ENTITY)),
         entry.options.get(CONF_WS_ALL_SESSIONS, False),
+        entry.options.get(CONF_MIN_POWER_CHANGE, DEFAULT_MIN_POWER_CHANGE),
         entry.options.get(CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL),
     )
     hass.data.setdefault(DOMAIN, {})
