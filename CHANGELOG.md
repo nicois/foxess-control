@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.5-beta.13
+
+### Fixed
+- **REST poll starvation from SoC extrapolation**: the 30-second SoC extrapolation timer called `async_set_updated_data`, which cancels and reschedules the REST poll timer. During any battery activity, the extrapolation fired more frequently than the poll interval, so REST polls never ran and all entities showed stale data indefinitely. Now updates entity data directly without touching the poll timer.
+- **Feed-in pacing stuck at initial power**: when target discharge power was below `min_power_change`, the update was silently skipped and the inverter stayed at the initial power level. Now switches to self-use mode when target is below threshold, so the next tick compares against a 0W baseline and can ramp up when the target exceeds the threshold.
+
+### Added
+- **Target power display in Lovelace card**: shows current vs target discharge rate when they differ during feed-in pacing.
+- **Diagnostic logging**: version and config logged at startup; detailed WS decision path logging for debugging.
+
 ## 1.0.5-beta.12
 
 ### Fixed
