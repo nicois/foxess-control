@@ -1,14 +1,19 @@
 # Changelog
 
-## Unreleased
+## 1.0.5-beta.1
 
 ### Changed
 - **Min SoC floor lowered to 0%**: `min_soc` (smart discharge) and `min_soc_on_grid` (config) now accept 0, removing the previous 5% floor. The FoxESS API minimum (`fdSoc >= 11`) is enforced separately — HA monitors SoC and stops the session at the user's chosen threshold.
-
 - **WebSocket activates during force operations**: force charge, force discharge, and feed-in now activate the WebSocket when `ws_all_sessions` is enabled. Previously only smart sessions triggered WS, so force operations were stuck on 5-minute REST polling.
 - **SoC extrapolation between REST polls**: coordinator pushes interpolated SoC updates every 30 seconds between REST polls, so progress bars advance smoothly instead of jumping in integer steps. Automatically stops when WebSocket takes over.
 
+### Added
+- **Entity-mode E2E tests**: HA input helpers simulate modbus entities for testing the entity adapter path end-to-end. `connection_mode` fixture parametrizes tests across cloud and entity modes. 34 tests pass (18 skipped cross-product combos).
+- **HA WebSocket event stream** (`HAEventStream`): subscribes to `state_changed` events for instant test notifications instead of REST polling. Drain-before-wait pattern eliminates event ordering races.
+- **Entity adapter service domain routing**: `input_select` / `input_number` entities now use the correct HA service domain (`input_select.select_option` instead of `select.select_option`). Previously, writes to input helpers failed silently.
+
 ### Fixed
+- **SoC interpolation clamp on tick change**: when the API reports a new integer SoC (e.g. 90→91), the interpolated value is clamped to [new, new+1) at that instant, preventing the display from briefly showing a value below the authoritative tick. Power integration may drift freely after the clamp.
 - **Progress bar start SoC wrong after deferral**: smart charge and smart discharge `start_soc` was captured at service call time; now updated to actual SoC when charging/discharging begins, so the progress bar range is accurate for deferred sessions.
 
 ## 1.0.4

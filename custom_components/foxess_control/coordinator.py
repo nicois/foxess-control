@@ -113,13 +113,21 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         net_bat_kw = charge_kw - discharge_kw
 
         if rest_soc is not None:
+            reported = float(rest_soc)
             if self._soc_interpolated is None:
-                self._soc_interpolated = float(rest_soc)
-                self._soc_last_reported = float(rest_soc)
-            elif float(rest_soc) != self._soc_last_reported:
-                # Integer SoC tick changed — resync
-                self._soc_interpolated = float(rest_soc)
-                self._soc_last_reported = float(rest_soc)
+                self._soc_interpolated = reported
+                self._soc_last_reported = reported
+            elif reported != self._soc_last_reported:
+                # Integer SoC tick changed — clamp the interpolated
+                # value into [new_tick, new_tick+1) so the display
+                # never contradicts the authoritative value at the
+                # moment it changes.  After this, power integration
+                # may drift freely (e.g. discharge during charge).
+                self._soc_interpolated = max(
+                    reported,
+                    min(reported + 0.99, self._soc_interpolated),
+                )
+                self._soc_last_reported = reported
             elif self._ws_last_time is not None:
                 # Same integer tick — advance by power integration
                 elapsed_h = (now - self._ws_last_time) / 3600.0
@@ -256,13 +264,15 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if reported_soc is not None:
             if self._soc_interpolated is None:
-                # First reading — initialise
-                self._soc_interpolated = reported_soc
-                self._soc_last_reported = reported_soc
-            elif reported_soc != self._soc_last_reported:
-                # Integer SoC tick changed — resync to authoritative value
-                self._soc_interpolated = reported_soc
-                self._soc_last_reported = reported_soc
+                self._soc_interpolated = float(reported_soc)
+                self._soc_last_reported = float(reported_soc)
+            elif float(reported_soc) != self._soc_last_reported:
+                # Integer SoC tick changed — clamp into [new, new+1)
+                self._soc_interpolated = max(
+                    float(reported_soc),
+                    min(float(reported_soc) + 0.99, self._soc_interpolated),
+                )
+                self._soc_last_reported = float(reported_soc)
 
         if self._soc_interpolated is not None and self._ws_last_time is not None:
             elapsed_hours = (now - self._ws_last_time) / 3600.0
