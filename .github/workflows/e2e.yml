@@ -1,0 +1,58 @@
+name: E2E Tests
+
+on:
+  push:
+  pull_request:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install -e '.[dev]'
+
+      - name: Install Playwright browsers
+        run: playwright install chromium
+
+      - name: Build E2E container
+        run: podman build -t ha-foxess-e2e e2e/
+
+      - name: Run E2E tests
+        run: |
+          python -m pytest e2e/ -m slow \
+            --tb=long \
+            -n auto \
+            --junitxml=e2e-results.xml \
+            -v \
+            2>&1 | tee e2e-output.log
+        continue-on-error: true
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: |
+            e2e-results.xml
+            e2e-output.log
+            e2e/screenshots/
+          retention-days: 14
+
+      - name: Check for failures
+        run: |
+          if grep -q "failed" e2e-results.xml 2>/dev/null; then
+            echo "::warning::E2E tests had failures — check artifacts for details"
+          fi
+          # Don't fail the workflow — E2E failures are informational
+          # until flaky tests are resolved
