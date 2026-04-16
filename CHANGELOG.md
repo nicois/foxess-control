@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.5-beta.7
+## 1.0.5-beta.8
 
 ### Changed
 - **Min SoC floor lowered to 0%**: `min_soc` and `min_soc_on_grid` now accept 0, removing the previous 5% floor.
