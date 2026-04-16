@@ -123,9 +123,11 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # never contradicts the authoritative value at the
                 # moment it changes.  After this, power integration
                 # may drift freely (e.g. discharge during charge).
+                # Upper bound 0.94 ensures round(x, 1) stays below
+                # reported+1 (0.95 rounds up to next tenth).
                 self._soc_interpolated = max(
                     reported,
-                    min(reported + 0.99, self._soc_interpolated),
+                    min(reported + 0.94, self._soc_interpolated),
                 )
                 self._soc_last_reported = reported
             elif self._ws_last_time is not None:
@@ -253,7 +255,10 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             pass
         if feedin_power_kw is not None:
             self._ws_feedin_power_kw = feedin_power_kw
-            self._ws_last_time = now
+
+        # Update timestamp for every WS message — SoC interpolation
+        # needs elapsed time even when feedin data is absent.
+        self._ws_last_time = now
 
         # Integrate battery power into sub-percent SoC estimate.
         # Uses the same trapezoidal approach as feedin integration.
@@ -270,7 +275,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Integer SoC tick changed — clamp into [new, new+1)
                 self._soc_interpolated = max(
                     float(reported_soc),
-                    min(float(reported_soc) + 0.99, self._soc_interpolated),
+                    min(float(reported_soc) + 0.94, self._soc_interpolated),
                 )
                 self._soc_last_reported = float(reported_soc)
 
