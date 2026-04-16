@@ -195,20 +195,26 @@ class TestDataSource:
     def test_api_source_when_idle(
         self,
         ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
         connection_mode: str,
     ) -> None:
-        """When idle in cloud mode, data source should be API."""
+        """When idle with WS blocked, data source should be API."""
         if connection_mode != "cloud":
             pytest.skip("data_source attribute is cloud-specific")
+        # Block WS to ensure data_source is deterministically "api".
+        # Without this, a lingering WS from a prior test's session
+        # may keep data_source at "ws" for 30+ seconds.
+        if foxess_sim is not None:
+            foxess_sim.fault("ws_refuse")
         ha_e2e.wait_for_state("sensor.foxess_smart_operations", "idle", timeout_s=30)
-        # WS has a 30s linger timeout after session end — wait for it
-        # to disconnect and data_source to revert to "api".
         ha_e2e.wait_for_attribute(
             "sensor.foxess_battery_soc",
             "data_source",
             "api",
             timeout_s=60,
         )
+        if foxess_sim is not None:
+            foxess_sim.clear_fault()
 
 
 # ---------------------------------------------------------------------------
