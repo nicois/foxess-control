@@ -23,6 +23,8 @@ dev = [
     "pytest-playwright",
     "pytest-xdist>=3.0",
     "pytest-randomly>=3.0",
+    "websocket-client>=1.0",
+    "filelock>=3.0",
 ]
 
 [tool.setuptools.packages.find]
