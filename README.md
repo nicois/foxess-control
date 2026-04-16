@@ -70,6 +70,8 @@ FoxESS Control polls real-time inverter data (battery SoC, charge/discharge powe
 
 After entering your API key and serial, an optional second step allows you to provide your **FoxESS Cloud web portal** username and password (the same credentials you use to log in at [foxesscloud.com](https://www.foxesscloud.com/)). These enable the real-time WebSocket data feature (see below). You can skip this step and add credentials later via **Configure > Reconfigure**.
 
+The web portal API uses an obfuscated signature algorithm (shipped as a WebAssembly module) for request authentication. See [docs/wasm-signature.md](docs/wasm-signature.md) for a full explanation of why this is necessary and how it works.
+
 You can enter either your raw password or its MD5 hash. If you prefer not to type your password into the HA UI, generate the hash beforehand:
 
 ```bash
