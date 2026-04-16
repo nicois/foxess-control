@@ -385,6 +385,25 @@ ensures no release ships with broken E2E.
 in tagged releases.
 **Traces**: `.githooks/pre-push`, `conftest.py::pytest_xdist_auto_num_workers`
 
+### C-031: No flaky tests — fix root causes, don't mask symptoms
+**Statement**: Every test failure must be investigated to its root
+cause. Intermittent failures signal real race conditions or timing
+assumptions that also affect production. Tests must not be skipped,
+xfailed, or have parameters tuned to avoid triggering the issue.
+**Rationale**: A flaky test is a bug report from the test
+infrastructure. The race condition it exposes exists in production
+too — the test just makes it visible. Masking it (skip, xfail,
+longer timeout, different parameters) hides the bug without fixing
+it. The correct response is: identify the event ordering assumption
+that's violated, and fix the code or the test infrastructure so the
+assumption holds deterministically.
+**Violation consequence**: Race conditions persist in production,
+manifesting as intermittent user-facing bugs that are hard to
+reproduce and diagnose.
+**Traces**: C-028 (simulator over mocks), C-029 (E2E for
+HA-dependent behaviour); `e2e/ha_client.py::HAEventStream`
+(drain-before-wait pattern eliminates event ordering races)
+
 ### C-027: Progressive schedule extension (discharge safety)
 **Statement**: The inverter schedule end time for forced discharge must
 be set to a safe horizon — the time at which the battery would reach

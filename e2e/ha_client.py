@@ -276,10 +276,42 @@ class HAEventStream:
         expected: str,
         timeout_s: float = 30,
         fatal_states: frozenset[str] | None = None,
+        rest_client: HAClient | None = None,
     ) -> str:
-        """Block until entity reaches expected state via WS event."""
+        """Block until entity reaches expected state via WS event.
+
+        Drains stale events first, then checks the current REST state
+        as a baseline.  This eliminates the race between triggering a
+        state change and starting to listen — if the state already
+        matches, returns immediately.
+        """
         t0 = time.monotonic()
         deadline = t0 + timeout_s
+
+        # Drain stale events so we only see fresh ones
+        self.drain()
+
+        # Check current state via REST — the change may have already
+        # happened before we started listening.
+        if rest_client is not None:
+            try:
+                current = rest_client.get_state(entity_id)
+                if current == expected:
+                    _log.warning(
+                        "ws_wait_for_state %s=%s: %.1fs (already)",
+                        entity_id,
+                        expected,
+                        time.monotonic() - t0,
+                    )
+                    return current
+                if fatal_states and current in fatal_states:
+                    raise RuntimeError(
+                        f"{entity_id} already in fatal state "
+                        f"'{current}' while waiting for '{expected}'"
+                    )
+            except Exception:
+                pass  # REST unavailable, fall through to event wait
+
         while time.monotonic() < deadline:
             with self._lock:
                 while self._events:

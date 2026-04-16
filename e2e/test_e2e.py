@@ -243,11 +243,11 @@ class TestEntityMode:
             fatal_states=FATAL_FOR_ACTIVE,
         )
 
-        # Wait for the entity adapter to write via WS event notification
         mode = event_stream.wait_for_state(
             "input_select.foxess_work_mode",
             "Force Discharge",
             timeout_s=90,
+            rest_client=ha_e2e,
         )
         assert mode == "Force Discharge"
 
@@ -331,10 +331,11 @@ class TestEntityMode:
         )
 
         ha_e2e.call_service("foxess_control", "clear_overrides", {})
-        ha_e2e.wait_for_state(
+        event_stream.wait_for_state(
             "sensor.foxess_smart_operations",
             "idle",
             timeout_s=30,
+            rest_client=ha_e2e,
         )
 
         mode = ha_e2e.get_state("input_select.foxess_work_mode")
