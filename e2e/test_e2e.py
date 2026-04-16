@@ -201,8 +201,14 @@ class TestDataSource:
         if connection_mode != "cloud":
             pytest.skip("data_source attribute is cloud-specific")
         ha_e2e.wait_for_state("sensor.foxess_smart_operations", "idle", timeout_s=30)
-        attrs = ha_e2e.get_attributes("sensor.foxess_battery_soc")
-        assert attrs.get("data_source") == "api"
+        # WS has a 30s linger timeout after session end — wait for it
+        # to disconnect and data_source to revert to "api".
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_battery_soc",
+            "data_source",
+            "api",
+            timeout_s=60,
+        )
 
 
 # ---------------------------------------------------------------------------
