@@ -311,6 +311,12 @@ _ENTITY_MODE_MAP: dict[str, str] = {
 }
 
 
+def _entity_service_domain(entity_id: str, default: str) -> str:
+    """Derive service domain from entity ID (input_select → input_select)."""
+    prefix = entity_id.split(".", 1)[0]
+    return prefix if prefix.startswith("input_") else default
+
+
 async def _apply_mode_via_entities(
     hass: HomeAssistant,
     mode: WorkMode,
@@ -321,6 +327,8 @@ async def _apply_mode_via_entities(
 
     Sets the work mode via a ``select`` entity and optionally adjusts the
     charge/discharge power limit and min SoC via ``number`` entities.
+    Detects ``input_select`` / ``input_number`` entities and uses the
+    correct service domain.
     """
     opts = _get_first_entry(hass).options
 
@@ -331,12 +339,13 @@ async def _apply_mode_via_entities(
         fd_soc,
     )
 
+    wm_entity = opts[CONF_WORK_MODE_ENTITY]
     mode_option = _ENTITY_MODE_MAP.get(mode)
     if mode_option:
         await hass.services.async_call(
-            "select",
+            _entity_service_domain(wm_entity, "select"),
             "select_option",
-            {"entity_id": opts[CONF_WORK_MODE_ENTITY], "option": mode_option},
+            {"entity_id": wm_entity, "option": mode_option},
         )
 
     if power_w is not None and mode in (
@@ -350,7 +359,7 @@ async def _apply_mode_via_entities(
         )
         if power_entity:
             await hass.services.async_call(
-                "number",
+                _entity_service_domain(power_entity, "number"),
                 "set_value",
                 {"entity_id": power_entity, "value": power_w},
             )
@@ -358,7 +367,7 @@ async def _apply_mode_via_entities(
     min_soc_entity = opts.get(CONF_MIN_SOC_ENTITY)
     if min_soc_entity and mode == WorkMode.FORCE_DISCHARGE:
         await hass.services.async_call(
-            "number",
+            _entity_service_domain(min_soc_entity, "number"),
             "set_value",
             {"entity_id": min_soc_entity, "value": fd_soc},
         )

@@ -342,6 +342,11 @@ class HAEventStream:
             f"{timeout_s}s (last: '{last}', via WebSocket)"
         )
 
+    def drain(self) -> None:
+        """Clear all accumulated events."""
+        with self._lock:
+            self._events.clear()
+
     def close(self) -> None:
         self._stop.set()
         self._ws.close()

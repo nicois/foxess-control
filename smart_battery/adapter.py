@@ -93,6 +93,20 @@ class EntityAdapter:
         brands like Huawei that need TOU slot configuration.
         """
 
+    @staticmethod
+    def _service_domain(entity_id: str, default: str) -> str:
+        """Derive the service domain from the entity ID prefix.
+
+        HA's ``select.select_option`` only works for platform-backed
+        ``select`` entities.  ``input_select`` entities require the
+        ``input_select`` service domain.  Same for ``number`` vs
+        ``input_number``.
+        """
+        prefix = entity_id.split(".", 1)[0]
+        if prefix.startswith("input_"):
+            return prefix
+        return default
+
     async def apply_mode(
         self,
         hass: HomeAssistant,
@@ -112,8 +126,9 @@ class EntityAdapter:
 
         mode_option = self._mode_map.get(mode)
         if mode_option:
+            domain = self._service_domain(self._work_mode_entity, "select")
             await hass.services.async_call(
-                "select",
+                domain,
                 "select_option",
                 {"entity_id": self._work_mode_entity, "option": mode_option},
             )
@@ -128,15 +143,17 @@ class EntityAdapter:
                 else self._discharge_power_entity
             )
             if power_entity:
+                domain = self._service_domain(power_entity, "number")
                 await hass.services.async_call(
-                    "number",
+                    domain,
                     "set_value",
                     {"entity_id": power_entity, "value": power_w},
                 )
 
         if self._min_soc_entity and mode == WorkMode.FORCE_DISCHARGE:
+            domain = self._service_domain(self._min_soc_entity, "number")
             await hass.services.async_call(
-                "number",
+                domain,
                 "set_value",
                 {"entity_id": self._min_soc_entity, "value": fd_soc},
             )
