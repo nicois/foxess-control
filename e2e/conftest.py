@@ -1,23 +1,21 @@
 """E2E test fixtures: simulator + HA container + Playwright browser.
 
 Scoping model (xdist-compatible):
+- connection_mode: session — "cloud" or "entity"
 - _worker_ports: session — unique sim + HA ports per worker
-- foxess_sim: session — one simulator per worker
-- ha_e2e: session — one HA container per worker
-- browser_context: session — one authenticated browser per worker
+- browser_context: session — reused browser (pages reconnect per test)
+- foxess_sim: function — fresh simulator per test (cloud only)
+- ha_e2e: function — fresh container per test (full isolation)
+- event_stream: function — fresh WS subscription per container
 - page: function — fresh tab per test
-- _e2e_reset: function (autouse) — resets sim + clears HA
 
-Resource lifecycle:
-- Named containers (ha-e2e-{worker_id}) enable deterministic cleanup
-- atexit handlers catch abnormal exits (SIGTERM, unhandled exceptions)
-- Setup failures trigger immediate cleanup before re-raising
-- Per-worker self-cleanup removes own stale container from prior runs
+Every function-scoped fixture uses yield for teardown. Each test
+gets a clean simulator, HA instance, and event stream with zero
+state from prior tests.
 """
 
 from __future__ import annotations
 
-import atexit
 import contextlib
 import logging
 import os
@@ -164,8 +162,8 @@ def _find_free_port() -> int:
         return port
 
 
-def _build_container() -> None:
-    """Build the HA container image, serialised across xdist workers."""
+def _build_container_once() -> None:
+    """Build the HA container image once, serialised across xdist workers."""
     import filelock
 
     lock = filelock.FileLock(str(REPO_ROOT / ".e2e-build.lock"), timeout=300)
@@ -231,16 +229,20 @@ def _worker_ports() -> dict[str, int]:
 
 
 @pytest.fixture(scope="session")
+def _container_built() -> None:
+    """Ensure the container image is built (once per worker, serialised)."""
+    _build_container_once()
+
+
+@pytest.fixture
 def foxess_sim(
     _worker_ports: dict[str, int],
     connection_mode: str,
 ) -> Generator[SimulatorHandle | None, None, None]:
-    """Start the FoxESS simulator (cloud mode only)."""
+    """Start a fresh simulator per test (cloud mode only)."""
     if connection_mode != "cloud":
         yield None
         return
-    wid = _worker_id()
-    t0 = time.monotonic()
     port = _worker_ports["sim"]
     proc = subprocess.Popen(
         ["python", "-m", "simulator", "--port", str(port)],
@@ -248,11 +250,6 @@ def foxess_sim(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
-
-    def _cleanup() -> None:
-        _kill_process(proc)
-
-    atexit.register(_cleanup)
 
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
@@ -264,15 +261,12 @@ def foxess_sim(
             pass
         time.sleep(0.2)
     else:
-        _cleanup()
-        atexit.unregister(_cleanup)
+        _kill_process(proc)
         raise RuntimeError("Simulator did not start")
 
-    _log.warning("[%s] simulator ready in %.1fs", wid, time.monotonic() - t0)
     yield SimulatorHandle(f"http://localhost:{port}")
 
-    _cleanup()
-    atexit.unregister(_cleanup)
+    _kill_process(proc)
 
 
 @pytest.fixture(scope="session")
@@ -282,26 +276,37 @@ def ha_port(_worker_ports: dict[str, int]) -> int:
 
 
 @pytest.fixture(scope="session")
+def browser_context(
+    playwright: Playwright,
+) -> Generator[BrowserContext, None, None]:
+    """Session-scoped browser — pages reconnect per test."""
+    browser = playwright.chromium.launch(headless=True)
+    context = browser.new_context()
+    yield context
+    context.close()
+    browser.close()
+
+
+# ---------------------------------------------------------------------------
+# Function-scoped fixtures (fresh per test)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
 def ha_e2e(
     foxess_sim: SimulatorHandle | None,
     ha_port: int,
     connection_mode: str,
+    _container_built: None,  # noqa: ARG001
 ) -> Generator[HAClient, None, None]:
-    """Start a HA container with unique port.
+    """Start a FRESH HA container for this test.
 
-    The container is named ``ha-e2e-{worker_id}`` so it can be
-    found and cleaned up deterministically.  An atexit handler
-    ensures the container is stopped even if the fixture teardown
-    is skipped (setup failure, worker crash, SIGTERM).
-
-    In entity mode, the config files are swapped for variants that
-    define input helpers and an entity-mode config entry.
+    Eliminates all state leaks: each test gets a clean HA instance
+    with no residual sessions, WS connections, coordinator state,
+    or cached data from prior tests.
     """
     wid = _worker_id()
     t0 = time.monotonic()
-    _build_container()
-    _log.warning("[%s] container build: %.1fs", wid, time.monotonic() - t0)
-
     name = _container_name()
     _stop_container(name)
 
@@ -309,7 +314,6 @@ def ha_e2e(
     shutil.copytree(str(HA_CONFIG_SEED), tmpdir, dirs_exist_ok=True)
 
     if connection_mode == "entity":
-        # Overwrite with entity-mode config variants
         entity_config = HA_CONFIG_SEED / "configuration.entity.yaml"
         entity_entries = HA_CONFIG_SEED / ".storage" / "core.config_entries.entity"
         shutil.copy2(str(entity_config), os.path.join(tmpdir, "configuration.yaml"))
@@ -347,21 +351,10 @@ def ha_e2e(
         stderr=subprocess.STDOUT,
     )
 
-    def _cleanup() -> None:
-        _stop_container(name)
-        _kill_process(proc)
-        shutil.rmtree(tmpdir, ignore_errors=True)
-
-    atexit.register(_cleanup)
-
     try:
         ha = HAClient(f"http://localhost:{ha_port}", E2E_TOKEN)
-        t1 = time.monotonic()
         ha.wait_ready(timeout_s=120)
-        _log.warning("[%s] HA ready: %.1fs", wid, time.monotonic() - t1)
 
-        # Wait for integration entities
-        t2 = time.monotonic()
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
             try:
@@ -374,51 +367,29 @@ def ha_e2e(
                 print(proc.stdout.read().decode(errors="replace")[-3000:])
             raise TimeoutError("Integration entities not created within 120s")
         _log.warning(
-            "[%s] entities ready: %.1fs (total: %.1fs)",
+            "[%s] container ready: %.1fs",
             wid,
-            time.monotonic() - t2,
             time.monotonic() - t0,
         )
     except:
-        _cleanup()
-        atexit.unregister(_cleanup)
+        _stop_container(name)
+        _kill_process(proc)
+        shutil.rmtree(tmpdir, ignore_errors=True)
         raise
 
     yield ha
 
-    _cleanup()
-    atexit.unregister(_cleanup)
+    _stop_container(name)
+    _kill_process(proc)
+    shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-# ---------------------------------------------------------------------------
-# Playwright fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="session")
-def browser_context(
-    playwright: Playwright,
-    ha_e2e: HAClient,  # ensure HA is running
-) -> Generator[BrowserContext, None, None]:
-    """Session-scoped browser context.
-
-    Auth is bypassed via pre-seeded http.auth content_user
-    (same approach as home-assistant-query-selector E2E tests).
-    No login form interaction needed.
-    """
-    browser = playwright.chromium.launch(headless=True)
-    context = browser.new_context()
-    yield context
-    context.close()
-    browser.close()
-
-
-@pytest.fixture(scope="session")
+@pytest.fixture
 def event_stream(
     ha_e2e: HAClient,  # noqa: ARG001 — ensure HA is running
     ha_port: int,
 ) -> Generator[HAEventStream, None, None]:
-    """Session-scoped WebSocket event stream for instant state notifications."""
+    """Function-scoped WebSocket event stream — fresh per container."""
     stream = HAEventStream(f"http://localhost:{ha_port}", E2E_TOKEN)
     yield stream
     stream.close()
@@ -428,62 +399,23 @@ def event_stream(
 def page(
     browser_context: BrowserContext,
     ha_port: int,
+    ha_e2e: HAClient,  # noqa: ARG001 — ensure container is up
 ) -> Generator[Page, None, None]:
-    """Function-scoped page navigated to HA dashboard.
-
-    HA's trusted_networks with allow_bypass_login auto-completes the
-    OAuth flow: browser → /auth/authorize → auto-approve → redirect
-    back to dashboard. We wait for this chain to complete.
-    """
+    """Function-scoped page navigated to HA dashboard."""
     t0 = time.monotonic()
     p = browser_context.new_page()
     p.goto(f"http://localhost:{ha_port}/lovelace/0", timeout=60000)
     p.wait_for_url("**/lovelace/**", timeout=60000)
     p.wait_for_load_state("networkidle", timeout=30000)
-    p.wait_for_timeout(2000)  # let custom cards render
+    p.wait_for_timeout(2000)
     _log.warning("[%s] page ready: %.1fs", _worker_id(), time.monotonic() - t0)
     yield p
     p.close()
 
 
 # ---------------------------------------------------------------------------
-# Function-scoped autouse reset
+# Helpers for tests
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _e2e_reset(
-    foxess_sim: SimulatorHandle | None,
-    ha_e2e: HAClient,
-    connection_mode: str,
-    event_stream: HAEventStream,
-) -> Generator[None, None, None]:
-    """Reset simulator/entities and clear HA sessions before each test."""
-    t0 = time.monotonic()
-    if connection_mode == "cloud" and foxess_sim is not None:
-        # Reset state but preserve faults — the data_source fixture
-        # manages ws_refuse, and clearing it here creates a window
-        # where WS reconnects before the next fault injection.
-        foxess_sim.set(soc=50, solar_kw=0, load_kw=0.5)
-    elif connection_mode == "entity":
-        with contextlib.suppress(Exception):
-            ha_e2e.set_input_select("input_select.foxess_work_mode", "Self Use")
-            ha_e2e.set_input_number("input_number.foxess_soc", 50)
-            ha_e2e.set_input_number("input_number.foxess_charge_power", 0)
-            ha_e2e.set_input_number("input_number.foxess_discharge_power", 0)
-            ha_e2e.set_input_number("input_number.foxess_min_soc", 10)
-            ha_e2e.set_input_number("input_number.foxess_loads_power", 0)
-            ha_e2e.set_input_number("input_number.foxess_pv_power", 0)
-    with contextlib.suppress(Exception):
-        ha_e2e.call_service("foxess_control", "clear_overrides", {})
-    with contextlib.suppress(TimeoutError):
-        ha_e2e.wait_for_state("sensor.foxess_smart_operations", "idle", timeout_s=10)
-    _log.warning("[%s] reset: %.1fs", _worker_id(), time.monotonic() - t0)
-
-    yield
-
-    with contextlib.suppress(Exception):
-        ha_e2e.call_service("foxess_control", "clear_overrides", {})
 
 
 def set_inverter_state(
@@ -500,7 +432,6 @@ def set_inverter_state(
         if "soc" in kwargs:
             ha_e2e.set_input_number("input_number.foxess_soc", float(kwargs["soc"]))
         if "solar_kw" in kwargs:
-            # Entity coordinator reads the raw state as kW (same as cloud API)
             ha_e2e.set_input_number(
                 "input_number.foxess_pv_power", float(kwargs["solar_kw"])
             )
@@ -509,8 +440,6 @@ def set_inverter_state(
                 "input_number.foxess_loads_power", float(kwargs["load_kw"])
             )
         # Wait for the entity coordinator to propagate values.
-        # The coordinator polls all entities in a single cycle, so
-        # waiting for the last-set value guarantees all are current.
         if "soc" in kwargs:
             target = str(float(kwargs["soc"]))
             if event_stream is not None:
@@ -528,7 +457,6 @@ def set_inverter_state(
                     poll_interval=1.0,
                 )
         elif kwargs:
-            # No SoC set but other values changed — wait one poll cycle
             time.sleep(6)
 
 
@@ -537,14 +465,11 @@ def data_source(
     request: pytest.FixtureRequest,
     foxess_sim: SimulatorHandle | None,
     connection_mode: str,
-    _e2e_reset: None,
 ) -> Generator[str, None, None]:
     """Control the active data source for the test.
 
     Valid combinations: cloud → [api, ws], entity → [entity].
-    Invalid cross-products are skipped at runtime — this is
-    unavoidable when a function-scoped param depends on a
-    session-scoped param that pytest can't resolve at collection.
+    Invalid cross-products are skipped at runtime.
     """
     mode: str = request.param
     if connection_mode == "entity" and mode != "entity":
