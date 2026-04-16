@@ -153,6 +153,116 @@ class TestSmartCharge:
 # ---------------------------------------------------------------------------
 
 
+class TestFeedinPacing:
+    def test_feedin_power_adjusts_over_time(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """Feed-in budget pacing must adjust discharge power as time passes.
+
+        Reproduces the production bug: with a feed-in limit (e.g. 1 kWh
+        over 30 min), the algorithm starts with a conservative discharge
+        rate, then gradually increases it.  But if min_power_change is
+        at its default (500W), every tick's delta is below the threshold
+        so the inverter schedule is never updated — the battery
+        discharges at the initial rate for the entire window.
+
+        Steps:
+        1. Set min_power_change=500 (the default) via options flow
+        2. Start discharge with feed-in limit
+        3. Fast-forward 10 minutes
+        4. Assert discharge power increased from initial value
+        """
+        if connection_mode != "cloud":
+            pytest.skip("requires simulator fast_forward")
+        assert foxess_sim is not None
+        import requests as _requests
+
+        # Set min_power_change to 500 (default) via options flow
+        # to reproduce the production failure mode.
+        session = _requests.Session()
+        session.headers.update(
+            {
+                "Authorization": ha_e2e._session.headers["Authorization"],
+                "Content-Type": "application/json",
+            }
+        )
+        entries = session.get(
+            f"{ha_e2e.base_url}/api/config/config_entries/entry"
+        ).json()
+        foxess_entry = next(e for e in entries if e["domain"] == "foxess_control")
+        entry_id = foxess_entry["entry_id"]
+
+        r = session.post(
+            f"{ha_e2e.base_url}/api/config/config_entries/options/flow",
+            json={"handler": entry_id},
+        )
+        flow = r.json()
+        flow_id = flow["flow_id"]
+        submit_data = {}
+        for field in flow.get("data_schema", []):
+            submit_data[field["name"]] = field.get("default")
+        submit_data["min_power_change"] = 500
+        session.post(
+            f"{ha_e2e.base_url}/api/config/config_entries/options/flow/{flow_id}",
+            json=submit_data,
+        )
+        session.post(
+            f"{ha_e2e.base_url}/api/config/config_entries/entry/{entry_id}/reload"
+        )
+
+        import time as _time
+
+        _time.sleep(5)
+
+        foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
+        start, end = _tight_window(30)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {
+                "start_time": start,
+                "end_time": end,
+                "min_soc": 30,
+                "feedin_energy_limit_kwh": 1.0,
+            },
+        )
+
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        # Record the initial power after the first listener tick
+        # stabilises (the initial jump from max → paced is immediate).
+        # The discharge listener fires every 60s real time.
+        _time.sleep(10)
+        attrs = ha_e2e.get_attributes("sensor.foxess_smart_operations")
+        initial_power = attrs.get("discharge_power_w", 0)
+        assert initial_power > 0, "Discharge should be active"
+
+        # Wait for several real listener ticks (60s each) so the
+        # algorithm has a chance to adjust power.  Fast-forward
+        # simulator time between ticks so the remaining window
+        # shrinks and the target power increases.
+        for _ in range(5):
+            foxess_sim.fast_forward(120, step=5)
+            _time.sleep(65)  # wait for one listener tick
+
+        attrs = ha_e2e.get_attributes("sensor.foxess_smart_operations")
+        later_power = attrs.get("discharge_power_w", 0)
+
+        assert later_power > initial_power, (
+            f"Discharge power should increase over time to meet feed-in "
+            f"target, but stayed at {initial_power}W → {later_power}W. "
+            f"min_power_change=500 blocks gradual adjustments."
+        )
+
+
 class TestFaultInjection:
     def test_ws_unit_mismatch_handled(
         self,

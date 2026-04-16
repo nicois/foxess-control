@@ -1172,12 +1172,15 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
     discharge / feed-in).
     """
     if _is_entity_mode(hass):
+        _LOGGER.debug("WS check: entity mode, skipping")
         return False
     try:
         entry = _get_first_entry(hass)
     except (ServiceValidationError, KeyError):
+        _LOGGER.debug("WS check: no config entry")
         return False
     if not entry.data.get(CONF_WEB_USERNAME):
+        _LOGGER.debug("WS check: no web credentials configured")
         return False
 
     domain_data = hass.data.get(DOMAIN, {})
@@ -1187,18 +1190,27 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
     # which is when house load could exceed discharge power and cause
     # grid import.  At full power there is plenty of headroom.
     ds = domain_data.get("_smart_discharge_state")
-    if (
-        ds is not None
-        and ds.get("discharging_started", False)
-        and not ds.get("min_soc", 0) >= 100
-        and ds.get("last_power_w", 0) < ds.get("max_power_w", 0)
-    ):
-        return True
+    if ds is not None and ds.get("discharging_started", False):
+        min_soc = ds.get("min_soc", 0)
+        last_pw = ds.get("last_power_w", 0)
+        max_pw = ds.get("max_power_w", 0)
+        paced = not min_soc >= 100 and last_pw < max_pw
+        _LOGGER.debug(
+            "WS check: discharge active, min_soc=%s, "
+            "last_power=%dW, max_power=%dW, paced=%s",
+            min_soc,
+            last_pw,
+            max_pw,
+            paced,
+        )
+        if paced:
+            return True
 
     # Any *started* smart session when ws_all_sessions is enabled
     if not ws_all:
         _LOGGER.debug(
-            "WS check: ws_all_sessions=%s (options=%s)",
+            "WS check: ws_all_sessions=%s, no paced discharge "
+            "(options=%s)",
             ws_all,
             {k: v for k, v in entry.options.items() if "password" not in k.lower()},
         )
@@ -1382,6 +1394,22 @@ def _trigger_discharge_listener(hass: HomeAssistant) -> None:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up FoxESS Control from a config entry."""
+    try:
+        from homeassistant.loader import async_get_integration  # noqa: PLC0415
+
+        integration = await async_get_integration(hass, DOMAIN)
+        version = integration.version or "unknown"
+    except Exception:
+        version = "unknown"
+    _LOGGER.info(
+        "FoxESS Control %s starting (serial=%s, entity_mode=%s, "
+        "ws_all=%s, min_power_change=%s, polling=%s)",
+        version,
+        entry.data.get(CONF_DEVICE_SERIAL, "?"),
+        bool(entry.options.get(CONF_WORK_MODE_ENTITY)),
+        entry.options.get(CONF_WS_ALL_SESSIONS, False),
+        entry.options.get(CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL),
+    )
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN].setdefault("_smart_discharge_unsubs", [])
     hass.data[DOMAIN].setdefault("_smart_charge_unsubs", [])

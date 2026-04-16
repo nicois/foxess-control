@@ -663,7 +663,11 @@ class FoxESSControlCard extends HTMLElement {
           </div>
           <div class="detail-row">
             <span class="detail-label">${this._t("power")}</span>
-            <span class="detail-value">${deferred ? this._t("self_use") : scheduled ? "—" : this._formatPower(power)}</span>
+            <span class="detail-value">${deferred ? this._t("self_use") : scheduled ? "—" : this._formatPower(power)}${
+              !deferred && !scheduled && a.discharge_target_power_w != null && a.discharge_target_power_w !== power
+                ? ` <span style="opacity:0.5">→ ${this._formatPower(a.discharge_target_power_w)}</span>`
+                : ""
+            }</span>
           </div>
           <div class="detail-row">
             <span class="detail-label">${this._t("min_soc")}</span>
