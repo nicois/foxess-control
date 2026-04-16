@@ -11,11 +11,14 @@
 
 ### Changed
 - **Stale REST values hidden in WS mode**: overview card suppresses PV1/PV2 detail, grid voltage/frequency, battery temperature, and residual energy when WebSocket is the active data source — these values only update on REST polls and would be misleadingly stale.
+- **WebSocket activates during force operations**: force charge, force discharge, and feed-in now activate the WebSocket when `ws_all_sessions` is enabled. Previously only smart sessions triggered WS, so force operations were stuck on 5-minute REST polling.
+- **SoC extrapolation between REST polls**: coordinator pushes interpolated SoC updates every 30 seconds between REST polls, so progress bars advance smoothly instead of jumping in integer steps. Automatically stops when WebSocket takes over.
 
 ### Fixed
 - **Work mode label stuck after session ends**: overview card showed "Force Discharge" for minutes after the window finished. Now cleared immediately via `_on_session_cancel`.
 - **WS not stopping when session ends via timer**: the brand-agnostic `cancel_smart_session` didn't trigger WebSocket shutdown.
 - **WASM signature test ordering dependency**: module singleton heap state caused non-deterministic output across test runs.
+- **Progress bar start SoC wrong after deferral**: smart charge and smart discharge `start_soc` was captured at service call time; now updated to actual SoC when charging/discharging begins, so the progress bar range is accurate for deferred sessions.
 
 ## 1.0.3
 

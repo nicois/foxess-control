@@ -1159,7 +1159,8 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
     discharge with min_soc < 100 (i.e. discharge is actually paced).
 
     When the ``ws_all_sessions`` option is enabled, the WebSocket is also
-    activated during smart charge sessions.
+    activated during smart charge sessions and force operations (charge /
+    discharge / feed-in).
     """
     if _is_entity_mode(hass):
         return False
@@ -1189,9 +1190,14 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
     if not ws_all:
         return False
     cs = domain_data.get("_smart_charge_state")
-    return (ds is not None and ds.get("discharging_started", False)) or (
+    if (ds is not None and ds.get("discharging_started", False)) or (
         cs is not None and cs.get("charging_started", False)
-    )
+    ):
+        return True
+
+    # Force operations (charge / discharge / feed-in) with a future end time
+    force_end: datetime.datetime | None = domain_data.get("_force_op_end")
+    return force_end is not None and dt_util.now() < force_end
 
 
 async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
@@ -1310,6 +1316,38 @@ async def _stop_realtime_ws(hass: HomeAssistant) -> None:
             if coord.data is not None and coord.data.get("_data_source") == "ws":
                 coord.data["_data_source"] = "api"
                 coord.async_set_updated_data(dict(coord.data))
+
+
+async def _start_force_op_ws(
+    hass: HomeAssistant,
+    end: datetime.datetime,
+) -> None:
+    """Activate WebSocket for the duration of a force operation.
+
+    Sets ``_force_op_end`` so ``_should_start_realtime_ws`` can see the
+    active operation, then schedules cleanup when the window expires.
+    """
+    domain_data = hass.data.get(DOMAIN, {})
+
+    # Cancel any previous force-op cleanup timer
+    cancel_prev: asyncio.TimerHandle | None = domain_data.pop("_force_op_timer", None)
+    if cancel_prev is not None:
+        cancel_prev.cancel()
+
+    domain_data["_force_op_end"] = end
+    await _maybe_start_realtime_ws(hass)
+
+    # Schedule WS stop when the window ends
+    delay = max(0.0, (end - dt_util.now()).total_seconds())
+
+    def _on_force_op_expired() -> None:
+        domain_data.pop("_force_op_end", None)
+        domain_data.pop("_force_op_timer", None)
+        if not _should_start_realtime_ws(hass):
+            hass.async_create_task(_stop_realtime_ws(hass))
+
+    handle = hass.loop.call_later(delay, _on_force_op_expired)
+    domain_data["_force_op_timer"] = handle
 
 
 def _trigger_discharge_listener(hass: HomeAssistant) -> None:
@@ -1481,6 +1519,15 @@ def _register_services(hass: HomeAssistant) -> None:
         if mode_filter is None or mode_filter == WorkMode.FORCE_DISCHARGE.value:
             _cancel_smart_discharge(hass)
 
+        # Clear force-op WS tracking
+        domain_data = hass.data.get(DOMAIN, {})
+        timer: asyncio.TimerHandle | None = domain_data.pop("_force_op_timer", None)
+        if timer is not None:
+            timer.cancel()
+        domain_data.pop("_force_op_end", None)
+        if not _should_start_realtime_ws(hass):
+            hass.async_create_task(_stop_realtime_ws(hass))
+
         if _is_entity_mode(hass):
             _LOGGER.info("Clearing overrides via entity backend, setting SelfUse")
             await _apply_mode_via_entities(hass, WorkMode.SELF_USE)
@@ -1557,6 +1604,8 @@ def _register_services(hass: HomeAssistant) -> None:
             )
             await hass.async_add_executor_job(inverter.set_schedule, groups)
 
+        await _start_force_op_ws(hass, end)
+
     async def handle_force_discharge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
         power: int | None = call.data.get("power")
@@ -1609,6 +1658,8 @@ def _register_services(hass: HomeAssistant) -> None:
             )
             await hass.async_add_executor_job(inverter.set_schedule, groups)
 
+        await _start_force_op_ws(hass, end)
+
     async def handle_feedin(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
         power: int | None = call.data.get("power")
@@ -1650,6 +1701,8 @@ def _register_services(hass: HomeAssistant) -> None:
                 force,
             )
             await hass.async_add_executor_job(inverter.set_schedule, groups)
+
+        await _start_force_op_ws(hass, end)
 
     async def handle_smart_discharge(call: ServiceCall) -> None:
         start_time: datetime.time = call.data["start_time"]

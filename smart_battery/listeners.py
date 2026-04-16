@@ -396,6 +396,7 @@ def setup_smart_charge_listeners(
             cur_state["last_power_w"] = new_power
             cur_state["charging_started"] = True
             cur_state["charging_started_at"] = now_dt
+            cur_state["start_soc"] = cur_soc
             cur_state["charging_started_energy_kwh"] = (
                 cur_soc / 100.0 * cur_state["battery_capacity_kwh"]
             )
@@ -614,6 +615,7 @@ def setup_smart_discharge_listeners(
                 cur_state["last_power_w"] = new_power
                 cur_state["discharging_started"] = True
                 cur_state["discharging_started_at"] = now_dt
+                cur_state["start_soc"] = soc_value
                 _LOGGER.info(
                     "Smart discharge: deferred discharge started "
                     "(SoC=%.1f%%, power=%dW)",

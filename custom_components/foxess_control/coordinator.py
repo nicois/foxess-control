@@ -7,6 +7,8 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.core import callback
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DOMAIN, POLLED_VARIABLES
@@ -14,6 +16,8 @@ from .smart_battery.coordinator import EntityCoordinator as _EntityCoordinator
 from .smart_battery.coordinator import get_coordinator_soc as _get_coordinator_soc
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from homeassistant.core import HomeAssistant
 
     from .foxess.inverter import Inverter
@@ -49,6 +53,8 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._soc_interpolated: float | None = None
         self._soc_last_reported: float | None = None
         self._soc_last_bat_kw: float = 0.0  # net: positive=charging
+        # Periodic SoC extrapolation between REST polls
+        self._soc_interp_cancel: Callable[[], None] | None = None
 
     def _get_capacity_kwh(self) -> float:
         """Read battery capacity from config (needed for SoC integration)."""
@@ -130,7 +136,74 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._soc_last_bat_kw = net_bat_kw
         self._ws_last_time = now
         data["_data_source"] = "api"
+        self._schedule_soc_extrapolation()
         return data
+
+    _SOC_EXTRAP_INTERVAL = 30  # seconds between extrapolation ticks
+
+    def _schedule_soc_extrapolation(self) -> None:
+        """Schedule periodic SoC extrapolation between REST polls.
+
+        Between REST polls the sensor attributes are frozen, so the
+        progress bar shows stale integer SoC.  This timer advances the
+        interpolated SoC by extrapolating the last-known battery power
+        and pushes an update to refresh sensors.  Runs only when there
+        is meaningful battery power and no active WebSocket (WS already
+        pushes ~5-second updates).
+        """
+        if self._soc_interp_cancel is not None:
+            self._soc_interp_cancel()
+            self._soc_interp_cancel = None
+
+        if (
+            self._soc_interpolated is None
+            or abs(self._soc_last_bat_kw) < 0.01
+            or self._get_capacity_kwh() <= 0
+        ):
+            return
+
+        @callback
+        def _tick(_now: datetime.datetime) -> None:
+            self._soc_interp_cancel = None
+            if self.data is None or self._soc_interpolated is None:
+                return
+            # Don't extrapolate if WS is providing updates
+            if self.data.get("_data_source") == "ws":
+                return
+
+            now = time.monotonic()
+            if self._ws_last_time is None:
+                return
+            elapsed_h = (now - self._ws_last_time) / 3600.0
+            if elapsed_h <= 0:
+                return
+
+            capacity = self._get_capacity_kwh()
+            if capacity <= 0:
+                return
+
+            delta_pct = self._soc_last_bat_kw * elapsed_h / capacity * 100.0
+            new_val = max(0.0, min(100.0, self._soc_interpolated + delta_pct))
+            new_rounded = round(new_val, 1)
+            old_rounded = round(self._soc_interpolated, 1)
+
+            self._soc_interpolated = new_val
+            self._ws_last_time = now
+
+            if new_rounded != old_rounded:
+                merged = dict(self.data)
+                merged["_soc_interpolated"] = new_rounded
+                self.async_set_updated_data(merged)
+
+            # Schedule next tick
+            if abs(self._soc_last_bat_kw) >= 0.01:
+                self._soc_interp_cancel = async_call_later(
+                    self.hass, self._SOC_EXTRAP_INTERVAL, _tick
+                )
+
+        self._soc_interp_cancel = async_call_later(
+            self.hass, self._SOC_EXTRAP_INTERVAL, _tick
+        )
 
     def inject_realtime_data(self, ws_data: dict[str, Any]) -> None:
         """Merge WebSocket real-time data into the current coordinator data.
@@ -147,6 +220,11 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if self.data is None:
             return
+
+        # WS provides its own frequent updates — stop REST extrapolation
+        if self._soc_interp_cancel is not None:
+            self._soc_interp_cancel()
+            self._soc_interp_cancel = None
 
         # Integrate feedinPower into the cumulative feedin energy counter
         now = time.monotonic()
