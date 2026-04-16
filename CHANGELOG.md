@@ -1,20 +1,25 @@
 # Changelog
 
-## 1.0.5-beta.5
+## 1.0.5-beta.7
 
 ### Changed
 - **Min SoC floor lowered to 0%**: `min_soc` and `min_soc_on_grid` now accept 0, removing the previous 5% floor.
 - **WebSocket activates during force operations** when `ws_all_sessions` is enabled.
 - **SoC extrapolation between REST polls**: 30-second interpolated updates for smooth progress bars.
+- **Simulator WS realism**: push loop only sends data to the newest client; older connections receive stale keepalives. Matches FoxESS cloud behaviour where a new app/web login takes over the data stream.
 
 ### Added
 - **Entity-mode E2E tests**: input helpers simulate modbus entities; `connection_mode` fixture parametrizes cloud vs entity modes.
 - **HA WebSocket event stream** (`HAEventStream`): instant state change notifications for E2E tests.
 - **Entity adapter service domain routing**: `input_select`/`input_number` entities use correct HA service domain.
 - **SoC interpolation regression tests**: 5 tests verify smooth decline, clamp behaviour, and feedin-absent scenarios.
+- **E2E function-scoped containers**: each test gets a fresh HA container and simulator, eliminating cross-test state leaks.
+- **E2E test: WS stream-stolen recovery**: verifies the integration reconnects when another client (FoxESS app) steals the data stream.
 
 ### Fixed
-- **SoC interpolation stuck between ticks**: `_ws_last_time` was set before integration (making elapsed=0) and only when feedinPower was present. Moved after integration and made unconditional. Progress bars now decline smoothly during WS-driven discharge.
+- **WS stream-stolen recovery**: when another client (FoxESS app/website) opens a WebSocket to the FoxESS cloud, the integration's existing connection goes silent — it receives stale keepalive frames but no useful data. Previously the 30s stale timeout never fired because `receive()` returned for each stale frame. Now tracks last useful data timestamp and reconnects when only stale frames arrive for 30s.
+- **WS token invalidation on reconnect failure**: the FoxESS cloud revokes the web session token when another client logs in, causing `WSServerHandshakeError` (HTTP 200 instead of 101). The cached token is now invalidated on reconnect failure, forcing a fresh login on the next attempt.
+- **SoC interpolation stuck between ticks**: `_ws_last_time` was set before integration (making elapsed=0) and only when feedinPower was present. Moved after integration and made unconditional.
 - **SoC clamp rounding**: upper bound 0.99 rounded to next integer (95.99→96.0 displayed as 96%). Changed to 0.94 so displayed value stays within the authoritative tick.
 - **Progress bar start SoC wrong after deferral**: updated to actual SoC when session begins.
 
