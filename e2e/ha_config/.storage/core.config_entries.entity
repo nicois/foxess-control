@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "minor_version": 4,
+  "key": "core.config_entries",
+  "data": {
+    "entries": [
+      {
+        "created_at": "2026-01-01T00:00:00.000000+00:00",
+        "data": {
+          "api_key": "",
+          "device_serial": "ENTITY0001"
+        },
+        "disabled_by": null,
+        "discovery_keys": {},
+        "domain": "foxess_control",
+        "entry_id": "e2e-foxess-entity-001",
+        "minor_version": 2,
+        "modified_at": "2026-01-01T00:00:00.000000+00:00",
+        "options": {
+          "battery_capacity_kwh": 10.0,
+          "polling_interval": 5,
+          "min_power_change": 100,
+          "smart_headroom": 0.1,
+          "work_mode_entity": "input_select.foxess_work_mode",
+          "charge_power_entity": "input_number.foxess_charge_power",
+          "discharge_power_entity": "input_number.foxess_discharge_power",
+          "min_soc_entity": "input_number.foxess_min_soc",
+          "soc_entity": "input_number.foxess_soc",
+          "loads_power_entity": "input_number.foxess_loads_power",
+          "pv_power_entity": "input_number.foxess_pv_power"
+        },
+        "pref_disable_new_entities": false,
+        "pref_disable_polling": false,
+        "source": "user",
+        "title": "FoxESS Entity Mode",
+        "unique_id": "ENTITY0001",
+        "version": 2
+      }
+    ]
+  }
+}

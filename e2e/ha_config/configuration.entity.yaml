@@ -1,0 +1,53 @@
+default_config:
+
+homeassistant:
+  auth_providers:
+    - type: trusted_networks
+      trusted_networks:
+        - 0.0.0.0/0
+        - ::/0
+      allow_bypass_login: true
+
+input_select:
+  foxess_work_mode:
+    options:
+      - Self Use
+      - Force Charge
+      - Force Discharge
+      - Feed-in First
+      - Back-up
+    initial: Self Use
+
+input_number:
+  foxess_soc:
+    min: 0
+    max: 100
+    step: 1
+    initial: 50
+    mode: box
+  foxess_charge_power:
+    min: 0
+    max: 12000
+    step: 100
+    mode: box
+  foxess_discharge_power:
+    min: 0
+    max: 12000
+    step: 100
+    mode: box
+  foxess_min_soc:
+    min: 10
+    max: 100
+    step: 1
+    initial: 10
+    mode: box
+  foxess_loads_power:
+    min: 0
+    max: 20000
+    step: 1
+    mode: box
+  foxess_pv_power:
+    min: 0
+    max: 20000
+    step: 1
+    mode: box

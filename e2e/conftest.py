@@ -218,6 +218,12 @@ def _kill_process(proc: subprocess.Popen[bytes]) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(scope="session", params=["cloud", "entity"])
+def connection_mode(request: pytest.FixtureRequest) -> str:
+    """Control whether tests run against cloud API or entity mode."""
+    return str(request.param)
+
+
 @pytest.fixture(scope="session")
 def _worker_ports() -> dict[str, int]:
     """Allocate unique ports for this xdist worker."""
@@ -227,8 +233,12 @@ def _worker_ports() -> dict[str, int]:
 @pytest.fixture(scope="session")
 def foxess_sim(
     _worker_ports: dict[str, int],
-) -> Generator[SimulatorHandle, None, None]:
-    """Start the FoxESS simulator."""
+    connection_mode: str,
+) -> Generator[SimulatorHandle | None, None, None]:
+    """Start the FoxESS simulator (cloud mode only)."""
+    if connection_mode != "cloud":
+        yield None
+        return
     wid = _worker_id()
     t0 = time.monotonic()
     port = _worker_ports["sim"]
@@ -273,8 +283,9 @@ def ha_port(_worker_ports: dict[str, int]) -> int:
 
 @pytest.fixture(scope="session")
 def ha_e2e(
-    foxess_sim: SimulatorHandle,
+    foxess_sim: SimulatorHandle | None,
     ha_port: int,
+    connection_mode: str,
 ) -> Generator[HAClient, None, None]:
     """Start a HA container with unique port.
 
@@ -282,6 +293,9 @@ def ha_e2e(
     found and cleaned up deterministically.  An atexit handler
     ensures the container is stopped even if the fixture teardown
     is skipped (setup failure, worker crash, SIGTERM).
+
+    In entity mode, the config files are swapped for variants that
+    define input helpers and an entity-mode config entry.
     """
     wid = _worker_id()
     t0 = time.monotonic()
@@ -289,17 +303,27 @@ def ha_e2e(
     _log.warning("[%s] container build: %.1fs", wid, time.monotonic() - t0)
 
     name = _container_name()
-    # Stop any stale container with our name from a prior failed run.
     _stop_container(name)
 
     tmpdir = tempfile.mkdtemp(prefix="ha-e2e-")
     shutil.copytree(str(HA_CONFIG_SEED), tmpdir, dirs_exist_ok=True)
+
+    if connection_mode == "entity":
+        # Overwrite with entity-mode config variants
+        entity_config = HA_CONFIG_SEED / "configuration.entity.yaml"
+        entity_entries = HA_CONFIG_SEED / ".storage" / "core.config_entries.entity"
+        shutil.copy2(str(entity_config), os.path.join(tmpdir, "configuration.yaml"))
+        shutil.copy2(
+            str(entity_entries),
+            os.path.join(tmpdir, ".storage", "core.config_entries"),
+        )
+
     os.chmod(tmpdir, 0o777)
     for root, dirs, _files in os.walk(tmpdir):
         for d in dirs:
             os.chmod(os.path.join(root, d), 0o777)
 
-    sim_port = foxess_sim.url.rsplit(":", 1)[1]
+    sim_port = foxess_sim.url.rsplit(":", 1)[1] if foxess_sim else "0"
     proc = subprocess.Popen(
         [
             "podman",
@@ -418,12 +442,23 @@ def page(
 
 @pytest.fixture(autouse=True)
 def _e2e_reset(
-    foxess_sim: SimulatorHandle,
+    foxess_sim: SimulatorHandle | None,
     ha_e2e: HAClient,
+    connection_mode: str,
 ) -> Generator[None, None, None]:
-    """Reset simulator and clear HA sessions before each test."""
+    """Reset simulator/entities and clear HA sessions before each test."""
     t0 = time.monotonic()
-    foxess_sim.reset()
+    if connection_mode == "cloud" and foxess_sim is not None:
+        foxess_sim.reset()
+    elif connection_mode == "entity":
+        with contextlib.suppress(Exception):
+            ha_e2e.set_input_select("input_select.foxess_work_mode", "Self Use")
+            ha_e2e.set_input_number("input_number.foxess_soc", 50)
+            ha_e2e.set_input_number("input_number.foxess_charge_power", 0)
+            ha_e2e.set_input_number("input_number.foxess_discharge_power", 0)
+            ha_e2e.set_input_number("input_number.foxess_min_soc", 10)
+            ha_e2e.set_input_number("input_number.foxess_loads_power", 0)
+            ha_e2e.set_input_number("input_number.foxess_pv_power", 0)
     with contextlib.suppress(Exception):
         ha_e2e.call_service("foxess_control", "clear_overrides", {})
     with contextlib.suppress(TimeoutError):
@@ -436,20 +471,55 @@ def _e2e_reset(
         ha_e2e.call_service("foxess_control", "clear_overrides", {})
 
 
-@pytest.fixture(params=["api", "ws"])
+def set_inverter_state(
+    connection_mode: str,
+    foxess_sim: SimulatorHandle | None,
+    ha_e2e: HAClient,
+    **kwargs: float,
+) -> None:
+    """Set inverter state via simulator (cloud) or input helpers (entity)."""
+    if connection_mode == "cloud" and foxess_sim is not None:
+        foxess_sim.set(**kwargs)
+    else:
+        if "soc" in kwargs:
+            ha_e2e.set_input_number("input_number.foxess_soc", float(kwargs["soc"]))
+        if "solar_kw" in kwargs:
+            ha_e2e.set_input_number(
+                "input_number.foxess_pv_power", float(kwargs["solar_kw"]) * 1000
+            )
+        if "load_kw" in kwargs:
+            ha_e2e.set_input_number(
+                "input_number.foxess_loads_power", float(kwargs["load_kw"]) * 1000
+            )
+        # Wait for the entity coordinator to pick up the new values
+        if "soc" in kwargs:
+            ha_e2e.wait_for_numeric_state(
+                "sensor.foxess_battery_soc",
+                "ge",
+                float(kwargs["soc"]) - 1,
+                timeout_s=15,
+                poll_interval=1.0,
+            )
+
+
+@pytest.fixture(params=["api", "ws", "entity"])
 def data_source(
     request: pytest.FixtureRequest,
-    foxess_sim: SimulatorHandle,
+    foxess_sim: SimulatorHandle | None,
+    connection_mode: str,
     _e2e_reset: None,
 ) -> Generator[str, None, None]:
     """Control the active data source for the test.
 
-    Depends on _e2e_reset so the fault is injected AFTER reset clears
-    all faults.  Tests that use this fixture run twice — once per mode.
-
-    Extensible: add "modbus" to params when a Modbus simulator exists.
+    Skips inapplicable combinations:
+    - cloud + "entity" → skip
+    - entity + "api"/"ws" → skip
     """
     mode: str = request.param
-    if mode == "api":
+    if connection_mode == "entity" and mode != "entity":
+        pytest.skip(f"{mode} only applies to cloud mode")
+    if connection_mode == "cloud" and mode == "entity":
+        pytest.skip("entity only applies to entity mode")
+    if mode == "api" and foxess_sim is not None:
         foxess_sim.fault("ws_refuse")
     yield mode

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from .conftest import set_inverter_state
 from .ha_client import FATAL_FOR_ACTIVE
 from .selectors import ControlCard, OverviewCard
 
@@ -90,9 +91,15 @@ class TestOverviewCard:
         """Overview card is present on the dashboard."""
         assert _find_card(page, "foxess-overview-card")
 
-    def test_shows_soc(self, page: Page, foxess_sim: SimulatorHandle) -> None:
+    def test_shows_soc(
+        self,
+        page: Page,
+        foxess_sim: SimulatorHandle | None,
+        ha_e2e: HAClient,
+        connection_mode: str,
+    ) -> None:
         """Battery SoC is displayed."""
-        foxess_sim.set(soc=75)
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=75)
         page.reload()
         page.wait_for_load_state("networkidle")
         # Wait for card to re-render with updated data
@@ -103,10 +110,14 @@ class TestOverviewCard:
             assert "75" in text or "%" in text
 
     def test_house_load_never_greyed(
-        self, page: Page, foxess_sim: SimulatorHandle
+        self,
+        page: Page,
+        foxess_sim: SimulatorHandle | None,
+        ha_e2e: HAClient,
+        connection_mode: str,
     ) -> None:
         """House node should not be greyed out even at very low load."""
-        foxess_sim.set(load_kw=0.003)
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, load_kw=0.003)
         page.reload()
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(3000)
@@ -119,10 +130,14 @@ class TestOverviewCard:
         self,
         page: Page,
         ha_e2e: HAClient,
-        foxess_sim: SimulatorHandle,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
         data_source: str,
     ) -> None:
-        """Data source badge reflects the active data path."""
+        """Data source badge reflects the active data path (cloud only)."""
+        if connection_mode != "cloud":
+            pytest.skip("data source badge is cloud-specific")
+        assert foxess_sim is not None
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
         start, end = _tight_window(10)
         ha_e2e.call_service(
@@ -180,10 +195,14 @@ class TestOverviewCard:
         self,
         page: Page,
         ha_e2e: HAClient,
-        foxess_sim: SimulatorHandle,
+        foxess_sim: SimulatorHandle | None,
         data_source: str,
+        connection_mode: str,
     ) -> None:
-        """PV1 + PV2 ≈ solar total during smart operations."""
+        """PV1 + PV2 ≈ solar total during smart operations (cloud only)."""
+        if connection_mode != "cloud":
+            pytest.skip("PV1/PV2 entities don't exist in entity mode")
+        assert foxess_sim is not None
         foxess_sim.set(soc=80, solar_kw=3.0, load_kw=0.5)
         start, end = _tight_window(10)
         ha_e2e.call_service(
@@ -274,11 +293,12 @@ class TestControlCard:
         self,
         page: Page,
         ha_e2e: HAClient,
-        foxess_sim: SimulatorHandle,
+        foxess_sim: SimulatorHandle | None,
         data_source: str,
+        connection_mode: str,
     ) -> None:
         """Progress section appears during active discharge."""
-        foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=80, load_kw=0.5)
         start, end = _tight_window(10)
         ha_e2e.call_service(
             "foxess_control",
@@ -340,12 +360,16 @@ class TestControlCard:
         self,
         page: Page,
         ha_e2e: HAClient,
-        foxess_sim: SimulatorHandle,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
     ) -> None:
         """Schedule horizon attribute is set and marker renders on card."""
+        if connection_mode != "cloud":
+            pytest.skip("progressive schedule extension is cloud-adapter only")
         # Low SoC headroom so the safe horizon is shorter than the
         # window — with SoC=35/min=30, only 0.5kWh available, so
         # the horizon is ~4 min vs the 10 min window.
+        assert foxess_sim is not None
         foxess_sim.set(soc=35, solar_kw=0, load_kw=0.5)
         start, end = _tight_window(10)
         ha_e2e.call_service(
@@ -423,9 +447,17 @@ class TestControlCard:
 
 
 class TestScreenshots:
-    def test_idle_screenshot(self, page: Page, foxess_sim: SimulatorHandle) -> None:
+    def test_idle_screenshot(
+        self,
+        page: Page,
+        foxess_sim: SimulatorHandle | None,
+        ha_e2e: HAClient,
+        connection_mode: str,
+    ) -> None:
         """Capture idle state for visual regression review."""
-        foxess_sim.set(soc=60, solar_kw=2.0, load_kw=0.5)
+        set_inverter_state(
+            connection_mode, foxess_sim, ha_e2e, soc=60, solar_kw=2.0, load_kw=0.5
+        )
         page.reload()
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(3000)
@@ -436,12 +468,13 @@ class TestScreenshots:
         self,
         page: Page,
         ha_e2e: HAClient,
-        foxess_sim: SimulatorHandle,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
     ) -> None:
         """Capture discharging state for visual regression review."""
-        # SoC=80 with min_soc=30 and 30-min window forces immediate
-        # discharge start (avoids deferred-start timeout).
-        foxess_sim.set(soc=80, solar_kw=1.0, load_kw=0.8)
+        set_inverter_state(
+            connection_mode, foxess_sim, ha_e2e, soc=80, solar_kw=1.0, load_kw=0.8
+        )
         start, end = _tight_window(10)
         ha_e2e.call_service(
             "foxess_control",

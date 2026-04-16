@@ -64,6 +64,22 @@ class HAClient:
                 f"{r.status_code} {r.text[:200]}"
             )
 
+    def set_input_number(self, entity_id: str, value: float) -> None:
+        """Set an input_number helper value."""
+        self.call_service(
+            "input_number",
+            "set_value",
+            {"entity_id": entity_id, "value": value},
+        )
+
+    def set_input_select(self, entity_id: str, option: str) -> None:
+        """Set an input_select helper option."""
+        self.call_service(
+            "input_select",
+            "select_option",
+            {"entity_id": entity_id, "option": option},
+        )
+
     def wait_for_state(
         self,
         entity_id: str,

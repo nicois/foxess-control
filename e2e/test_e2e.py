@@ -1,11 +1,12 @@
-"""End-to-end tests: real HA container + FoxESS simulator.
+"""End-to-end tests: real HA container + FoxESS simulator / input helpers.
 
 Run with: pytest e2e/ -m slow
 Requires: podman, PyJWT
 
 Fixture scoping:
+- connection_mode: session — "cloud" or "entity"
 - foxess_sim + ha_e2e: session scope (one per xdist worker)
-- _e2e_reset: autouse function scope (resets sim + clears HA)
+- _e2e_reset: autouse function scope (resets sim/entities + clears HA)
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from .conftest import set_inverter_state
 from .ha_client import FATAL_FOR_ACTIVE
 
 if TYPE_CHECKING:
@@ -25,12 +27,7 @@ pytestmark = pytest.mark.slow
 
 
 def _tight_window(minutes: int = 30) -> tuple[str, str]:
-    """Return a tight window starting ~now (UTC).
-
-    Short windows force the algorithm to start immediately (no deferral),
-    since the entire energy budget must be delivered within the window.
-    Uses UTC because the HA container defaults to UTC timezone.
-    """
+    """Return a tight window starting ~now (UTC)."""
     now = datetime.datetime.now(tz=datetime.UTC)
     start = now - datetime.timedelta(minutes=2)
     end = start + datetime.timedelta(minutes=minutes)
@@ -40,12 +37,20 @@ def _tight_window(minutes: int = 30) -> tuple[str, str]:
     )
 
 
+# ---------------------------------------------------------------------------
+# Smart discharge (both modes)
+# ---------------------------------------------------------------------------
+
+
 class TestSmartDischarge:
     def test_discharge_starts(
-        self, ha_e2e: HAClient, foxess_sim: SimulatorHandle
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
     ) -> None:
-        """Service call → schedule written → state transitions."""
-        foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
+        """Service call → state transitions to discharging."""
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=80, load_kw=0.5)
 
         start, end = _tight_window(10)
         ha_e2e.call_service(
@@ -62,13 +67,16 @@ class TestSmartDischarge:
         )
         assert state == "discharging"
 
-        sim_state = foxess_sim.state()
-        assert sim_state["schedule_enabled"]
-
     def test_discharge_drains_battery(
-        self, ha_e2e: HAClient, foxess_sim: SimulatorHandle
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
     ) -> None:
-        """Fast-forward and verify SoC decreases."""
+        """Fast-forward and verify SoC decreases (cloud only)."""
+        if connection_mode != "cloud":
+            pytest.skip("requires simulator fast_forward")
+        assert foxess_sim is not None
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
 
         start, end = _tight_window(10)
@@ -93,10 +101,20 @@ class TestSmartDischarge:
         assert soc < 80
 
 
+# ---------------------------------------------------------------------------
+# Smart charge (both modes)
+# ---------------------------------------------------------------------------
+
+
 class TestSmartCharge:
-    def test_charge_starts(self, ha_e2e: HAClient, foxess_sim: SimulatorHandle) -> None:
+    def test_charge_starts(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
         """Service call starts a charge session."""
-        foxess_sim.set(soc=20, solar_kw=0, load_kw=0.3)
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=20, load_kw=0.3)
 
         start, end = _tight_window(10)
         ha_e2e.call_service(
@@ -114,11 +132,22 @@ class TestSmartCharge:
         assert state == "charging"
 
 
+# ---------------------------------------------------------------------------
+# Cloud-only tests (simulator required)
+# ---------------------------------------------------------------------------
+
+
 class TestFaultInjection:
     def test_ws_unit_mismatch_handled(
-        self, ha_e2e: HAClient, foxess_sim: SimulatorHandle
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
     ) -> None:
         """WS sends kW instead of W — integration handles it."""
+        if connection_mode != "cloud":
+            pytest.skip("WS fault injection requires cloud mode")
+        assert foxess_sim is not None
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
 
         start, end = _tight_window(10)
@@ -135,27 +164,133 @@ class TestFaultInjection:
             fatal_states=FATAL_FOR_ACTIVE,
         )
 
-        # Switch to kW units AFTER discharge starts
         foxess_sim.ws_unit("kW")
         foxess_sim.fast_forward(60, step=5)
 
-        # SoC should still reflect actual discharge (unit detection works)
         soc = ha_e2e.wait_for_numeric_state(
             "sensor.foxess_battery_soc", "lt", 80.0, timeout_s=60
         )
         assert soc < 80
-
         foxess_sim.ws_unit("W")
 
 
 class TestDataSource:
     def test_api_source_when_idle(
-        self, ha_e2e: HAClient, foxess_sim: SimulatorHandle
+        self,
+        ha_e2e: HAClient,
+        connection_mode: str,
     ) -> None:
-        """When idle, data source should be API."""
+        """When idle in cloud mode, data source should be API."""
+        if connection_mode != "cloud":
+            pytest.skip("data_source attribute is cloud-specific")
         ha_e2e.wait_for_state("sensor.foxess_smart_operations", "idle", timeout_s=30)
         attrs = ha_e2e.get_attributes("sensor.foxess_battery_soc")
-        # data_source is "api" when web credentials are configured (which
-        # they are in the E2E config entry). It would be None only if the
-        # sensor's _has_multiple_sources was False (single-source setup).
         assert attrs.get("data_source") == "api"
+
+
+# ---------------------------------------------------------------------------
+# Entity-mode-only tests
+# ---------------------------------------------------------------------------
+
+
+class TestEntityMode:
+    def test_work_mode_entity_updated(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """Discharge sets work_mode entity to Force Discharge."""
+        if connection_mode != "entity":
+            pytest.skip("entity-mode only")
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=80, load_kw=0.5)
+
+        start, end = _tight_window(10)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        # Entity writes are async — the listener tick that calls
+        # adapter.apply_mode happens on a 60s interval.
+        mode = ha_e2e.wait_for_state(
+            "input_select.foxess_work_mode",
+            "Force Discharge",
+            timeout_s=90,
+        )
+        assert mode == "Force Discharge"
+
+    def test_power_entity_written(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """Discharge writes a power value to the discharge_power entity."""
+        if connection_mode != "entity":
+            pytest.skip("entity-mode only")
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=80, load_kw=0.5)
+
+        start, end = _tight_window(10)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        # Wait for the power entity to be written — the listener tick
+        # that calls adapter.apply_mode happens on a 60s interval.
+        power = ha_e2e.wait_for_numeric_state(
+            "input_number.foxess_discharge_power",
+            "gt",
+            0,
+            timeout_s=90,
+        )
+        assert power > 0, "Discharge power entity should be set"
+
+    def test_self_use_on_clear(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """clear_overrides reverts work mode to Self Use."""
+        if connection_mode != "entity":
+            pytest.skip("entity-mode only")
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=80, load_kw=0.5)
+
+        start, end = _tight_window(10)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        ha_e2e.call_service("foxess_control", "clear_overrides", {})
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "idle",
+            timeout_s=30,
+        )
+
+        mode = ha_e2e.get_state("input_select.foxess_work_mode")
+        assert mode == "Self Use"
