@@ -173,6 +173,11 @@ class FoxESSRealtimeWS:
     def is_connected(self) -> bool:
         return self._connected
 
+    @property
+    def is_active(self) -> bool:
+        """Return True if connected or actively reconnecting."""
+        return self._listen_task is not None and not self._listen_task.done()
+
     async def async_connect(self) -> None:
         """Connect to the WebSocket and start listening."""
         if self._connected:
@@ -292,6 +297,9 @@ class FoxESSRealtimeWS:
     async def _try_reconnect(self) -> None:
         """Attempt to reconnect with exponential backoff."""
         self._connected = False
+        # Signal that WS data is no longer flowing so the coordinator
+        # can update data_source immediately (e.g. badge shows "API").
+        self._on_disconnect()
         await self._close_ws()
 
         for attempt in range(self.RECONNECT_MAX_ATTEMPTS):

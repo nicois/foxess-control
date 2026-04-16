@@ -1219,9 +1219,10 @@ async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
     if not _should_start_realtime_ws(hass):
         return
     domain_data = hass.data[DOMAIN]
-    if domain_data.get("_realtime_ws") is not None:
-        _LOGGER.debug("WS: already running, skipping")
-        return  # already running
+    ws_ref = domain_data.get("_realtime_ws")
+    if ws_ref is not None and ws_ref.is_active:
+        _LOGGER.debug("WS: already running or reconnecting, skipping")
+        return
     _LOGGER.debug("WS: conditions met, attempting connection")
 
     entry = _get_first_entry(hass)
@@ -1260,8 +1261,9 @@ async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
 
     def on_disconnect() -> None:
         _LOGGER.warning("FoxESS WebSocket disconnected, falling back to REST polling")
-        domain_data.pop("_realtime_ws", None)
-        # Update data source immediately so the badge reflects reality
+        # Don't pop _realtime_ws here — the WS object may be
+        # reconnecting.  _maybe_start_realtime_ws checks is_active
+        # and _stop_realtime_ws handles the final cleanup.
         if coordinator.data is not None:
             coordinator.data["_data_source"] = "api"
             coordinator.async_set_updated_data(dict(coordinator.data))
