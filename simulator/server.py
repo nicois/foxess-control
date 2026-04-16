@@ -184,16 +184,21 @@ async def handle_login(request: web.Request) -> web.Response:
 async def handle_ws(request: web.Request) -> web.WebSocketResponse:
     if _model.active_fault == "ws_refuse":
         raise web.HTTPForbidden(text="WebSocket refused")
-    ws = web.WebSocketResponse(heartbeat=20.0)
+    # No heartbeat — matches FoxESS cloud behaviour where the server
+    # does not send pings.  The client's heartbeat=20 sends pings but
+    # if the server doesn't respond, aiohttp may close the connection.
+    ws = web.WebSocketResponse()
     await ws.prepare(request)
-    _LOGGER.info("WebSocket connected (clients=%d)", len(_ws_clients) + 1)
     _ws_clients.append(ws)
+    _LOGGER.info(
+        "WebSocket connected (clients=%d, active=newest only)",
+        len(_ws_clients),
+    )
 
     try:
         async for msg in ws:
             if msg.type == WSMsgType.TEXT:
                 if msg.data == "getdata":
-                    # Send initial message
                     await ws.send_json(_model.get_ws_message())
             elif msg.type in (WSMsgType.ERROR, WSMsgType.CLOSED):
                 break
@@ -206,12 +211,31 @@ async def handle_ws(request: web.Request) -> web.WebSocketResponse:
 
 
 async def _ws_push_loop(app: web.Application) -> None:
-    """Background task: push WS messages every 5 seconds."""
+    """Background task: push WS messages every 5 seconds.
+
+    Only the NEWEST client receives real data — older connections
+    receive stale keepalive messages (high timeDiff) that prevent
+    the client's receive() from timing out but carry no useful data.
+    This replicates FoxESS cloud behaviour where a new web/app login
+    takes over the stream but the old connection stays alive.
+    """
     try:
         while True:
             await asyncio.sleep(5)
-            if _ws_clients and _model.active_fault != "ws_disconnect":
-                await _broadcast_ws(_model.get_ws_message())
+            if not _ws_clients or _model.active_fault == "ws_disconnect":
+                continue
+            msg = json.dumps(_model.get_ws_message())
+            stale_msg = json.dumps({"errno": 0, "result": {"timeDiff": 999}})
+            for i, ws in enumerate(list(_ws_clients)):
+                if ws.closed:
+                    continue
+                try:
+                    if i == len(_ws_clients) - 1:
+                        await ws.send_str(msg)
+                    else:
+                        await ws.send_str(stale_msg)
+                except Exception:
+                    pass
     except asyncio.CancelledError:
         pass
 
