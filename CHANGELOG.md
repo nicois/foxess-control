@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.5-beta.11
+## 1.0.5-beta.12
 
 ### Fixed
 - **WS data_source badge stuck during stale stream**: when another client (FoxESS app) stole the WS stream, the Lovelace badge stayed on "WS" throughout the stale period and reconnect — the coordinator was never notified that useful data had stopped. Now signals the coordinator immediately when reconnecting, so the badge shows "API" until fresh WS data resumes.

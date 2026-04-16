@@ -52,9 +52,9 @@ while read -r local_ref local_oid remote_ref remote_oid; do
     exit 1
   fi
 
-  # Check if any run failed
+  # Check if any run failed (cancelled runs are superseded, not broken)
   failed=$(gh run list --commit "$commit" --json status,conclusion \
-    --jq '[.[] | select(.status == "completed" and .conclusion != "success")] | length' 2>/dev/null || echo "0")
+    --jq '[.[] | select(.status == "completed" and .conclusion != "success" and .conclusion != "cancelled")] | length' 2>/dev/null || echo "0")
 
   if [ "$failed" != "0" ]; then
     echo "❌ CI checks failed for commit $commit"
