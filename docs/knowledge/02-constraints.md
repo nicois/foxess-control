@@ -404,6 +404,24 @@ reproduce and diagnose.
 HA-dependent behaviour); `e2e/ha_client.py::HAEventStream`
 (drain-before-wait pattern eliminates event ordering races)
 
+### C-032: Reproduce failure before fixing
+**Statement**: When a bug is discovered — from user reports, live
+monitoring, or test failures — a test must be written that reliably
+reproduces the failure with the current (broken) code BEFORE any fix
+is attempted. The fix is only applied after the test is confirmed to
+fail, and the commit includes both the test and the fix.
+**Rationale**: A fix without a reproducing test provides no confidence
+that it addresses the actual issue. The test proves the bug exists,
+proves the fix works, and prevents regression. Without this discipline,
+fixes may address a different symptom, or the test may pass for the
+wrong reason (as happened with the SoC interpolation mock that had
+`capacity=0`, silently preventing integration from running).
+**Violation consequence**: False confidence in fixes; regressions
+reappear because the "fix" didn't address the root cause.
+**Traces**: C-031 (no flaky tests);
+`tests/test_coordinator.py::TestSocInterpolationDuringDischarge`
+(confirmed to fail with bug, pass with fix)
+
 ### C-027: Progressive schedule extension (discharge safety)
 **Statement**: The inverter schedule end time for forced discharge must
 be set to a safe horizon — the time at which the battery would reach
