@@ -469,3 +469,78 @@ class TestSocInterpolationDuringDischarge:
             f"Expected smooth decline (8+ distinct values), "
             f"got {distinct} (staircase?)\nFull: {values}"
         )
+
+
+class TestSocExtrapolationDoesNotStarvePoll:
+    """Regression: SoC extrapolation ticks called async_set_updated_data,
+    which cancels and reschedules the REST poll timer. If the extrapolation
+    fires more frequently than the poll interval, REST polls never run and
+    all entities show stale data indefinitely.
+
+    Production symptom: coordinator logs show only "Manually updated"
+    (from async_set_updated_data) and never "Finished fetching" (from
+    the normal poll cycle). All sensor values are frozen.
+    """
+
+    @pytest.mark.asyncio
+    async def test_extrapolation_tick_does_not_call_async_set_updated_data(
+        self,
+    ) -> None:
+        """The extrapolation tick must not call async_set_updated_data."""
+        from custom_components.foxess_control.const import DOMAIN
+
+        coord = _make_coordinator(update_interval=300)
+        inv = coord.inverter
+        inv.get_real_time.return_value = {
+            "SoC": 47,
+            "batChargePower": 0.0,
+            "batDischargePower": 0.571,
+        }
+        inv.get_current_mode.return_value = None
+
+        entry = MagicMock()
+        entry.options = {"battery_capacity_kwh": 10.0}
+        coord.hass.data = {DOMAIN: {"test-entry": {}}}
+        coord.hass.config_entries.async_get_entry = MagicMock(return_value=entry)
+
+        # Capture what _schedule_soc_extrapolation registers
+        registered_callbacks: list = []
+
+        def fake_call_later(_hass, _delay, cb):
+            registered_callbacks.append(cb)
+            return MagicMock()
+
+        base = time.monotonic()
+        with (
+            patch("time.monotonic", return_value=base),
+            patch(
+                "custom_components.foxess_control.coordinator.async_call_later",
+                side_effect=fake_call_later,
+            ),
+        ):
+            data = await coord._async_update_data()
+            coord.data = data
+
+        assert registered_callbacks, "Extrapolation should be scheduled"
+
+        # Spy on async_set_updated_data
+        original = coord.async_set_updated_data
+        set_updated_calls: list = []
+
+        def spy(d):
+            set_updated_calls.append(d)
+            original(d)
+
+        coord.async_set_updated_data = spy
+
+        # Advance 60s — enough for the 0.571kW discharge on 10kWh to
+        # change the rounded SoC (0.571/10*100 * 60/3600 ≈ 0.095%)
+        with patch("time.monotonic", return_value=base + 60):
+            tick_cb = registered_callbacks[-1]
+            tick_cb(None)
+
+        assert not set_updated_calls, (
+            "Extrapolation tick must NOT call async_set_updated_data "
+            "(it starves the REST poll timer). "
+            f"Called {len(set_updated_calls)} time(s)."
+        )

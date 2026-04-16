@@ -203,7 +203,8 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if new_rounded != old_rounded:
                 merged = dict(self.data)
                 merged["_soc_interpolated"] = new_rounded
-                self.async_set_updated_data(merged)
+                self.data = merged
+                self.async_update_listeners()
 
             # Schedule next tick
             if abs(self._soc_last_bat_kw) >= 0.01:
