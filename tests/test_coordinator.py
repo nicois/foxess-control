@@ -307,3 +307,165 @@ class TestDataSourceTracking:
         coord.data = {"SoC": 50.0, "_data_source": "ws"}
         result = await coord._async_update_data()
         assert result["_data_source"] == "api"
+
+
+class TestSocInterpolationDuringDischarge:
+    """Reproduce and verify SoC interpolation during WS-driven discharge.
+
+    Simulates a discharge at ~8.7 kW on a 10 kWh battery with WS
+    messages arriving every 5 seconds.
+    """
+
+    @staticmethod
+    def _make_coord() -> FoxESSDataCoordinator:
+        from custom_components.foxess_control.const import DOMAIN
+
+        coord = _make_coordinator()
+        coord.data = {"SoC": 97.0, "_data_source": "ws"}
+        entry = MagicMock()
+        entry.options = {"battery_capacity_kwh": 10.0}
+        # Wire hass.data as a real dict so _get_capacity_kwh can
+        # iterate entry_ids and look up the config entry.
+        coord.hass.data = {DOMAIN: {"test-entry": {}}}  # type: ignore[assignment]
+        coord.hass.config_entries.async_get_entry = MagicMock(  # type: ignore[method-assign]
+            return_value=entry
+        )
+        return coord
+
+    @staticmethod
+    def _ws_msg(
+        soc: int,
+        discharge_kw: float = 8.7,
+        *,
+        include_feedin: bool = True,
+    ) -> dict[str, object]:
+        msg: dict[str, object] = {
+            "SoC": soc,
+            "batChargePower": 0.0,
+            "batDischargePower": discharge_kw,
+        }
+        if include_feedin:
+            msg["feedinPower"] = max(0.0, discharge_kw - 0.5)
+        return msg
+
+    def test_interpolation_decreases_between_ticks(self) -> None:
+        """Interpolated SoC should decrease between integer ticks."""
+        coord = self._make_coord()
+
+        base = time.monotonic()
+        with patch("time.monotonic", return_value=base):
+            coord.inject_realtime_data(self._ws_msg(97))
+        initial = coord._soc_interpolated
+
+        # 30s gap to produce a visible delta (~0.07%)
+        with patch("time.monotonic", return_value=base + 30):
+            coord.inject_realtime_data(self._ws_msg(97))
+        after = coord._soc_interpolated
+
+        assert after is not None and initial is not None
+        assert after < initial, (
+            f"Interpolated SoC should decrease during discharge: {initial} -> {after}"
+        )
+
+    def test_clamp_on_tick_change_display_value(self) -> None:
+        """On tick change, round(interpolated, 1) must not exceed new tick."""
+        coord = self._make_coord()
+
+        coord.inject_realtime_data(self._ws_msg(97))
+        coord._soc_interpolated = 96.5
+        coord._soc_last_reported = 97.0
+
+        coord.inject_realtime_data(self._ws_msg(96))
+
+        displayed = round(coord._soc_interpolated, 1)
+        assert displayed <= 96.9, (
+            f"Displayed value {displayed} should not exceed tick 96 "
+            f"(raw: {coord._soc_interpolated})"
+        )
+        assert coord._soc_interpolated >= 96.0
+
+    def test_interpolation_without_feedin_data(self) -> None:
+        """SoC integration must run even when feedinPower is absent."""
+        coord = self._make_coord()
+
+        base = time.monotonic()
+        with patch("time.monotonic", return_value=base):
+            coord.inject_realtime_data(self._ws_msg(95, include_feedin=True))
+        initial = coord._soc_interpolated
+
+        with patch("time.monotonic", return_value=base + 30):
+            coord.inject_realtime_data(self._ws_msg(95, include_feedin=False))
+        after = coord._soc_interpolated
+
+        assert after is not None and initial is not None
+        assert after < initial, (
+            f"Interpolation should run without feedin: {initial} -> {after}"
+        )
+
+    def test_smooth_decline_across_ticks(self) -> None:
+        """Simulate 2 min of discharge — SoC decreases monotonically."""
+        coord = self._make_coord()
+
+        base = time.monotonic()
+        values: list[float] = []
+
+        for step in range(24):  # 24 * 5s = 120s
+            t = base + step * 5
+            elapsed_min = step * 5 / 60
+            real_soc = 97.0 - 1.45 * elapsed_min
+            tick = int(real_soc)
+
+            with patch("time.monotonic", return_value=t):
+                coord.inject_realtime_data(self._ws_msg(tick))
+
+            interp = coord.data.get("_soc_interpolated")
+            if interp is not None:
+                values.append(round(interp, 1))
+
+        # Monotonically decreasing (allow equal for rounding)
+        for i in range(1, len(values)):
+            assert values[i] <= values[i - 1], (
+                f"SoC increased at step {i}: "
+                f"{values[i - 1]} -> {values[i]}\n"
+                f"Full: {values}"
+            )
+
+        # Meaningful decrease over 2 minutes
+        total_drop = values[0] - values[-1]
+        assert total_drop > 1.0, (
+            f"Expected >1% drop over 2min at 8.7kW, got {total_drop}\nFull: {values}"
+        )
+
+    def test_smooth_decline_without_feedin(self) -> None:
+        """Same as above but feedinPower absent — real FoxESS WS scenario.
+
+        Without feedin, the broken code only updates via tick-change
+        clamping (staircase). The fixed code integrates battery power
+        regardless and produces smooth sub-percent changes.
+        """
+        coord = self._make_coord()
+
+        base = time.monotonic()
+        values: list[float] = []
+
+        for step in range(24):
+            t = base + step * 5
+            elapsed_min = step * 5 / 60
+            real_soc = 97.0 - 1.45 * elapsed_min
+            tick = int(real_soc)
+
+            with patch("time.monotonic", return_value=t):
+                coord.inject_realtime_data(self._ws_msg(tick, include_feedin=False))
+
+            interp = coord.data.get("_soc_interpolated")
+            if interp is not None:
+                values.append(round(interp, 1))
+
+        # Must have sub-integer changes — not just tick-boundary jumps.
+        # Count distinct values: staircase gives ~3 (97, 96, 95);
+        # smooth interpolation gives 10+ distinct values.
+        distinct = len(set(values))
+        assert distinct >= 8, (
+            f"Expected smooth decline (8+ distinct values), "
+            f"got {distinct} (staircase?)\nFull: {values}"
+        )

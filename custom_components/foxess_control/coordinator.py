@@ -256,10 +256,6 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if feedin_power_kw is not None:
             self._ws_feedin_power_kw = feedin_power_kw
 
-        # Update timestamp for every WS message — SoC interpolation
-        # needs elapsed time even when feedin data is absent.
-        self._ws_last_time = now
-
         # Integrate battery power into sub-percent SoC estimate.
         # Uses the same trapezoidal approach as feedin integration.
         charge_kw = ws_data.get("batChargePower", 0.0)
@@ -290,6 +286,10 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         0.0, min(100.0, self._soc_interpolated + delta_pct)
                     )
         self._soc_last_bat_kw = net_bat_kw
+        # Update timestamp AFTER integration so elapsed > 0 on the
+        # next message.  Unconditional — SoC interpolation needs
+        # timing even when feedin data is absent.
+        self._ws_last_time = now
 
         # Expose interpolated SoC for display (sensors, progress bars)
         if self._soc_interpolated is not None:
