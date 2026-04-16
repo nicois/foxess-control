@@ -1,34 +1,21 @@
 # Changelog
 
-## 1.0.4-beta.5
+## 1.0.4
 
 ### Added
-- **Progressive schedule extension**: discharge schedule end time is set to a safe horizon computed from current SoC, discharge rate, and safety factor (1.5×). If HA loses connectivity, the inverter's schedule expires and reverts to self-use — battery protected without HA. Horizon extends naturally on each power adjustment.
-- **pytest-xdist parallel test execution**: auto-selects worker count based on `min(cpu_count, total_ram / 6 GB)`. Tests randomised via `pytest-randomly` to expose ordering dependencies. Override with `-n 0` for serial.
-- **Playwright browser tests** (`e2e/test_ui.py`): 19 tests (all passing) validating Lovelace card rendering in a real HA instance via Chromium — card presence, SoC display, progress bars during discharge, PV1+PV2 consistency with solar total, data source badge across API/WS modes, screenshot regression captures.
-- **`data_source` parametrized fixture**: E2E tests that start smart sessions run under both API-only and WebSocket modes. The `ws_refuse` simulator fault gates WS connections. Extensible to Modbus when a simulator exists.
-- **E2E timing instrumentation**: per-test duration breakdown in terminal summary, timing on all fixture phases and wait helpers. E2E suite runs 19 tests in ~68s with 10 workers.
+- **Progressive schedule extension**: discharge schedule end time is set to a dynamically computed safe horizon based on current SoC, discharge rate, and safety factor (1.5×). If HA loses connectivity, the inverter's schedule expires and reverts to self-use — battery protected without HA intervention. Horizon shown on Lovelace card time progress bar as a vertical marker.
+- **SoC interpolation in REST-only mode**: coordinator integrates battery power between REST polls for sub-percent SoC estimates, eliminating staircase progress bars when WebSocket is not active.
+- **FoxESS simulator** (`simulator/`): standalone aiohttp server with REST API, WebSocket, web auth, and backchannel endpoints for testing. Supports fault injection, fast-forward, and fuzzing (±2% jitter). Unit tests migrated from mock library to simulator.
+- **Containerised E2E tests** (`e2e/`): real HA instance in Podman container with Playwright browser automation. 20 tests covering card rendering, discharge/charge lifecycle, PV consistency, data source badge (API and WS modes), schedule horizon marker, and screenshot regression. Runs in ~70s with 10 parallel workers.
+- **`_on_session_cancel` hook**: WebSocket stops through all cancel paths (timer, SoC abort, exception, clear_overrides, target reached), and work mode clears immediately for the Lovelace card.
 
 ### Changed
-- **E2E performance**: zero API throttle when talking to the simulator (5s sleep eliminated per request), 10-minute discharge windows to avoid deferred-start waits, tighter reset timeouts. Total wall time reduced from 3:20 to 1:08.
+- **Stale REST values hidden in WS mode**: overview card suppresses PV1/PV2 detail, grid voltage/frequency, battery temperature, and residual energy when WebSocket is the active data source — these values only update on REST polls and would be misleadingly stale.
 
 ### Fixed
-- **Work mode label stuck after session ends**: overview card showed "Force Discharge" for minutes after the discharge window finished because the coordinator only updated `_work_mode` on the next REST poll. Now cleared immediately via `_on_session_cancel`.
-- **Stale REST-only values shown during WS mode**: overview card hides PV1/PV2 detail, grid voltage/frequency, battery temperature, and residual energy when WebSocket is the active data source — these values only update on REST polls and would be misleadingly stale.
-- **E2E SELinux bind mount**: `:Z` (private label) → `:z` (shared label) for the `custom_components` mount so multiple xdist containers can read the same host directory.
-- **E2E resource lifecycle**: named containers (`ha-e2e-{worker_id}`), atexit safety nets, setup try/except cleanup, and pre-push orphan cleanup prevent leaked Podman containers from cascading into subsequent test failures.
-- **WASM signature test ordering dependency**: `test_known_signature` failed when run after other signature tests due to WASM heap state accumulation in the module singleton. Fixed by resetting the engine before the deterministic check.
-
-## 1.0.4-beta.1
-
-### Fixed
-- **WS not stopping when session ends via timer**: the brand-agnostic `cancel_smart_session` didn't trigger WebSocket shutdown. Added `_on_session_cancel` hook so WS stops through ALL cancel paths (timer expiry, SoC abort, exception, clear_overrides, target reached).
-
-### Added
-- **FoxESS simulator** (`simulator/`): standalone aiohttp server with REST API, WebSocket, web auth, and backchannel endpoints for E2E testing. Supports fault injection, fast-forward, and fuzzing (±2% jitter on power readings).
-- **Containerised E2E tests** (`e2e/`): real HA instance in Podman container, configured to talk to the simulator via `FOXESS_SIMULATOR_URL` env var. 5 tests covering discharge, charge, WS unit mismatch, and data source badge.
-- **Simulator-backed unit tests**: `test_client.py` and `test_inverter.py` migrated from `responses` library to real HTTP against the simulator.
-- **`FOXESS_SIMULATOR_URL` env var**: when set, all FoxESS clients (REST, WebSocket, web auth) point at the specified URL instead of foxesscloud.com.
+- **Work mode label stuck after session ends**: overview card showed "Force Discharge" for minutes after the window finished. Now cleared immediately via `_on_session_cancel`.
+- **WS not stopping when session ends via timer**: the brand-agnostic `cancel_smart_session` didn't trigger WebSocket shutdown.
+- **WASM signature test ordering dependency**: module singleton heap state caused non-deterministic output across test runs.
 
 ## 1.0.3
 
