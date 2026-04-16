@@ -34,9 +34,7 @@ jobs:
             --tb=long \
             -n auto \
             --junitxml=e2e-results.xml \
-            -v \
-            2>&1 | tee e2e-output.log
-        continue-on-error: true
+            -v
 
       - name: Upload test results
         if: always()
@@ -45,14 +43,5 @@ jobs:
           name: e2e-results
           path: |
             e2e-results.xml
-            e2e-output.log
             e2e/screenshots/
           retention-days: 14
-
-      - name: Check for failures
-        run: |
-          if grep -q "failed" e2e-results.xml 2>/dev/null; then
-            echo "::warning::E2E tests had failures — check artifacts for details"
-          fi
-          # Don't fail the workflow — E2E failures are informational
-          # until flaky tests are resolved
