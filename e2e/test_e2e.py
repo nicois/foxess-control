@@ -12,12 +12,13 @@ Fixture scoping:
 from __future__ import annotations
 
 import datetime
+import time
 from typing import TYPE_CHECKING
 
 import pytest
 
 from .conftest import set_inverter_state
-from .ha_client import FATAL_FOR_ACTIVE
+from .ha_client import FATAL_FOR_ACTIVE, HAEventStream
 
 if TYPE_CHECKING:
     from .conftest import SimulatorHandle
@@ -48,9 +49,17 @@ class TestSmartDischarge:
         ha_e2e: HAClient,
         foxess_sim: SimulatorHandle | None,
         connection_mode: str,
+        event_stream: HAEventStream,
     ) -> None:
         """Service call → state transitions to discharging."""
-        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=80, load_kw=0.5)
+        set_inverter_state(
+            connection_mode,
+            foxess_sim,
+            ha_e2e,
+            event_stream=event_stream,
+            soc=80,
+            load_kw=0.5,
+        )
 
         start, end = _tight_window(10)
         ha_e2e.call_service(
@@ -112,9 +121,17 @@ class TestSmartCharge:
         ha_e2e: HAClient,
         foxess_sim: SimulatorHandle | None,
         connection_mode: str,
+        event_stream: HAEventStream,
     ) -> None:
         """Service call starts a charge session."""
-        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=20, load_kw=0.3)
+        set_inverter_state(
+            connection_mode,
+            foxess_sim,
+            ha_e2e,
+            event_stream=event_stream,
+            soc=20,
+            load_kw=0.3,
+        )
 
         start, end = _tight_window(10)
         ha_e2e.call_service(
@@ -199,11 +216,19 @@ class TestEntityMode:
         ha_e2e: HAClient,
         foxess_sim: SimulatorHandle | None,
         connection_mode: str,
+        event_stream: HAEventStream,
     ) -> None:
         """Discharge sets work_mode entity to Force Discharge."""
         if connection_mode != "entity":
             pytest.skip("entity-mode only")
-        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=80, load_kw=0.5)
+        set_inverter_state(
+            connection_mode,
+            foxess_sim,
+            ha_e2e,
+            event_stream=event_stream,
+            soc=80,
+            load_kw=0.5,
+        )
 
         start, end = _tight_window(10)
         ha_e2e.call_service(
@@ -218,9 +243,8 @@ class TestEntityMode:
             fatal_states=FATAL_FOR_ACTIVE,
         )
 
-        # Entity writes are async — the listener tick that calls
-        # adapter.apply_mode happens on a 60s interval.
-        mode = ha_e2e.wait_for_state(
+        # Wait for the entity adapter to write via WS event notification
+        mode = event_stream.wait_for_state(
             "input_select.foxess_work_mode",
             "Force Discharge",
             timeout_s=90,
@@ -232,11 +256,19 @@ class TestEntityMode:
         ha_e2e: HAClient,
         foxess_sim: SimulatorHandle | None,
         connection_mode: str,
+        event_stream: HAEventStream,
     ) -> None:
         """Discharge writes a power value to the discharge_power entity."""
         if connection_mode != "entity":
             pytest.skip("entity-mode only")
-        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=80, load_kw=0.5)
+        set_inverter_state(
+            connection_mode,
+            foxess_sim,
+            ha_e2e,
+            event_stream=event_stream,
+            soc=80,
+            load_kw=0.5,
+        )
 
         start, end = _tight_window(10)
         ha_e2e.call_service(
@@ -251,14 +283,19 @@ class TestEntityMode:
             fatal_states=FATAL_FOR_ACTIVE,
         )
 
-        # Wait for the power entity to be written — the listener tick
-        # that calls adapter.apply_mode happens on a 60s interval.
-        power = ha_e2e.wait_for_numeric_state(
-            "input_number.foxess_discharge_power",
-            "gt",
-            0,
-            timeout_s=90,
-        )
+        # Wait for the entity adapter to write power
+        deadline = time.monotonic() + 90
+        power = 0.0
+        while time.monotonic() < deadline:
+            try:
+                state = ha_e2e.get_state("input_number.foxess_discharge_power")
+                power = float(state)
+                if power > 0:
+                    break
+            except (ValueError, TypeError):
+                pass
+            time.sleep(2)
+
         assert power > 0, "Discharge power entity should be set"
 
     def test_self_use_on_clear(
@@ -266,11 +303,19 @@ class TestEntityMode:
         ha_e2e: HAClient,
         foxess_sim: SimulatorHandle | None,
         connection_mode: str,
+        event_stream: HAEventStream,
     ) -> None:
         """clear_overrides reverts work mode to Self Use."""
         if connection_mode != "entity":
             pytest.skip("entity-mode only")
-        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=80, load_kw=0.5)
+        set_inverter_state(
+            connection_mode,
+            foxess_sim,
+            ha_e2e,
+            event_stream=event_stream,
+            soc=80,
+            load_kw=0.5,
+        )
 
         start, end = _tight_window(10)
         ha_e2e.call_service(

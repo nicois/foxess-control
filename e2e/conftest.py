@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 import requests
 
-from .ha_client import HAClient
+from .ha_client import HAClient, HAEventStream
 
 _log = logging.getLogger("e2e.timing")
 
@@ -413,6 +413,17 @@ def browser_context(
     browser.close()
 
 
+@pytest.fixture(scope="session")
+def event_stream(
+    ha_e2e: HAClient,  # noqa: ARG001 — ensure HA is running
+    ha_port: int,
+) -> Generator[HAEventStream, None, None]:
+    """Session-scoped WebSocket event stream for instant state notifications."""
+    stream = HAEventStream(f"http://localhost:{ha_port}", E2E_TOKEN)
+    yield stream
+    stream.close()
+
+
 @pytest.fixture
 def page(
     browser_context: BrowserContext,
@@ -475,6 +486,7 @@ def set_inverter_state(
     connection_mode: str,
     foxess_sim: SimulatorHandle | None,
     ha_e2e: HAClient,
+    event_stream: HAEventStream | None = None,
     **kwargs: float,
 ) -> None:
     """Set inverter state via simulator (cloud) or input helpers (entity)."""
@@ -491,15 +503,24 @@ def set_inverter_state(
             ha_e2e.set_input_number(
                 "input_number.foxess_loads_power", float(kwargs["load_kw"]) * 1000
             )
-        # Wait for the entity coordinator to pick up the new values
+        # Wait for the entity coordinator to propagate the new SoC
+        # via WebSocket event (instant) or REST polling (fallback).
         if "soc" in kwargs:
-            ha_e2e.wait_for_numeric_state(
-                "sensor.foxess_battery_soc",
-                "ge",
-                float(kwargs["soc"]) - 1,
-                timeout_s=15,
-                poll_interval=1.0,
-            )
+            target = str(float(kwargs["soc"]))
+            if event_stream is not None:
+                event_stream.wait_for_state(
+                    "sensor.foxess_battery_soc",
+                    target,
+                    timeout_s=15,
+                )
+            else:
+                ha_e2e.wait_for_numeric_state(
+                    "sensor.foxess_battery_soc",
+                    "ge",
+                    float(kwargs["soc"]) - 1,
+                    timeout_s=15,
+                    poll_interval=1.0,
+                )
 
 
 @pytest.fixture(params=["api", "ws", "entity"])

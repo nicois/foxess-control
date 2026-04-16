@@ -1,12 +1,15 @@
-"""Thin wrapper around the Home Assistant REST API for E2E tests."""
+"""Thin wrapper around the Home Assistant REST + WebSocket API for E2E tests."""
 
 from __future__ import annotations
 
+import json
 import logging
+import threading
 import time
 from typing import Any
 
 import requests
+import websocket
 
 _log = logging.getLogger("e2e.timing")
 
@@ -205,3 +208,141 @@ class HAClient:
                 return
             time.sleep(2)
         raise TimeoutError(f"HA did not become ready within {timeout_s}s")
+
+
+class HAEventStream:
+    """WebSocket subscription for instant HA state change notifications.
+
+    Connects to ``/api/websocket``, authenticates, and subscribes to
+    ``state_changed`` events.  Provides blocking ``wait_for_state``
+    and ``wait_for_attribute`` that resolve as soon as HA pushes the
+    matching event — no polling needed.
+    """
+
+    def __init__(self, base_url: str, token: str) -> None:
+        ws_url = base_url.replace("http://", "ws://") + "/api/websocket"
+        self._ws = websocket.create_connection(ws_url, timeout=10)
+        self._token = token
+        self._msg_id = 1
+        self._events: list[dict[str, Any]] = []
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+
+        # Authenticate
+        msg = json.loads(self._ws.recv())
+        if msg["type"] != "auth_required":
+            raise RuntimeError(f"Expected auth_required, got {msg['type']}")
+        self._ws.send(json.dumps({"type": "auth", "access_token": token}))
+        msg = json.loads(self._ws.recv())
+        if msg["type"] != "auth_ok":
+            raise RuntimeError(f"Auth failed: {msg}")
+
+        # Subscribe to state_changed
+        self._ws.send(
+            json.dumps(
+                {
+                    "id": self._msg_id,
+                    "type": "subscribe_events",
+                    "event_type": "state_changed",
+                }
+            )
+        )
+        self._msg_id += 1
+        result = json.loads(self._ws.recv())
+        if not result.get("success"):
+            raise RuntimeError(f"Subscribe failed: {result}")
+
+        # Background thread to accumulate events
+        self._thread = threading.Thread(target=self._recv_loop, daemon=True)
+        self._thread.start()
+
+    def _recv_loop(self) -> None:
+        self._ws.settimeout(1.0)
+        while not self._stop.is_set():
+            try:
+                raw = self._ws.recv()
+                msg = json.loads(raw)
+                if msg.get("type") == "event":
+                    with self._lock:
+                        self._events.append(msg["event"]["data"])
+            except websocket.WebSocketTimeoutException:
+                continue
+            except Exception:
+                break
+
+    def wait_for_state(
+        self,
+        entity_id: str,
+        expected: str,
+        timeout_s: float = 30,
+        fatal_states: frozenset[str] | None = None,
+    ) -> str:
+        """Block until entity reaches expected state via WS event."""
+        t0 = time.monotonic()
+        deadline = t0 + timeout_s
+        while time.monotonic() < deadline:
+            with self._lock:
+                while self._events:
+                    ev = self._events.pop(0)
+                    if ev.get("entity_id") != entity_id:
+                        continue
+                    new_state = ev.get("new_state", {}).get("state")
+                    if new_state == expected:
+                        _log.warning(
+                            "ws_wait_for_state %s=%s: %.1fs",
+                            entity_id,
+                            expected,
+                            time.monotonic() - t0,
+                        )
+                        return str(new_state)
+                    if fatal_states and new_state in fatal_states:
+                        raise RuntimeError(
+                            f"{entity_id} reached fatal state "
+                            f"'{new_state}' while waiting for "
+                            f"'{expected}' (after "
+                            f"{time.monotonic() - t0:.1f}s)"
+                        )
+            time.sleep(0.1)
+        raise TimeoutError(
+            f"{entity_id} did not reach '{expected}' within "
+            f"{timeout_s}s (via WebSocket)"
+        )
+
+    def wait_for_attribute(
+        self,
+        entity_id: str,
+        attr: str,
+        expected: str,
+        timeout_s: float = 30,
+    ) -> str:
+        """Block until entity attribute matches via WS event."""
+        t0 = time.monotonic()
+        deadline = t0 + timeout_s
+        last = None
+        while time.monotonic() < deadline:
+            with self._lock:
+                while self._events:
+                    ev = self._events.pop(0)
+                    if ev.get("entity_id") != entity_id:
+                        continue
+                    attrs = ev.get("new_state", {}).get("attributes", {})
+                    last = attrs.get(attr)
+                    if last == expected:
+                        _log.warning(
+                            "ws_wait_for_attribute %s.%s=%s: %.1fs",
+                            entity_id,
+                            attr,
+                            expected,
+                            time.monotonic() - t0,
+                        )
+                        return str(last)
+            time.sleep(0.1)
+        raise TimeoutError(
+            f"{entity_id}.{attr} did not reach '{expected}' within "
+            f"{timeout_s}s (last: '{last}', via WebSocket)"
+        )
+
+    def close(self) -> None:
+        self._stop.set()
+        self._ws.close()
+        self._thread.join(timeout=3)
