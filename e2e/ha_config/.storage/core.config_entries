@@ -22,7 +22,7 @@
           "battery_capacity_kwh": 10.0,
           "min_soc_on_grid": 15,
           "api_min_soc": 11,
-          "polling_interval": 10,
+          "polling_interval": 60,
           "min_power_change": 100,
           "smart_headroom": 0.1,
           "ws_all_sessions": true
