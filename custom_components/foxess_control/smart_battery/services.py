@@ -105,7 +105,7 @@ SCHEMA_SMART_DISCHARGE = vol.Schema(
         vol.Required("start_time"): cv.time,
         vol.Required("end_time"): cv.time,
         vol.Optional("power"): vol.All(int, vol.Range(min=100)),
-        vol.Required("min_soc"): vol.All(int, vol.Range(min=5, max=100)),
+        vol.Required("min_soc"): vol.All(int, vol.Range(min=0, max=100)),
         vol.Optional("feedin_energy_limit_kwh"): vol.All(
             vol.Coerce(float), vol.Range(min=0.1)
         ),

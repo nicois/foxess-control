@@ -96,7 +96,7 @@ After setup, click **Configure** on the integration entry to adjust:
 
 | Option | Default | Range | Description |
 |---|---|---|---|
-| Minimum SoC on Grid | 15% | 5-100% | The minimum battery state of charge to maintain when on grid. Applied to all schedule operations. |
+| Minimum SoC on Grid | 15% | 0-100% | The minimum battery state of charge to maintain when on grid. Applied to all schedule operations. |
 | API Polling Interval | 300 s (cloud) / 30 s (entity mode) | 60-600 s | How often to poll for real-time data. In cloud mode, defaults to 5 minutes to stay within the FoxESS API quota. In entity mode, defaults to 30 seconds since reads are local. |
 | Battery Capacity | 0.0 kWh | 0-100 kWh | Total usable battery capacity in kWh. Required for `smart_charge` power calculations. |
 | Min Power Change | 500 W | 0-5000 W | Minimum watt change before updating the charge schedule during `smart_charge`. Lower values improve SoC tracking, higher values reduce API calls. |
@@ -284,7 +284,7 @@ Battery SoC is read from the integration's polled data.
 | `start_time` | Yes | | Time of day to start discharging (e.g. `"17:00:00"`). |
 | `end_time` | Yes | | Time of day to stop discharging (e.g. `"20:00:00"`). Must be after start time, within 4 hours. |
 | `power` | No | Inverter max | Discharge power limit in watts (min 100). |
-| `min_soc` | Yes | | Stop discharging and revert to self-use when the battery reaches this SoC level (5-100%). |
+| `min_soc` | Yes | | Stop discharging and revert to self-use when the battery reaches this SoC level (0-100%). |
 | `feedin_energy_limit_kwh` | No | | Stop discharging after this much energy (kWh) has been fed into the grid. This is the excess energy exported beyond household self-consumption. Uses the cumulative `feedin` counter from the API for accuracy across restarts. |
 | `replace_conflicts` | No | false | Remove conflicting overrides instead of aborting. |
 

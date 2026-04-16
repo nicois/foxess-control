@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Changed
+- **Min SoC floor lowered to 0%**: `min_soc` (smart discharge) and `min_soc_on_grid` (config) now accept 0, removing the previous 5% floor. The FoxESS API minimum (`fdSoc >= 11`) is enforced separately — HA monitors SoC and stops the session at the user's chosen threshold.
+
 - **WebSocket activates during force operations**: force charge, force discharge, and feed-in now activate the WebSocket when `ws_all_sessions` is enabled. Previously only smart sessions triggered WS, so force operations were stuck on 5-minute REST polling.
 - **SoC extrapolation between REST polls**: coordinator pushes interpolated SoC updates every 30 seconds between REST polls, so progress bars advance smoothly instead of jumping in integer steps. Automatically stops when WebSocket takes over.
 

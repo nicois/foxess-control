@@ -90,7 +90,7 @@ def battery_options_schema(
             vol.Optional(
                 CONF_MIN_SOC_ON_GRID,
                 default=opts.get(CONF_MIN_SOC_ON_GRID, DEFAULT_MIN_SOC_ON_GRID),
-            ): vol.All(int, vol.Range(min=5, max=100)),
+            ): vol.All(int, vol.Range(min=0, max=100)),
             vol.Optional(
                 CONF_BATTERY_CAPACITY_KWH,
                 default=opts.get(CONF_BATTERY_CAPACITY_KWH, 0.0),

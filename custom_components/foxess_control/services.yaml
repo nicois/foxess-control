@@ -194,7 +194,7 @@ smart_discharge:
       required: true
       selector:
         number:
-          min: 5
+          min: 0
           max: 100
           unit_of_measurement: "%"
     feedin_energy_limit_kwh:
