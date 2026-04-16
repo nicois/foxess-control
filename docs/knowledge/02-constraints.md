@@ -416,9 +416,14 @@ proves the fix works, and prevents regression. Without this discipline,
 fixes may address a different symptom, or the test may pass for the
 wrong reason (as happened with the SoC interpolation mock that had
 `capacity=0`, silently preventing integration from running).
+The test must fail for the **same root cause** as production —
+a test that fails because of test environment differences (e.g.
+E2E polling interval differs from production) is a test bug,
+not a valid reproduction.
 **Violation consequence**: False confidence in fixes; regressions
 reappear because the "fix" didn't address the root cause.
 **Traces**: C-031 (no flaky tests);
+`/regression-test` skill (enforces the discipline);
 `tests/test_coordinator.py::TestSocInterpolationDuringDischarge`
 (confirmed to fail with bug, pass with fix)
 

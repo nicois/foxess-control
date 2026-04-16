@@ -1220,7 +1220,9 @@ async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
         return
     domain_data = hass.data[DOMAIN]
     if domain_data.get("_realtime_ws") is not None:
+        _LOGGER.debug("WS: already running, skipping")
         return  # already running
+    _LOGGER.debug("WS: conditions met, attempting connection")
 
     entry = _get_first_entry(hass)
     username = entry.data[CONF_WEB_USERNAME]
