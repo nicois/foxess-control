@@ -214,6 +214,84 @@ class TestDataSource:
         if foxess_sim is not None:
             foxess_sim.clear_fault()
 
+    def test_ws_reconnects_after_reload_at_max_power(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+        event_stream: HAEventStream,
+    ) -> None:
+        """WS must reconnect after integration reload during discharge.
+
+        Reproduces the production bug: WS is active during discharge,
+        HA restarts (simulated via config entry reload), session resumes,
+        but WS fails to reconnect because the WS lifecycle isn't
+        re-established after session recovery.
+        """
+        if connection_mode != "cloud":
+            pytest.skip("WS is cloud-specific")
+        assert foxess_sim is not None
+        foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
+
+        start, end = _tight_window(10)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        # Confirm WS is active before reload
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_battery_soc",
+            "data_source",
+            "ws",
+            timeout_s=90,
+        )
+
+        # Reload the integration — simulates HA restart.
+        # Triggers async_unload_entry + async_setup_entry, which
+        # recovers the session from persistent storage.
+        import requests as _requests
+
+        session = _requests.Session()
+        session.headers.update(
+            {
+                "Authorization": ha_e2e._session.headers["Authorization"],
+                "Content-Type": "application/json",
+            }
+        )
+        entries = session.get(
+            f"{ha_e2e.base_url}/api/config/config_entries/entry"
+        ).json()
+        foxess_entry = next(e for e in entries if e["domain"] == "foxess_control")
+        r = session.post(
+            f"{ha_e2e.base_url}/api/config/config_entries/entry/"
+            f"{foxess_entry['entry_id']}/reload"
+        )
+        assert r.ok, f"Reload failed: {r.status_code}"
+
+        # Wait for session to resume after reload
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        # WS must reconnect after reload
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_battery_soc",
+            "data_source",
+            "ws",
+            timeout_s=90,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Entity-mode-only tests
