@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.5-beta.13
+## 1.0.5-beta.14
 
 ### Fixed
 - **REST poll starvation from SoC extrapolation**: the 30-second SoC extrapolation timer called `async_set_updated_data`, which cancels and reschedules the REST poll timer. During any battery activity, the extrapolation fired more frequently than the poll interval, so REST polls never ran and all entities showed stale data indefinitely. Now updates entity data directly without touching the poll timer.
