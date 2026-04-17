@@ -1,7 +1,9 @@
 """FoxESS simulator HTTP/WS server.
 
 Single aiohttp application serving REST API, WebSocket, web auth,
-and backchannel endpoints.
+and backchannel endpoints.  Each ``create_app()`` call produces an
+independent application with its own ``InverterModel`` so multiple
+simulators can run in the same process without cross-contamination.
 """
 
 from __future__ import annotations
@@ -17,19 +19,23 @@ from .model import InverterModel
 
 _LOGGER = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Shared state
-# ---------------------------------------------------------------------------
 
-_model = InverterModel()
-_ws_clients: list[web.WebSocketResponse] = []
+def _model(request: web.Request) -> InverterModel:
+    result: InverterModel = request.app["model"]
+    return result
 
 
-async def _broadcast_ws(msg: dict[str, Any]) -> None:
+def _ws_clients(request: web.Request) -> list[web.WebSocketResponse]:
+    result: list[web.WebSocketResponse] = request.app["ws_clients"]
+    return result
+
+
+async def _broadcast_ws(app: web.Application, msg: dict[str, Any]) -> None:
     """Send a message to all connected WebSocket clients."""
+    ws_clients: list[web.WebSocketResponse] = app["ws_clients"]
     payload = json.dumps(msg)
     dead: list[web.WebSocketResponse] = []
-    for ws in _ws_clients:
+    for ws in ws_clients:
         if ws.closed:
             dead.append(ws)
             continue
@@ -38,7 +44,7 @@ async def _broadcast_ws(msg: dict[str, Any]) -> None:
         except Exception:
             dead.append(ws)
     for ws in dead:
-        _ws_clients.remove(ws)
+        ws_clients.remove(ws)
 
 
 # ---------------------------------------------------------------------------
@@ -50,15 +56,16 @@ def _api_response(result: Any, errno: int = 0, msg: str = "success") -> web.Resp
     return web.json_response({"errno": errno, "msg": msg, "result": result})
 
 
-def _check_fault() -> web.Response | None:
-    if _model.active_fault is None:
+def _check_fault(request: web.Request) -> web.Response | None:
+    model = _model(request)
+    if model.active_fault is None:
         return None
     # Decrement remaining count; auto-clear when exhausted
-    if _model.fault_remaining > 0:
-        _model.fault_remaining -= 1
-        if _model.fault_remaining == 0:
-            fault = _model.active_fault
-            _model.active_fault = None
+    if model.fault_remaining > 0:
+        model.fault_remaining -= 1
+        if model.fault_remaining == 0:
+            fault = model.active_fault
+            model.active_fault = None
             # Return fault response for this last faulted request
             if fault == "api_down":
                 return web.Response(status=503, text="Service Unavailable")
@@ -69,46 +76,46 @@ def _check_fault() -> web.Response | None:
             if fault == "api_500":
                 return web.Response(status=500, text="Internal Server Error")
             return None
-    if _model.active_fault == "api_down":
+    if model.active_fault == "api_down":
         return web.Response(status=503, text="Service Unavailable")
-    if _model.active_fault == "rate_limit":
+    if model.active_fault == "rate_limit":
         return _api_response(None, errno=40400, msg="Rate limit")
-    if _model.active_fault == "api_400":
+    if model.active_fault == "api_400":
         return web.Response(status=400, text="Bad Request")
-    if _model.active_fault == "api_500":
+    if model.active_fault == "api_500":
         return web.Response(status=500, text="Internal Server Error")
     return None
 
 
 async def handle_device_list(request: web.Request) -> web.Response:
-    if fault := _check_fault():
+    if fault := _check_fault(request):
         return fault
-    return _api_response({"data": [{"deviceSN": _model.device_sn}]})
+    return _api_response({"data": [{"deviceSN": _model(request).device_sn}]})
 
 
 async def handle_device_detail(request: web.Request) -> web.Response:
-    if fault := _check_fault():
+    if fault := _check_fault(request):
         return fault
-    return _api_response({"capacity": _model.max_power_w / 1050})
+    return _api_response({"capacity": _model(request).max_power_w / 1050})
 
 
 async def handle_real_query(request: web.Request) -> web.Response:
-    if fault := _check_fault():
+    if fault := _check_fault(request):
         return fault
     body = await request.json()
     variables = body.get("variables", [])
-    result = _model.get_real_time_response(variables)
+    result = _model(request).get_real_time_response(variables)
     return _api_response(result)
 
 
 async def handle_scheduler_get(request: web.Request) -> web.Response:
-    if fault := _check_fault():
+    if fault := _check_fault(request):
         return fault
-    return _api_response(_model.get_schedule_response())
+    return _api_response(_model(request).get_schedule_response())
 
 
 async def handle_scheduler_enable(request: web.Request) -> web.Response:
-    if fault := _check_fault():
+    if fault := _check_fault(request):
         return fault
     body = await request.json()
     groups = body.get("groups", [])
@@ -132,34 +139,37 @@ async def handle_scheduler_enable(request: web.Request) -> web.Response:
             if a_start < b_end and b_start < a_end:
                 return _api_response(None, errno=42023, msg="Time overlap")
 
-    _model.set_schedule(groups)
-    _LOGGER.info("Schedule set: %d groups", len(_model.schedule_groups))
+    model = _model(request)
+    model.set_schedule(groups)
+    _LOGGER.info("Schedule set: %d groups", len(model.schedule_groups))
     return _api_response(None)
 
 
 async def handle_plant_list(request: web.Request) -> web.Response:
-    if fault := _check_fault():
+    if fault := _check_fault(request):
         return fault
-    return _api_response({"data": [{"stationID": _model.plant_id}]})
+    return _api_response({"data": [{"stationID": _model(request).plant_id}]})
 
 
 async def handle_battery_soc_get(request: web.Request) -> web.Response:
-    if fault := _check_fault():
+    if fault := _check_fault(request):
         return fault
+    model = _model(request)
     return _api_response(
         {
-            "minSoc": _model.min_soc,
-            "minSocOnGrid": _model.min_soc_on_grid,
+            "minSoc": model.min_soc,
+            "minSocOnGrid": model.min_soc_on_grid,
         }
     )
 
 
 async def handle_battery_soc_set(request: web.Request) -> web.Response:
-    if fault := _check_fault():
+    if fault := _check_fault(request):
         return fault
     body = await request.json()
-    _model.min_soc = body.get("minSoc", _model.min_soc)
-    _model.min_soc_on_grid = body.get("minSocOnGrid", _model.min_soc_on_grid)
+    model = _model(request)
+    model.min_soc = body.get("minSoc", model.min_soc)
+    model.min_soc_on_grid = body.get("minSocOnGrid", model.min_soc_on_grid)
     return _api_response(None)
 
 
@@ -169,11 +179,12 @@ async def handle_battery_soc_set(request: web.Request) -> web.Response:
 
 
 async def handle_login(request: web.Request) -> web.Response:
-    if _model.active_fault == "wrong_password":
+    model = _model(request)
+    if model.active_fault == "wrong_password":
         return _api_response(None, errno=41038, msg="Incorrect password")
     body = await request.json()
     _LOGGER.info("Login: user=%s", body.get("user"))
-    return _api_response({"token": f"sim-token-{_model.device_sn}"})
+    return _api_response({"token": f"sim-token-{model.device_sn}"})
 
 
 # ---------------------------------------------------------------------------
@@ -182,30 +193,32 @@ async def handle_login(request: web.Request) -> web.Response:
 
 
 async def handle_ws(request: web.Request) -> web.WebSocketResponse:
-    if _model.active_fault == "ws_refuse":
+    model = _model(request)
+    ws_clients = _ws_clients(request)
+    if model.active_fault == "ws_refuse":
         raise web.HTTPForbidden(text="WebSocket refused")
     # No heartbeat — matches FoxESS cloud behaviour where the server
     # does not send pings.  The client's heartbeat=20 sends pings but
     # if the server doesn't respond, aiohttp may close the connection.
     ws = web.WebSocketResponse()
     await ws.prepare(request)
-    _ws_clients.append(ws)
+    ws_clients.append(ws)
     _LOGGER.info(
         "WebSocket connected (clients=%d, active=newest only)",
-        len(_ws_clients),
+        len(ws_clients),
     )
 
     try:
         async for msg in ws:
             if msg.type == WSMsgType.TEXT:
                 if msg.data == "getdata":
-                    await ws.send_json(_model.get_ws_message())
+                    await ws.send_json(model.get_ws_message())
             elif msg.type in (WSMsgType.ERROR, WSMsgType.CLOSED):
                 break
     finally:
-        if ws in _ws_clients:
-            _ws_clients.remove(ws)
-        _LOGGER.info("WebSocket disconnected (clients=%d)", len(_ws_clients))
+        if ws in ws_clients:
+            ws_clients.remove(ws)
+        _LOGGER.info("WebSocket disconnected (clients=%d)", len(ws_clients))
 
     return ws
 
@@ -219,18 +232,20 @@ async def _ws_push_loop(app: web.Application) -> None:
     This replicates FoxESS cloud behaviour where a new web/app login
     takes over the stream but the old connection stays alive.
     """
+    model: InverterModel = app["model"]
+    ws_clients: list[web.WebSocketResponse] = app["ws_clients"]
     try:
         while True:
             await asyncio.sleep(5)
-            if not _ws_clients or _model.active_fault == "ws_disconnect":
+            if not ws_clients or model.active_fault == "ws_disconnect":
                 continue
-            msg = json.dumps(_model.get_ws_message())
+            msg = json.dumps(model.get_ws_message())
             stale_msg = json.dumps({"errno": 0, "result": {"timeDiff": 999}})
-            for i, ws in enumerate(list(_ws_clients)):
+            for i, ws in enumerate(list(ws_clients)):
                 if ws.closed:
                     continue
                 try:
-                    if i == len(_ws_clients) - 1:
+                    if i == len(ws_clients) - 1:
                         await ws.send_str(msg)
                     else:
                         await ws.send_str(stale_msg)
@@ -246,24 +261,26 @@ async def _ws_push_loop(app: web.Application) -> None:
 
 
 async def handle_sim_state(request: web.Request) -> web.Response:
-    return web.json_response(_model.to_dict())
+    return web.json_response(_model(request).to_dict())
 
 
 async def handle_sim_set(request: web.Request) -> web.Response:
     body = await request.json()
+    model = _model(request)
     for key, value in body.items():
-        if hasattr(_model, key):
-            setattr(_model, key, value)
+        if hasattr(model, key):
+            setattr(model, key, value)
     # Re-tick to update derived values
-    _model.tick(0)
+    model.tick(0)
     return web.json_response({"ok": True})
 
 
 async def handle_sim_tick(request: web.Request) -> web.Response:
     body = await request.json()
     seconds = body.get("seconds", 5)
-    _model.tick(seconds)
-    return web.json_response(_model.to_dict())
+    model = _model(request)
+    model.tick(seconds)
+    return web.json_response(model.to_dict())
 
 
 async def handle_sim_fast_forward(request: web.Request) -> web.Response:
@@ -272,58 +289,65 @@ async def handle_sim_fast_forward(request: web.Request) -> web.Response:
     step = body.get("step", 5)
     ws_delay = body.get("ws_delay", 0.01)
 
+    model = _model(request)
+    ws_clients = _ws_clients(request)
     steps = int(total_seconds / step)
     for _ in range(steps):
-        _model.tick(step)
-        if _ws_clients:
-            await _broadcast_ws(_model.get_ws_message())
+        model.tick(step)
+        if ws_clients:
+            await _broadcast_ws(request.app, model.get_ws_message())
             if ws_delay > 0:
                 await asyncio.sleep(ws_delay)
 
-    return web.json_response(_model.to_dict())
+    return web.json_response(model.to_dict())
 
 
 async def handle_sim_fault(request: web.Request) -> web.Response:
     body = await request.json()
     fault_type = body.get("type")
     count = body.get("count", 0)  # 0 = permanent
-    _model.active_fault = fault_type
-    _model.fault_remaining = count
+    model = _model(request)
+    ws_clients = _ws_clients(request)
+    model.active_fault = fault_type
+    model.fault_remaining = count
     _LOGGER.info("Fault injected: %s (count=%d)", fault_type, count)
 
     if fault_type in ("ws_disconnect", "ws_refuse"):
-        for ws in list(_ws_clients):
+        for ws in list(ws_clients):
             await ws.close()
-        _ws_clients.clear()
+        ws_clients.clear()
 
     return web.json_response({"ok": True, "fault": fault_type})
 
 
 async def handle_sim_clear_fault(request: web.Request) -> web.Response:
-    _model.active_fault = None
+    _model(request).active_fault = None
     return web.json_response({"ok": True})
 
 
 async def handle_sim_fuzzing(request: web.Request) -> web.Response:
     body = await request.json()
-    _model.fuzzing = body.get("enabled", True)
-    return web.json_response({"ok": True, "fuzzing": _model.fuzzing})
+    model = _model(request)
+    model.fuzzing = body.get("enabled", True)
+    return web.json_response({"ok": True, "fuzzing": model.fuzzing})
 
 
 async def handle_sim_ws_unit(request: web.Request) -> web.Response:
     body = await request.json()
-    _model.ws_unit = body.get("unit", "W")
-    return web.json_response({"ok": True, "unit": _model.ws_unit})
+    model = _model(request)
+    model.ws_unit = body.get("unit", "W")
+    return web.json_response({"ok": True, "unit": model.ws_unit})
 
 
 async def handle_sim_ws_stale(request: web.Request) -> web.Response:
     body = await request.json()
-    _model.ws_time_diff = body.get("timeDiff", 5)
-    return web.json_response({"ok": True, "timeDiff": _model.ws_time_diff})
+    model = _model(request)
+    model.ws_time_diff = body.get("timeDiff", 5)
+    return web.json_response({"ok": True, "timeDiff": model.ws_time_diff})
 
 
 async def handle_sim_reset(request: web.Request) -> web.Response:
-    _model.reset()
+    _model(request).reset()
     return web.json_response({"ok": True})
 
 
@@ -334,6 +358,8 @@ async def handle_sim_reset(request: web.Request) -> web.Response:
 
 def create_app() -> web.Application:
     app = web.Application()
+    app["model"] = InverterModel()
+    app["ws_clients"] = []
 
     # REST API
     app.router.add_post("/op/v0/device/list", handle_device_list)
