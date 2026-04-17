@@ -510,6 +510,15 @@ class OverrideStatusSensor(SensorEntity):
         self._attr_device_info = device_info
         self.hass = hass
 
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to coordinator updates for instant state changes."""
+        entry_data = self.hass.data.get(self._domain, {}).get(self._entry.entry_id, {})
+        coordinator = entry_data.get("coordinator")
+        if coordinator is not None:
+            self.async_on_remove(
+                coordinator.async_add_listener(self.async_write_ha_state)
+            )
+
     @property
     def native_value(self) -> str:
         cs = get_charge_state(self.hass, self._domain)
@@ -635,6 +644,15 @@ class SmartOperationsOverviewSensor(SensorEntity):
             "charge_discharge_active",
         ]
         self.hass = hass
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to coordinator updates for instant state changes."""
+        entry_data = self.hass.data.get(self._domain, {}).get(self._entry.entry_id, {})
+        coordinator = entry_data.get("coordinator")
+        if coordinator is not None:
+            self.async_on_remove(
+                coordinator.async_add_listener(self.async_write_ha_state)
+            )
 
     @property
     def native_value(self) -> str:

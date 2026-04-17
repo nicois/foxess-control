@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 import voluptuous as vol
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -81,6 +82,9 @@ from .smart_battery.algorithms import (  # noqa: F401
     should_suspend_discharge as _should_suspend_discharge,
 )
 from .smart_battery.config_flow_base import build_entity_map as _build_entity_map
+from .smart_battery.const import (
+    SMART_DISCHARGE_CHECK_SECONDS as _sb_SMART_DISCHARGE_CHECK_SECONDS,
+)
 from .smart_battery.listeners import (
     cancel_smart_charge as _sb_cancel_smart_charge,
 )
@@ -601,20 +605,30 @@ def _setup_smart_discharge_listeners(
     """Register HA listeners for an active smart discharge session.
 
     Delegates to the brand-agnostic smart_battery listeners via a
-    FoxESS-specific InverterAdapter.
+    FoxESS-specific InverterAdapter, then replaces the periodic timer
+    with a WS-aware wrapper so _maybe_start_realtime_ws fires after
+    every discharge check (including deferred→active transitions).
     """
     state = hass.data[DOMAIN]["_smart_discharge_state"]
     adapter = _build_foxess_adapter(hass, inverter, state)
     cb = _sb_setup_smart_discharge_listeners(hass, DOMAIN, adapter)  # type: ignore[arg-type]
 
-    # Wrap the callback to manage WebSocket lifecycle after each check.
-    # The brand-agnostic listener doesn't know about WS — this is
-    # FoxESS-specific policy that was previously inline in the listener.
     async def _ws_aware_discharge_cb(now: datetime.datetime) -> None:
         await cb(now)
         await _maybe_start_realtime_ws(hass)
 
     hass.data[DOMAIN]["_ws_discharge_callback"] = _ws_aware_discharge_cb
+
+    unsubs = hass.data[DOMAIN].get("_smart_discharge_unsubs", [])
+    if unsubs:
+        unsubs[0]()
+        unsubs[0] = async_track_time_interval(
+            hass,
+            _ws_aware_discharge_cb,
+            datetime.timedelta(
+                seconds=_sb_SMART_DISCHARGE_CHECK_SECONDS,
+            ),
+        )
 
 
 def _has_matching_schedule_group(

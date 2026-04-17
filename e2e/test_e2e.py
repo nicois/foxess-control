@@ -190,6 +190,12 @@ class TestFeedinPacing:
         import time as _time
 
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
+        ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_battery_soc",
+            "ge",
+            79,
+            timeout_s=90,
+        )
         start, end = _tight_window(30)
         ha_e2e.call_service(
             "foxess_control",

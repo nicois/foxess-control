@@ -1335,6 +1335,85 @@ class TestHandleSmartDischarge:
         assert state["last_power_w"] > 0
 
     @pytest.mark.asyncio
+    async def test_deferred_to_discharging_triggers_ws(self) -> None:
+        """WS lifecycle must be checked when deferred phase ends.
+
+        The periodic timer fires the discharge callback every 60s.  When
+        the deferred phase ends (forced discharge starts), the callback
+        must trigger _maybe_start_realtime_ws so WebSocket connects for
+        real-time data.  Previously the timer ran the unwrapped callback,
+        so WS never connected after a deferred start.
+        """
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=10.0,
+            coordinator_data={"SoC": 80.0, "loadsPower": 0.0, "pvPower": 0.0},
+        )
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 10,
+                    }
+                )
+            )
+
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state["discharging_started"] is False
+
+        ws_cb = hass.data[DOMAIN].get("_ws_discharge_callback")
+        assert ws_cb is not None, "_ws_discharge_callback must be set after setup"
+
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 50.0,
+            "loadsPower": 0.0,
+            "pvPower": 0.0,
+        }
+
+        with (
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 19, 40, 0),
+            ),
+            patch(
+                "custom_components.foxess_control._maybe_start_realtime_ws",
+                new_callable=AsyncMock,
+            ) as mock_ws,
+        ):
+            await ws_cb(datetime.datetime(2026, 4, 7, 19, 40, 0))
+
+        assert state["discharging_started"] is True
+        mock_ws.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_smart_discharge_feedin_limit_constrains_pacing(self) -> None:
         """Feed-in energy limit caps paced power to spread export budget."""
         inv = MagicMock(spec=Inverter)

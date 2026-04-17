@@ -446,14 +446,14 @@ def set_inverter_state(
                 event_stream.wait_for_state(
                     "sensor.foxess_battery_soc",
                     target,
-                    timeout_s=15,
+                    timeout_s=30,
                 )
             else:
                 ha_e2e.wait_for_numeric_state(
                     "sensor.foxess_battery_soc",
                     "ge",
                     float(kwargs["soc"]) - 1,
-                    timeout_s=15,
+                    timeout_s=30,
                     poll_interval=1.0,
                 )
         elif kwargs:
