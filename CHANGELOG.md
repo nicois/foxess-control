@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.5-beta.17
+## 1.0.5-beta.18
 
 ### Fixed
 - **Smart sessions survive transient API errors**: a single "Device offline" or DNS timeout during `apply_mode` no longer aborts the entire charge/discharge session. Errors are retried on the next timer tick; only 3 consecutive failures trigger an abort. Previously, any transient cloud outage (even a few seconds of DNS instability) would kill a multi-hour session.
