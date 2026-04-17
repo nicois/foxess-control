@@ -1700,9 +1700,10 @@ def _register_services(hass: HomeAssistant) -> None:
             f"{power}W" if power else "max",
         )
 
-        # Cancel smart charge BEFORE any awaits to prevent old callbacks
+        # Cancel smart sessions BEFORE any awaits to prevent old callbacks
         # from racing with the schedule change.
         _cancel_smart_charge(hass)
+        _cancel_smart_discharge(hass)
 
         if _is_entity_mode(hass):
             await _apply_mode_via_entities(hass, WorkMode.FORCE_CHARGE, power)
@@ -1748,8 +1749,9 @@ def _register_services(hass: HomeAssistant) -> None:
             f"{power}W" if power else "max",
         )
 
-        # Cancel smart discharge BEFORE any awaits to prevent old callbacks
+        # Cancel smart sessions BEFORE any awaits to prevent old callbacks
         # from racing with the schedule change.
+        _cancel_smart_charge(hass)
         _cancel_smart_discharge(hass)
 
         if _is_entity_mode(hass):

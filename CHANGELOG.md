@@ -10,6 +10,7 @@
 - **WebSocket mode selector**: replaced the boolean `ws_all_sessions` toggle with a 3-state `ws_mode` dropdown: **Auto** (WS only during paced forced discharge — the default), **All smart sessions** (WS during any smart session or force op), and **Always connected** (WS preferred over REST polling at all times). Existing configurations migrate automatically. "Always" mode includes a watchdog that recovers the WS connection after transient failures.
 
 ### Fixed
+- **Force operations not cancelling opposite smart session**: `force_charge` only cancelled an active `smart_charge`, leaving `smart_discharge` listeners running (and vice versa). The leftover listener would fight the schedule. Both force operations now cancel both smart session types, matching the behaviour smart operations already had.
 - **WebSocket not connecting after deferred discharge start**: when a discharge session started in deferred mode (self-use until the deadline), the periodic timer ran the unwrapped callback that didn't trigger `_maybe_start_realtime_ws`. The timer now fires the WS-aware wrapper, so WebSocket connects as soon as forced discharge begins.
 - **Session sensors delayed by ~30s after state changes**: `SmartOperationsOverviewSensor` and `OverrideStatusSensor` relied on HA's ~30s poll cycle instead of subscribing to coordinator updates. Now subscribe via `coordinator.async_add_listener` for instant state propagation.
 
