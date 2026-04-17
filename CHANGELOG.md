@@ -1,10 +1,16 @@
 # Changelog
 
-## 1.0.5-beta.27
+## 1.0.5-beta.28
+
+### Added
+- **Staleness indicator on both Lovelace cards**: overview and control cards compute data age client-side from the freshness sensor's `last_update` attribute. Badge turns amber with elapsed time (e.g. "API · 2m") when data exceeds 30 seconds old.
+
+### Changed
+- **Extrapolated SoC precision**: control card now shows interpolated SoC to 2 decimal places (e.g. 47.32%) instead of 1.
 
 ### Fixed
 - **Schedule horizon not set on immediate discharge start**: both the `__init__.py` service handler and brand-agnostic `services.py` bypassed the adapter's `apply_mode()` before the state dict existed, so `schedule_horizon` was never set for non-deferred sessions. Now computed inline before state dict creation.
-- **Overview card not showing data staleness**: the data freshness sensor was created but the overview card never read from it, and `age_seconds` was computed server-side (always ~0 in cached state). Card now computes age client-side from `last_update` and shows amber badge with elapsed time when data exceeds 10 seconds old.
+- **Feed-in energy inflated at session start**: `feedin_start_kwh` was captured from the coordinator at session setup, which in API mode held a stale value from the last poll (up to 5 minutes old). When WS connected and delivered fresh data, the cumulative counter jumped, inflating `feedin_used_kwh` immediately. Baseline is now deferred to the listener's first tick when fresh data is available.
 
 ## 1.0.5-beta.25
 
