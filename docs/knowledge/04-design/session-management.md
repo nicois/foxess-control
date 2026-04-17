@@ -97,9 +97,36 @@ Modbus is already faster than the cloud WS.
 **Traces**: C-021;
 `tests/test_entity_mode.py`
 
+### D-023: Transient adapter error resilience
+**Decision**: When `apply_mode` or any other adapter call raises an
+exception during a periodic callback, the error is logged as a warning
+and retried on the next timer tick. Only after
+`MAX_CONSECUTIVE_ADAPTER_ERRORS` (3) consecutive failures is the
+session aborted and the inverter returned to self-use.
+**Context**: Production incident 2026-04-17: a transient DNS outage
+caused the FoxESS cloud API to return "Device offline" for ~2 minutes.
+The previous catch-all handler aborted a multi-hour charge session on
+the first error. The session was healthy; only the cloud was briefly
+unreachable.
+**Rationale**: Cloud APIs are inherently unreliable — DNS blips,
+transient 503s, device-offline windows during firmware updates, etc.
+A charge session running from 02:00-06:00 should not die because of
+a 30-second network glitch at 03:00. The retry counter still aborts
+on persistent errors (safety net from C-024).
+**Alternatives considered**:
+- Catch only specific exception types (FoxESSApiError): rejected
+  because the adapter protocol is brand-agnostic — entity adapters
+  can raise different exceptions (ServiceValidationError, etc.)
+- Infinite retries (never abort): rejected because a truly broken
+  session leaving the inverter in forced mode is a safety risk
+**Traces**: C-024;
+`tests/test_services.py::TestTransientApiErrorResilience`
+
 ## Key Behaviours
 
 - Charge sessions check SoC every 5 minutes, adjust power accordingly.
 - Discharge sessions check SoC every 1 minute (higher risk).
 - SoC unavailability for 15 minutes (3 checks) triggers cancellation.
+- Adapter errors: 3 consecutive failures triggers cancellation (~15 min
+  for charge, ~3 min for discharge).
 - Session cancellation restores SelfUse mode.

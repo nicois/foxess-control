@@ -51,4 +51,9 @@ SMART_DISCHARGE_CHECK_SECONDS = 60  # 1 minute
 # consecutive periodic checks (3 x 5 min = 15 minutes).
 MAX_SOC_UNAVAILABLE_COUNT = 3
 
+# Cancel a smart session after this many consecutive adapter errors
+# (e.g. API timeout, device offline).  With 5-min charge ticks this
+# gives ~15 min of tolerance; with 1-min discharge ticks, ~3 min.
+MAX_CONSECUTIVE_ADAPTER_ERRORS = 3
+
 STORAGE_VERSION = 1

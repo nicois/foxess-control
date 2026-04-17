@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import sys
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.helpers.event import (
@@ -28,6 +29,7 @@ from .algorithms import (
 )
 from .const import (
     DEFAULT_MIN_POWER_CHANGE,
+    MAX_CONSECUTIVE_ADAPTER_ERRORS,
     MAX_SOC_UNAVAILABLE_COUNT,
     SMART_CHARGE_ADJUST_SECONDS,
     SMART_DISCHARGE_CHECK_SECONDS,
@@ -49,6 +51,12 @@ if TYPE_CHECKING:
     from .taper import TaperProfile
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _exc_summary() -> str:
+    """One-line summary of the current exception for warning-level logs."""
+    exc = sys.exc_info()[1]
+    return f"{type(exc).__name__}: {exc}" if exc else "unknown"
 
 
 def _get_coordinator_value(
@@ -257,9 +265,22 @@ def setup_smart_charge_listeners(
 
         try:
             await _adjust_charge_power_inner(cur_state)
+            cur_state["consecutive_error_count"] = 0
         except Exception:
-            _LOGGER.exception("Smart charge: unexpected error, aborting session")
-            _record_error(hass, domain, "Charge session aborted: unexpected error")
+            count = cur_state.get("consecutive_error_count", 0) + 1
+            cur_state["consecutive_error_count"] = count
+            if count < MAX_CONSECUTIVE_ADAPTER_ERRORS:
+                _LOGGER.warning(
+                    "Smart charge: transient error (%d/%d), will retry: %s",
+                    count,
+                    MAX_CONSECUTIVE_ADAPTER_ERRORS,
+                    _exc_summary(),
+                )
+                return
+            _LOGGER.exception(
+                "Smart charge: %d consecutive errors, aborting session", count
+            )
+            _record_error(hass, domain, "Charge session aborted: repeated errors")
             try:
                 charging_started = cur_state.get("charging_started", False)
                 if _is_my_session():
@@ -539,9 +560,22 @@ def setup_smart_discharge_listeners(
 
         try:
             await _check_discharge_soc_inner(cur_state)
+            cur_state["consecutive_error_count"] = 0
         except Exception:
-            _LOGGER.exception("Smart discharge: unexpected error, aborting session")
-            _record_error(hass, domain, "Discharge session aborted: unexpected error")
+            count = cur_state.get("consecutive_error_count", 0) + 1
+            cur_state["consecutive_error_count"] = count
+            if count < MAX_CONSECUTIVE_ADAPTER_ERRORS:
+                _LOGGER.warning(
+                    "Smart discharge: transient error (%d/%d), will retry: %s",
+                    count,
+                    MAX_CONSECUTIVE_ADAPTER_ERRORS,
+                    _exc_summary(),
+                )
+                return
+            _LOGGER.exception(
+                "Smart discharge: %d consecutive errors, aborting session", count
+            )
+            _record_error(hass, domain, "Discharge session aborted: repeated errors")
             try:
                 discharging_started = cur_state.get("discharging_started", False)
                 if _is_my_session():

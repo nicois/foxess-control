@@ -49,20 +49,27 @@ brand integration and risking divergence between copies.
 **Traces**: C-015
 
 ### C-024: Safe state on failure
-**Statement**: On any unhandled failure — uncaught exception in a
-session callback, API becoming unresponsive, or integration unload —
-the system must ensure that forced charge/discharge overrides do not
-persist long enough to cause serious inconvenience to the user.
+**Statement**: On persistent failure — repeated uncaught exceptions
+in a session callback, API becoming unresponsive, or integration
+unload — the system must ensure that forced charge/discharge
+overrides do not persist long enough to cause serious inconvenience
+to the user. Transient errors (single API timeout, brief DNS outage)
+must be tolerated and retried on the next timer tick; only
+`MAX_CONSECUTIVE_ADAPTER_ERRORS` (3) consecutive failures trigger
+session abort.
 **Rationale**: Self-use is the only mode where the inverter manages
 itself safely without external control. A forced mode left active
 after the controlling session has failed will run unchecked —
 charging indefinitely or discharging past min SoC with no pacing.
+However, aborting on a single transient error (e.g. a few seconds of
+DNS instability) kills multi-hour sessions unnecessarily — the error
+would self-resolve on the next tick.
 **Violation consequence**: Inverter stuck in forced charge
 (overcharging, wasted grid import) or forced discharge
 (over-discharge, grid import) with no active session monitoring it.
 **Traces**: C-012 (specific case);
-`tests/test_services.py::TestCallbackExceptionSafety::test_charge_callback_exception_cancels`,
-`tests/test_services.py::TestCallbackExceptionSafety::test_discharge_callback_exception_cancels`
+`tests/test_services.py::TestCallbackExceptionSafety`,
+`tests/test_services.py::TestTransientApiErrorResilience`
 
 ### C-025: Session boundary cleanliness
 **Statement**: When a smart session ends (normally, by cancellation,

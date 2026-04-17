@@ -1590,20 +1590,25 @@ class TestCallbackExceptionSafety:
         assert captured is not None
         assert "_smart_charge_state" in hass.data[DOMAIN]
 
-        # Make _get_current_soc raise an exception
-        with (
-            patch(
-                "custom_components.foxess_control.smart_battery.listeners._get_current_soc",
-                side_effect=RuntimeError("sensor exploded"),
-            ),
-            patch(
-                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
-                return_value=datetime.datetime(2026, 4, 7, 2, 5, 0),
-            ),
-        ):
-            await captured(datetime.datetime(2026, 4, 7, 2, 5, 0))
+        from custom_components.foxess_control.smart_battery.const import (
+            MAX_CONSECUTIVE_ADAPTER_ERRORS,
+        )
 
-        # Session should be cancelled
+        # Fire enough errors to exceed the retry threshold
+        for i in range(MAX_CONSECUTIVE_ADAPTER_ERRORS):
+            with (
+                patch(
+                    "custom_components.foxess_control.smart_battery.listeners._get_current_soc",
+                    side_effect=RuntimeError("sensor exploded"),
+                ),
+                patch(
+                    "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                    return_value=datetime.datetime(2026, 4, 7, 2, 5 + i, 0),
+                ),
+            ):
+                await captured(datetime.datetime(2026, 4, 7, 2, 5 + i, 0))
+
+        # Session should be cancelled after repeated errors
         assert "_smart_charge_state" not in hass.data[DOMAIN]
 
     @pytest.mark.asyncio
@@ -1656,20 +1661,25 @@ class TestCallbackExceptionSafety:
         assert captured is not None
         assert "_smart_discharge_state" in hass.data[DOMAIN]
 
-        # Make _get_net_consumption raise (first thing after session guard)
-        with (
-            patch(
-                "custom_components.foxess_control.smart_battery.listeners._get_net_consumption",
-                side_effect=RuntimeError("sensor exploded"),
-            ),
-            patch(
-                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
-                return_value=datetime.datetime(2026, 4, 7, 17, 1, 0),
-            ),
-        ):
-            await captured(datetime.datetime(2026, 4, 7, 17, 1, 0))
+        from custom_components.foxess_control.smart_battery.const import (
+            MAX_CONSECUTIVE_ADAPTER_ERRORS,
+        )
 
-        # Session should be cancelled
+        # Fire enough errors to exceed the retry threshold
+        for i in range(MAX_CONSECUTIVE_ADAPTER_ERRORS):
+            with (
+                patch(
+                    "custom_components.foxess_control.smart_battery.listeners._get_net_consumption",
+                    side_effect=RuntimeError("sensor exploded"),
+                ),
+                patch(
+                    "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                    return_value=datetime.datetime(2026, 4, 7, 17, 1 + i, 0),
+                ),
+            ):
+                await captured(datetime.datetime(2026, 4, 7, 17, 1 + i, 0))
+
+        # Session should be cancelled after repeated errors
         assert "_smart_discharge_state" not in hass.data[DOMAIN]
 
 
@@ -2860,15 +2870,22 @@ class TestHandleSmartCharge:
             ],
         }
 
-        # At 05:50, deferred start has passed → tries to start charging
+        # At 05:50, deferred start has passed → tries to start charging.
+        # Conflict persists across retries, so session aborts after threshold.
+        from custom_components.foxess_control.smart_battery.const import (
+            MAX_CONSECUTIVE_ADAPTER_ERRORS,
+        )
 
-        with patch(
-            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
-            return_value=datetime.datetime(2026, 4, 7, 5, 50, 0),
-        ):
-            await captured_interval_callback(datetime.datetime(2026, 4, 7, 5, 50, 0))
+        for i in range(MAX_CONSECUTIVE_ADAPTER_ERRORS):
+            with patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 5, 50 + i, 0),
+            ):
+                await captured_interval_callback(
+                    datetime.datetime(2026, 4, 7, 5, 50 + i, 0)
+                )
 
-        # Should abort — conflict detected, session cancelled
+        # Should abort — conflict persisted across retries
         assert "_smart_charge_state" not in hass.data[DOMAIN]
         assert hass.data[DOMAIN]["_smart_charge_unsubs"] == []
         # Should NOT have set a schedule
@@ -4250,3 +4267,218 @@ class TestRemainingZeroCancels:
         assert hass.data[DOMAIN]["_smart_charge_unsubs"] == []
         # Override should be removed (self_use called via _remove_mode_from_schedule)
         inv.self_use.assert_called()
+
+
+class TestTransientApiErrorResilience:
+    """Sessions must survive transient API errors (device offline, DNS timeout).
+
+    Reproduces production incident 2026-04-17: a DNS outage caused
+    set_schedule to raise FoxESSApiError(41935, "Device offline").
+    The catch-all handler aborted the charge session instead of
+    retrying on the next timer tick.
+    """
+
+    @pytest.mark.asyncio
+    async def test_charge_survives_transient_api_error(self) -> None:
+        """A single API error during charge adjustment must not abort the session."""
+        from custom_components.foxess_control.foxess.client import FoxESSApiError
+
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=60.0,
+            coordinator_data={
+                "SoC": 20.0,
+                "loadsPower": 3.0,
+                "pvPower": 0.0,
+            },
+        )
+
+        captured_callback = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_callback
+            captured_callback = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(2, 0),
+                        "end_time": datetime.time(6, 0),
+                        "target_soc": 80,
+                    }
+                )
+            )
+
+        assert captured_callback is not None
+        assert hass.data[DOMAIN]["_smart_charge_state"]["charging_started"]
+
+        # Make set_schedule raise a transient API error (device offline)
+        inv.set_schedule.side_effect = FoxESSApiError(
+            41935, "Device offline, Please connect and retry"
+        )
+
+        with patch(
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 3, 0, 0),
+        ):
+            await captured_callback(datetime.datetime(2026, 4, 7, 3, 0, 0))
+
+        # Session must still be alive
+        assert hass.data[DOMAIN].get("_smart_charge_state") is not None
+
+    @pytest.mark.asyncio
+    async def test_discharge_survives_transient_api_error(self) -> None:
+        """A single API error during discharge adjustment must not abort the session."""
+        from custom_components.foxess_control.foxess.client import FoxESSApiError
+
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 80.0},
+        )
+
+        captured_callback = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_callback
+            captured_callback = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 30,
+                    }
+                )
+            )
+
+        assert captured_callback is not None
+        assert hass.data[DOMAIN]["_smart_discharge_state"]["discharging_started"]
+
+        # Make set_schedule raise a transient API error
+        inv.set_schedule.side_effect = FoxESSApiError(
+            41935, "Device offline, Please connect and retry"
+        )
+
+        with patch(
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 18, 0, 0),
+        ):
+            await captured_callback(datetime.datetime(2026, 4, 7, 18, 0, 0))
+
+        # Session must still be alive
+        assert hass.data[DOMAIN].get("_smart_discharge_state") is not None
+
+    @pytest.mark.asyncio
+    async def test_charge_aborts_after_repeated_errors(self) -> None:
+        """Persistent API errors (>= MAX_CONSECUTIVE_ADAPTER_ERRORS) must abort."""
+        from custom_components.foxess_control import _register_services
+        from custom_components.foxess_control.foxess.client import FoxESSApiError
+        from custom_components.foxess_control.smart_battery.const import (
+            MAX_CONSECUTIVE_ADAPTER_ERRORS,
+        )
+
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=60.0,
+            coordinator_data={
+                "SoC": 20.0,
+                "loadsPower": 3.0,
+                "pvPower": 0.0,
+            },
+        )
+
+        captured_callback = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_callback
+            captured_callback = callback
+            return MagicMock()
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(2, 0),
+                        "end_time": datetime.time(6, 0),
+                        "target_soc": 80,
+                    }
+                )
+            )
+
+        assert captured_callback is not None
+        inv.set_schedule.side_effect = FoxESSApiError(41935, "Device offline")
+
+        for i in range(MAX_CONSECUTIVE_ADAPTER_ERRORS):
+            with patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 3, i, 0),
+            ):
+                await captured_callback(datetime.datetime(2026, 4, 7, 3, i, 0))
+
+        assert hass.data[DOMAIN].get("_smart_charge_state") is None

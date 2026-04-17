@@ -6,7 +6,7 @@ traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-546 unit tests + 19 E2E tests = 565 total.
+555 unit tests + 19 E2E tests = 574 total.
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
@@ -110,8 +110,8 @@ simulator and Playwright browser automation.
 
 ## Session Management & Service Handlers
 
-**Constraints**: C-003, C-012, C-013, C-016
-**Source**: `tests/test_init.py`, `tests/test_services.py` (79 tests)
+**Constraints**: C-003, C-012, C-013, C-016, C-024
+**Source**: `tests/test_init.py`, `tests/test_services.py` (82 tests)
 
 | Test | Verifies | Constraint |
 |---|---|---|
@@ -123,6 +123,9 @@ simulator and Playwright browser automation.
 | `TestRecoverSessions::*` (10 tests) | Session recovery on startup | C-003 |
 | `TestSocStabilityCounters::*` (4 tests) | Below-min confirmation counter | C-002 |
 | `TestCheckScheduleSafe::*` (7 tests) | Unmanaged mode rejection | C-018 |
+| `TestTransientApiErrorResilience::test_charge_survives_transient_api_error` | Single API error retried | C-024 |
+| `TestTransientApiErrorResilience::test_discharge_survives_transient_api_error` | Single API error retried | C-024 |
+| `TestTransientApiErrorResilience::test_charge_aborts_after_repeated_errors` | Consecutive errors abort | C-024 |
 
 ## Sensor Display
 

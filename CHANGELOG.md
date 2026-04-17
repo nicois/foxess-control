@@ -1,8 +1,9 @@
 # Changelog
 
-## 1.0.5-beta.16
+## 1.0.5-beta.17
 
 ### Fixed
+- **Smart sessions survive transient API errors**: a single "Device offline" or DNS timeout during `apply_mode` no longer aborts the entire charge/discharge session. Errors are retried on the next timer tick; only 3 consecutive failures trigger an abort. Previously, any transient cloud outage (even a few seconds of DNS instability) would kill a multi-hour session.
 - **SoC interpolation overshooting entity value**: the interpolated SoC (used by the Lovelace battery icon and progress bar) could exceed the integer tick by more than 0.5%, causing `Math.round()` to display a higher value than `sensor.foxess_battery_soc`. The clamp is now `[tick − 0.5, tick + 0.44]` so the rounded display always matches the entity.
 
 ### Changed

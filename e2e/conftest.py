@@ -464,6 +464,7 @@ def set_inverter_state(
 def data_source(
     request: pytest.FixtureRequest,
     foxess_sim: SimulatorHandle | None,
+    ha_e2e: HAClient,
     connection_mode: str,
 ) -> Generator[str, None, None]:
     """Control the active data source for the test.
@@ -478,4 +479,6 @@ def data_source(
         pytest.skip("entity not valid for cloud mode")
     if mode == "api" and foxess_sim is not None:
         foxess_sim.fault("ws_refuse")
+    if mode == "ws":
+        ha_e2e.set_options(ws_all_sessions=True)
     yield mode
