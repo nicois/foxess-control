@@ -1413,14 +1413,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         try:
             entry_id = _first_entry_id(hass)
         except ServiceValidationError:
+            _LOGGER.debug("Session cancel hook: no entry (unloading)")
             return
         entry_data = hass.data[DOMAIN].get(entry_id)
         if entry_data is None:
+            _LOGGER.debug("Session cancel hook: entry data gone (unloading)")
             return
         coordinator = entry_data.get("coordinator")
         if coordinator is not None and coordinator.data is not None:
+            old = coordinator.data.get("_work_mode")
             coordinator.data["_work_mode"] = None
             coordinator.async_set_updated_data(dict(coordinator.data))
+            if old:
+                _LOGGER.info("Cleared work mode %s (session ended)", old)
 
     hass.data[DOMAIN]["_on_session_cancel"] = _on_session_cancel
 
@@ -1518,6 +1523,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Only internal "_*" keys remain → last real entry was removed
     remaining = {k for k in hass.data[DOMAIN] if not k.startswith("_")}
     if not remaining:
+        _LOGGER.info("Unloading last entry %s — cleaning up domain", entry.entry_id)
         # Preserve persisted sessions so recovery works after options reload
         _cancel_smart_discharge(hass, clear_storage=False)
         _cancel_smart_charge(hass, clear_storage=False)

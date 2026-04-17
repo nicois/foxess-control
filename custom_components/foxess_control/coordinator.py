@@ -99,6 +99,9 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             mode = WorkMode(mode_str)
         except ValueError:
+            _LOGGER.warning(
+                "Pending override cleanup: invalid mode '%s', discarding", mode_str
+            )
             domain_data.pop("_pending_override_cleanup", None)
             return
         min_soc_on_grid = 11

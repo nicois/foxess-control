@@ -286,8 +286,16 @@ def setup_smart_charge_listeners(
                     _exc_summary(),
                 )
                 return
+            try:
+                _soc = _get_current_soc(hass, domain)
+            except Exception:
+                _soc = None
             _LOGGER.exception(
-                "Smart charge: %d consecutive errors, aborting session", count
+                "Smart charge: %d consecutive errors, aborting session "
+                "(SoC=%s, charging_started=%s)",
+                count,
+                _soc,
+                cur_state.get("charging_started", False),
             )
             _record_error(hass, domain, "Charge session aborted: repeated errors")
             try:
@@ -590,8 +598,17 @@ def setup_smart_discharge_listeners(
                     _exc_summary(),
                 )
                 return
+            try:
+                _soc = _get_current_soc(hass, domain)
+            except Exception:
+                _soc = None
             _LOGGER.exception(
-                "Smart discharge: %d consecutive errors, aborting session", count
+                "Smart discharge: %d consecutive errors, aborting session "
+                "(SoC=%s, discharging_started=%s, suspended=%s)",
+                count,
+                _soc,
+                cur_state.get("discharging_started", False),
+                cur_state.get("suspended", False),
             )
             _record_error(hass, domain, "Discharge session aborted: repeated errors")
             try:
