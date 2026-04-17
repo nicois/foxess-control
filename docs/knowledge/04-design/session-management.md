@@ -175,6 +175,34 @@ session state via a context getter callback injected at setup time.
 `tests/test_structured_logging.py::TestInstallRemove` (2),
 `tests/test_structured_logging.py::TestDebugLogHandlerWithSession` (3)
 
+### D-029: Proactive error surfacing mechanism
+**Decision**: Record persistent session errors to
+`hass.data[domain]["_smart_error_state"]` dict. The Smart Battery
+Status sensor reads this dict: state returns `"error"` when truthy,
+attributes expose `has_error`, `last_error`, `last_error_at`, and
+`error_count`. New session start clears the dict.
+**Context**: Session abort errors (3 consecutive adapter failures,
+SoC unavailable for 15 minutes) were log-only. Dashboard users never
+check logs, so aborted sessions appeared as silent "idle" with no
+explanation.
+**Rationale**: Synchronous write to `hass.data` is zero-cost. The
+sensor polls attributes on each coordinator update so errors appear
+within seconds. Clearing on new session start avoids stale errors
+persisting across sessions.
+**Errors surfaced**: Session abort from `MAX_CONSECUTIVE_ADAPTER_ERRORS`
+(3 failures), session abort from `MAX_SOC_UNAVAILABLE_COUNT` (3 checks
+/ 15 minutes). Single transient errors are not surfaced — they are
+retried silently per D-025.
+**Alternatives considered**:
+- HA persistent notification: rejected because it is hard to clear
+  programmatically when the next session starts
+- Separate error sensor: rejected because entity lifecycle overhead
+  for a rare event is disproportionate
+- Event bus: rejected because events have no persistent state — a
+  dashboard card can't read the current error
+**Traces**: C-026, C-020;
+`tests/test_services.py::TestErrorSurfacing`
+
 ## Async Flow Diagrams
 
 These diagrams trace the concurrent async operations during the

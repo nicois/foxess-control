@@ -52,6 +52,26 @@ consumption is low (it may spike overnight, e.g., hot water heater).
 `tests/test_smart_battery_algorithms.py::TestCalculateDeferredStart::test_consumption_affects_deferral`,
 `tests/test_smart_battery_algorithms.py::TestCalculateDeferredStart::test_taper_consumption_affects_deferral`
 
+### D-028: Unreachable charge target detection
+**Decision**: Expose `is_charge_target_reachable` as a boolean attribute
+(`charge_target_reachable`) on the Smart Battery Status sensor during
+active charge sessions.
+**Context**: When the target SoC becomes unreachable mid-session (BMS
+taper, consumption spike, late start), the user has no way to know
+until the window ends and the target was missed.
+**Rationale**: The check reuses the same formula as deferred start
+(energy-needed vs effective-power * remaining-time), accounting for
+taper profile and consumption headroom — zero additional computation.
+Exposing it as a sensor attribute rather than a separate entity keeps
+the entity count low and avoids lifecycle complexity.
+**Alternatives considered**:
+- Separate binary sensor: rejected because entity lifecycle management
+  for a transient per-session value adds complexity
+- HA persistent notification: rejected as too intrusive for an
+  informational signal
+**Traces**: C-022, C-020;
+`tests/test_smart_battery_algorithms.py::TestIsChargeTargetReachable`
+
 ## Key Behaviours
 
 - Charge power adjustment interval is 5 minutes (vs 1 minute for
