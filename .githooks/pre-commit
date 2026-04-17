@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Pre-commit hook: run ruff, ruff-format, and mypy via pre-commit.
+#
+# Setup (one-time):  git config core.hooksPath .githooks
+
+set -euo pipefail
+
+if ! command -v pre-commit &>/dev/null; then
+  echo "⚠  pre-commit not found — skipping lint checks"
+  exit 0
+fi
+
+exec pre-commit run --all-files
