@@ -1,0 +1,130 @@
+name: Flaky Test Detection
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e '.[dev]'
+      - name: "Unit tests (run ${{ matrix.run }})"
+        run: pytest tests/ --tb=short -q --junitxml=unit-${{ matrix.run }}.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-results-${{ matrix.run }}
+          path: unit-${{ matrix.run }}.xml
+          retention-days: 14
+
+  e2e-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e '.[dev]'
+      - run: playwright install chromium
+      - name: Build E2E container
+        run: podman build -t ha-foxess-e2e e2e/
+      - name: "E2E tests (run ${{ matrix.run }})"
+        run: |
+          python -m pytest e2e/ -m slow \
+            --tb=short \
+            -n auto \
+            --junitxml=e2e-${{ matrix.run }}.xml \
+            -q
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-results-${{ matrix.run }}
+          path: |
+            e2e-${{ matrix.run }}.xml
+            e2e/screenshots/
+          retention-days: 14
+
+  summary:
+    runs-on: ubuntu-latest
+    needs: [unit-tests, e2e-tests]
+    if: always()
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: results
+      - name: Summarise results
+        run: |
+          echo "## Flaky Test Detection Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          unit_pass=0; unit_fail=0
+          e2e_pass=0; e2e_fail=0
+
+          for f in results/unit-results-*/unit-*.xml; do
+            if grep -q 'failures="0"' "$f" 2>/dev/null && grep -q 'errors="0"' "$f" 2>/dev/null; then
+              unit_pass=$((unit_pass + 1))
+            else
+              unit_fail=$((unit_fail + 1))
+            fi
+          done
+
+          for f in results/e2e-results-*/e2e-*.xml; do
+            if grep -q 'failures="0"' "$f" 2>/dev/null && grep -q 'errors="0"' "$f" 2>/dev/null; then
+              e2e_pass=$((e2e_pass + 1))
+            else
+              e2e_fail=$((e2e_fail + 1))
+            fi
+          done
+
+          echo "| Suite | Passed | Failed | Rate |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|--------|------|" >> $GITHUB_STEP_SUMMARY
+
+          unit_total=$((unit_pass + unit_fail))
+          if [ $unit_total -gt 0 ]; then
+            unit_rate=$((unit_pass * 100 / unit_total))
+          else
+            unit_rate=0
+          fi
+          echo "| Unit | $unit_pass/$unit_total | $unit_fail | ${unit_rate}% |" >> $GITHUB_STEP_SUMMARY
+
+          e2e_total=$((e2e_pass + e2e_fail))
+          if [ $e2e_total -gt 0 ]; then
+            e2e_rate=$((e2e_pass * 100 / e2e_total))
+          else
+            e2e_rate=0
+          fi
+          echo "| E2E | $e2e_pass/$e2e_total | $e2e_fail | ${e2e_rate}% |" >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ $unit_fail -gt 0 ] || [ $e2e_fail -gt 0 ]; then
+            echo "### Failed runs" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            for f in results/*//*.xml; do
+              if ! grep -q 'failures="0"' "$f" 2>/dev/null || ! grep -q 'errors="0"' "$f" 2>/dev/null; then
+                echo "#### $(basename $f)" >> $GITHUB_STEP_SUMMARY
+                echo '```' >> $GITHUB_STEP_SUMMARY
+                grep 'testcase.*name=' "$f" | grep -v 'failures="0"' | head -20 >> $GITHUB_STEP_SUMMARY || true
+                grep '<failure' "$f" | head -10 >> $GITHUB_STEP_SUMMARY || true
+                echo '```' >> $GITHUB_STEP_SUMMARY
+              fi
+            done
+          fi
