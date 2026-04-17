@@ -644,6 +644,7 @@ def setup_smart_discharge_listeners(
                     cur_state["max_power_w"],
                     cur_state["end"],
                     net_consumption_kw=_get_net_consumption(hass, domain),
+                    start=cur_state.get("start"),
                     headroom=_get_smart_headroom(hass, domain),
                     taper_profile=taper,
                     feedin_energy_limit_kwh=cur_state.get("feedin_energy_limit_kwh"),

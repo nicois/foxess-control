@@ -5,6 +5,9 @@
 ### Changed
 - **Coverage matrix regenerated**: full bidirectional trace analysis with new ACCEPTED status for non-actionable gaps (infrastructure/methodology constraints). Actionable items reduced from 11 to 4.
 
+### Fixed
+- **Smart discharge starting before window**: the deferred discharge listener omitted the `start=` parameter when calling `calculate_discharge_deferred_start`, bypassing the floor clamp that prevents discharge before the window opens. The inverter received a schedule with `fdPwr=0` but ignored the zero and discharged at full power. Now passes the window start time so the clamp keeps deferred mode active until the window begins.
+
 ## 1.0.5-beta.22
 
 ### Added

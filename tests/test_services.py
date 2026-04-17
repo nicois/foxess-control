@@ -1685,6 +1685,82 @@ class TestHandleSmartDischarge:
         mock_ws.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_deferred_discharge_does_not_start_before_window(self) -> None:
+        """Deferred discharge must not start forced discharge before window start.
+
+        The listener recalculates the deferred start time each tick.  If it
+        omits the window start floor, the algorithm can return a time before
+        the window opens, causing the inverter to discharge early.
+
+        Scenario: 10 kWh battery at 90%, min_soc=20%, window 18:00–18:30.
+        The algorithm needs ~47 min to drain 70% at 10.5 kW, so without the
+        start clamp it returns ~17:43 — 17 min before the window opens.
+        """
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=10.0,
+            coordinator_data={"SoC": 90.0, "loadsPower": 0.5, "pvPower": 0.0},
+        )
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        # Create session at 17:30, window 18:00–18:30.  The initial
+        # deferred check at session creation passes start= correctly,
+        # so should_defer=True (17:30 < 18:00).
+        with (
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 30, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(18, 0),
+                        "end_time": datetime.time(18, 30),
+                        "min_soc": 20,
+                    }
+                )
+            )
+
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state["discharging_started"] is False
+
+        # Listener fires at 17:50.  Without the start= floor, the
+        # algorithm returns 17:43, so 17:50 >= 17:43 triggers discharge
+        # 10 minutes before the window opens.
+        ws_cb = hass.data[DOMAIN].get("_ws_discharge_callback")
+        assert ws_cb is not None
+
+        with patch(
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 17, 50, 0),
+        ):
+            await ws_cb(datetime.datetime(2026, 4, 7, 17, 50, 0))
+
+        assert state["discharging_started"] is False, (
+            "Discharge must not start before the window opens"
+        )
+
+    @pytest.mark.asyncio
     async def test_smart_discharge_feedin_limit_constrains_pacing(self) -> None:
         """Feed-in energy limit caps paced power to spread export budget."""
         inv = MagicMock(spec=Inverter)
