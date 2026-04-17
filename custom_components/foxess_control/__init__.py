@@ -2013,7 +2013,7 @@ def _register_services(hass: HomeAssistant) -> None:
             "soc_below_min_count": 0,
             "soc_unavailable_count": 0,
             "feedin_energy_limit_kwh": feedin_energy_limit,
-            "feedin_start_kwh": _get_feedin_energy_kwh(hass),
+            "feedin_start_kwh": None,
             "battery_capacity_kwh": battery_capacity_kwh,
             "min_power_change": _get_min_power_change(hass),
             "pacing_enabled": pacing_enabled,

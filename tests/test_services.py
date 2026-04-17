@@ -4267,6 +4267,15 @@ class TestFeedinEnergyLimit:
         assert captured_interval is not None
         state = hass.data[DOMAIN]["_smart_discharge_state"]
         assert state["feedin_energy_limit_kwh"] == 2.0
+        assert state["feedin_start_kwh"] is None
+
+        # First tick: baseline deferred — listener captures it now
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 75.0,
+            "feedin": 100.0,
+        }
+        await captured_interval(datetime.datetime(2026, 4, 7, 17, 5, 0))
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
         assert state["feedin_start_kwh"] == 100.0
 
         # Counter has increased by 2.5 kWh (> 2.0 limit)
@@ -4274,8 +4283,6 @@ class TestFeedinEnergyLimit:
             "SoC": 70.0,
             "feedin": 102.5,
         }
-        # First call records baseline (start was snapshotted at session start)
-        # Since start was already set, this should trigger
         await captured_interval(datetime.datetime(2026, 4, 7, 17, 30, 0))
 
         # Session should be cancelled
@@ -4330,6 +4337,16 @@ class TestFeedinEnergyLimit:
             )
 
         assert captured_interval is not None
+
+        # First tick: captures baseline (feedin_start_kwh deferred to listener)
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 75.0,
+            "feedin": 500.0,
+        }
+        await captured_interval(datetime.datetime(2026, 4, 7, 17, 5, 0))
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state is not None
+        assert state["feedin_start_kwh"] == 500.0
 
         # Counter +1 kWh — under limit
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {
@@ -4532,6 +4549,23 @@ class TestFeedinEnergyLimit:
         # One point_in_time call for the window end timer
         initial_point_calls = len(point_in_time_calls)
 
+        # Baseline tick: listener captures feedin_start_kwh from fresh data
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 78.0,
+            "feedin": 100.0,
+        }
+        with (
+            pit_patch,
+            patch(
+                "custom_components.foxess_control.dt_util.utcnow",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 5),
+            ),
+        ):
+            await captured_interval(datetime.datetime(2026, 4, 7, 17, 0, 5))
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state is not None
+        assert state["feedin_start_kwh"] == 100.0
+
         # Poll 1: exported 0.30 kWh. No previous reading yet →
         # no observed rate, no early stop scheduled.
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {
@@ -4661,6 +4695,20 @@ class TestFeedinEnergyLimit:
         assert captured_interval is not None
         initial_point_calls = len(point_in_time_calls)
 
+        # Baseline tick: listener captures feedin_start_kwh from fresh data
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 78.0,
+            "feedin": 100.0,
+        }
+        with (
+            pit_patch,
+            patch(
+                "custom_components.foxess_control.dt_util.utcnow",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 5),
+            ),
+        ):
+            await captured_interval(datetime.datetime(2026, 4, 7, 17, 0, 5))
+
         # Poll 1: establish observed rate baseline
         hass.data[DOMAIN]["entry1"]["coordinator"].data = {
             "SoC": 75.0,
@@ -4697,6 +4745,83 @@ class TestFeedinEnergyLimit:
         assert state["last_power_w"] == 10500  # Unchanged
         # No new point_in_time calls beyond the initial window end timer
         assert len(point_in_time_calls) == initial_point_calls
+
+
+class TestFeedinBaselineDeferred:
+    """Feed-in baseline must be captured by the listener, not at session start."""
+
+    @pytest.mark.asyncio
+    async def test_feedin_baseline_not_captured_at_session_start(self) -> None:
+        """feedin_start_kwh should be None after session setup.
+
+        The coordinator value at session start may be stale (e.g. last API
+        poll was minutes ago). The listener captures the baseline on its
+        first tick, by which time WS delivers fresh data.
+        """
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 80.0, "feedin": 776.1},
+        )
+
+        captured_interval = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval
+            captured_interval = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 10,
+                        "feedin_energy_limit_kwh": 1.0,
+                    }
+                )
+            )
+
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state["feedin_energy_limit_kwh"] == 1.0
+        assert state["feedin_start_kwh"] is None, (
+            "Baseline should be deferred to listener, not captured from "
+            "potentially stale coordinator data at session start"
+        )
+
+        # Simulate WS delivering fresh data on first listener tick
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 79.0,
+            "feedin": 776.31,
+        }
+        assert captured_interval is not None
+        await captured_interval(datetime.datetime(2026, 4, 7, 17, 0, 5))
+
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state["feedin_start_kwh"] == 776.31, (
+            "Baseline should be captured from fresh WS data on first tick"
+        )
 
 
 class TestRemainingZeroCancels:

@@ -49,7 +49,6 @@ from .const import (
 )
 from .listeners import (
     _get_current_soc,
-    _get_feedin_energy_kwh,
     _get_net_consumption,
     cancel_smart_charge,
     cancel_smart_discharge,
@@ -424,7 +423,7 @@ def register_services(
             "soc_below_min_count": 0,
             "soc_unavailable_count": 0,
             "feedin_energy_limit_kwh": feedin_energy_limit,
-            "feedin_start_kwh": _get_feedin_energy_kwh(hass, domain),
+            "feedin_start_kwh": None,
             "battery_capacity_kwh": battery_capacity_kwh,
             "min_power_change": min_power_change,
             "pacing_enabled": pacing_enabled,
