@@ -9,5 +9,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/nicois/foxess-control/issues",
   "requirements": ["wasmtime>=29.0.0"],
-  "version": "1.0.5-beta.19"
+  "version": "1.0.5-beta.20"
 }

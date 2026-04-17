@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.5-beta.19
+## 1.0.5-beta.20
 
 ### Fixed
 - **Stale work mode badge after failed cleanup**: when a session aborted due to API errors and the schedule cleanup also failed (same outage), the overview card showed "Force Charge" or "Force Discharge" indefinitely. Now: (1) override removal stores a pending retry on failure, and the coordinator retries on each successful REST poll until the schedule is clean; (2) all session cancel paths use the brand-agnostic `cancel_smart_session` which fires the `_on_session_cancel` hook to clear `_work_mode` immediately.
