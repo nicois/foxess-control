@@ -564,7 +564,7 @@ class _DebugLogHandler(logging.Handler):
 
     def __init__(
         self,
-        buffer: collections.deque[dict[str, str]],
+        buffer: collections.deque[dict[str, Any]],
         original_level: int = logging.NOTSET,
     ) -> None:
         super().__init__()
@@ -573,15 +573,17 @@ class _DebugLogHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            self._buffer.append(
-                {
-                    "t": datetime.datetime.fromtimestamp(
-                        record.created, tz=datetime.UTC
-                    ).isoformat(timespec="seconds"),
-                    "level": record.levelname,
-                    "msg": self.format(record),
-                }
-            )
+            entry: dict[str, Any] = {
+                "t": datetime.datetime.fromtimestamp(
+                    record.created, tz=datetime.UTC
+                ).isoformat(timespec="seconds"),
+                "level": record.levelname,
+                "msg": self.format(record),
+            }
+            session: dict[str, Any] = getattr(record, "session", {})
+            if session:
+                entry["session"] = session
+            self._buffer.append(entry)
         except Exception:  # noqa: BLE001
             self.handleError(record)
 
@@ -596,7 +598,7 @@ class DebugLogSensor(SensorEntity):
     def __init__(
         self,
         entry: ConfigEntry,
-        buffer: collections.deque[dict[str, str]],
+        buffer: collections.deque[dict[str, Any]],
     ) -> None:
         self._buffer = buffer
         self._attr_unique_id = f"{entry.entry_id}_debug_log"
@@ -621,7 +623,7 @@ def setup_debug_log(
     if state is None or state.state != "on":
         return None
 
-    buf: collections.deque[dict[str, str]] = collections.deque(
+    buf: collections.deque[dict[str, Any]] = collections.deque(
         maxlen=_DEBUG_LOG_BUFFER_SIZE
     )
     logger = logging.getLogger("custom_components.foxess_control")

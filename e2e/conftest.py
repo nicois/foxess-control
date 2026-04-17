@@ -68,7 +68,7 @@ def pytest_terminal_summary(terminalreporter: Any, config: Any) -> None:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
 
     from playwright.sync_api import BrowserContext, Page, Playwright
 
@@ -482,3 +482,16 @@ def data_source(
     if mode == "ws":
         ha_e2e.set_options(ws_all_sessions=True)
     yield mode
+
+
+@pytest.fixture
+def structured_logs(
+    ha_e2e: HAClient,
+) -> Callable[[], list[dict[str, Any]]]:
+    """Return a callable that fetches debug log entries with session context."""
+
+    def _get() -> list[dict[str, Any]]:
+        attrs = ha_e2e.get_attributes("sensor.foxess_control_debug_log")
+        return [e for e in attrs.get("entries", []) if e.get("session")]
+
+    return _get

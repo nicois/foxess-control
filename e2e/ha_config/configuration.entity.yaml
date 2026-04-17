@@ -8,6 +8,10 @@ homeassistant:
         - ::/0
       allow_bypass_login: true
 
+input_boolean:
+  foxess_control_debug_log:
+    initial: true
+
 input_select:
   foxess_work_mode:
     options:
