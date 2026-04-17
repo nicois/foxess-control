@@ -11,7 +11,7 @@
  *   # soc_entity: sensor.foxess_battery_soc
  */
 
-const CARD_VERSION = "1.4.0";
+const CARD_VERSION = "1.5.0";
 
 // -- i18n --------------------------------------------------------------------
 
@@ -425,6 +425,8 @@ class FoxESSControlCard extends HTMLElement {
       operations_entity:
         config.operations_entity || "sensor.foxess_smart_operations",
       soc_entity: config.soc_entity || "sensor.foxess_battery_soc",
+      freshness_entity:
+        config.freshness_entity || "sensor.foxess_data_freshness",
       ...config,
     };
   }
@@ -470,11 +472,25 @@ class FoxESSControlCard extends HTMLElement {
     return e && e.attributes && e.attributes.data_source ? e.attributes.data_source : null;
   }
 
-  _dataSourceBadge(source) {
+  _dataSourceBadge(source, ageSeconds) {
     if (!source) return "";
     const labels = { ws: "WS", api: "API", modbus: "Modbus" };
     const label = labels[source] || source;
-    return `<span class="data-source" title="Data: ${label}">${label}</span>`;
+    const staleThreshold = 10;
+    const isStale = typeof ageSeconds === "number" && ageSeconds > staleThreshold;
+    const ageLabel = typeof ageSeconds === "number" ? this._formatAge(ageSeconds) : "";
+    const cls = isStale ? "data-source stale" : "data-source";
+    const title = ageLabel ? `Data: ${label} (${ageLabel} ago)` : `Data: ${label}`;
+    const text = isStale ? `${label} · ${ageLabel}` : label;
+    return `<span class="${cls}" title="${title}">${text}</span>`;
+  }
+
+  _formatAge(seconds) {
+    if (seconds < 60) return `${seconds}s`;
+    const m = Math.floor(seconds / 60);
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    return `${h}h${m % 60}m`;
   }
 
   _formatPower(watts) {
@@ -570,11 +586,14 @@ class FoxESSControlCard extends HTMLElement {
     else if (socPct <= 30) barColor = "var(--warning-color, #ff9800)";
 
     const dataSource = this._getDataSource();
+    const freshnessEntity = this._entity(this._config.freshness_entity);
+    const lastUpdate = freshnessEntity && freshnessEntity.attributes && freshnessEntity.attributes.last_update;
+    const ageSeconds = lastUpdate ? Math.max(0, Math.round((Date.now() - new Date(lastUpdate).getTime()) / 1000)) : null;
 
     return `
       <div class="header">
         <div class="header-left">
-          <div class="title">${this._t("title")}${this._dataSourceBadge(dataSource)}</div>
+          <div class="title">${this._t("title")}${this._dataSourceBadge(dataSource, ageSeconds)}</div>
         </div>
         <div class="header-right">
           <div class="soc-group">
@@ -966,6 +985,10 @@ class FoxESSControlCard extends HTMLElement {
         margin-left: 6px;
         vertical-align: middle;
         letter-spacing: 0.03em;
+      }
+      .data-source.stale {
+        background: rgba(var(--rgb-warning-color, 255, 152, 0), 0.15);
+        color: var(--warning-color, #ff9800);
       }
       .header-right {
         display: flex;
