@@ -1209,8 +1209,7 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
     # Any *started* smart session when ws_all_sessions is enabled
     if not ws_all:
         _LOGGER.debug(
-            "WS check: ws_all_sessions=%s, no paced discharge "
-            "(options=%s)",
+            "WS check: ws_all_sessions=%s, no paced discharge (options=%s)",
             ws_all,
             {k: v for k, v in entry.options.items() if "password" not in k.lower()},
         )

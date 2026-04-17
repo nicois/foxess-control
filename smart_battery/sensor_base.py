@@ -763,9 +763,7 @@ class SmartOperationsOverviewSensor(SensorEntity):
                 {
                     "discharge_phase": discharge_phase,
                     "discharge_power_w": ds_power,
-                    "discharge_target_power_w": ds.get(
-                        "target_power_w", ds_power
-                    ),
+                    "discharge_target_power_w": ds.get("target_power_w", ds_power),
                     "discharge_max_power_w": ds.get("max_power_w"),
                     "discharge_min_soc": ds.get("min_soc"),
                     "discharge_current_soc": soc,

@@ -840,7 +840,9 @@ def setup_smart_discharge_listeners(
                     )
                     cur_state["last_power_w"] = 0
                     await adapter.apply_mode(
-                        hass, WorkMode.SELF_USE, 0,
+                        hass,
+                        WorkMode.SELF_USE,
+                        0,
                         fd_soc=cur_state.get("min_soc", 11),
                     )
                     if not _is_my_session():

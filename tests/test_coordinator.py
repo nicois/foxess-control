@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -490,7 +491,7 @@ class TestSocExtrapolationDoesNotStarvePoll:
         from custom_components.foxess_control.const import DOMAIN
 
         coord = _make_coordinator(update_interval=300)
-        inv = coord.inverter
+        inv: Any = coord.inverter
         inv.get_real_time.return_value = {
             "SoC": 47,
             "batChargePower": 0.0,
@@ -500,13 +501,14 @@ class TestSocExtrapolationDoesNotStarvePoll:
 
         entry = MagicMock()
         entry.options = {"battery_capacity_kwh": 10.0}
-        coord.hass.data = {DOMAIN: {"test-entry": {}}}
-        coord.hass.config_entries.async_get_entry = MagicMock(return_value=entry)
+        coord.hass.data = {DOMAIN: {"test-entry": {}}}  # type: ignore[assignment]
+        coord.hass.config_entries.async_get_entry = MagicMock(  # type: ignore[method-assign]
+            return_value=entry
+        )
 
-        # Capture what _schedule_soc_extrapolation registers
-        registered_callbacks: list = []
+        registered_callbacks: list[Any] = []
 
-        def fake_call_later(_hass, _delay, cb):
+        def fake_call_later(_hass: Any, _delay: float, cb: Any) -> MagicMock:
             registered_callbacks.append(cb)
             return MagicMock()
 
@@ -523,15 +525,14 @@ class TestSocExtrapolationDoesNotStarvePoll:
 
         assert registered_callbacks, "Extrapolation should be scheduled"
 
-        # Spy on async_set_updated_data
         original = coord.async_set_updated_data
-        set_updated_calls: list = []
+        set_updated_calls: list[Any] = []
 
-        def spy(d):
+        def spy(d: Any) -> None:
             set_updated_calls.append(d)
             original(d)
 
-        coord.async_set_updated_data = spy
+        coord.async_set_updated_data = spy  # type: ignore[assignment]
 
         # Advance 60s — enough for the 0.571kW discharge on 10kWh to
         # change the rounded SoC (0.571/10*100 * 60/3600 ≈ 0.095%)

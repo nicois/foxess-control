@@ -217,11 +217,15 @@ class TestFeedinPacing:
             f"{ha_e2e.base_url}/api/config/config_entries/options/flow/{flow_id}",
             json=submit_data,
         )
-        assert options_r.ok, f"Options flow failed: {options_r.status_code} {options_r.text[:500]}"
+        assert options_r.ok, (
+            f"Options flow failed: {options_r.status_code} {options_r.text[:500]}"
+        )
         reload_r = session.post(
             f"{ha_e2e.base_url}/api/config/config_entries/entry/{entry_id}/reload"
         )
-        assert reload_r.ok, f"Reload failed: {reload_r.status_code} {reload_r.text[:500]}"
+        assert reload_r.ok, (
+            f"Reload failed: {reload_r.status_code} {reload_r.text[:500]}"
+        )
 
         import time as _time
 
