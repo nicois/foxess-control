@@ -4,6 +4,7 @@
 
 ### Added
 - **Structured session logging**: enrich existing log messages with session context (session_id, session_type, SoC, power levels) via a `logging.Filter`. The debug log sensor exposes structured session data in its attributes for E2E tests and power users.
+- **Data freshness sensor**: new `sensor.foxess_data_freshness` exposes the current data source (`ws`, `api`, or `modbus`) as its state, with `last_update` (ISO timestamp) and `age_seconds` attributes. Lovelace cards can use `age_seconds` to indicate when data is stale in API-polling mode (up to 5 min lag) vs live in WS/modbus mode (~5s updates).
 
 ### Changed
 - **WebSocket mode selector**: replaced the boolean `ws_all_sessions` toggle with a 3-state `ws_mode` dropdown: **Auto** (WS only during paced forced discharge — the default), **All smart sessions** (WS during any smart session or force op), and **Always connected** (WS preferred over REST polling at all times). Existing configurations migrate automatically. "Always" mode includes a watchdog that recovers the WS connection after transient failures.

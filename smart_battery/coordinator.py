@@ -13,6 +13,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -70,6 +71,7 @@ class EntityCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             data["_work_mode"] = None
 
         data["_data_source"] = "modbus"
+        data["_data_last_update"] = dt_util.utcnow().isoformat()
         return data
 
 

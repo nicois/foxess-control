@@ -51,7 +51,8 @@
       "discharge_power": { "name": "Discharge Power" },
       "discharge_window": { "name": "Discharge Window" },
       "discharge_remaining": { "name": "Discharge Remaining" },
-      "battery_forecast": { "name": "Battery Forecast" }
+      "battery_forecast": { "name": "Battery Forecast" },
+      "data_freshness": { "name": "Data Freshness" }
     },
     "binary_sensor": {
       "smart_charge_active": { "name": "Smart Charge Active" },

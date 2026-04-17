@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.core import callback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, POLLED_VARIABLES
 from .smart_battery.coordinator import EntityCoordinator as _EntityCoordinator
@@ -199,6 +200,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._soc_last_bat_kw = net_bat_kw
         self._ws_last_time = now
         data["_data_source"] = "api"
+        data["_data_last_update"] = dt_util.utcnow().isoformat()
         self._schedule_soc_extrapolation()
         return data
 
@@ -363,6 +365,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ws_data["_soc_interpolated"] = round(self._soc_interpolated, 1)
 
         ws_data["_data_source"] = "ws"
+        ws_data["_data_last_update"] = dt_util.utcnow().isoformat()
 
         # Instrumentation: warn when WS power values are >10x different
         # from existing coordinator values (catches unit mismatch).
@@ -384,8 +387,13 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     cur_val,
                 )
 
-        # Skip if nothing actually changed (avoids redundant entity updates)
-        if all(self.data.get(k) == v for k, v in ws_data.items()):
+        # Skip if nothing actually changed (avoids redundant entity updates).
+        # Exclude _data_last_update — it always differs.
+        if all(
+            self.data.get(k) == v
+            for k, v in ws_data.items()
+            if k != "_data_last_update"
+        ):
             return
         merged = dict(self.data)
         merged.update(ws_data)

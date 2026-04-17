@@ -187,6 +187,7 @@ async def async_setup_entry(
             for desc in POLLED_SENSOR_DESCRIPTIONS
         )
         entities.append(FoxESSWorkModeSensor(coordinator, entry))
+        entities.append(FoxESSDataFreshnessSensor(coordinator, entry))
 
     # Opt-in debug log capture
     result = setup_debug_log(hass, entry)
@@ -552,6 +553,47 @@ class FoxESSWorkModeSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntit
             return None
         val: str | None = self.coordinator.data.get("_work_mode")
         return val
+
+
+class FoxESSDataFreshnessSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity):
+    """Sensor exposing data source and staleness for Lovelace cards."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:clock-check-outline"
+
+    def __init__(
+        self,
+        coordinator: FoxESSDataCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_data_freshness"
+        self._attr_translation_key = "data_freshness"
+        self._attr_device_info = _device_info(entry)
+
+    @property
+    def native_value(self) -> str | None:
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.get("_data_source")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        if self.coordinator.data is None:
+            return None
+        last_update = self.coordinator.data.get("_data_last_update")
+        if last_update is None:
+            return None
+        now = dt_util.utcnow()
+        try:
+            updated_at = datetime.datetime.fromisoformat(last_update)
+            age_seconds = round((now - updated_at).total_seconds())
+        except (ValueError, TypeError):
+            return {"last_update": last_update}
+        return {
+            "last_update": last_update,
+            "age_seconds": max(0, age_seconds),
+        }
 
 
 # ---------------------------------------------------------------------------
