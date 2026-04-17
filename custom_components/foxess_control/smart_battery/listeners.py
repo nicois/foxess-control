@@ -191,9 +191,13 @@ def cancel_smart_charge(
     domain: str,
     *,
     clear_storage: bool = True,
-) -> None:
-    """Cancel any active smart charge listeners and clear stored session."""
-    cancel_smart_session(
+) -> Any:
+    """Cancel any active smart charge listeners and clear stored session.
+
+    Returns the deferred WS shutdown coroutine (if any) from the cancel hook.
+    Callers should await it AFTER override removal completes.
+    """
+    return cancel_smart_session(
         hass.data[domain],
         "_smart_charge_state",
         "_smart_charge_unsubs",
@@ -209,9 +213,13 @@ def cancel_smart_discharge(
     domain: str,
     *,
     clear_storage: bool = True,
-) -> None:
-    """Cancel any active smart discharge listeners and clear stored session."""
-    cancel_smart_session(
+) -> Any:
+    """Cancel any active smart discharge listeners and clear stored session.
+
+    Returns the deferred WS shutdown coroutine (if any) from the cancel hook.
+    Callers should await it AFTER override removal completes.
+    """
+    return cancel_smart_session(
         hass.data[domain],
         "_smart_discharge_state",
         "_smart_discharge_unsubs",
@@ -263,9 +271,11 @@ def setup_smart_charge_listeners(
             .get("_smart_charge_state", {})
             .get("charging_started", False)
         )
-        cancel_smart_charge(hass, domain)
+        ws_stop = cancel_smart_charge(hass, domain)
         if charging_started:
             await _remove_charge_override()
+        if ws_stop is not None:
+            await ws_stop
 
     async def _adjust_charge_power(_now: datetime.datetime) -> None:
         cur_state = hass.data[domain].get("_smart_charge_state")
@@ -301,9 +311,11 @@ def setup_smart_charge_listeners(
             try:
                 charging_started = cur_state.get("charging_started", False)
                 if _is_my_session():
-                    cancel_smart_charge(hass, domain)
+                    ws_stop = cancel_smart_charge(hass, domain)
                     if charging_started:
                         await _remove_charge_override()
+                    if ws_stop is not None:
+                        await ws_stop
             except Exception:
                 _LOGGER.exception("Smart charge: cleanup also failed")
 
@@ -325,9 +337,11 @@ def setup_smart_charge_listeners(
                 )
                 charging_started = cur_state.get("charging_started", False)
                 if _is_my_session():
-                    cancel_smart_charge(hass, domain)
+                    ws_stop = cancel_smart_charge(hass, domain)
                     if charging_started:
                         await _remove_charge_override()
+                    if ws_stop is not None:
+                        await ws_stop
                 return
             _LOGGER.debug("Smart charge: SoC unavailable, skipping adjustment")
             return
@@ -360,9 +374,11 @@ def setup_smart_charge_listeners(
             _LOGGER.info("Smart charge: window expired during adjustment, reverting")
             charging_started = cur_state.get("charging_started", False)
             if _is_my_session():
-                cancel_smart_charge(hass, domain)
+                ws_stop = cancel_smart_charge(hass, domain)
                 if charging_started:
                     await _remove_charge_override()
+                if ws_stop is not None:
+                    await ws_stop
             return
 
         net_consumption = _get_net_consumption(hass, domain)
@@ -575,9 +591,11 @@ def setup_smart_discharge_listeners(
         cur = hass.data[domain].get("_smart_discharge_state")
         was_active = cur is not None and cur.get("discharging_started", True)
         _log_session_end("window ended, removing override")
-        cancel_smart_discharge(hass, domain)
+        ws_stop = cancel_smart_discharge(hass, domain)
         if was_active:
             await _remove_discharge_override()
+        if ws_stop is not None:
+            await ws_stop
 
     async def _check_discharge_soc(_now: datetime.datetime) -> None:
         cur_state = hass.data[domain].get("_smart_discharge_state")
@@ -614,9 +632,11 @@ def setup_smart_discharge_listeners(
             try:
                 discharging_started = cur_state.get("discharging_started", False)
                 if _is_my_session():
-                    cancel_smart_discharge(hass, domain)
+                    ws_stop = cancel_smart_discharge(hass, domain)
                     if discharging_started:
                         await _remove_discharge_override()
+                    if ws_stop is not None:
+                        await ws_stop
             except Exception:
                 _LOGGER.exception("Smart discharge: cleanup also failed")
 
@@ -731,8 +751,10 @@ def setup_smart_discharge_listeners(
                                 f"reached limit {feedin_limit:.2f} kWh, "
                                 "removing override"
                             )
-                            cancel_smart_discharge(hass, domain)
+                            ws_stop = cancel_smart_discharge(hass, domain)
                             await _remove_discharge_override()
+                            if ws_stop is not None:
+                                await ws_stop
                         return
 
                     remaining_kwh = feedin_limit - exported
@@ -773,8 +795,10 @@ def setup_smart_discharge_listeners(
                             _log_session_end(
                                 "early stop triggered (feed-in target ~reached)"
                             )
-                            cancel_smart_discharge(hass, domain)
+                            ws_stop = cancel_smart_discharge(hass, domain)
                             await _remove_discharge_override()
+                            if ws_stop is not None:
+                                await ws_stop
 
                         unsub = async_track_point_in_time(hass, _early_stop, stop_at)
                         hass.data[domain].setdefault(
@@ -796,9 +820,11 @@ def setup_smart_discharge_listeners(
                 _record_error(hass, domain, "Discharge aborted: SoC unavailable")
                 discharging_started = cur_state.get("discharging_started", False)
                 if _is_my_session():
-                    cancel_smart_discharge(hass, domain)
+                    ws_stop = cancel_smart_discharge(hass, domain)
                     if discharging_started:
                         await _remove_discharge_override()
+                    if ws_stop is not None:
+                        await ws_stop
                 return
             _LOGGER.debug("Smart discharge: SoC unavailable, skipping adjustment")
             return
@@ -985,8 +1011,10 @@ def setup_smart_discharge_listeners(
                     f"SoC {soc_value:.1f}% confirmed at/below "
                     f"threshold {cur_state['min_soc']}%, removing override"
                 )
-                cancel_smart_discharge(hass, domain)
+                ws_stop = cancel_smart_discharge(hass, domain)
                 await _remove_discharge_override()
+                if ws_stop is not None:
+                    await ws_stop
         else:
             cur_state["soc_below_min_count"] = 0
 

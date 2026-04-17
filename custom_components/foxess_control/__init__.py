@@ -128,6 +128,8 @@ from .smart_battery.session import (
 from .smart_battery.taper import TaperProfile as _TaperProfile
 
 if TYPE_CHECKING:
+    from collections.abc import Coroutine
+
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant, ServiceCall
 
@@ -515,7 +517,9 @@ async def _save_taper_profile(hass: HomeAssistant, profile: _TaperProfile) -> No
 
 def _cancel_smart_discharge(hass: HomeAssistant, *, clear_storage: bool = True) -> None:
     """Cancel any active smart discharge listeners and clear stored session."""
-    _sb_cancel_smart_discharge(hass, DOMAIN, clear_storage=clear_storage)
+    ws_stop = _sb_cancel_smart_discharge(hass, DOMAIN, clear_storage=clear_storage)
+    if ws_stop is not None:
+        hass.async_create_task(ws_stop)
 
 
 async def _save_session(hass: HomeAssistant, key: str, data: dict[str, Any]) -> None:
@@ -570,7 +574,9 @@ async def _async_remove_override(
 
 def _cancel_smart_charge(hass: HomeAssistant, *, clear_storage: bool = True) -> None:
     """Cancel any active smart charge listeners and clear stored session."""
-    _sb_cancel_smart_charge(hass, DOMAIN, clear_storage=clear_storage)
+    ws_stop = _sb_cancel_smart_charge(hass, DOMAIN, clear_storage=clear_storage)
+    if ws_stop is not None:
+        hass.async_create_task(ws_stop)
 
 
 def _build_foxess_adapter(
@@ -1446,10 +1452,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Post-cancel hook: stop WebSocket and clear stale work mode.
     # Called by the brand-agnostic cancel_smart_session after clearing state.
-    def _on_session_cancel() -> None:
+    # Returns a coroutine for WS shutdown; the caller must await it AFTER
+    # the override removal completes so the linger captures post-session
+    # data instead of stale forced-discharge/charge values (D-009).
+    def _on_session_cancel() -> Coroutine[Any, Any, None] | None:
         hass.data[DOMAIN].pop("_ws_discharge_callback", None)
+        ws_stop: Coroutine[Any, Any, None] | None = None
         if not _should_start_realtime_ws(hass):
-            hass.async_create_task(_stop_realtime_ws(hass))
+            ws_stop = _stop_realtime_ws(hass)
         # Clear work mode immediately so the overview card drops the
         # label without waiting for the next REST poll.
         # During unload the entry data is already removed, so guard access.
@@ -1457,11 +1467,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry_id = _first_entry_id(hass)
         except ServiceValidationError:
             _LOGGER.debug("Session cancel hook: no entry (unloading)")
-            return
+            return ws_stop
         entry_data = hass.data[DOMAIN].get(entry_id)
         if entry_data is None:
             _LOGGER.debug("Session cancel hook: entry data gone (unloading)")
-            return
+            return ws_stop
         coordinator = entry_data.get("coordinator")
         if coordinator is not None and coordinator.data is not None:
             old = coordinator.data.get("_work_mode")
@@ -1469,6 +1479,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             coordinator.async_set_updated_data(dict(coordinator.data))
             if old:
                 _LOGGER.info("Cleared work mode %s (session ended)", old)
+        return ws_stop
 
     hass.data[DOMAIN]["_on_session_cancel"] = _on_session_cancel
 

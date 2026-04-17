@@ -125,8 +125,13 @@ def cancel_smart_session(
     hass: HomeAssistant,
     *,
     clear_storage: bool = True,
-) -> None:
-    """Cancel an active smart session — unsubscribe listeners and clear state."""
+) -> Any:
+    """Cancel an active smart session — unsubscribe listeners and clear state.
+
+    Returns whatever the ``_on_session_cancel`` hook returns (typically a
+    coroutine for deferred WS shutdown that the caller should await after
+    the override removal completes).
+    """
     unsubs: list[Callable[[], None]] = domain_data.get(unsubs_key, [])
     for unsub in unsubs:
         unsub()
@@ -137,4 +142,5 @@ def cancel_smart_session(
     # Brand-specific post-cancel hook (e.g., stop WebSocket)
     hook = domain_data.get("_on_session_cancel")
     if hook is not None:
-        hook()
+        return hook()
+    return None
