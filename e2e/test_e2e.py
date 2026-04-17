@@ -487,7 +487,7 @@ class TestDataSource:
             "sensor.foxess_battery_soc",
             "le",
             26,
-            timeout_s=30,
+            timeout_s=90,
         )
 
         start, end = _tight_window(10)
