@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.5-beta.29
+
+### Fixed
+- **WS linger captured stale forced-discharge data (D-009)**: after a smart session ended, `_on_session_cancel` scheduled `_stop_realtime_ws` via `async_create_task`, which ran concurrently with override removal. The WS linger captured data while the inverter was still in forced discharge mode, leaving stale discharge values in the coordinator. The cancel hook now returns the WS stop coroutine; listener call sites await it after override removal completes, so the linger captures post-session self-use data.
+
 ## 1.0.5-beta.28
 
 ### Added
