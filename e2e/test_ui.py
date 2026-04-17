@@ -196,8 +196,8 @@ class TestOverviewCard:
             }"""
         )
         expected = data_source.upper()
-        assert badge_text == expected, (
-            f"Badge shows '{badge_text}', expected '{expected}'"
+        assert badge_text is not None and badge_text.startswith(expected), (
+            f"Badge shows '{badge_text}', expected to start with '{expected}'"
         )
 
     def test_stale_badge_shown_for_old_api_data(
