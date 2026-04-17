@@ -369,21 +369,41 @@ class TestSocInterpolationDuringDischarge:
         )
 
     def test_clamp_on_tick_change_display_value(self) -> None:
-        """On tick change, round(interpolated, 1) must not exceed new tick."""
+        """On tick change, Math.round(interpolated) must equal the new tick.
+
+        Reproduces the production bug: charging at 10.5 kW on 10 kWh,
+        SoC ticks 49→50.  Interpolation was running ahead at ~51.
+        The old clamp [50, 50.94] allowed round(50.9) = 51 in the
+        Lovelace header while sensor.foxess_battery_soc showed 50.
+
+        The clamp must keep the interpolated value within ±0.5 of
+        the reported tick so Math.round() always agrees with the entity.
+        """
         coord = self._make_coord()
 
-        coord.inject_realtime_data(self._ws_msg(97))
-        coord._soc_interpolated = 96.5
-        coord._soc_last_reported = 97.0
+        # Simulate charging: interpolation ran ahead to 51.2 while
+        # the inverter still reported SoC=49.
+        coord.data = {"SoC": 49, "_data_source": "ws"}
+        base = time.monotonic()
+        with patch("time.monotonic", return_value=base):
+            coord.inject_realtime_data(
+                {"SoC": 49, "batChargePower": 10.5, "batDischargePower": 0.0}
+            )
+        coord._soc_interpolated = 51.2
+        coord._soc_last_reported = 49.0
 
-        coord.inject_realtime_data(self._ws_msg(96))
+        # Now the tick changes: inverter reports SoC=50
+        with patch("time.monotonic", return_value=base + 5):
+            coord.inject_realtime_data(
+                {"SoC": 50, "batChargePower": 10.5, "batDischargePower": 0.0}
+            )
 
-        displayed = round(coord._soc_interpolated, 1)
-        assert displayed <= 96.9, (
-            f"Displayed value {displayed} should not exceed tick 96 "
-            f"(raw: {coord._soc_interpolated})"
+        # The JS card header does Math.round(interpolated).
+        # It must equal the reported integer tick.
+        assert round(coord._soc_interpolated) == 50, (
+            f"Math.round({coord._soc_interpolated}) = "
+            f"{round(coord._soc_interpolated)}, expected 50"
         )
-        assert coord._soc_interpolated >= 96.0
 
     def test_interpolation_without_feedin_data(self) -> None:
         """SoC integration must run even when feedinPower is absent."""

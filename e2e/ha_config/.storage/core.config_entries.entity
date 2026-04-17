@@ -18,10 +18,7 @@
         "modified_at": "2026-01-01T00:00:00.000000+00:00",
         "options": {
           "battery_capacity_kwh": 10.0,
-          "inverter_power": 12000,
           "polling_interval": 5,
-          "min_power_change": 100,
-          "smart_headroom": 0.1,
           "work_mode_entity": "input_select.foxess_work_mode",
           "charge_power_entity": "input_number.foxess_charge_power",
           "discharge_power_entity": "input_number.foxess_discharge_power",

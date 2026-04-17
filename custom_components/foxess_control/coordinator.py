@@ -119,15 +119,11 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._soc_last_reported = reported
             elif reported != self._soc_last_reported:
                 # Integer SoC tick changed — clamp the interpolated
-                # value into [new_tick, new_tick+1) so the display
-                # never contradicts the authoritative value at the
-                # moment it changes.  After this, power integration
-                # may drift freely (e.g. discharge during charge).
-                # Upper bound 0.94 ensures round(x, 1) stays below
-                # reported+1 (0.95 rounds up to next tenth).
+                # value into the rounding bucket of the new tick so
+                # Math.round(interpolated) always equals the entity.
                 self._soc_interpolated = max(
-                    reported,
-                    min(reported + 0.94, self._soc_interpolated),
+                    reported - 0.5,
+                    min(reported + 0.44, self._soc_interpolated),
                 )
                 self._soc_last_reported = reported
             elif self._ws_last_time is not None:
@@ -141,6 +137,11 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         self._soc_interpolated = max(
                             0.0, min(100.0, self._soc_interpolated + delta_pct)
                         )
+            # Keep within the rounding bucket of the authoritative tick
+            self._soc_interpolated = max(
+                reported - 0.5,
+                min(reported + 0.44, self._soc_interpolated),
+            )
             data["_soc_interpolated"] = round(self._soc_interpolated, 1)
 
         self._soc_last_bat_kw = net_bat_kw
@@ -194,6 +195,11 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             delta_pct = self._soc_last_bat_kw * elapsed_h / capacity * 100.0
             new_val = max(0.0, min(100.0, self._soc_interpolated + delta_pct))
+            if self._soc_last_reported is not None:
+                new_val = max(
+                    self._soc_last_reported - 0.5,
+                    min(self._soc_last_reported + 0.44, new_val),
+                )
             new_rounded = round(new_val, 1)
             old_rounded = round(self._soc_interpolated, 1)
 
@@ -269,10 +275,10 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._soc_interpolated = float(reported_soc)
                 self._soc_last_reported = float(reported_soc)
             elif float(reported_soc) != self._soc_last_reported:
-                # Integer SoC tick changed — clamp into [new, new+1)
+                # Integer SoC tick changed — clamp into rounding bucket
                 self._soc_interpolated = max(
-                    float(reported_soc),
-                    min(float(reported_soc) + 0.94, self._soc_interpolated),
+                    float(reported_soc) - 0.5,
+                    min(float(reported_soc) + 0.44, self._soc_interpolated),
                 )
                 self._soc_last_reported = float(reported_soc)
 
@@ -286,6 +292,13 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._soc_interpolated = max(
                         0.0, min(100.0, self._soc_interpolated + delta_pct)
                     )
+            # Keep interpolated within the rounding bucket of the
+            # last authoritative tick so Math.round() matches the entity.
+            if self._soc_last_reported is not None:
+                self._soc_interpolated = max(
+                    self._soc_last_reported - 0.5,
+                    min(self._soc_last_reported + 0.44, self._soc_interpolated),
+                )
         self._soc_last_bat_kw = net_bat_kw
         # Update timestamp AFTER integration so elapsed > 0 on the
         # next message.  Unconditional — SoC interpolation needs

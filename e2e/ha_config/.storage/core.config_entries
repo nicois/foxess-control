@@ -20,12 +20,7 @@
         "modified_at": "2026-01-01T00:00:00.000000+00:00",
         "options": {
           "battery_capacity_kwh": 10.0,
-          "min_soc_on_grid": 15,
-          "api_min_soc": 11,
-          "polling_interval": 60,
-          "min_power_change": 100,
-          "smart_headroom": 0.1,
-          "ws_all_sessions": true
+          "polling_interval": 60
         },
         "pref_disable_new_entities": false,
         "pref_disable_polling": false,

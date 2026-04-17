@@ -178,7 +178,7 @@ class TestFeedinPacing:
         discharges at the initial rate for the entire window.
 
         Steps:
-        1. Set min_power_change=500 (the default) via options flow
+        1. Uses default min_power_change=500 (production default)
         2. Start discharge with feed-in limit
         3. Fast-forward 10 minutes
         4. Assert discharge power increased from initial value
@@ -186,50 +186,8 @@ class TestFeedinPacing:
         if connection_mode != "cloud":
             pytest.skip("requires simulator fast_forward")
         assert foxess_sim is not None
-        import requests as _requests
-
-        # Set min_power_change to 500 (default) via options flow
-        # to reproduce the production failure mode.
-        session = _requests.Session()
-        session.headers.update(
-            {
-                "Authorization": ha_e2e._session.headers["Authorization"],
-                "Content-Type": "application/json",
-            }
-        )
-        entries = session.get(
-            f"{ha_e2e.base_url}/api/config/config_entries/entry"
-        ).json()
-        foxess_entry = next(e for e in entries if e["domain"] == "foxess_control")
-        entry_id = foxess_entry["entry_id"]
-
-        r = session.post(
-            f"{ha_e2e.base_url}/api/config/config_entries/options/flow",
-            json={"handler": entry_id},
-        )
-        flow = r.json()
-        flow_id = flow["flow_id"]
-        submit_data = {}
-        for field in flow.get("data_schema", []):
-            submit_data[field["name"]] = field.get("default")
-        submit_data["min_power_change"] = 500
-        options_r = session.post(
-            f"{ha_e2e.base_url}/api/config/config_entries/options/flow/{flow_id}",
-            json=submit_data,
-        )
-        assert options_r.ok, (
-            f"Options flow failed: {options_r.status_code} {options_r.text[:500]}"
-        )
-        reload_r = session.post(
-            f"{ha_e2e.base_url}/api/config/config_entries/entry/{entry_id}/reload"
-        )
-        assert reload_r.ok, (
-            f"Reload failed: {reload_r.status_code} {reload_r.text[:500]}"
-        )
 
         import time as _time
-
-        _time.sleep(5)
 
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
         start, end = _tight_window(30)
@@ -288,6 +246,7 @@ class TestFaultInjection:
         if connection_mode != "cloud":
             pytest.skip("WS fault injection requires cloud mode")
         assert foxess_sim is not None
+        ha_e2e.set_options(ws_all_sessions=True)
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
 
         start, end = _tight_window(10)
@@ -356,6 +315,7 @@ class TestDataSource:
         if connection_mode != "cloud":
             pytest.skip("WS is cloud-specific")
         assert foxess_sim is not None
+        ha_e2e.set_options(ws_all_sessions=True)
 
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
         start, end = _tight_window(10)
@@ -437,6 +397,7 @@ class TestDataSource:
         if connection_mode != "cloud":
             pytest.skip("WS is cloud-specific")
         assert foxess_sim is not None
+        ha_e2e.set_options(ws_all_sessions=True)
 
         # --- Session 1 ---
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
@@ -492,6 +453,61 @@ class TestDataSource:
             timeout_s=90,
         )
 
+    def test_ws_connects_after_deferred_start(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """WS must connect when a deferred discharge transitions to active.
+
+        Reproduces production bug: session starts deferred (SoC headroom
+        means forced discharge isn't needed yet).  The initial
+        _maybe_start_realtime_ws call is skipped for deferred sessions.
+        When the deferred phase ends and forced discharge begins, the
+        periodic timer callback must trigger WS — but the timer uses
+        the unwrapped callback that doesn't call _maybe_start_realtime_ws.
+
+        Setup: low energy to discharge (SoC 25%, min_soc 20%) with a
+        long-ish window (8 min) so the algorithm defers for ~5 minutes
+        before starting forced discharge.
+        """
+        if connection_mode != "cloud":
+            pytest.skip("WS is cloud-specific")
+        assert foxess_sim is not None
+        ha_e2e.set_options(ws_all_sessions=True)
+        foxess_sim.set(soc=25, solar_kw=0, load_kw=0.3)
+
+        start, end = _tight_window(8)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 20},
+        )
+
+        # Session should start in deferred phase
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharge_deferred",
+            timeout_s=60,
+        )
+
+        # Wait for deferred→active transition (up to ~6 min)
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=420,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        # WS must connect after the deferred→active transition
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_battery_soc",
+            "data_source",
+            "ws",
+            timeout_s=90,
+        )
+
     def test_ws_all_sessions_persists_via_options_flow(
         self,
         ha_e2e: HAClient,
@@ -513,54 +529,7 @@ class TestDataSource:
         if connection_mode != "cloud":
             pytest.skip("WS is cloud-specific")
         assert foxess_sim is not None
-        import requests as _requests
-
-        session = _requests.Session()
-        session.headers.update(
-            {
-                "Authorization": ha_e2e._session.headers["Authorization"],
-                "Content-Type": "application/json",
-            }
-        )
-
-        # Get current config entry
-        entries = session.get(
-            f"{ha_e2e.base_url}/api/config/config_entries/entry"
-        ).json()
-        foxess_entry = next(e for e in entries if e["domain"] == "foxess_control")
-        entry_id = foxess_entry["entry_id"]
-
-        # Start options flow
-        r = session.post(
-            f"{ha_e2e.base_url}/api/config/config_entries/options/flow",
-            json={"handler": entry_id},
-        )
-        assert r.ok, f"Options flow start failed: {r.status_code}"
-        flow = r.json()
-        assert flow.get("type") == "form", f"Expected form, got {flow}"
-        flow_id = flow["flow_id"]
-
-        # Build submission from schema defaults + ws_all_sessions=True
-        schema = flow.get("data_schema", [])
-        submit_data = {}
-        for field in schema:
-            name = field.get("name", "")
-            submit_data[name] = field.get("default")
-        submit_data["ws_all_sessions"] = True
-
-        # Submit the options
-        r = session.post(
-            f"{ha_e2e.base_url}/api/config/config_entries/options/flow/{flow_id}",
-            json=submit_data,
-        )
-        assert r.ok, f"Options flow submit failed: {r.status_code} {r.json()}"
-
-        # Verify the option was persisted by reloading and checking
-        # that WS activates during a discharge
-        r = session.post(
-            f"{ha_e2e.base_url}/api/config/config_entries/entry/{entry_id}/reload"
-        )
-        assert r.ok, f"Reload failed: {r.status_code}"
+        ha_e2e.set_options(ws_all_sessions=True)
 
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
         start, end = _tight_window(10)
@@ -601,6 +570,7 @@ class TestDataSource:
         if connection_mode != "cloud":
             pytest.skip("WS is cloud-specific")
         assert foxess_sim is not None
+        ha_e2e.set_options(ws_all_sessions=True)
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
 
         start, end = _tight_window(10)

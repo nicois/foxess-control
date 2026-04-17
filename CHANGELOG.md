@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.5-beta.16
+
+### Fixed
+- **SoC interpolation overshooting entity value**: the interpolated SoC (used by the Lovelace battery icon and progress bar) could exceed the integer tick by more than 0.5%, causing `Math.round()` to display a higher value than `sensor.foxess_battery_soc`. The clamp is now `[tick − 0.5, tick + 0.44]` so the rounded display always matches the entity.
+
+### Changed
+- **E2E config uses production defaults**: removed non-default overrides (`ws_all_sessions`, `min_power_change`, `smart_headroom`) from E2E seed config. Tests that need non-default options now set them explicitly via the options flow, matching real user setup.
+- **GitHub Actions updated**: checkout v4→v6, setup-python v5→v6, upload-artifact v4→v7, download-artifact v4→v8. Removed `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` workaround.
+
 ## 1.0.5-beta.15
 
 ### Fixed

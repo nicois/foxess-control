@@ -67,6 +67,48 @@ class HAClient:
                 f"{r.status_code} {r.text[:200]}"
             )
 
+    def set_options(self, **overrides: Any) -> None:
+        """Update integration options via the HA options flow and reload.
+
+        Opens the options flow for the foxess_control config entry,
+        merges *overrides* into the schema defaults, submits, and
+        reloads the entry so the new values take effect.
+        """
+        entries = self._session.get(
+            f"{self.base_url}/api/config/config_entries/entry", timeout=10
+        ).json()
+        foxess_entry = next(e for e in entries if e["domain"] == "foxess_control")
+        entry_id = foxess_entry["entry_id"]
+
+        r = self._session.post(
+            f"{self.base_url}/api/config/config_entries/options/flow",
+            json={"handler": entry_id},
+            timeout=10,
+        )
+        r.raise_for_status()
+        flow = r.json()
+        flow_id = flow["flow_id"]
+        submit_data: dict[str, Any] = {}
+        for field in flow.get("data_schema", []):
+            submit_data[field["name"]] = field.get("default")
+        submit_data.update(overrides)
+
+        r = self._session.post(
+            f"{self.base_url}/api/config/config_entries/options/flow/{flow_id}",
+            json=submit_data,
+            timeout=10,
+        )
+        if not r.ok:
+            raise RuntimeError(f"Options flow failed: {r.status_code} {r.text[:500]}")
+
+        r = self._session.post(
+            f"{self.base_url}/api/config/config_entries/entry/{entry_id}/reload",
+            timeout=10,
+        )
+        if not r.ok:
+            raise RuntimeError(f"Reload failed: {r.status_code} {r.text[:500]}")
+        time.sleep(5)
+
     def set_input_number(self, entity_id: str, value: float) -> None:
         """Set an input_number helper value."""
         self.call_service(
