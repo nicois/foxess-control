@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 created: 2026-04-14
-last_updated: 2026-04-17
+last_updated: 2026-04-18
 last_reflection: 2026-04-17T15:00:00+10:00
 ---
 # Knowledge Tree Meta
@@ -122,3 +122,56 @@ last_reflection: 2026-04-17T15:00:00+10:00
   E2E expanded via cloud/entity parametrization and new data source tests.
 - **C-024/C-025 promoted**: Both now have design docs (D-025/D-026), moving
   from PARTIAL to COVERED in the coverage matrix.
+
+### 2026-04-18 — Flaky test investigation + D-009 fix + session monitoring
+- **Flaky test root cause**: Unit tests using the FoxESS simulator
+  (`tests/test_client.py`, `tests/test_inverter.py`) failed intermittently
+  at ~0.5% rate under parallel execution. Three distinct test failures
+  observed across ~350 runs: `test_get_soc` (SoC=50 instead of 75),
+  `test_real_query` (SoC=50 instead of 75), `test_rate_limit_exhausts_retries`
+  (fault not raised). Root cause: `simulator/server.py` stored
+  `InverterModel` and `_ws_clients` as **module-level singletons**.
+  With `pytest-xdist -n auto`, each worker process has its own module
+  globals, but within a single worker, function-scoped fixtures create
+  new simulator apps (own port, own event loop thread) that all share
+  the same `_model`. Daemon threads from previous tests' simulators
+  could process `reset()` requests from teardown AFTER the next test
+  had already `set()` its state, clobbering the new test's setup.
+  Fix: moved `_model` and `_ws_clients` to per-app state
+  (`app["model"]`, `app["ws_clients"]`). Each `create_app()` now gets
+  a fully isolated `InverterModel`. 0/200 failures after fix vs 1/200
+  before.
+- **Troubleshooting methodology**: 5 initial runs didn't reproduce.
+  Scaled to 50 runs (1 failure), then 100 (0), then 200 with explicit
+  `-n 16` (1). The ~0.5% rate requires 200+ runs to reliably observe.
+  Key insight: examine ALL observed failure messages across runs — the
+  different test names but same symptom (wrong default values) pointed
+  to shared mutable state rather than a test-specific bug.
+- **D-009 WS linger race fixed**: E2E test
+  `test_ws_linger_captures_post_discharge_data` written first (test
+  before fix). Test confirmed failure on CI: `discharge_rate` stuck at
+  0.496 kW after session end. Fix: `_on_session_cancel` returns the WS
+  stop coroutine instead of scheduling via `async_create_task`; all 10
+  cancel→override paths in `listeners.py` await it after override
+  removal. CI confirmed fix passes.
+- **SoC precision**: Coordinator rounded `_soc_interpolated` to 1dp
+  before storing in coordinator data, losing precision before the
+  Lovelace card could display it. Card's `toFixed(2)` showed trailing
+  zero. Fix: store full float, round only for change detection (2dp
+  gate to prevent entity update storms).
+- **Live session monitoring**: Discharge session 09:00–09:11 monitored
+  in real-time via HA REST API. Verified: WS active, power pacing down
+  from 4.9kW to 0.5kW, feed-in tracking (deferred baseline working —
+  no phantom jump), schedule horizon set, session ended cleanly at
+  feed-in limit (1.0 kWh), no errors.
+- **Skill improvement opportunity**: The flaky test investigation
+  exposed a gap in C-033 (minimise simulator–production deviations) and
+  C-028 (simulator over mocks). The constraint says "use simulator",
+  but doesn't capture "simulator instances must be isolated". A new
+  constraint or an amendment to C-028 should state: **each test must
+  have an independent simulator instance with no shared mutable state**.
+  The module-level singleton pattern violated this implicitly — it
+  worked when tests ran serially but broke under parallelism. The
+  skill's staleness detection (monitoring `conftest.py` and test
+  infrastructure) would have flagged this if it checked for module-level
+  state in simulator code.
