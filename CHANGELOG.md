@@ -2,8 +2,12 @@
 
 ## 1.0.5-beta.24
 
+### Added
+- **Structural tests for coverage gaps**: AST-based `test_cancel_smart_session_is_synchronous` (C-016) verifies cancel functions cannot yield between unsub and state clear. `test_smart_battery_has_no_brand_imports` (C-021) verifies `smart_battery/` never imports from brand-specific packages.
+- **Design decisions D-028, D-029**: documented unreachable charge target detection (C-022) and proactive error surfacing mechanism (C-026).
+
 ### Changed
-- **Coverage matrix regenerated**: full bidirectional trace analysis with new ACCEPTED status for non-actionable gaps (infrastructure/methodology constraints). Actionable items reduced from 11 to 4.
+- **Coverage matrix regenerated**: full bidirectional trace analysis with new ACCEPTED status for non-actionable gaps. All 4 actionable PARTIAL gaps closed — COVERED rises from 65% to 77%.
 
 ### Fixed
 - **Smart discharge starting before window**: the deferred discharge listener omitted the `start=` parameter when calling `calculate_discharge_deferred_start`, bypassing the floor clamp that prevents discharge before the window opens. The inverter received a schedule with `fdPwr=0` but ignored the zero and discharged at full power. Now passes the window start time so the clamp keeps deferred mode active until the window begins.
