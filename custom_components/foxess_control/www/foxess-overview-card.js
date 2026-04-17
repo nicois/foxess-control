@@ -364,7 +364,8 @@ class FoxESSOverviewCard extends HTMLElement {
     const dataSource = this._getDataSource(eid);
     const freshnessId = eid.data_freshness_entity;
     const freshnessEntity = freshnessId && this._hass.states[freshnessId];
-    const ageSeconds = freshnessEntity && freshnessEntity.attributes && freshnessEntity.attributes.age_seconds;
+    const lastUpdate = freshnessEntity && freshnessEntity.attributes && freshnessEntity.attributes.last_update;
+    const ageSeconds = lastUpdate ? Math.max(0, Math.round((Date.now() - new Date(lastUpdate).getTime()) / 1000)) : null;
 
     this.shadowRoot.innerHTML = `
       <style>${FoxESSOverviewCard._styles()}</style>

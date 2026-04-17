@@ -1,10 +1,10 @@
 # Changelog
 
-## 1.0.5-beta.26
+## 1.0.5-beta.27
 
 ### Fixed
 - **Schedule horizon not set on immediate discharge start**: both the `__init__.py` service handler and brand-agnostic `services.py` bypassed the adapter's `apply_mode()` before the state dict existed, so `schedule_horizon` was never set for non-deferred sessions. Now computed inline before state dict creation.
-- **Overview card not showing data staleness**: the data freshness sensor was created but the overview card never read `age_seconds` from it. Added freshness entity to WS discovery map and badge now shows elapsed time with warning colour when API data exceeds 2 minutes.
+- **Overview card not showing data staleness**: the data freshness sensor was created but the overview card never read from it, and `age_seconds` was computed server-side (always ~0 in cached state). Card now computes age client-side from `last_update` and shows amber badge with elapsed time when data exceeds 10 seconds old.
 
 ## 1.0.5-beta.25
 
