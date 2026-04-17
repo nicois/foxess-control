@@ -665,6 +665,83 @@ class TestDataSource:
             timeout_s=90,
         )
 
+    def test_ws_linger_captures_post_discharge_data(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """After session end, WS linger must capture self-use data, not stale discharge.
+
+        Reproduces D-009 regression: the linger task starts before the
+        override removal API call completes, so it captures a WS push
+        that still shows forced-discharge values.  After the linger
+        disconnects, the coordinator is left with stale discharge data
+        and data_source incorrectly set to "api" without having seen
+        the real post-session state.
+
+        The correct behaviour: after session end and override removal,
+        the discharge rate entity should show 0 (self-use) and
+        data_source should revert to "api".
+        """
+        if connection_mode != "cloud":
+            pytest.skip("WS linger is cloud-specific")
+        assert foxess_sim is not None
+        ha_e2e.set_options(ws_mode="smart_sessions")
+        foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
+
+        start, end = _tight_window(10)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_battery_soc",
+            "data_source",
+            "ws",
+            timeout_s=90,
+        )
+
+        # Confirm discharge rate is non-zero while discharging
+        ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_discharge_rate",
+            "ge",
+            0.1,
+            timeout_s=30,
+        )
+
+        # End session via clear_overrides
+        ha_e2e.call_service("foxess_control", "clear_overrides", {})
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "idle",
+            timeout_s=60,
+        )
+
+        # After linger completes (~30s max), data_source should revert
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_battery_soc",
+            "data_source",
+            "api",
+            timeout_s=60,
+        )
+
+        # The discharge rate should reflect self-use (0), not the
+        # stale forced-discharge value captured during linger.
+        ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_discharge_rate",
+            "le",
+            0.05,
+            timeout_s=60,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Entity-mode-only tests
