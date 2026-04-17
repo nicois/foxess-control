@@ -1409,9 +1409,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.async_create_task(_stop_realtime_ws(hass))
         # Clear work mode immediately so the overview card drops the
         # label without waiting for the next REST poll.
-        entry_id = _first_entry_id(hass)
-        coordinator = hass.data[DOMAIN][entry_id]["coordinator"]
-        if coordinator.data is not None:
+        # During unload the entry data is already removed, so guard access.
+        try:
+            entry_id = _first_entry_id(hass)
+        except ServiceValidationError:
+            return
+        entry_data = hass.data[DOMAIN].get(entry_id)
+        if entry_data is None:
+            return
+        coordinator = entry_data.get("coordinator")
+        if coordinator is not None and coordinator.data is not None:
             coordinator.data["_work_mode"] = None
             coordinator.async_set_updated_data(dict(coordinator.data))
 
