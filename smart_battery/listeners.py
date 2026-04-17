@@ -239,7 +239,16 @@ def setup_smart_charge_listeners(
     my_session_id: str = state["session_id"]
 
     async def _remove_charge_override() -> None:
-        await adapter.remove_override(hass, WorkMode.FORCE_CHARGE)
+        try:
+            await adapter.remove_override(hass, WorkMode.FORCE_CHARGE)
+        except Exception:
+            _LOGGER.warning(
+                "Smart charge: override removal failed, scheduling retry: %s",
+                _exc_summary(),
+            )
+            hass.data[domain]["_pending_override_cleanup"] = {
+                "mode": WorkMode.FORCE_CHARGE.value,
+            }
 
     def _is_my_session() -> bool:
         cur = hass.data[domain].get("_smart_charge_state")
@@ -525,7 +534,16 @@ def setup_smart_discharge_listeners(
     my_session_id: str = state["session_id"]
 
     async def _remove_discharge_override() -> None:
-        await adapter.remove_override(hass, WorkMode.FORCE_DISCHARGE)
+        try:
+            await adapter.remove_override(hass, WorkMode.FORCE_DISCHARGE)
+        except Exception:
+            _LOGGER.warning(
+                "Smart discharge: override removal failed, scheduling retry: %s",
+                _exc_summary(),
+            )
+            hass.data[domain]["_pending_override_cleanup"] = {
+                "mode": WorkMode.FORCE_DISCHARGE.value,
+            }
 
     def _is_my_session() -> bool:
         cur = hass.data[domain].get("_smart_discharge_state")

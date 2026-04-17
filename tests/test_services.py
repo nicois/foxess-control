@@ -4482,3 +4482,143 @@ class TestTransientApiErrorResilience:
                 await captured_callback(datetime.datetime(2026, 4, 7, 3, i, 0))
 
         assert hass.data[DOMAIN].get("_smart_charge_state") is None
+
+
+class TestStaleWorkModeAfterCleanupFailure:
+    """Work mode must not stay stale when session abort's cleanup fails.
+
+    Reproduces production bug 2026-04-17: DNS outage aborted the charge
+    session.  The error handler called cancel_smart_charge (clearing
+    _work_mode to None) then _remove_charge_override (API call to clean
+    the schedule).  But the API was still down, so the removal also
+    failed.  The next REST poll re-read ForceCharge from the still-dirty
+    schedule, and the overview card showed "Force Charge" indefinitely.
+    """
+
+    @pytest.mark.asyncio
+    async def test_clear_overrides_clears_work_mode_immediately(self) -> None:
+        """clear_overrides must set _work_mode to None before awaiting API."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {
+            "groups": [
+                {
+                    "enable": 1,
+                    "startHour": 2,
+                    "startMinute": 0,
+                    "endHour": 6,
+                    "endMinute": 0,
+                    "workMode": "ForceCharge",
+                    "minSocOnGrid": 11,
+                    "fdSoc": 11,
+                    "fdPwr": 0,
+                }
+            ]
+        }
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 50.0, "_work_mode": "ForceCharge"},
+        )
+
+        # Register the session-cancel hook (normally done by async_setup_entry)
+        from custom_components.foxess_control import (
+            _first_entry_id,
+            _register_services,
+        )
+
+        def _on_session_cancel() -> None:
+            entry_id = _first_entry_id(hass)
+            coordinator = hass.data[DOMAIN][entry_id]["coordinator"]
+            if coordinator.data is not None:
+                coordinator.data["_work_mode"] = None
+
+        hass.data[DOMAIN]["_on_session_cancel"] = _on_session_cancel
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[0].args[2]
+
+        await handler(_make_call({}))
+
+        coordinator = hass.data[DOMAIN]["entry1"]["coordinator"]
+        assert coordinator.data["_work_mode"] is None
+
+    @pytest.mark.asyncio
+    async def test_failed_cleanup_schedules_pending_retry(self) -> None:
+        """When override removal fails during abort, a retry must be pending."""
+        from custom_components.foxess_control.foxess.client import FoxESSApiError
+        from custom_components.foxess_control.smart_battery.const import (
+            MAX_CONSECUTIVE_ADAPTER_ERRORS,
+        )
+
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=60.0,
+            coordinator_data={
+                "SoC": 20.0,
+                "loadsPower": 3.0,
+                "pvPower": 0.0,
+                "_work_mode": "ForceCharge",
+            },
+        )
+
+        captured_callback = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_callback
+            captured_callback = callback
+            return MagicMock()
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[4].args[2]
+
+        with (
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(2, 0),
+                        "end_time": datetime.time(6, 0),
+                        "target_soc": 80,
+                    }
+                )
+            )
+
+        assert captured_callback is not None
+        assert hass.data[DOMAIN]["_smart_charge_state"]["charging_started"]
+
+        # Make ALL API calls fail (simulates DNS outage)
+        inv.set_schedule.side_effect = FoxESSApiError(41935, "Device offline")
+        inv.self_use.side_effect = FoxESSApiError(41935, "Device offline")
+
+        # Fire enough errors to abort the session — cleanup also fails
+        for i in range(MAX_CONSECUTIVE_ADAPTER_ERRORS):
+            with patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 3, i, 0),
+            ):
+                await captured_callback(datetime.datetime(2026, 4, 7, 3, i, 0))
+
+        # Session is aborted
+        assert hass.data[DOMAIN].get("_smart_charge_state") is None
+
+        # A pending cleanup must be stored so the coordinator can retry
+        pending = hass.data[DOMAIN].get("_pending_override_cleanup")
+        assert pending is not None
+        assert pending["mode"] == "ForceCharge"

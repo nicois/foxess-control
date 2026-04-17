@@ -82,6 +82,12 @@ from .smart_battery.algorithms import (  # noqa: F401
 )
 from .smart_battery.config_flow_base import build_entity_map as _build_entity_map
 from .smart_battery.listeners import (
+    cancel_smart_charge as _sb_cancel_smart_charge,
+)
+from .smart_battery.listeners import (
+    cancel_smart_discharge as _sb_cancel_smart_discharge,
+)
+from .smart_battery.listeners import (
     setup_smart_charge_listeners as _sb_setup_smart_charge_listeners,
 )
 from .smart_battery.listeners import (
@@ -108,8 +114,6 @@ from .smart_battery.session import (
 from .smart_battery.taper import TaperProfile as _TaperProfile
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant, ServiceCall
 
@@ -485,18 +489,7 @@ async def _save_taper_profile(hass: HomeAssistant, profile: _TaperProfile) -> No
 
 def _cancel_smart_discharge(hass: HomeAssistant, *, clear_storage: bool = True) -> None:
     """Cancel any active smart discharge listeners and clear stored session."""
-    unsubs: list[Callable[[], None]] = hass.data[DOMAIN].get(
-        "_smart_discharge_unsubs", []
-    )
-    for unsub in unsubs:
-        unsub()
-    hass.data[DOMAIN]["_smart_discharge_unsubs"] = []
-    hass.data[DOMAIN].pop("_smart_discharge_state", None)
-    hass.data[DOMAIN].pop("_ws_discharge_callback", None)
-    # Disconnect WebSocket — no active discharge session needs it
-    hass.async_create_task(_stop_realtime_ws(hass))
-    if clear_storage and hass.data.get(DOMAIN, {}).get("_store") is not None:
-        hass.async_create_task(_clear_stored_session(hass, "smart_discharge"))
+    _sb_cancel_smart_discharge(hass, DOMAIN, clear_storage=clear_storage)
 
 
 async def _save_session(hass: HomeAssistant, key: str, data: dict[str, Any]) -> None:
@@ -551,16 +544,7 @@ async def _async_remove_override(
 
 def _cancel_smart_charge(hass: HomeAssistant, *, clear_storage: bool = True) -> None:
     """Cancel any active smart charge listeners and clear stored session."""
-    unsubs: list[Callable[[], None]] = hass.data[DOMAIN].get("_smart_charge_unsubs", [])
-    for unsub in unsubs:
-        unsub()
-    hass.data[DOMAIN]["_smart_charge_unsubs"] = []
-    hass.data[DOMAIN].pop("_smart_charge_state", None)
-    if clear_storage and hass.data.get(DOMAIN, {}).get("_store") is not None:
-        hass.async_create_task(_clear_stored_session(hass, "smart_charge"))
-    # Stop WebSocket if no longer needed (discharge may still need it)
-    if not _should_start_realtime_ws(hass):
-        hass.async_create_task(_stop_realtime_ws(hass))
+    _sb_cancel_smart_charge(hass, DOMAIN, clear_storage=clear_storage)
 
 
 def _build_foxess_adapter(
@@ -1420,6 +1404,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Post-cancel hook: stop WebSocket and clear stale work mode.
     # Called by the brand-agnostic cancel_smart_session after clearing state.
     def _on_session_cancel() -> None:
+        hass.data[DOMAIN].pop("_ws_discharge_callback", None)
         if not _should_start_realtime_ws(hass):
             hass.async_create_task(_stop_realtime_ws(hass))
         # Clear work mode immediately so the overview card drops the

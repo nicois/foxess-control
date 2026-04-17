@@ -69,7 +69,8 @@ would self-resolve on the next tick.
 (over-discharge, grid import) with no active session monitoring it.
 **Traces**: C-012 (specific case);
 `tests/test_services.py::TestCallbackExceptionSafety`,
-`tests/test_services.py::TestTransientApiErrorResilience`
+`tests/test_services.py::TestTransientApiErrorResilience`,
+`tests/test_services.py::TestStaleWorkModeAfterCleanupFailure`
 
 ### C-025: Session boundary cleanliness
 **Statement**: When a smart session ends (normally, by cancellation,
@@ -87,7 +88,8 @@ discharge power in the next window.
 the previous one, causing incorrect pacing or unexpected forced mode
 retention.
 **Traces**: C-003 (stale callback prevention);
-`tests/test_services.py::TestSessionBoundaryCleanness`
+`tests/test_services.py::TestSessionBoundaryCleanness`,
+`tests/test_services.py::TestStaleWorkModeAfterCleanupFailure`
 
 ## Invariants — Safety
 

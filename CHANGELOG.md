@@ -1,10 +1,14 @@
 # Changelog
 
-## 1.0.5-beta.18
+## 1.0.5-beta.19
 
 ### Fixed
+- **Stale work mode badge after failed cleanup**: when a session aborted due to API errors and the schedule cleanup also failed (same outage), the overview card showed "Force Charge" or "Force Discharge" indefinitely. Now: (1) override removal stores a pending retry on failure, and the coordinator retries on each successful REST poll until the schedule is clean; (2) all session cancel paths use the brand-agnostic `cancel_smart_session` which fires the `_on_session_cancel` hook to clear `_work_mode` immediately.
 - **Smart sessions survive transient API errors**: a single "Device offline" or DNS timeout during `apply_mode` no longer aborts the entire charge/discharge session. Errors are retried on the next timer tick; only 3 consecutive failures trigger an abort. Previously, any transient cloud outage (even a few seconds of DNS instability) would kill a multi-hour session.
 - **SoC interpolation overshooting entity value**: the interpolated SoC (used by the Lovelace battery icon and progress bar) could exceed the integer tick by more than 0.5%, causing `Math.round()` to display a higher value than `sensor.foxess_battery_soc`. The clamp is now `[tick − 0.5, tick + 0.44]` so the rounded display always matches the entity.
+
+### Changed
+- **Eliminated duplicated cancel functions**: `_cancel_smart_charge` and `_cancel_smart_discharge` in `__init__.py` were replaced with delegates to the brand-agnostic `cancel_smart_charge`/`cancel_smart_discharge` from `listeners.py`, ensuring the `_on_session_cancel` hook fires from all cancel paths (clear_overrides, force_charge, force_discharge, smart_charge, smart_discharge, unload).
 
 ### Changed
 - **E2E config uses production defaults**: removed non-default overrides (`ws_all_sessions`, `min_power_change`, `smart_headroom`) from E2E seed config. Tests that need non-default options now set them explicitly via the options flow, matching real user setup.

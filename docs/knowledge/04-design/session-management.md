@@ -122,6 +122,33 @@ on persistent errors (safety net from C-024).
 **Traces**: C-024;
 `tests/test_services.py::TestTransientApiErrorResilience`
 
+### D-024: Pending override cleanup on failed abort
+**Decision**: When `adapter.remove_override()` fails during session
+abort (e.g. the same API outage that triggered the abort),
+`_remove_*_override()` stores `{"mode": "<WorkMode>"}` in
+`hass.data[domain]["_pending_override_cleanup"]`. The FoxESS
+coordinator's `_retry_pending_cleanup()` checks for this on each
+successful REST poll and retries `_remove_mode_from_schedule` until
+the schedule is clean.
+**Context**: Production incident 2026-04-17: DNS outage caused
+charge session abort (3 consecutive errors). The error handler called
+`cancel_smart_charge` (clearing `_work_mode`) then
+`_remove_charge_override()` — which also failed (same DNS outage).
+The schedule retained ForceCharge, so the next REST poll re-read it
+and the overview card showed "Force Charge" indefinitely.
+**Rationale**: C-024 and C-025 require guaranteed cleanup, not
+best-effort. The REST poll cycle already runs every 60s, so
+piggybacking the retry adds no new timers. The cleanup is idempotent
+— retrying a removal that already succeeded is harmless (the group
+is already gone).
+**Alternatives considered**:
+- Single delayed retry (60s timer): insufficient — the API outage
+  could last longer than one retry
+- Never retry (require manual `clear_overrides`): violates C-025's
+  guarantee that overrides are fully removed on session end
+**Traces**: C-024, C-025;
+`tests/test_services.py::TestStaleWorkModeAfterCleanupFailure`
+
 ## Key Behaviours
 
 - Charge sessions check SoC every 5 minutes, adjust power accordingly.

@@ -84,6 +84,49 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         return data
 
+    async def _retry_pending_cleanup(self) -> None:
+        """Attempt to remove a stale schedule override left by a failed abort."""
+        from .foxess.inverter import WorkMode
+        from .foxess_adapter import _remove_mode_from_schedule
+
+        domain_data = self.hass.data.get(DOMAIN)
+        if domain_data is None:
+            return
+        pending = domain_data.get("_pending_override_cleanup")
+        if pending is None:
+            return
+        mode_str = pending.get("mode", "")
+        try:
+            mode = WorkMode(mode_str)
+        except ValueError:
+            domain_data.pop("_pending_override_cleanup", None)
+            return
+        min_soc_on_grid = 11
+        for key in domain_data:
+            if not str(key).startswith("_"):
+                entry = self.hass.config_entries.async_get_entry(str(key))
+                if entry is not None:
+                    from .const import CONF_MIN_SOC_ON_GRID, DEFAULT_MIN_SOC_ON_GRID
+
+                    min_soc_on_grid = entry.options.get(
+                        CONF_MIN_SOC_ON_GRID, DEFAULT_MIN_SOC_ON_GRID
+                    )
+                    break
+        try:
+            await self.hass.async_add_executor_job(
+                _remove_mode_from_schedule,
+                self.inverter,
+                mode,
+                min_soc_on_grid,
+            )
+            domain_data.pop("_pending_override_cleanup", None)
+            _LOGGER.info("Pending override cleanup succeeded: removed %s", mode.value)
+        except Exception:
+            _LOGGER.warning(
+                "Pending override cleanup failed, will retry next poll: %s",
+                mode.value,
+            )
+
     async def _async_update_data(self) -> dict[str, Any]:
         try:
             data: dict[str, Any] = await self.hass.async_add_executor_job(
@@ -98,6 +141,12 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.warning("REST poll failed, keeping last-known data: %s", err)
                 return dict(self.data)
             raise UpdateFailed(f"Error fetching FoxESS data: {err}") from err
+
+        # Retry pending override cleanup from a previous failed session abort.
+        # Stored by listeners when adapter.remove_override() fails (e.g. DNS
+        # outage).  On each successful REST poll, attempt the cleanup again.
+        await self._retry_pending_cleanup()
+
         # REST poll is authoritative — reset WebSocket feed-in integration
         self._ws_feedin_power_kw = 0.0
 

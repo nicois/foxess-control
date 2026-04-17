@@ -6,7 +6,7 @@ traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-555 unit tests + 19 E2E tests = 574 total.
+557 unit tests + 19 E2E tests = 576 total.
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
@@ -110,8 +110,8 @@ simulator and Playwright browser automation.
 
 ## Session Management & Service Handlers
 
-**Constraints**: C-003, C-012, C-013, C-016, C-024
-**Source**: `tests/test_init.py`, `tests/test_services.py` (82 tests)
+**Constraints**: C-003, C-012, C-013, C-016, C-024, C-025
+**Source**: `tests/test_init.py`, `tests/test_services.py` (84 tests)
 
 | Test | Verifies | Constraint |
 |---|---|---|
@@ -126,6 +126,8 @@ simulator and Playwright browser automation.
 | `TestTransientApiErrorResilience::test_charge_survives_transient_api_error` | Single API error retried | C-024 |
 | `TestTransientApiErrorResilience::test_discharge_survives_transient_api_error` | Single API error retried | C-024 |
 | `TestTransientApiErrorResilience::test_charge_aborts_after_repeated_errors` | Consecutive errors abort | C-024 |
+| `TestStaleWorkModeAfterCleanupFailure::test_clear_overrides_clears_work_mode_immediately` | Session cancel hook fires from all paths | C-024, C-025 |
+| `TestStaleWorkModeAfterCleanupFailure::test_failed_cleanup_schedules_pending_retry` | Failed cleanup stores pending retry | C-024, C-025 |
 
 ## Sensor Display
 
