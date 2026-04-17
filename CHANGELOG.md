@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.5-beta.21
+
+### Fixed
+- **WebSocket not connecting after deferred discharge start**: when a discharge session started in deferred mode (self-use until the deadline), the periodic timer ran the unwrapped callback that didn't trigger `_maybe_start_realtime_ws`. The timer now fires the WS-aware wrapper, so WebSocket connects as soon as forced discharge begins.
+- **Session sensors delayed by ~30s after state changes**: `SmartOperationsOverviewSensor` and `OverrideStatusSensor` relied on HA's ~30s poll cycle instead of subscribing to coordinator updates. Now subscribe via `coordinator.async_add_listener` for instant state propagation.
+
 ## 1.0.5-beta.20
 
 ### Fixed
