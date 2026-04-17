@@ -5,7 +5,6 @@ on:
   pull_request:
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   E2E_WORKERS: 6
 
 jobs:
@@ -15,8 +14,8 @@ jobs:
       matrix: ${{ steps.split.outputs.matrix }}
       seed: ${{ steps.split.outputs.seed }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - run: pip install -e '.[dev]'
@@ -53,8 +52,8 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.collect.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - run: pip install -e '.[dev]'
@@ -71,7 +70,7 @@ jobs:
             --junitxml=e2e-w${{ matrix.worker }}.xml \
             -v
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: e2e-results-w${{ matrix.worker }}
@@ -85,7 +84,7 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: results
 

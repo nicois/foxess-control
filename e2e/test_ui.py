@@ -324,7 +324,7 @@ class TestControlCard:
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(5000)
 
-        SCREENSHOT_DIR.mkdir(exist_ok=True)
+        SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(SCREENSHOT_DIR / "discharge-progress.png"))
 
         # Verify the control card renders with a progress section.
@@ -470,7 +470,7 @@ class TestScreenshots:
         page.reload()
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(3000)
-        SCREENSHOT_DIR.mkdir(exist_ok=True)
+        SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(SCREENSHOT_DIR / "idle.png"))
 
     def test_discharging_screenshot(
@@ -499,5 +499,5 @@ class TestScreenshots:
         page.reload()
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(3000)
-        SCREENSHOT_DIR.mkdir(exist_ok=True)
+        SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(SCREENSHOT_DIR / "discharging.png"))

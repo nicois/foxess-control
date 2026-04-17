@@ -5,9 +5,6 @@ on:
     tags:
       - "v*"
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
@@ -16,14 +13,14 @@ jobs:
       matrix:
         run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - run: pip install -e '.[dev]'
       - name: "Unit tests (run ${{ matrix.run }})"
         run: pytest tests/ --tb=short -q --junitxml=unit-${{ matrix.run }}.xml
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: unit-results-${{ matrix.run }}
@@ -38,8 +35,8 @@ jobs:
       matrix:
         run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - run: pip install -e '.[dev]'
@@ -53,7 +50,7 @@ jobs:
             -n auto \
             --junitxml=e2e-${{ matrix.run }}.xml \
             -q
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: e2e-results-${{ matrix.run }}
@@ -67,7 +64,7 @@ jobs:
     needs: [unit-tests, e2e-tests]
     if: always()
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: results
       - name: Summarise results
