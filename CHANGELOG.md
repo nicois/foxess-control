@@ -1,6 +1,9 @@
 # Changelog
 
-## 1.0.5-beta.21
+## 1.0.5-beta.22
+
+### Added
+- **Structured session logging**: enrich existing log messages with session context (session_id, session_type, SoC, power levels) via a `logging.Filter`. The debug log sensor exposes structured session data in its attributes for E2E tests and power users.
 
 ### Fixed
 - **WebSocket not connecting after deferred discharge start**: when a discharge session started in deferred mode (self-use until the deadline), the periodic timer ran the unwrapped callback that didn't trigger `_maybe_start_realtime_ws`. The timer now fires the WS-aware wrapper, so WebSocket connects as soon as forced discharge begins.
