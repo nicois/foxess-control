@@ -6,13 +6,13 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  E2E_WORKERS: 6
 
 jobs:
   collect:
     runs-on: ubuntu-latest
     outputs:
-      worker0: ${{ steps.split.outputs.worker0 }}
-      worker1: ${{ steps.split.outputs.worker1 }}
+      matrix: ${{ steps.split.outputs.matrix }}
       seed: ${{ steps.split.outputs.seed }}
     steps:
       - uses: actions/checkout@v4
@@ -26,21 +26,24 @@ jobs:
           seed=$RANDOM
           echo "seed=$seed" >> "$GITHUB_OUTPUT"
 
-          # Collect test node IDs, shuffle with seed, split into 2 groups
           python -m pytest e2e/ -m slow --co -q --randomly-seed=$seed 2>/dev/null \
             | grep '::' > all_tests.txt
 
-          total=$(wc -l < all_tests.txt)
-          half=$(( (total + 1) / 2 ))
+          python3 -c "
+          import json, math, os
 
-          head -n "$half" all_tests.txt > w0.txt
-          tail -n +"$((half + 1))" all_tests.txt > w1.txt
-
-          # Output as space-separated node IDs
-          echo "worker0=$(paste -sd ' ' w0.txt)" >> "$GITHUB_OUTPUT"
-          echo "worker1=$(paste -sd ' ' w1.txt)" >> "$GITHUB_OUTPUT"
-
-          echo "Split $total tests: $(wc -l < w0.txt) + $(wc -l < w1.txt)"
+          workers = int(os.environ['E2E_WORKERS'])
+          tests = open('all_tests.txt').read().splitlines()
+          per_worker = math.ceil(len(tests) / workers)
+          groups = []
+          for i in range(workers):
+              chunk = tests[i * per_worker : (i + 1) * per_worker]
+              if chunk:
+                  groups.append({'worker': i, 'tests': ' '.join(chunk)})
+          print(f'Split {len(tests)} tests across {len(groups)} workers')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'matrix={json.dumps({\"include\": groups})}\n')
+          "
 
   e2e:
     needs: collect
@@ -48,8 +51,7 @@ jobs:
     timeout-minutes: 15
     strategy:
       fail-fast: false
-      matrix:
-        worker: [0, 1]
+      matrix: ${{ fromJson(needs.collect.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -62,13 +64,7 @@ jobs:
 
       - name: "Run E2E (worker ${{ matrix.worker }})"
         run: |
-          if [ "${{ matrix.worker }}" = "0" ]; then
-            tests="${{ needs.collect.outputs.worker0 }}"
-          else
-            tests="${{ needs.collect.outputs.worker1 }}"
-          fi
-
-          python -m pytest $tests \
+          python -m pytest ${{ matrix.tests }} \
             --randomly-seed=${{ needs.collect.outputs.seed }} \
             -n auto \
             --tb=long \
