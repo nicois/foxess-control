@@ -5,6 +5,9 @@
 ### Added
 - **Structured session logging**: enrich existing log messages with session context (session_id, session_type, SoC, power levels) via a `logging.Filter`. The debug log sensor exposes structured session data in its attributes for E2E tests and power users.
 
+### Changed
+- **WebSocket mode selector**: replaced the boolean `ws_all_sessions` toggle with a 3-state `ws_mode` dropdown: **Auto** (WS only during paced forced discharge — the default), **All smart sessions** (WS during any smart session or force op), and **Always connected** (WS preferred over REST polling at all times). Existing configurations migrate automatically. "Always" mode includes a watchdog that recovers the WS connection after transient failures.
+
 ### Fixed
 - **WebSocket not connecting after deferred discharge start**: when a discharge session started in deferred mode (self-use until the deadline), the periodic timer ran the unwrapped callback that didn't trigger `_maybe_start_realtime_ws`. The timer now fires the WS-aware wrapper, so WebSocket connects as soon as forced discharge begins.
 - **Session sensors delayed by ~30s after state changes**: `SmartOperationsOverviewSensor` and `OverrideStatusSensor` relied on HA's ~30s poll cycle instead of subscribing to coordinator updates. Now subscribe via `coordinator.async_add_listener` for instant state propagation.

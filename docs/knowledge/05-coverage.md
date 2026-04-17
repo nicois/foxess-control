@@ -34,8 +34,8 @@ Traceability from constraints through design decisions to tests.
 | C-020 Operational transparency | D-021 | `TestDataSourceTracking` (3), `TestFoxESSPolledSensor::test_data_source_*` (2) | COVERED |
 | C-021 Brand-agnostic code in common package | -- | `test_vendored_copy_matches_canonical` (indirect) | PARTIAL |
 | C-026 Proactive error surfacing | -- | `TestErrorSurfacing` (2) | COVERED |
-| C-025 Session boundary cleanliness | D-024 | `TestSessionBoundaryCleanness` (2), `TestStaleWorkModeAfterCleanupFailure` (2) | COVERED |
-| C-024 Safe state on failure | D-023, D-024 | `TestCallbackExceptionSafety` (2), `TestTransientApiErrorResilience` (3), `TestStaleWorkModeAfterCleanupFailure` (2), C-012, unload_entry | COVERED |
+| C-025 Session boundary cleanliness | D-026 | `TestSessionBoundaryCleanness` (2), `TestStaleWorkModeAfterCleanupFailure` (2) | COVERED |
+| C-024 Safe state on failure | D-025, D-026 | `TestCallbackExceptionSafety` (2), `TestTransientApiErrorResilience` (3), `TestStaleWorkModeAfterCleanupFailure` (2), C-012, unload_entry | COVERED |
 | C-023 Solar-aware charge reduction | -- | -- | GAP |
 | C-022 Unreachable charge target surfaced | -- | `TestIsChargeTargetReachable` (7) | COVERED |
 | C-019 Discharge SoC unavailability abort | D-019 | `TestDischargeSocUnavailability` (2) | COVERED |

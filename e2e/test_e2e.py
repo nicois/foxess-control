@@ -252,7 +252,7 @@ class TestFaultInjection:
         if connection_mode != "cloud":
             pytest.skip("WS fault injection requires cloud mode")
         assert foxess_sim is not None
-        ha_e2e.set_options(ws_all_sessions=True)
+        ha_e2e.set_options(ws_mode="smart_sessions")
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
 
         start, end = _tight_window(10)
@@ -303,6 +303,27 @@ class TestDataSource:
         if foxess_sim is not None:
             foxess_sim.clear_fault()
 
+    def test_ws_always_connects_without_session(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """ws_mode=always connects WS at startup without a session."""
+        if connection_mode != "cloud":
+            pytest.skip("WS is cloud-specific")
+        assert foxess_sim is not None
+        foxess_sim.set(soc=50, solar_kw=1.0, load_kw=0.3)
+        ha_e2e.set_options(ws_mode="always")
+
+        ha_e2e.wait_for_state("sensor.foxess_smart_operations", "idle", timeout_s=60)
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_battery_soc",
+            "data_source",
+            "ws",
+            timeout_s=90,
+        )
+
     def test_ws_recovers_after_stream_stolen(
         self,
         ha_e2e: HAClient,
@@ -321,7 +342,7 @@ class TestDataSource:
         if connection_mode != "cloud":
             pytest.skip("WS is cloud-specific")
         assert foxess_sim is not None
-        ha_e2e.set_options(ws_all_sessions=True)
+        ha_e2e.set_options(ws_mode="smart_sessions")
 
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
         start, end = _tight_window(10)
@@ -403,7 +424,7 @@ class TestDataSource:
         if connection_mode != "cloud":
             pytest.skip("WS is cloud-specific")
         assert foxess_sim is not None
-        ha_e2e.set_options(ws_all_sessions=True)
+        ha_e2e.set_options(ws_mode="smart_sessions")
 
         # --- Session 1 ---
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
@@ -486,7 +507,7 @@ class TestDataSource:
         if connection_mode != "cloud":
             pytest.skip("WS is cloud-specific")
         assert foxess_sim is not None
-        ha_e2e.set_options(ws_all_sessions=True)
+        ha_e2e.set_options(ws_mode="smart_sessions")
         foxess_sim.set(soc=25, solar_kw=0, load_kw=0.3)
 
         ha_e2e.wait_for_numeric_state(
@@ -526,28 +547,22 @@ class TestDataSource:
             timeout_s=90,
         )
 
-    def test_ws_all_sessions_persists_via_options_flow(
+    def test_ws_mode_persists_via_options_flow(
         self,
         ha_e2e: HAClient,
         foxess_sim: SimulatorHandle | None,
         connection_mode: str,
     ) -> None:
-        """ws_all_sessions set via options flow must be persisted and effective.
-
-        Reproduces the production bug: user checks ws_all_sessions in
-        the UI, but the option isn't saved to entry.options, so WS
-        never activates at max power.
+        """ws_mode set via options flow must be persisted and effective.
 
         Steps:
-        1. Start with ws_all_sessions absent from options
-        2. Set it via the options flow REST API
-        3. Verify it appears in the config entry
-        4. Start a discharge and verify WS activates
+        1. Set ws_mode to smart_sessions via the options flow REST API
+        2. Start a discharge and verify WS activates
         """
         if connection_mode != "cloud":
             pytest.skip("WS is cloud-specific")
         assert foxess_sim is not None
-        ha_e2e.set_options(ws_all_sessions=True)
+        ha_e2e.set_options(ws_mode="smart_sessions")
 
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
         start, end = _tight_window(10)
@@ -563,7 +578,7 @@ class TestDataSource:
             fatal_states=FATAL_FOR_ACTIVE,
         )
 
-        # If ws_all_sessions was persisted, WS should connect
+        # If ws_mode was persisted, WS should connect
         ha_e2e.wait_for_attribute(
             "sensor.foxess_battery_soc",
             "data_source",
@@ -588,7 +603,7 @@ class TestDataSource:
         if connection_mode != "cloud":
             pytest.skip("WS is cloud-specific")
         assert foxess_sim is not None
-        ha_e2e.set_options(ws_all_sessions=True)
+        ha_e2e.set_options(ws_mode="smart_sessions")
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
 
         start, end = _tight_window(10)

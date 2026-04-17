@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: Session Management
-last_verified: 2026-04-14
+last_verified: 2026-04-17
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -97,7 +97,7 @@ Modbus is already faster than the cloud WS.
 **Traces**: C-021;
 `tests/test_entity_mode.py`
 
-### D-023: Transient adapter error resilience
+### D-025: Transient adapter error resilience
 **Decision**: When `apply_mode` or any other adapter call raises an
 exception during a periodic callback, the error is logged as a warning
 and retried on the next timer tick. Only after
@@ -120,9 +120,10 @@ on persistent errors (safety net from C-024).
 - Infinite retries (never abort): rejected because a truly broken
   session leaving the inverter in forced mode is a safety risk
 **Traces**: C-024;
-`tests/test_services.py::TestTransientApiErrorResilience`
+`tests/test_services.py::TestTransientApiErrorResilience`,
+`tests/test_services.py::TestHandleSmartDischarge::test_deferred_to_discharging_triggers_ws`
 
-### D-024: Pending override cleanup on failed abort
+### D-026: Pending override cleanup on failed abort
 **Decision**: When `adapter.remove_override()` fails during session
 abort (e.g. the same API outage that triggered the abort),
 `_remove_*_override()` stores `{"mode": "<WorkMode>"}` in
@@ -148,6 +149,31 @@ is already gone).
   guarantee that overrides are fully removed on session end
 **Traces**: C-024, C-025;
 `tests/test_services.py::TestStaleWorkModeAfterCleanupFailure`
+
+### D-027: Structured session logging via logging.Filter
+**Decision**: A `SessionContextFilter` (in `smart_battery/logging.py`)
+is attached to the integration's logger hierarchy on setup and removed
+on unload. It enriches every log record with a `session` dict
+containing the active session's `session_id`, `session_type`,
+power levels, SoC counters, and suspension state — all read from
+the live session state dicts. The debug log sensor exposes these
+structured fields in its `attributes` for E2E tests and power users.
+**Context**: Diagnosing session issues required correlating log lines
+with session state manually. E2E tests needed to assert on session
+properties without parsing log message text.
+**Rationale**: A logging.Filter enriches records transparently — zero
+changes to existing `_LOGGER.info/debug/warning` call sites. The
+filter is brand-agnostic (lives in `smart_battery/`) and receives
+session state via a context getter callback injected at setup time.
+**Alternatives considered**:
+- Wrapper logger class: rejected because it requires changing every
+  call site
+- Structured logging library (structlog): rejected as an extra
+  dependency for a narrow use case
+**Traces**: C-020;
+`tests/test_structured_logging.py::TestSessionContextFilter` (7),
+`tests/test_structured_logging.py::TestInstallRemove` (2),
+`tests/test_structured_logging.py::TestDebugLogHandlerWithSession` (3)
 
 ## Key Behaviours
 

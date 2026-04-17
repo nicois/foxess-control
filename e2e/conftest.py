@@ -480,7 +480,7 @@ def data_source(
     if mode == "api" and foxess_sim is not None:
         foxess_sim.fault("ws_refuse")
     if mode == "ws":
-        ha_e2e.set_options(ws_all_sessions=True)
+        ha_e2e.set_options(ws_mode="smart_sessions")
     yield mode
 
 

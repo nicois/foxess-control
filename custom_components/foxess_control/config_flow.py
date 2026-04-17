@@ -14,6 +14,12 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.selector import (
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
 
 from .const import (
     CONF_API_KEY,
@@ -29,7 +35,11 @@ from .const import (
     CONF_WEB_USERNAME,
     CONF_WORK_MODE_ENTITY,
     CONF_WS_ALL_SESSIONS,
+    CONF_WS_MODE,
     DOMAIN,
+    WS_MODE_ALWAYS,
+    WS_MODE_AUTO,
+    WS_MODE_SMART_SESSIONS,
 )
 from .foxess import FoxESSClient, FoxESSRealtimeWS, FoxESSWebSession, Inverter
 from .foxess.client import FoxESSApiError
@@ -265,12 +275,36 @@ class FoxessControlOptionsFlow(OptionsFlow):
         # Show WebSocket option only when web credentials are configured
         if self._config_entry.data.get(CONF_WEB_USERNAME):
             opts = self._config_entry.options
+            if CONF_WS_MODE in opts:
+                current_ws = str(opts[CONF_WS_MODE])
+            elif opts.get(CONF_WS_ALL_SESSIONS):
+                current_ws = WS_MODE_SMART_SESSIONS
+            else:
+                current_ws = WS_MODE_AUTO
             schema = schema.extend(
                 {
                     vol.Optional(
-                        CONF_WS_ALL_SESSIONS,
-                        default=opts.get(CONF_WS_ALL_SESSIONS, False),
-                    ): bool,
+                        CONF_WS_MODE,
+                        default=current_ws,
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                SelectOptionDict(
+                                    value=WS_MODE_AUTO,
+                                    label="Auto (paced discharge only)",
+                                ),
+                                SelectOptionDict(
+                                    value=WS_MODE_SMART_SESSIONS,
+                                    label="All smart sessions",
+                                ),
+                                SelectOptionDict(
+                                    value=WS_MODE_ALWAYS,
+                                    label="Always connected",
+                                ),
+                            ],
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
                 }
             )
         return self.async_show_form(step_id="init", data_schema=schema)

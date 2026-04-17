@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: WebSocket Real-Time Data
-last_verified: 2026-04-14
+last_verified: 2026-04-17
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -17,30 +17,47 @@ where stale data risks grid import from undetected load spikes.
 
 ## Design Decisions
 
-### D-008: Conditional WebSocket activation
-**Decision**: The WebSocket connects only when ALL of:
-(a) web credentials are configured,
-(b) NOT in entity mode (WS is cloud-API only),
-(c) discharge has actually started (`discharging_started=True`),
-(d) discharge is paced below max (`last_power_w < max_power_w`).
-At full power, 5-minute REST polling is sufficient because there's
-ample headroom. WS-triggered discharge recalculations are debounced
-at 10 seconds (`_WS_DEBOUNCE_SECONDS`) to prevent noisy real-time
-data from causing excessive power changes on the inverter.
+### D-008: WebSocket activation modes (`ws_mode`)
+**Decision**: WebSocket activation is governed by a 3-state `ws_mode`
+option (replacing the former boolean `ws_all_sessions`):
+
+- **auto** (default): WS connects only during paced forced discharge
+  (`discharging_started=True` and `last_power_w < max_power_w`).
+  Requires web credentials and cloud mode (not entity mode).
+- **smart_sessions**: WS connects during any started smart session
+  (charge or discharge, including deferred phases) or force operation.
+- **always**: WS connects at integration startup and stays connected
+  regardless of session state. A watchdog timer (at the polling
+  interval) re-establishes the connection after transient failures.
+
+All modes require web credentials and cloud mode. WS-triggered
+recalculations are debounced at 10 seconds (`_WS_DEBOUNCE_SECONDS`).
+The FoxESS-specific `__init__.py` wraps the brand-agnostic discharge
+callback to call `_maybe_start_realtime_ws` after every check, ensuring
+WS activates on deferred→active transitions.
+
+Existing configurations with the old `ws_all_sessions=True` boolean
+are migrated to `ws_mode=smart_sessions` automatically.
 **Context**: WebSocket uses a separate web session (username + MD5
 password) from the Open API key. It's an extra connection with
 reconnect complexity. Entity mode uses local Modbus with faster
-polling, making the cloud WebSocket unnecessary.
-**Rationale**: The risk window is specifically when paced power is near
-house load — that's when a load spike can cause grid import. At full
-power, there's >10x headroom and no risk.
+polling, making the cloud WebSocket unnecessary. Users running
+real-time dashboards wanted WS data continuously, not just during
+sessions.
+**Rationale**: The 3-state model serves different user profiles:
+casual users get the safe default (auto), power users tracking
+all sessions enable smart_sessions, and dashboard users get always.
+The watchdog in always mode ensures the connection recovers from
+transient cloud outages without manual intervention.
 **Alternatives considered**:
-- Always-on WebSocket: rejected as unnecessary connection overhead
-  and complexity
-- WebSocket during all sessions: available via `ws_all_sessions` toggle
-  but off by default
-**Traces**: C-005;
-`tests/test_realtime_ws.py::TestStaleness`
+- Keep the boolean toggle: rejected because it couldn't express
+  "always connected" without overloading the meaning
+- Per-session-type toggles: rejected as too granular
+**Traces**: C-005, C-020;
+`tests/test_realtime_ws.py::TestStaleness`,
+`tests/test_services.py::TestHandleSmartDischarge::test_deferred_to_discharging_triggers_ws`,
+`e2e/test_e2e.py::TestDataSource::test_ws_always_connects_without_session`,
+`e2e/test_e2e.py::TestDataSource::test_ws_mode_persists_via_options_flow`
 
 ### D-009: Post-session linger timeout
 **Decision**: After a smart session ends, keep the WebSocket open for

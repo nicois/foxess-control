@@ -34,6 +34,7 @@ from .const import (
     CONF_WEB_USERNAME,
     CONF_WORK_MODE_ENTITY,
     CONF_WS_ALL_SESSIONS,
+    CONF_WS_MODE,
     DEFAULT_API_MIN_SOC,
     DEFAULT_ENTITY_POLLING_INTERVAL,
     DEFAULT_INVERTER_POWER,
@@ -43,6 +44,9 @@ from .const import (
     DEFAULT_SMART_HEADROOM,
     DOMAIN,
     PLATFORMS,
+    WS_MODE_ALWAYS,
+    WS_MODE_AUTO,
+    WS_MODE_SMART_SESSIONS,
 )
 from .coordinator import (
     FoxESSDataCoordinator,
@@ -265,6 +269,18 @@ def _get_first_entry(hass: HomeAssistant) -> ConfigEntry:
     if entry is None:
         raise ServiceValidationError("No FoxESS Control integration configured")
     return entry
+
+
+def _get_ws_mode(hass: HomeAssistant) -> str:
+    """Return the effective ws_mode, migrating from the old boolean."""
+    try:
+        entry = _get_first_entry(hass)
+    except (ServiceValidationError, KeyError):
+        return WS_MODE_AUTO
+    opts = entry.options
+    if CONF_WS_MODE in opts:
+        return str(opts[CONF_WS_MODE])
+    return WS_MODE_SMART_SESSIONS if opts.get(CONF_WS_ALL_SESSIONS) else WS_MODE_AUTO
 
 
 def _get_smart_headroom(hass: HomeAssistant) -> float:
@@ -594,7 +610,7 @@ def _setup_smart_charge_listeners(
     state = hass.data[DOMAIN]["_smart_charge_state"]
     adapter = _build_foxess_adapter(hass, inverter, state)
     _sb_setup_smart_charge_listeners(hass, DOMAIN, adapter)  # type: ignore[arg-type]
-    # Trigger WS check — needed when ws_all_sessions is enabled
+    # Trigger WS check — needed for smart_sessions and always modes
     hass.async_create_task(_maybe_start_realtime_ws(hass))
 
 
@@ -1162,12 +1178,12 @@ _WS_DEBOUNCE_SECONDS = 10.0
 def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
     """Return True if the WebSocket should be active right now.
 
-    Default criteria: cloud mode, web credentials configured, active forced
-    discharge with min_soc < 100 (i.e. discharge is actually paced).
+    Behaviour depends on ``ws_mode``:
 
-    When the ``ws_all_sessions`` option is enabled, the WebSocket is also
-    activated during smart charge sessions and force operations (charge /
-    discharge / feed-in).
+    * **auto** (default) — WS only during paced forced discharge
+      (min_soc < 100 and power below max).
+    * **smart_sessions** — WS during any smart session or force op.
+    * **always** — WS connected at all times.
     """
     if _is_entity_mode(hass):
         _LOGGER.debug("WS check: entity mode, skipping")
@@ -1181,8 +1197,12 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
         _LOGGER.debug("WS check: no web credentials configured")
         return False
 
+    ws_mode = _get_ws_mode(hass)
+
+    if ws_mode == WS_MODE_ALWAYS:
+        return True
+
     domain_data = hass.data.get(DOMAIN, {})
-    ws_all = entry.options.get(CONF_WS_ALL_SESSIONS, False)
 
     # Active forced discharge — only when power is paced below max,
     # which is when house load could exceed discharge power and cause
@@ -1204,14 +1224,11 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
         if paced:
             return True
 
-    # Any *started* smart session when ws_all_sessions is enabled
-    if not ws_all:
-        _LOGGER.debug(
-            "WS check: ws_all_sessions=%s, no paced discharge (options=%s)",
-            ws_all,
-            {k: v for k, v in entry.options.items() if "password" not in k.lower()},
-        )
+    if ws_mode != WS_MODE_SMART_SESSIONS:
+        _LOGGER.debug("WS check: ws_mode=%s, no paced discharge", ws_mode)
         return False
+
+    # Any *started* smart session
     cs = domain_data.get("_smart_charge_state")
     if (ds is not None and ds.get("discharging_started", False)) or (
         cs is not None and cs.get("charging_started", False)
@@ -1400,11 +1417,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         version = "unknown"
     _LOGGER.info(
         "FoxESS Control %s starting (serial=%s, entity_mode=%s, "
-        "ws_all=%s, min_power_change=%s, polling=%s)",
+        "ws_mode=%s, min_power_change=%s, polling=%s)",
         version,
         entry.data.get(CONF_DEVICE_SERIAL, "?"),
         bool(entry.options.get(CONF_WORK_MODE_ENTITY)),
-        entry.options.get(CONF_WS_ALL_SESSIONS, False),
+        entry.options.get(CONF_WS_MODE)
+        or (
+            WS_MODE_SMART_SESSIONS
+            if entry.options.get(CONF_WS_ALL_SESSIONS)
+            else WS_MODE_AUTO
+        ),
         entry.options.get(CONF_MIN_POWER_CHANGE, DEFAULT_MIN_POWER_CHANGE),
         entry.options.get(CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL),
     )
@@ -1535,6 +1557,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Recover smart sessions persisted before a restart
     await _recover_sessions(hass, inverter)
 
+    # "always" mode: start WS at integration startup and register a
+    # watchdog that re-establishes the connection if it drops.
+    if _get_ws_mode(hass) == WS_MODE_ALWAYS:
+        await _maybe_start_realtime_ws(hass)
+
+        async def _ws_always_watchdog(_now: datetime.datetime) -> None:
+            if _get_ws_mode(hass) == WS_MODE_ALWAYS:
+                await _maybe_start_realtime_ws(hass)
+
+        entry.async_on_unload(
+            async_track_time_interval(
+                hass,
+                _ws_always_watchdog,
+                datetime.timedelta(seconds=polling_interval),
+            )
+        )
+
     # Reload entry when options change (picks up new polling interval)
     entry.async_on_unload(entry.add_update_listener(_async_update_options))
 
@@ -1558,6 +1597,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Preserve persisted sessions so recovery works after options reload
         _cancel_smart_discharge(hass, clear_storage=False)
         _cancel_smart_charge(hass, clear_storage=False)
+        # Stop WebSocket unconditionally — _on_session_cancel skips this
+        # for "always" mode since _should_start_realtime_ws returns True.
+        ws: FoxESSRealtimeWS | None = hass.data[DOMAIN].pop("_realtime_ws", None)
+        if ws is not None:
+            await ws.async_disconnect()
         # Close web session used for WebSocket auth
         web_session: FoxESSWebSession | None = hass.data[DOMAIN].pop(
             "_web_session", None
