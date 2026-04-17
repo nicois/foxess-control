@@ -47,4 +47,5 @@ class OverviewCard:
     GRID_NODE = f"{ROOT} >>> .node.grid"
     GRID_VALUE = f"{ROOT} >>> .node.grid .node-value"
     DATA_SOURCE = f"{ROOT} >>> .data-source"
+    DATA_SOURCE_STALE = f"{ROOT} >>> .data-source.stale"
     TITLE = f"{ROOT} >>> .title"

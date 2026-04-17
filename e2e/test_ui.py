@@ -200,6 +200,65 @@ class TestOverviewCard:
             f"Badge shows '{badge_text}', expected '{expected}'"
         )
 
+    def test_stale_badge_shown_for_old_api_data(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        data_source: str,
+        connection_mode: str,
+    ) -> None:
+        """Badge turns amber (stale class) when API data exceeds 10s age."""
+        if connection_mode != "cloud":
+            pytest.skip("data freshness badge is cloud-specific")
+        if data_source != "api":
+            pytest.skip("staleness indicator only relevant for API mode")
+        assert foxess_sim is not None
+        foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_solar_power",
+            "data_source",
+            "api",
+            timeout_s=60,
+        )
+        page.reload()
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(12000)
+        page.reload()
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(2000)
+
+        badge_info = page.evaluate(
+            """() => {
+                function findCard(root) {
+                    const c = root.querySelector('foxess-overview-card');
+                    if (c) return c;
+                    for (const el of root.querySelectorAll('*')) {
+                        if (el.shadowRoot) {
+                            const f = findCard(el.shadowRoot);
+                            if (f) return f;
+                        }
+                    }
+                    return null;
+                }
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return null;
+                const badge = card.shadowRoot.querySelector('.data-source');
+                if (!badge) return null;
+                return {
+                    text: badge.textContent,
+                    classes: badge.className,
+                };
+            }"""
+        )
+        assert badge_info is not None, "data-source badge not found"
+        assert "stale" in badge_info["classes"], (
+            f"Badge should have 'stale' class after 12s, got: {badge_info}"
+        )
+        assert "API" in badge_info["text"], (
+            f"Badge should contain 'API', got: {badge_info['text']}"
+        )
+
     def test_pv_values_consistent_with_solar_total(
         self,
         page: Page,
