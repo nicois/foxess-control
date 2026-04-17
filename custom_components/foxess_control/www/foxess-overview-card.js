@@ -16,7 +16,7 @@
  *   # etc.
  */
 
-const OVERVIEW_VERSION = "2.3.0";
+const OVERVIEW_VERSION = "2.4.0";
 
 // -- i18n --------------------------------------------------------------------
 
@@ -175,6 +175,7 @@ const _ROLE_MAP = {
   grid_frequency_entity:    "grid_frequency",
   bat_temp_entity:          "battery_temperature",
   residual_entity:          "residual_energy",
+  data_freshness_entity:    "data_freshness",
 };
 
 class FoxESSOverviewCard extends HTMLElement {
@@ -293,11 +294,25 @@ class FoxESSOverviewCard extends HTMLElement {
     return null;
   }
 
-  _dataSourceBadge(source) {
+  _dataSourceBadge(source, ageSeconds) {
     if (!source) return "";
     const labels = { ws: "WS", api: "API", modbus: "Modbus" };
     const label = labels[source] || source;
-    return `<span class="data-source" title="Data: ${label}">${label}</span>`;
+    const staleThreshold = source === "ws" ? 30 : 120;
+    const isStale = typeof ageSeconds === "number" && ageSeconds > staleThreshold;
+    const ageLabel = typeof ageSeconds === "number" ? this._formatAge(ageSeconds) : "";
+    const cls = isStale ? "data-source stale" : "data-source";
+    const title = ageLabel ? `Data: ${label} (${ageLabel} ago)` : `Data: ${label}`;
+    const text = isStale ? `${label} · ${ageLabel}` : label;
+    return `<span class="${cls}" title="${title}">${text}</span>`;
+  }
+
+  _formatAge(seconds) {
+    if (seconds < 60) return `${seconds}s`;
+    const m = Math.floor(seconds / 60);
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    return `${h}h${m % 60}m`;
   }
 
   // -- Rendering -------------------------------------------------------------
@@ -347,12 +362,15 @@ class FoxESSOverviewCard extends HTMLElement {
     else if (socPct <= 30) socColor = "var(--warning-color, #ff9800)";
 
     const dataSource = this._getDataSource(eid);
+    const freshnessId = eid.data_freshness_entity;
+    const freshnessEntity = freshnessId && this._hass.states[freshnessId];
+    const ageSeconds = freshnessEntity && freshnessEntity.attributes && freshnessEntity.attributes.age_seconds;
 
     this.shadowRoot.innerHTML = `
       <style>${FoxESSOverviewCard._styles()}</style>
       <ha-card>
         <div class="header">
-          <div class="title">${this._t("title")}${this._dataSourceBadge(dataSource)}</div>
+          <div class="title">${this._t("title")}${this._dataSourceBadge(dataSource, ageSeconds)}</div>
           ${workMode && workMode !== "SelfUse" ? `<span class="work-mode">${this._formatWorkMode(workMode)}</span>` : ""}
         </div>
         <div class="flow-grid">
@@ -500,6 +518,10 @@ class FoxESSOverviewCard extends HTMLElement {
         margin-left: 6px;
         vertical-align: middle;
         letter-spacing: 0.03em;
+      }
+      .data-source.stale {
+        background: rgba(var(--rgb-warning-color, 255, 152, 0), 0.15);
+        color: var(--warning-color, #ff9800);
       }
 
       .flow-grid {

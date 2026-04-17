@@ -1045,6 +1045,7 @@ _ENTITY_ROLES: dict[str, str] = {
     "battery_temperature": "bat_temperature",
     "smart_operations": "smart_operations",
     "battery_forecast": "battery_forecast",
+    "data_freshness": "data_freshness",
 }
 
 
