@@ -203,12 +203,14 @@ Key tests:
 
 ## Vendored Code Sync
 
-**Constraints**: C-015
+**Constraints**: C-015, C-016, C-021
 **Source**: `tests/test_smart_battery_sync.py`
 
 | Test | Verifies | Constraint |
 |---|---|---|
 | `test_vendored_copy_matches_canonical` | Byte-identical copies | C-015 |
+| `test_smart_battery_has_no_brand_imports` | No foxess imports in smart_battery/ | C-021 |
+| `test_cancel_smart_session_is_synchronous` | cancel_smart_session is sync (no awaits) | C-016 |
 
 ## E2E Tests (Containerised HA + Simulator + Playwright)
 
