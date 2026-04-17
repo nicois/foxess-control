@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.5-beta.23
+## 1.0.5-beta.24
 
 ### Changed
 - **Coverage matrix regenerated**: full bidirectional trace analysis with new ACCEPTED status for non-actionable gaps (infrastructure/methodology constraints). Actionable items reduced from 11 to 4.
