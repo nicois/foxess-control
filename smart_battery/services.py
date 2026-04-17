@@ -23,9 +23,11 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 
 from .algorithms import (
+    DISCHARGE_SAFETY_FACTOR,
     calculate_charge_power,
     calculate_deferred_start,
     calculate_discharge_deferred_start,
+    compute_safe_schedule_end,
 )
 from .const import (
     CONF_API_MIN_SOC,
@@ -388,6 +390,29 @@ def register_services(
             )
         )
 
+        # Compute safe schedule horizon for immediate starts (C-027).
+        # adapter.apply_mode sets this on subsequent power adjustments,
+        # but the state dict doesn't exist yet when apply_mode runs
+        # above, so the initial horizon is lost.
+        schedule_horizon: str | None = None
+        if (
+            not should_defer
+            and initial_power > 0
+            and battery_capacity_kwh > 0
+            and current_soc is not None
+        ):
+            safe_end = compute_safe_schedule_end(
+                current_soc,
+                min_soc,
+                battery_capacity_kwh,
+                initial_power,
+                end,
+                safety_factor=DISCHARGE_SAFETY_FACTOR,
+                now=now,
+            )
+            if safe_end != end:
+                schedule_horizon = safe_end.isoformat()
+
         hass.data[domain]["_smart_discharge_state"] = {
             "session_id": str(uuid.uuid4()),
             "groups": [],
@@ -407,6 +432,7 @@ def register_services(
             "discharging_started": not should_defer,
             "discharging_started_at": None if should_defer else now,
             "consumption_peak_kw": max(0.0, net_consumption),
+            "schedule_horizon": schedule_horizon,
         }
 
         setup_smart_discharge_listeners(hass, domain, adapter)

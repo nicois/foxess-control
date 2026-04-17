@@ -71,6 +71,9 @@ from .foxess_adapter import (  # noqa: F401
     _to_minutes,
 )
 from .smart_battery.algorithms import (
+    DISCHARGE_SAFETY_FACTOR as _DISCHARGE_SAFETY_FACTOR,
+)
+from .smart_battery.algorithms import (
     calculate_charge_power as _calculate_charge_power,
 )
 from .smart_battery.algorithms import (
@@ -81,6 +84,9 @@ from .smart_battery.algorithms import (
 )
 from .smart_battery.algorithms import (
     calculate_discharge_power as _calculate_discharge_power,
+)
+from .smart_battery.algorithms import (
+    compute_safe_schedule_end as _compute_safe_schedule_end,
 )
 from .smart_battery.algorithms import (  # noqa: F401
     should_suspend_discharge as _should_suspend_discharge,
@@ -1973,6 +1979,28 @@ def _register_services(hass: HomeAssistant) -> None:
         hass.data[DOMAIN].pop("_smart_error_state", None)
 
         # Store state for binary sensor and diagnostics
+        # Compute safe schedule horizon for immediate starts (C-027).
+        # The adapter's apply_mode does this for subsequent power
+        # adjustments, but the initial setup bypasses the adapter.
+        schedule_horizon: str | None = None
+        if (
+            not should_defer
+            and initial_power > 0
+            and battery_capacity_kwh > 0
+            and current_soc is not None
+        ):
+            safe_end = _compute_safe_schedule_end(
+                current_soc,
+                min_soc,
+                battery_capacity_kwh,
+                initial_power,
+                end,
+                safety_factor=_DISCHARGE_SAFETY_FACTOR,
+                now=now,
+            )
+            if safe_end != end:
+                schedule_horizon = safe_end.isoformat()
+
         hass.data[DOMAIN]["_smart_discharge_state"] = {
             "session_id": str(uuid.uuid4()),
             "groups": groups,
@@ -1992,6 +2020,7 @@ def _register_services(hass: HomeAssistant) -> None:
             "discharging_started_at": None if should_defer else now,
             "consumption_peak_kw": max(0.0, net_consumption),
             "start_soc": current_soc,
+            "schedule_horizon": schedule_horizon,
         }
 
         _setup_smart_discharge_listeners(hass, inverter)

@@ -1169,6 +1169,82 @@ class TestHandleSmartDischarge:
         assert state["end"] == datetime.datetime(2026, 4, 7, 20, 0, 0)
 
     @pytest.mark.asyncio
+    async def test_schedule_horizon_set_on_immediate_start(self) -> None:
+        """schedule_horizon must be set when discharge starts immediately.
+
+        The __init__.py service handler bypasses the adapter's apply_mode
+        for the initial schedule setup (building/merging groups directly).
+        It must still compute and store the safe schedule horizon so the
+        sensor attribute is available from the first state update.
+
+        Without this, schedule_horizon is only set when the listener's
+        pacing loop calls apply_mode with a changed power — which may
+        never happen if power stays at max throughout the session.
+        """
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=10.0,
+            coordinator_data={"SoC": 35.0},
+        )
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = hass.services.async_register.call_args_list[5].args[2]
+
+        # now=17:07 is past the deferred deadline (~17:06:50) for
+        # SoC=35→30 at 10.5kW over a 10-min window, so discharge
+        # starts immediately rather than deferring.
+        now = datetime.datetime(2026, 4, 7, 17, 7, 0)
+        with (
+            patch(
+                "custom_components.foxess_control.dt_util.now",
+                return_value=now,
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.services.dt_util.now",
+                return_value=now,
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=now,
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(17, 10),
+                        "min_soc": 30,
+                    }
+                )
+            )
+
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state["discharging_started"] is True
+        horizon = state.get("schedule_horizon")
+        assert horizon is not None, (
+            "schedule_horizon must be set on immediate discharge start"
+        )
+        # Horizon should be an ISO timestamp before the window end
+        assert "T" in horizon
+        end_iso = state["end"].isoformat()
+        assert horizon < end_iso, (
+            f"Horizon {horizon} should be before session end {end_iso}"
+        )
+
+    @pytest.mark.asyncio
     async def test_smart_discharge_registers_listeners(self) -> None:
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500

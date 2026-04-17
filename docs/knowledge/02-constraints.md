@@ -436,6 +436,28 @@ reappear because the "fix" didn't address the root cause.
 `tests/test_coordinator.py::TestSocInterpolationDuringDischarge`
 (confirmed to fail with bug, pass with fix)
 
+### C-033: Minimise known simulator–production deviations
+**Statement**: Known behavioural differences between the FoxESS
+simulator and the real FoxESS cloud/inverter system must be
+documented and minimised. When a deviation is identified, it must
+be either fixed in the simulator or explicitly accepted with a
+rationale for why the difference is safe.
+**Rationale**: The simulator is the integration's authoritative test
+double (C-028). Any deviation between the simulator and the real
+system creates a blind spot: tests pass against behaviour the real
+system doesn't exhibit, or fail to test behaviour it does. These
+blind spots compound — a test written to work around a simulator
+quirk may mask a real bug, and the workaround becomes load-bearing.
+The `test_schedule_horizon_during_discharge` failure (2026-04-17)
+was caused by the E2E polling interval (60s) differing from the
+simulator's immediate state visibility, causing the coordinator
+to use stale SoC data and take a different code path than intended.
+**Violation consequence**: Tests pass in CI but the integration
+misbehaves in production, or tests fail for reasons unrelated to
+the code under test — both erode confidence in the test suite.
+**Traces**: C-028 (simulator over mocks), C-031 (no flaky tests),
+C-032 (reproduce before fix)
+
 ### C-027: Progressive schedule extension (discharge safety)
 **Statement**: The inverter schedule end time for forced discharge must
 be set to a safe horizon — the time at which the battery would reach
