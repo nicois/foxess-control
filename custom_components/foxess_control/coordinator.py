@@ -195,7 +195,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 reported - 0.5,
                 min(reported + 0.44, self._soc_interpolated),
             )
-            data["_soc_interpolated"] = round(self._soc_interpolated, 1)
+            data["_soc_interpolated"] = self._soc_interpolated
 
         self._soc_last_bat_kw = net_bat_kw
         self._ws_last_time = now
@@ -254,15 +254,15 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._soc_last_reported - 0.5,
                     min(self._soc_last_reported + 0.44, new_val),
                 )
-            new_rounded = round(new_val, 1)
-            old_rounded = round(self._soc_interpolated, 1)
+            new_rounded = round(new_val, 2)
+            old_rounded = round(self._soc_interpolated, 2)
 
             self._soc_interpolated = new_val
             self._ws_last_time = now
 
             if new_rounded != old_rounded:
                 merged = dict(self.data)
-                merged["_soc_interpolated"] = new_rounded
+                merged["_soc_interpolated"] = new_val
                 self.data = merged
                 self.async_update_listeners()
 
@@ -362,7 +362,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Expose interpolated SoC for display (sensors, progress bars)
         if self._soc_interpolated is not None:
             ws_data = dict(ws_data) if not isinstance(ws_data, dict) else ws_data
-            ws_data["_soc_interpolated"] = round(self._soc_interpolated, 1)
+            ws_data["_soc_interpolated"] = self._soc_interpolated
 
         ws_data["_data_source"] = "ws"
         ws_data["_data_last_update"] = dt_util.utcnow().isoformat()
