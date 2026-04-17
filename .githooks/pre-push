@@ -31,7 +31,7 @@ while read -r local_ref local_oid remote_ref remote_oid; do
     fi
 
     echo "Running E2E tests before tagging $tag..."
-    if ! python -m pytest e2e/ -m slow --tb=short -q; then
+    if ! python -m pytest e2e/ -m slow -n auto --tb=short -q; then
       echo "❌ E2E tests failed — fix before pushing tag $tag"
       exit 1
     fi

@@ -469,8 +469,13 @@ class TestDataSource:
         the unwrapped callback that doesn't call _maybe_start_realtime_ws.
 
         Setup: low energy to discharge (SoC 25%, min_soc 20%) with a
-        long-ish window (8 min) so the algorithm defers for ~5 minutes
-        before starting forced discharge.
+        10-min window.  At 10.5 kW max power the ~0.5 kWh discharge
+        only needs ~3.3 min (with headroom), so the algorithm defers
+        for ~5 min before starting forced discharge.
+
+        The SoC must propagate to the coordinator BEFORE the service
+        call, otherwise the coordinator's default 50% SoC makes the
+        energy estimate too large and skips deferral entirely.
         """
         if connection_mode != "cloud":
             pytest.skip("WS is cloud-specific")
@@ -478,7 +483,14 @@ class TestDataSource:
         ha_e2e.set_options(ws_all_sessions=True)
         foxess_sim.set(soc=25, solar_kw=0, load_kw=0.3)
 
-        start, end = _tight_window(8)
+        ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_battery_soc",
+            "le",
+            26,
+            timeout_s=30,
+        )
+
+        start, end = _tight_window(10)
         ha_e2e.call_service(
             "foxess_control",
             "smart_discharge",
@@ -492,7 +504,7 @@ class TestDataSource:
             timeout_s=60,
         )
 
-        # Wait for deferred→active transition (up to ~6 min)
+        # Wait for deferred→active transition (up to ~7 min)
         ha_e2e.wait_for_state(
             "sensor.foxess_smart_operations",
             "discharging",
