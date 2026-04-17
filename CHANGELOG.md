@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.5-beta.24
+## 1.0.5-beta.25
 
 ### Added
 - **Structural tests for coverage gaps**: AST-based `test_cancel_smart_session_is_synchronous` (C-016) verifies cancel functions cannot yield between unsub and state clear. `test_smart_battery_has_no_brand_imports` (C-021) verifies `smart_battery/` never imports from brand-specific packages.
