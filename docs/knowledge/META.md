@@ -1,7 +1,8 @@
 ---
 project: FoxESS Control
 created: 2026-04-14
-last_updated: 2026-04-14
+last_updated: 2026-04-17
+last_reflection: 2026-04-17T15:00:00+10:00
 ---
 # Knowledge Tree Meta
 
@@ -97,3 +98,27 @@ last_updated: 2026-04-14
   Verification must now walk code → design → constraint, not just the
   reverse. "Alternatives considered" entries are audited to confirm
   they are genuinely rejected, not implemented.
+
+### 2026-04-17 — Update pass (ws_mode + structured logging + ID collision)
+- **Changes detected**: 7 commits since last update (6d5443d..bd0b44a) plus
+  uncommitted `ws_mode` feature. Source files: `__init__.py`, `const.py`,
+  `config_flow.py`, `smart_battery/logging.py`, `smart_battery/listeners.py`,
+  `smart_battery/sensor_base.py`, `e2e/test_e2e.py`.
+- **D-NNN ID collision fixed**: D-023 was assigned to both "Progressive
+  schedule extension" (smart-discharge.md) and "Transient adapter error
+  resilience" (session-management.md). Renumbered session-management entries
+  to D-025 (transient errors) and D-026 (pending override cleanup). All
+  cross-references in 02-constraints.md and 05-coverage.md updated.
+- **D-008 rewritten**: The former "Conditional WebSocket activation" listed
+  "always-on WebSocket" as a rejected alternative, but `ws_mode=always` is
+  now implemented. Rewritten as "WebSocket activation modes (ws_mode)" with
+  three documented states (auto/smart_sessions/always), migration from the
+  old boolean, and watchdog for always mode. This repeats the exact pattern
+  flagged in the 2026-04-14 reflection — implemented behaviour described
+  as a rejected alternative.
+- **D-027 added**: Structured session logging via `logging.Filter`.
+  12 new unit tests in `test_structured_logging.py`. Traces to C-020.
+- **Test counts updated**: 570 unit + 66 E2E = 636 total (was 557 + 19).
+  E2E expanded via cloud/entity parametrization and new data source tests.
+- **C-024/C-025 promoted**: Both now have design docs (D-025/D-026), moving
+  from PARTIAL to COVERED in the coverage matrix.

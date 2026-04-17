@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 2
-last_verified: 2026-04-15
+last_verified: 2026-04-17
 traces_up: [01-vision.md]
 traces_down: [03-architecture.md, 04-design/]
 ---
@@ -30,7 +30,7 @@ the issue themselves. Opacity creates support burden and erodes trust.
 **Violation consequence**: Users cannot distinguish normal operation
 (e.g. deferred start waiting) from a fault, leading to unnecessary
 manual intervention or missed issues.
-**Traces**: D-021;
+**Traces**: D-021, D-027;
 C-022 (unreachable target surfaced), C-026 (error surfacing)
 
 ### C-021: Brand-agnostic code belongs in the common package

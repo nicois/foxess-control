@@ -70,7 +70,17 @@ post-session values so the overview card immediately reflects reality.
 - Immediate disconnect: rejected because UI shows stale state for
   minutes
 - Keep WS open until next REST poll: rejected as wasteful (up to 5 min)
-**Traces**: C-007
+**Known issue** (regression): The linger races with the override
+removal API call. The cancel hook fires `_stop_realtime_ws` as a
+fire-and-forget task, and `_remove_discharge_override()` runs
+concurrently. If the WS push arrives before the API removes the
+override, the linger captures still-discharging values and then
+disconnects — leaving stale high power on the card until the next
+REST poll (~5 min). See the sequence diagram in
+`session-management.md` (Session cancel with WS linger) for the
+full async trace. The `always` ws_mode is unaffected because the
+WS stays connected and delivers fresh post-session data within ~5s.
+**Traces**: C-007, C-020
 
 ### D-010: Power balance for grid direction
 **Decision**: Derive grid import/export from power balance

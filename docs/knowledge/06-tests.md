@@ -1,12 +1,12 @@
 ---
 project: FoxESS Control
 level: 6
-last_verified: 2026-04-16
+last_verified: 2026-04-17
 traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-557 unit tests + 19 E2E tests = 576 total.
+570 unit tests + 66 E2E tests = 636 total.
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
@@ -128,6 +128,27 @@ simulator and Playwright browser automation.
 | `TestTransientApiErrorResilience::test_charge_aborts_after_repeated_errors` | Consecutive errors abort | C-024 |
 | `TestStaleWorkModeAfterCleanupFailure::test_clear_overrides_clears_work_mode_immediately` | Session cancel hook fires from all paths | C-024, C-025 |
 | `TestStaleWorkModeAfterCleanupFailure::test_failed_cleanup_schedules_pending_retry` | Failed cleanup stores pending retry | C-024, C-025 |
+| `TestHandleSmartDischarge::test_deferred_to_discharging_triggers_ws` | WS connects on deferred→active transition | C-024 |
+
+## Structured Session Logging
+
+**Constraints**: C-020
+**Source**: `tests/test_structured_logging.py` (12 tests)
+
+| Test | Verifies | Constraint |
+|---|---|---|
+| `TestSessionContextFilter::test_injects_charge_session_context` | Charge fields on log record | C-020 |
+| `TestSessionContextFilter::test_injects_discharge_session_context` | Discharge fields on log record | C-020 |
+| `TestSessionContextFilter::test_empty_dict_when_no_session_active` | No session = empty context | C-020 |
+| `TestSessionContextFilter::test_never_suppresses_records` | Filter never drops records | C-020 |
+| `TestSessionContextFilter::test_discharge_wins_session_type_when_both_active` | Discharge takes priority | C-020 |
+| `TestSessionContextFilter::test_survives_getter_exception` | Graceful degradation | C-020 |
+| `TestSessionContextFilter::test_missing_fields_are_skipped` | Sparse state handled | C-020 |
+| `TestInstallRemove::test_roundtrip` | Install/remove lifecycle | C-020 |
+| `TestInstallRemove::test_filter_enriches_records_through_logger` | End-to-end enrichment | C-020 |
+| `TestDebugLogHandlerWithSession::test_handler_includes_session_in_buffer` | Session in debug sensor | C-020 |
+| `TestDebugLogHandlerWithSession::test_handler_omits_session_when_empty` | No session = no key | C-020 |
+| `TestDebugLogHandlerWithSession::test_handler_omits_session_when_attr_is_empty_dict` | Empty dict = no key | C-020 |
 
 ## Sensor Display
 
@@ -191,7 +212,7 @@ Key tests:
 
 ## E2E Tests (Containerised HA + Simulator + Playwright)
 
-**Source**: `e2e/test_e2e.py` (5 tests), `e2e/test_ui.py` (14 tests)
+**Source**: `e2e/test_e2e.py` (28 tests), `e2e/test_ui.py` (38 tests)
 **Infrastructure**: Podman HA container, FoxESS simulator, Playwright Chromium
 
 | Test | Verifies | Constraint |
@@ -199,23 +220,34 @@ Key tests:
 | `TestSmartDischarge::test_discharge_starts` | Service → schedule → state transition | C-001 |
 | `TestSmartDischarge::test_discharge_drains_battery` | SoC decreases during discharge | C-001, C-002 |
 | `TestSmartCharge::test_charge_starts` | Charge service + state transition | -- |
+| `TestEntityMode::test_self_use_on_clear` | Entity mode override cleanup | C-025 |
+| `TestEntityMode::test_work_mode_entity_updated` | Entity mode write | -- |
+| `TestEntityMode::test_power_entity_written` | Entity mode power write | -- |
 | `TestFaultInjection::test_ws_unit_mismatch_handled` | WS kW/W unit detection | C-004 |
 | `TestDataSource::test_api_source_when_idle` | data_source attribute = "api" | C-020 |
+| `TestDataSource::test_ws_always_connects_without_session` | ws_mode=always activates WS at startup | C-020 |
+| `TestDataSource::test_ws_connects_after_deferred_start` | WS connects on deferred→active | C-001 |
+| `TestDataSource::test_ws_connects_on_second_session` | WS reconnects for new session | C-003 |
+| `TestDataSource::test_ws_recovers_after_stream_stolen` | WS reconnects after theft | C-024 |
+| `TestDataSource::test_ws_reconnects_after_reload_at_max_power` | WS reconnects after reload | C-024 |
+| `TestDataSource::test_ws_mode_persists_via_options_flow` | ws_mode saved in options | C-020 |
+| `TestFeedinPacing::test_feedin_power_adjusts_over_time` | Feed-in pacing E2E | C-001 |
 | `TestOverviewCard::test_card_renders` | Overview card in shadow DOM | -- |
 | `TestOverviewCard::test_shows_soc` | SoC displayed on card | -- |
 | `TestOverviewCard::test_house_load_never_greyed` | House node active at low load | C-020 |
-| `TestOverviewCard::test_data_source_badge_matches_mode[api/ws]` | Badge reflects active data path | C-020 |
-| `TestOverviewCard::test_pv_values_consistent_with_solar_total[api/ws]` | PV1+PV2 ≈ total solar | C-020 |
+| `TestOverviewCard::test_data_source_badge_matches_mode[api/ws/entity]` | Badge reflects active data path | C-020 |
+| `TestOverviewCard::test_pv_values_consistent_with_solar_total[api/ws/entity]` | PV1+PV2 ≈ total solar | C-020 |
 | `TestControlCard::test_card_renders` | Control card in shadow DOM | -- |
 | `TestControlCard::test_soc_displayed` | SoC percentage in header | -- |
 | `TestControlCard::test_progress_hidden_when_idle` | No progress section when idle | C-020 |
-| `TestControlCard::test_progress_visible_during_discharge[api/ws]` | Progress section during discharge | C-020 |
+| `TestControlCard::test_progress_visible_during_discharge[api/ws/entity]` | Progress section during discharge | C-020 |
+| `TestControlCard::test_schedule_horizon_during_discharge` | Schedule horizon displayed | C-027 |
 | `TestScreenshots::test_idle_screenshot` | Visual regression capture | -- |
 | `TestScreenshots::test_discharging_screenshot` | Visual regression capture | -- |
 
-Tests parametrized with `[api/ws]` run under both data sources via the
-`data_source` fixture, which uses the `ws_refuse` simulator fault to
-block WS connections for API-only mode.
+Tests are parametrized across `[cloud, entity]` connection modes and
+`[api, ws, entity]` data sources. The `ws_refuse` simulator fault blocks
+WS connections for API-only mode. Total E2E count is 66 (28 + 38).
 
 ## Unmapped Tests
 

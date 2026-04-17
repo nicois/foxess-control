@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 5
-last_verified: 2026-04-16
+last_verified: 2026-04-17
 traces_up: [02-constraints.md, 04-design/]
 traces_down: [06-tests.md]
 ---
@@ -31,7 +31,7 @@ Traceability from constraints through design decisions to tests.
 | C-016 Cancel listeners before awaits | D-018 | -- | GAP |
 | C-017 End-of-discharge guard | D-003 | `TestShouldSuspendDischarge::test_high_consumption_suspends` | COVERED |
 | C-018 Unmanaged work mode protection | D-016 | `TestCheckScheduleSafe` (7), `test_rejects_schedule_with_backup_mode` | COVERED |
-| C-020 Operational transparency | D-021 | `TestDataSourceTracking` (3), `TestFoxESSPolledSensor::test_data_source_*` (2) | COVERED |
+| C-020 Operational transparency | D-021, D-027 | `TestDataSourceTracking` (3), `TestFoxESSPolledSensor::test_data_source_*` (2), `TestSessionContextFilter` (7), `TestInstallRemove` (2), `TestDebugLogHandlerWithSession` (3) | COVERED |
 | C-021 Brand-agnostic code in common package | -- | `test_vendored_copy_matches_canonical` (indirect) | PARTIAL |
 | C-026 Proactive error surfacing | -- | `TestErrorSurfacing` (2) | COVERED |
 | C-025 Session boundary cleanliness | D-026 | `TestSessionBoundaryCleanness` (2), `TestStaleWorkModeAfterCleanupFailure` (2) | COVERED |
@@ -41,7 +41,7 @@ Traceability from constraints through design decisions to tests.
 | C-019 Discharge SoC unavailability abort | D-019 | `TestDischargeSocUnavailability` (2) | COVERED |
 | C-027 Progressive schedule extension | D-023 | `compute_safe_schedule_end` tested via `TestHandleSmartDischarge` | COVERED |
 | C-028 Simulator over mocks | -- | `test_client.py`, `test_inverter.py` use simulator | COVERED |
-| C-029 E2E for HA-dependent behaviour | -- | `e2e/test_e2e.py` (5), `e2e/test_ui.py` (14) | COVERED |
+| C-029 E2E for HA-dependent behaviour | -- | `e2e/test_e2e.py` (28), `e2e/test_ui.py` (38) | COVERED |
 | C-030 E2E parallel before tagging | -- | `.githooks/pre-push` enforces gate | COVERED |
 
 ## Gaps
@@ -64,14 +64,6 @@ Traceability from constraints through design decisions to tests.
 - **C-021**: Brand-agnostic code in common package — architectural
   constraint enforced by code review, not a testable invariant. C-015
   (vendored sync) provides indirect verification.
-- **C-024**: Safe state on failure — `async_unload_entry` cleans up on
-  integration unload, C-012 handles SoC unavailability, but no
-  systematic guarantee across all failure paths (uncaught exceptions,
-  API failures mid-session).
-- **C-025**: Session boundary cleanliness — cancellation removes
-  overrides and new sessions initialise fresh state, but no test
-  verifies that transient state (peak consumption, taper ticks,
-  feed-in baselines) doesn't leak between back-to-back sessions.
 
 ### Design decisions without tests (UNVERIFIED)
 - **D-002**: Deferred start with self-use — the deferred start
@@ -79,7 +71,10 @@ Traceability from constraints through design decisions to tests.
   (self-use -> forced discharge at deadline) is only tested via
   integration flow.
 - **D-009**: Post-session linger — the 30-second linger timeout after
-  session end is not tested in isolation.
+  session end is not tested in isolation. **Active regression**: the
+  linger races with the override removal API call and captures
+  still-discharging values. See sequence diagram in
+  `session-management.md`.
 - **D-016**: Unmanaged mode protection — tested by
   `test_rejects_schedule_with_backup_mode` but only for Backup mode.
   Other unmanaged modes not tested.
@@ -93,8 +88,9 @@ Traceability from constraints through design decisions to tests.
 ## Summary
 
 - **Total constraints**: 30
-- **Fully covered**: 25 (83%)
-- **Partial**: 3 (11%)
+- **Fully covered**: 27 (90%)
+- **Partial**: 2 (7%)
 - **Gaps**: 2 (7%) — C-016 (structural), C-023 (investigation needed)
 - **Orphan tests**: 80+ unit (test_services.py largely unmapped)
-- **E2E tests**: 19 (5 REST + 14 Playwright) across API and WS modes
+- **Unit tests**: 570
+- **E2E tests**: 66 (28 test_e2e.py + 38 test_ui.py) across cloud and entity modes

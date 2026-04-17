@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 3
-last_verified: 2026-04-14
+last_verified: 2026-04-17
 traces_up: [02-constraints.md]
 traces_down: [04-design/]
 ---
@@ -31,7 +31,8 @@ reuse across Huawei, SolaX, Sungrow, etc. without duplicating the
 pacing logic. The `InverterAdapter` protocol is the abstraction boundary.
 **Key interfaces**: `InverterAdapter` (Protocol), `EntityAdapter` (impl),
 `calculate_charge_power()`, `calculate_discharge_power()`,
-`should_suspend_discharge()`, `TaperProfile`.
+`should_suspend_discharge()`, `TaperProfile`,
+`SessionContextFilter` (structured logging).
 
 ### `foxess/` — FoxESS Cloud API client
 **Path**: `custom_components/foxess_control/foxess/`

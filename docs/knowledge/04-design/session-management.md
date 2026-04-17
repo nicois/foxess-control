@@ -175,6 +175,171 @@ session state via a context getter callback injected at setup time.
 `tests/test_structured_logging.py::TestInstallRemove` (2),
 `tests/test_structured_logging.py::TestDebugLogHandlerWithSession` (3)
 
+## Async Flow Diagrams
+
+These diagrams trace the concurrent async operations during the
+highest-risk session transitions. The cancel+linger race documented
+here is the root cause of the stale-discharge-value regression (D-009).
+
+Source files: `smart_battery/session.py::cancel_smart_session`,
+`smart_battery/listeners.py::_on_timer_expire`,
+`__init__.py::_on_session_cancel`, `__init__.py::_stop_realtime_ws`,
+`__init__.py::_recover_sessions`.
+
+### Session cancel with WS linger (auto/smart_sessions mode)
+
+The cancel hook fires `_stop_realtime_ws` as a fire-and-forget task.
+The linger and the override removal run concurrently — the linger
+may capture a WS push that still shows high discharge power because
+the inverter hasn't processed the override removal yet.
+
+```mermaid
+sequenceDiagram
+    participant Timer as HA Timer (_on_timer_expire)
+    participant Cancel as cancel_smart_session
+    participant Hook as _on_session_cancel
+    participant Linger as _stop_realtime_ws (task)
+    participant API as FoxESS Cloud API
+    participant WS as WebSocket stream
+    participant Coord as Coordinator
+
+    Timer->>Cancel: cancel_smart_discharge(hass, domain)
+    activate Cancel
+    Note over Cancel: SYNC: unsub all listeners
+    Cancel->>Cancel: pop _smart_discharge_state
+    Cancel->>Cancel: async_create_task(clear_stored_session)
+    Cancel->>Hook: _on_session_cancel()
+    activate Hook
+    Hook->>Hook: pop _ws_discharge_callback
+    Hook->>Hook: _should_start_realtime_ws → False (state gone)
+    Hook->>Linger: async_create_task(_stop_realtime_ws)
+    Note over Hook: SYNC: clear _work_mode on coordinator
+    Hook->>Coord: async_set_updated_data({_work_mode: None})
+    deactivate Hook
+    deactivate Cancel
+
+    Note over Timer: cancel_smart_session returned (sync)
+    Timer->>API: await _remove_discharge_override()
+    activate API
+    Note over API: Network call ~1-5s
+
+    activate Linger
+    Linger->>Linger: pop _realtime_ws
+    Linger->>Linger: replace _on_data with linger wrapper
+    Note over Linger: await WS push (up to 30s)
+
+    WS-->>Linger: data push (~5s cycle)
+    Note over WS,Linger: ⚠ Inverter STILL discharging<br/>(API removal not complete)
+    Linger->>Coord: inject_realtime_data(stale high power)
+    Linger->>Linger: received.set()
+    Linger->>WS: async_disconnect()
+    Linger->>Coord: _data_source = "api"
+    deactivate Linger
+
+    API-->>Timer: override removed
+    deactivate API
+    Note over Coord: REST poll in ~5 min shows<br/>correct (low) discharge power
+    Note over Coord: ⚠ Card shows stale high value<br/>until REST poll
+```
+
+**Root cause**: The linger captures a WS push before the API has
+removed the override, so it injects still-discharging values. After
+linger disconnects, no further updates arrive until the next REST
+poll (~5 min). The card shows stale high discharge power.
+
+**Fix direction**: The linger should wait for the override removal
+to complete before accepting a WS push, or continue lingering until
+it sees discharge power drop below a threshold.
+
+### Session cancel (always mode)
+
+In `always` mode, `_should_start_realtime_ws` returns True, so the
+linger is never triggered. The WS stays connected and delivers fresh
+post-session data within ~5 seconds.
+
+```mermaid
+sequenceDiagram
+    participant Timer as HA Timer (_on_timer_expire)
+    participant Cancel as cancel_smart_session
+    participant Hook as _on_session_cancel
+    participant WS as WebSocket stream
+    participant Coord as Coordinator
+    participant API as FoxESS Cloud API
+
+    Timer->>Cancel: cancel_smart_discharge(hass, domain)
+    Cancel->>Hook: _on_session_cancel()
+    Hook->>Hook: _should_start_realtime_ws → True (always mode)
+    Note over Hook: WS NOT stopped — stays connected
+    Hook->>Coord: async_set_updated_data({_work_mode: None})
+
+    Timer->>API: await _remove_discharge_override()
+    API-->>Timer: override removed
+
+    WS-->>Coord: data push (~5s): discharge power ≈ 0
+    Note over Coord: Card updates within ~5s ✓
+```
+
+### Session recovery after HA restart
+
+On startup, `_recover_sessions` checks the Store for persisted
+sessions. The session state is rebuilt from stored data and new
+listeners are registered. No WS connection exists yet — it starts
+via the first discharge check callback.
+
+```mermaid
+sequenceDiagram
+    participant Setup as async_setup_entry
+    participant Store as HA Store (JSON)
+    participant Recover as _recover_sessions
+    participant API as FoxESS Cloud API
+    participant Listeners as _setup_smart_discharge_listeners
+
+    Setup->>Store: await store.async_load()
+    Store-->>Recover: stored session data
+
+    alt Session date ≠ today
+        Recover->>Store: delete stale session
+    else Window already passed
+        Recover->>API: remove expired override
+        Recover->>Store: delete expired session
+    else Active session
+        Recover->>API: has_matching_schedule_group?
+        API-->>Recover: True
+
+        Recover->>Recover: rebuild _smart_discharge_state
+        Note over Recover: New session_id (UUID)<br/>Recompute power from current SoC
+        Recover->>Listeners: _setup_smart_discharge_listeners
+        Note over Listeners: Register timer + WS-aware wrapper
+        Note over Listeners: First tick triggers<br/>_maybe_start_realtime_ws
+    end
+```
+
+### WS lifecycle during session transitions (deferred → active)
+
+The discharge callback is wrapped with a WS-aware layer that calls
+`_maybe_start_realtime_ws` after every check. When the deferred
+phase ends and forced discharge starts, the next check activates WS.
+
+```mermaid
+sequenceDiagram
+    participant Timer as 60s Timer
+    participant CB as _ws_aware_discharge_cb
+    participant Check as _check_discharge_soc
+    participant WS as _maybe_start_realtime_ws
+    participant State as _smart_discharge_state
+
+    Note over State: discharging_started = false (deferred)
+
+    Timer->>CB: tick
+    CB->>Check: await cb(now)
+    Note over Check: Deferred: SoC check + deadline calc
+    Check->>State: discharging_started = true (deadline reached)
+    Check->>Check: await adapter.apply_mode(ForceDischarge)
+    CB->>WS: await _maybe_start_realtime_ws
+    WS->>WS: _should_start_realtime_ws → True
+    Note over WS: WS connects, starts streaming
+```
+
 ## Key Behaviours
 
 - Charge sessions check SoC every 5 minutes, adjust power accordingly.
