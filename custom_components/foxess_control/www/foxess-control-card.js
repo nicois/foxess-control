@@ -476,7 +476,7 @@ class FoxESSControlCard extends HTMLElement {
     if (!source) return "";
     const labels = { ws: "WS", api: "API", modbus: "Modbus" };
     const label = labels[source] || source;
-    const staleThreshold = 10;
+    const staleThreshold = 30;
     const isStale = typeof ageSeconds === "number" && ageSeconds > staleThreshold;
     const ageLabel = typeof ageSeconds === "number" ? this._formatAge(ageSeconds) : "";
     const cls = isStale ? "data-source stale" : "data-source";

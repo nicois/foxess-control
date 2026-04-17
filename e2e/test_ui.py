@@ -223,7 +223,7 @@ class TestOverviewCard:
         )
         page.reload()
         page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(12000)
+        page.wait_for_timeout(32000)
         page.reload()
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(2000)
@@ -253,7 +253,7 @@ class TestOverviewCard:
         )
         assert badge_info is not None, "data-source badge not found"
         assert "stale" in badge_info["classes"], (
-            f"Badge should have 'stale' class after 12s, got: {badge_info}"
+            f"Badge should have 'stale' class after 32s, got: {badge_info}"
         )
         assert "API" in badge_info["text"], (
             f"Badge should contain 'API', got: {badge_info['text']}"
