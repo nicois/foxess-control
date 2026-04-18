@@ -206,6 +206,66 @@ class TestApplyModeViaEntities:
         # Only work mode call, no charge_power_entity configured
         assert hass.services.async_call.call_count == 1
 
+    @pytest.mark.asyncio
+    async def test_input_select_uses_input_select_domain(self) -> None:
+        """input_select entities must use the input_select service domain."""
+        hass = MagicMock()
+        hass.services.async_call = AsyncMock()
+        entry = MagicMock()
+        entry.options = {CONF_WORK_MODE_ENTITY: "input_select.foxess_work_mode"}
+        hass.data = {DOMAIN: {"entry1": {}}}
+        hass.config_entries.async_get_entry.return_value = entry
+
+        await _apply_mode_via_entities(hass, WorkMode.SELF_USE)
+
+        hass.services.async_call.assert_called_once_with(
+            "input_select",
+            "select_option",
+            {"entity_id": "input_select.foxess_work_mode", "option": "Self Use"},
+        )
+
+    @pytest.mark.asyncio
+    async def test_input_number_uses_input_number_domain(self) -> None:
+        """input_number entities must use the input_number service domain."""
+        hass = MagicMock()
+        hass.services.async_call = AsyncMock()
+        entry = MagicMock()
+        entry.options = {
+            CONF_WORK_MODE_ENTITY: "input_select.foxess_work_mode",
+            CONF_DISCHARGE_POWER_ENTITY: "input_number.foxess_discharge_power",
+            CONF_MIN_SOC_ENTITY: "input_number.foxess_min_soc",
+        }
+        hass.data = {DOMAIN: {"entry1": {}}}
+        hass.config_entries.async_get_entry.return_value = entry
+
+        await _apply_mode_via_entities(
+            hass, WorkMode.FORCE_DISCHARGE, power_w=3000, fd_soc=15
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert calls[0].args[0] == "input_select"
+        assert calls[1].args[0] == "input_number"
+        assert calls[2].args[0] == "input_number"
+
+    @pytest.mark.asyncio
+    async def test_platform_select_uses_select_domain(self) -> None:
+        """Platform-backed select entities use the select service domain."""
+        hass = MagicMock()
+        hass.services.async_call = AsyncMock()
+        entry = MagicMock()
+        entry.options = {
+            CONF_WORK_MODE_ENTITY: "select.foxess_work_mode",
+            CONF_DISCHARGE_POWER_ENTITY: "number.foxess_discharge_power",
+        }
+        hass.data = {DOMAIN: {"entry1": {}}}
+        hass.config_entries.async_get_entry.return_value = entry
+
+        await _apply_mode_via_entities(hass, WorkMode.FORCE_DISCHARGE, power_w=3000)
+
+        calls = hass.services.async_call.call_args_list
+        assert calls[0].args[0] == "select"
+        assert calls[1].args[0] == "number"
+
 
 class TestAsyncRemoveOverride:
     """Tests for _async_remove_override."""
