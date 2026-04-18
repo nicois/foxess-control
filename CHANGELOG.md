@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.6-beta.2
+
+### Added
+- **Graceful setup retry on cloud outage**: raises `ConfigEntryNotReady` when the FoxESS Cloud is unreachable during startup, so HA retries with exponential backoff instead of failing permanently.
+
 ## 1.0.6-beta.1
 
 ### Fixed

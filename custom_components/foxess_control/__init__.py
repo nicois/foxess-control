@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
@@ -1515,8 +1515,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if api_key:
         client = FoxESSClient(api_key, base_url=sim_url)
         inverter = Inverter(client, entry.data[CONF_DEVICE_SERIAL])
-        # Pre-warm max_power_w (validates connection, caches rated power)
-        await hass.async_add_executor_job(lambda: inverter.max_power_w)
+        try:
+            await hass.async_add_executor_job(lambda: inverter.max_power_w)
+        except Exception as err:
+            raise ConfigEntryNotReady(f"FoxESS Cloud unreachable: {err}") from err
     elif not entity_mode:
         raise ServiceValidationError(
             "No API key configured and entity mode is not active. "
