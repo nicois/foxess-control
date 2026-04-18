@@ -425,6 +425,12 @@ class FoxESSCloudAdapter:
         self._groups = []
 
 
+def _entity_service_domain(entity_id: str, default: str) -> str:
+    """Derive service domain from entity ID (input_select → input_select)."""
+    prefix = entity_id.split(".", 1)[0]
+    return prefix if prefix.startswith("input_") else default
+
+
 class FoxESSEntityAdapter:
     """InverterAdapter for FoxESS entity-mode (foxess_modbus) control.
 
@@ -460,10 +466,11 @@ class FoxESSEntityAdapter:
 
         mode_option = _ENTITY_MODE_MAP.get(mode)
         if mode_option:
+            wm_entity = self._opts[CONF_WORK_MODE_ENTITY]
             await hass.services.async_call(
-                "select",
+                _entity_service_domain(wm_entity, "select"),
                 "select_option",
-                {"entity_id": self._opts[CONF_WORK_MODE_ENTITY], "option": mode_option},
+                {"entity_id": wm_entity, "option": mode_option},
             )
 
         if power_w is not None and mode in (
@@ -477,7 +484,7 @@ class FoxESSEntityAdapter:
             )
             if power_entity:
                 await hass.services.async_call(
-                    "number",
+                    _entity_service_domain(power_entity, "number"),
                     "set_value",
                     {"entity_id": power_entity, "value": power_w},
                 )
@@ -485,7 +492,7 @@ class FoxESSEntityAdapter:
         min_soc_entity = self._opts.get(CONF_MIN_SOC_ENTITY)
         if min_soc_entity and mode == WorkMode.FORCE_DISCHARGE:
             await hass.services.async_call(
-                "number",
+                _entity_service_domain(min_soc_entity, "number"),
                 "set_value",
                 {"entity_id": min_soc_entity, "value": fd_soc},
             )
