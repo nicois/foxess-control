@@ -6,6 +6,7 @@ Subclasses :class:`SmartBatteryDomainData` with FoxESS-specific fields
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -157,3 +158,9 @@ class FoxESSControlData(SmartBatteryDomainData):
         """Iterate over entry_ids + underscore keys (for legacy iteration)."""
         yield from self.entries
         yield from self._KEY_MAP
+
+    def items(self):  # type: ignore[no-untyped-def]
+        """Yield (key, value) pairs for legacy dict iteration."""
+        for key in self:
+            with contextlib.suppress(KeyError):
+                yield key, self[key]
