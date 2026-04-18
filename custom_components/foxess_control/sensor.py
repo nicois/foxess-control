@@ -12,6 +12,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
+from homeassistant.const import EntityCategory
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util  # noqa: F401 — test patching target
@@ -216,6 +217,8 @@ class _PolledSensorDescription:
         "unit",
         "state_class",
         "icon",
+        "entity_category",
+        "enabled_default",
     )
 
     def __init__(
@@ -227,6 +230,9 @@ class _PolledSensorDescription:
         unit: str,
         state_class: SensorStateClass,
         icon: str,
+        *,
+        entity_category: EntityCategory | None = None,
+        enabled_default: bool = True,
     ) -> None:
         self.variable = variable
         self.name = name
@@ -235,6 +241,8 @@ class _PolledSensorDescription:
         self.unit = unit
         self.state_class = state_class
         self.icon = icon
+        self.entity_category = entity_category
+        self.enabled_default = enabled_default
 
 
 POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
@@ -291,6 +299,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "°C",
         SensorStateClass.MEASUREMENT,
         "mdi:thermometer",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     _PolledSensorDescription(
         "gridConsumptionPower",
@@ -327,6 +336,8 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "V",
         SensorStateClass.MEASUREMENT,
         "mdi:flash-triangle",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
     ),
     _PolledSensorDescription(
         "batCurrent",
@@ -336,6 +347,8 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "A",
         SensorStateClass.MEASUREMENT,
         "mdi:current-dc",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
     ),
     _PolledSensorDescription(
         "pv1Power",
@@ -345,6 +358,8 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "kW",
         SensorStateClass.MEASUREMENT,
         "mdi:solar-panel",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
     ),
     _PolledSensorDescription(
         "pv2Power",
@@ -354,6 +369,8 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "kW",
         SensorStateClass.MEASUREMENT,
         "mdi:solar-panel",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
     ),
     _PolledSensorDescription(
         "ambientTemperation",
@@ -363,6 +380,8 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "°C",
         SensorStateClass.MEASUREMENT,
         "mdi:thermometer",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
     ),
     _PolledSensorDescription(
         "invTemperation",
@@ -372,6 +391,8 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "°C",
         SensorStateClass.MEASUREMENT,
         "mdi:thermometer-alert",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
     ),
     # Cumulative energy counters (lifetime kWh)
     _PolledSensorDescription(
@@ -436,6 +457,8 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "kWh",
         SensorStateClass.TOTAL_INCREASING,
         "mdi:battery-sync",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
     ),
     # Grid connection
     _PolledSensorDescription(
@@ -446,6 +469,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "kW",
         SensorStateClass.MEASUREMENT,
         "mdi:meter-electric",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     _PolledSensorDescription(
         "RVolt",
@@ -455,6 +479,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "V",
         SensorStateClass.MEASUREMENT,
         "mdi:flash-triangle",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     _PolledSensorDescription(
         "RCurrent",
@@ -464,6 +489,8 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "A",
         SensorStateClass.MEASUREMENT,
         "mdi:current-ac",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
     ),
     _PolledSensorDescription(
         "RFreq",
@@ -473,6 +500,8 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "Hz",
         SensorStateClass.MEASUREMENT,
         "mdi:sine-wave",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
     ),
     # EPS / backup
     _PolledSensorDescription(
@@ -483,6 +512,8 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "kW",
         SensorStateClass.MEASUREMENT,
         "mdi:power-plug-battery",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
     ),
 ]
 
@@ -507,6 +538,10 @@ class FoxESSPolledSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity)
         self._attr_state_class = desc.state_class
         self._attr_icon = desc.icon
         self._attr_device_info = _device_info(entry)
+        if desc.entity_category is not None:
+            self._attr_entity_category = desc.entity_category
+        if not desc.enabled_default:
+            self._attr_entity_registry_enabled_default = False
         # Only expose data_source when multiple sources are configured
         self._has_multiple_sources = bool(entry.data.get(CONF_WEB_USERNAME))
 
