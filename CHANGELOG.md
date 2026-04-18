@@ -1,98 +1,47 @@
 # Changelog
 
-## 1.0.5-beta.29
-
-### Fixed
-- **WS linger captured stale forced-discharge data (D-009)**: after a smart session ended, `_on_session_cancel` scheduled `_stop_realtime_ws` via `async_create_task`, which ran concurrently with override removal. The WS linger captured data while the inverter was still in forced discharge mode, leaving stale discharge values in the coordinator. The cancel hook now returns the WS stop coroutine; listener call sites await it after override removal completes, so the linger captures post-session self-use data.
-
-## 1.0.5-beta.28
+## 1.0.5
 
 ### Added
-- **Staleness indicator on both Lovelace cards**: overview and control cards compute data age client-side from the freshness sensor's `last_update` attribute. Badge turns amber with elapsed time (e.g. "API · 2m") when data exceeds 30 seconds old.
+- **WebSocket mode selector** (`ws_mode`): replaced the boolean `ws_all_sessions` toggle with a 3-state dropdown — **Auto** (WS only during paced forced discharge), **All smart sessions** (any smart session or force op), **Always connected** (WS preferred at all times with watchdog recovery). Existing configurations migrate automatically.
+- **Data freshness sensor**: `sensor.foxess_data_freshness` exposes the current data source (`ws`, `api`, or `modbus`) as its state, with `last_update` and `age_seconds` attributes for staleness detection.
+- **Data staleness indicator on Lovelace cards**: both cards compute data age client-side; badge turns red with elapsed time (e.g. "API · 2m") when data exceeds 30 seconds old.
+- **Structured session logging**: session context (ID, type, SoC, power) enriched via `logging.Filter`; debug log sensor exposes structured data for E2E tests and power users.
+- **Target power display**: Lovelace card shows current vs target discharge rate when they differ during feed-in pacing.
+- **Entity-mode E2E tests**: input helpers simulate modbus entities; `connection_mode` fixture parametrizes cloud vs entity modes with function-scoped containers for full isolation.
+- **Reconfigure flow**: add or update web portal credentials without re-creating the config entry. Accepts both raw password and pre-computed MD5 hash.
+- **Structural tests**: AST-based verification of synchronous cancel functions (C-016) and brand import boundary (C-021).
 
 ### Changed
-- **Extrapolated SoC precision**: control card now shows interpolated SoC to 2 decimal places (e.g. 47.32%) instead of 1.
-
-### Fixed
-- **Schedule horizon not set on immediate discharge start**: both the `__init__.py` service handler and brand-agnostic `services.py` bypassed the adapter's `apply_mode()` before the state dict existed, so `schedule_horizon` was never set for non-deferred sessions. Now computed inline before state dict creation.
-- **Feed-in energy inflated at session start**: `feedin_start_kwh` was captured from the coordinator at session setup, which in API mode held a stale value from the last poll (up to 5 minutes old). When WS connected and delivered fresh data, the cumulative counter jumped, inflating `feedin_used_kwh` immediately. Baseline is now deferred to the listener's first tick when fresh data is available.
-
-## 1.0.5-beta.25
-
-### Added
-- **Structural tests for coverage gaps**: AST-based `test_cancel_smart_session_is_synchronous` (C-016) verifies cancel functions cannot yield between unsub and state clear. `test_smart_battery_has_no_brand_imports` (C-021) verifies `smart_battery/` never imports from brand-specific packages.
-- **Design decisions D-028, D-029**: documented unreachable charge target detection (C-022) and proactive error surfacing mechanism (C-026).
-
-### Changed
-- **Coverage matrix regenerated**: full bidirectional trace analysis with new ACCEPTED status for non-actionable gaps. All 4 actionable PARTIAL gaps closed — COVERED rises from 65% to 77%.
-
-### Fixed
-- **Smart discharge starting before window**: the deferred discharge listener omitted the `start=` parameter when calling `calculate_discharge_deferred_start`, bypassing the floor clamp that prevents discharge before the window opens. The inverter received a schedule with `fdPwr=0` but ignored the zero and discharged at full power. Now passes the window start time so the clamp keeps deferred mode active until the window begins.
-
-## 1.0.5-beta.22
-
-### Added
-- **Structured session logging**: enrich existing log messages with session context (session_id, session_type, SoC, power levels) via a `logging.Filter`. The debug log sensor exposes structured session data in its attributes for E2E tests and power users.
-- **Data freshness sensor**: new `sensor.foxess_data_freshness` exposes the current data source (`ws`, `api`, or `modbus`) as its state, with `last_update` (ISO timestamp) and `age_seconds` attributes. Lovelace cards can use `age_seconds` to indicate when data is stale in API-polling mode (up to 5 min lag) vs live in WS/modbus mode (~5s updates).
-
-### Changed
-- **WebSocket mode selector**: replaced the boolean `ws_all_sessions` toggle with a 3-state `ws_mode` dropdown: **Auto** (WS only during paced forced discharge — the default), **All smart sessions** (WS during any smart session or force op), and **Always connected** (WS preferred over REST polling at all times). Existing configurations migrate automatically. "Always" mode includes a watchdog that recovers the WS connection after transient failures.
-
-### Fixed
-- **Force operations not cancelling opposite smart session**: `force_charge` only cancelled an active `smart_charge`, leaving `smart_discharge` listeners running (and vice versa). The leftover listener would fight the schedule. Both force operations now cancel both smart session types, matching the behaviour smart operations already had.
-- **WebSocket not connecting after deferred discharge start**: when a discharge session started in deferred mode (self-use until the deadline), the periodic timer ran the unwrapped callback that didn't trigger `_maybe_start_realtime_ws`. The timer now fires the WS-aware wrapper, so WebSocket connects as soon as forced discharge begins.
-- **Session sensors delayed by ~30s after state changes**: `SmartOperationsOverviewSensor` and `OverrideStatusSensor` relied on HA's ~30s poll cycle instead of subscribing to coordinator updates. Now subscribe via `coordinator.async_add_listener` for instant state propagation.
-
-## 1.0.5-beta.20
-
-### Fixed
-- **Stale work mode badge after failed cleanup**: when a session aborted due to API errors and the schedule cleanup also failed (same outage), the overview card showed "Force Charge" or "Force Discharge" indefinitely. Now: (1) override removal stores a pending retry on failure, and the coordinator retries on each successful REST poll until the schedule is clean; (2) all session cancel paths use the brand-agnostic `cancel_smart_session` which fires the `_on_session_cancel` hook to clear `_work_mode` immediately.
-- **Smart sessions survive transient API errors**: a single "Device offline" or DNS timeout during `apply_mode` no longer aborts the entire charge/discharge session. Errors are retried on the next timer tick; only 3 consecutive failures trigger an abort. Previously, any transient cloud outage (even a few seconds of DNS instability) would kill a multi-hour session.
-- **SoC interpolation overshooting entity value**: the interpolated SoC (used by the Lovelace battery icon and progress bar) could exceed the integer tick by more than 0.5%, causing `Math.round()` to display a higher value than `sensor.foxess_battery_soc`. The clamp is now `[tick − 0.5, tick + 0.44]` so the rounded display always matches the entity.
-
-### Changed
-- **Eliminated duplicated cancel functions**: `_cancel_smart_charge` and `_cancel_smart_discharge` in `__init__.py` were replaced with delegates to the brand-agnostic `cancel_smart_charge`/`cancel_smart_discharge` from `listeners.py`, ensuring the `_on_session_cancel` hook fires from all cancel paths (clear_overrides, force_charge, force_discharge, smart_charge, smart_discharge, unload).
-
-### Changed
-- **E2E config uses production defaults**: removed non-default overrides (`ws_all_sessions`, `min_power_change`, `smart_headroom`) from E2E seed config. Tests that need non-default options now set them explicitly via the options flow, matching real user setup.
-- **GitHub Actions updated**: checkout v4→v6, setup-python v5→v6, upload-artifact v4→v7, download-artifact v4→v8. Removed `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` workaround.
-
-## 1.0.5-beta.15
-
-### Fixed
-- **REST poll starvation from SoC extrapolation**: the 30-second SoC extrapolation timer called `async_set_updated_data`, which cancels and reschedules the REST poll timer. During any battery activity, the extrapolation fired more frequently than the poll interval, so REST polls never ran and all entities showed stale data indefinitely. Now updates entity data directly without touching the poll timer.
-- **Feed-in pacing stuck at initial power**: when target discharge power was below `min_power_change`, the update was silently skipped and the inverter stayed at the initial power level. Now switches to self-use mode when target is below threshold, so the next tick compares against a 0W baseline and can ramp up when the target exceeds the threshold.
-
-### Added
-- **Target power display in Lovelace card**: shows current vs target discharge rate when they differ during feed-in pacing.
-- **Diagnostic logging**: version and config logged at startup; detailed WS decision path logging for debugging.
-
-## 1.0.5-beta.12
-
-### Fixed
-- **WS data_source badge stuck during stale stream**: when another client (FoxESS app) stole the WS stream, the Lovelace badge stayed on "WS" throughout the stale period and reconnect — the coordinator was never notified that useful data had stopped. Now signals the coordinator immediately when reconnecting, so the badge shows "API" until fresh WS data resumes.
-
-## 1.0.5-beta.8
-
-### Changed
+- **SoC display precision matches confidence**: Lovelace card shows integer SoC until the first confirmed integer change (e.g. 93→92), then switches to 2 decimal places. Before the first change, interpolation is just an estimate; after, the real SoC is known to be near X.5, making interpolation meaningful.
+- **Interpolated SoC stored at full float precision**: rounding applied only for change detection (2dp gate to prevent entity update storms), not storage.
+- **Session construction via factory functions**: `create_charge_session()` and `create_discharge_session()` ensure consistent field defaults and reduce duplication across callers.
 - **Min SoC floor lowered to 0%**: `min_soc` and `min_soc_on_grid` now accept 0, removing the previous 5% floor.
-- **WebSocket activates during force operations** when `ws_all_sessions` is enabled.
-- **SoC extrapolation between REST polls**: 30-second interpolated updates for smooth progress bars.
-- **Simulator WS realism**: push loop only sends data to the newest client; older connections receive stale keepalives. Matches FoxESS cloud behaviour where a new app/web login takes over the data stream.
-
-### Added
-- **Entity-mode E2E tests**: input helpers simulate modbus entities; `connection_mode` fixture parametrizes cloud vs entity modes.
-- **HA WebSocket event stream** (`HAEventStream`): instant state change notifications for E2E tests.
-- **Entity adapter service domain routing**: `input_select`/`input_number` entities use correct HA service domain.
-- **SoC interpolation regression tests**: 5 tests verify smooth decline, clamp behaviour, and feedin-absent scenarios.
-- **E2E function-scoped containers**: each test gets a fresh HA container and simulator, eliminating cross-test state leaks.
-- **E2E test: WS stream-stolen recovery**: verifies the integration reconnects when another client (FoxESS app) steals the data stream.
+- **Unified cancel functions**: `_cancel_smart_charge` and `_cancel_smart_discharge` replaced with delegates to brand-agnostic `cancel_smart_session`, ensuring the `_on_session_cancel` hook fires from all cancel paths.
+- **Simulator fidelity**: charge taper above 90% SoC, discharge taper below 15% SoC, per-app state isolation, stale-stream behaviour matching FoxESS cloud.
+- **E2E config uses production defaults**: tests needing non-default options set them explicitly via the options flow, matching real user setup.
+- **GitHub Actions updated**: checkout v4→v6, setup-python v5→v6, upload-artifact v4→v7, download-artifact v4→v8.
 
 ### Fixed
-- **WS stream-stolen recovery**: when another client (FoxESS app/website) opens a WebSocket to the FoxESS cloud, the integration's existing connection goes silent — it receives stale keepalive frames but no useful data. Previously the 30s stale timeout never fired because `receive()` returned for each stale frame. Now tracks last useful data timestamp and reconnects when only stale frames arrive for 30s.
-- **WS token invalidation on reconnect failure**: the FoxESS cloud revokes the web session token when another client logs in, causing `WSServerHandshakeError` (HTTP 200 instead of 101). The cached token is now invalidated on reconnect failure, forcing a fresh login on the next attempt.
-- **SoC interpolation stuck between ticks**: `_ws_last_time` was set before integration (making elapsed=0) and only when feedinPower was present. Moved after integration and made unconditional.
-- **SoC clamp rounding**: upper bound 0.99 rounded to next integer (95.99→96.0 displayed as 96%). Changed to 0.94 so displayed value stays within the authoritative tick.
+- **WS linger race captured stale forced-discharge data (D-009)**: `_on_session_cancel` now returns the WS stop coroutine; callers await it after override removal completes, so the linger captures post-session self-use data. Also fixed the `clear_overrides` service path which used fire-and-forget.
+- **Entity-mode service domain detection**: `apply_mode()` used hardcoded `"select"` and `"number"` domains, breaking `input_select`/`input_number` entities from foxess_modbus. Added `_entity_service_domain()` helper to derive the correct domain from the entity ID prefix.
+- **Charge fdSoc regression**: listener must pass `fd_soc=100` to prevent FoxESS API validation failure (C-008).
+- **Smart discharge starting before scheduled window**: deferred discharge listener omitted the `start=` parameter, bypassing the floor clamp. The inverter received `fdPwr=0` but ignored it and discharged at full power.
+- **Force operations not cancelling opposite smart session**: both force operations now cancel both session types, preventing leftover listeners from fighting the schedule.
+- **WS not connecting after deferred discharge start**: timer now fires the WS-aware wrapper, so WebSocket connects as soon as forced discharge begins.
+- **WS reconnect during smart charge**: charge listener wrapper wasn't triggering `_maybe_start_realtime_ws`.
+- **Session sensors delayed by ~30s**: now subscribe via `coordinator.async_add_listener` for instant state propagation.
+- **Stale work mode badge after failed cleanup**: override removal retries on each successful REST poll; cancel paths clear `_work_mode` immediately.
+- **Smart sessions survive transient API errors**: errors retried on next timer tick; only 3 consecutive failures trigger abort. Previously any transient cloud outage killed a multi-hour session.
+- **SoC interpolation overshooting entity value**: clamp tightened to `[tick − 0.5, tick + 0.44]` so the rounded display always matches the entity.
+- **REST poll starvation from SoC extrapolation**: now updates entity data directly without resetting the poll timer.
+- **Feed-in pacing stuck at initial power**: switches to self-use when target is below `min_power_change` threshold, enabling ramp-up on the next tick.
+- **Feed-in energy inflated at session start**: baseline deferred to the listener's first tick when fresh data is available.
+- **Schedule horizon not set on immediate discharge start**: computed inline before state dict creation.
+- **WS data_source badge stuck during stale stream**: coordinator notified immediately when reconnecting, so badge shows "API" until fresh WS data resumes.
+- **WS stream-stolen recovery**: tracks last useful data timestamp; reconnects after 30s of only stale frames. Token invalidated on handshake error, forcing fresh login.
+- **SoC interpolation stuck between ticks**: timestamp set after integration, made unconditional.
+- **SoC clamp rounding**: upper bound changed to 0.94 to prevent displayed value exceeding authoritative tick.
 - **Progress bar start SoC wrong after deferral**: updated to actual SoC when session begins.
 
 ## 1.0.4
