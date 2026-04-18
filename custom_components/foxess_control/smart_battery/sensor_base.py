@@ -499,6 +499,19 @@ class OverrideStatusSensor(SensorEntity):
 
     _attr_has_entity_name = True
     _attr_should_poll = True
+    _unrecorded_attributes = frozenset(
+        {
+            "mode",
+            "phase",
+            "power_w",
+            "max_power_w",
+            "target_soc",
+            "end_time",
+            "min_soc",
+            "consumption_peak_kw",
+            "safety_floor_w",
+        }
+    )
 
     def __init__(
         self,
@@ -623,6 +636,26 @@ class SmartOperationsOverviewSensor(RestoreSensor):
     _attr_should_poll = True
     _attr_translation_key = "smart_operations"
     _attr_device_class = SensorDeviceClass.ENUM
+    _unrecorded_attributes = frozenset(
+        {
+            "charge_power_w",
+            "charge_current_soc",
+            "charge_confirmed_soc",
+            "charge_remaining",
+            "charge_target_reachable",
+            "discharge_power_w",
+            "discharge_target_power_w",
+            "discharge_current_soc",
+            "discharge_confirmed_soc",
+            "discharge_remaining",
+            "discharge_feedin_used_kwh",
+            "discharge_feedin_projected_kwh",
+            "has_error",
+            "last_error",
+            "last_error_at",
+            "error_count",
+        }
+    )
 
     def __init__(
         self,
@@ -1071,6 +1104,7 @@ class BatteryForecastSensor(SensorEntity):
     _attr_should_poll = True
     _attr_icon = ICON_FORECAST
     _attr_native_unit_of_measurement = "%"
+    _unrecorded_attributes = frozenset({"forecast"})
 
     def __init__(
         self,
