@@ -272,6 +272,10 @@ class TestOverviewCard:
         if connection_mode != "cloud":
             pytest.skip("PV1/PV2 entities don't exist in entity mode")
         assert foxess_sim is not None
+        # PV sensors are disabled by default — enable them and reload.
+        for eid in ("sensor.foxess_pv1_power", "sensor.foxess_pv2_power"):
+            ha_e2e.enable_entity(eid)
+        ha_e2e.reload_integration()
         foxess_sim.set(soc=80, solar_kw=3.0, load_kw=0.5)
         start, end = _tight_window(10)
         ha_e2e.call_service(

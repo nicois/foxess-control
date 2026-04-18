@@ -232,6 +232,52 @@ class HAClient:
             f"within {timeout_s}s (last: '{last}')"
         )
 
+    def enable_entity(self, entity_id: str) -> None:
+        """Enable a disabled-by-default entity via the WS entity registry API."""
+        import websocket as _ws
+
+        ws_url = self.base_url.replace("http://", "ws://") + "/api/websocket"
+        ws = _ws.create_connection(ws_url, timeout=10)
+        try:
+            msg = json.loads(ws.recv())
+            if msg["type"] != "auth_required":
+                raise RuntimeError(f"Expected auth_required, got {msg['type']}")
+            token = str(self._session.headers["Authorization"]).split(" ", 1)[1]
+            ws.send(json.dumps({"type": "auth", "access_token": token}))
+            msg = json.loads(ws.recv())
+            if msg["type"] != "auth_ok":
+                raise RuntimeError(f"Auth failed: {msg}")
+            ws.send(
+                json.dumps(
+                    {
+                        "id": 1,
+                        "type": "config/entity_registry/update",
+                        "entity_id": entity_id,
+                        "disabled_by": None,
+                    }
+                )
+            )
+            result = json.loads(ws.recv())
+            if not result.get("success"):
+                raise RuntimeError(f"Failed to enable {entity_id}: {result}")
+        finally:
+            ws.close()
+
+    def reload_integration(self, domain: str = "foxess_control") -> None:
+        """Reload a config entry so entity registry changes take effect."""
+        entries = self._session.get(
+            f"{self.base_url}/api/config/config_entries/entry", timeout=10
+        ).json()
+        entry = next(e for e in entries if e["domain"] == domain)
+        r = self._session.post(
+            f"{self.base_url}/api/config/config_entries/entry/"
+            f"{entry['entry_id']}/reload",
+            timeout=10,
+        )
+        if not r.ok:
+            raise RuntimeError(f"Reload failed: {r.status_code} {r.text[:200]}")
+        time.sleep(5)
+
     def is_ready(self) -> bool:
         """Check if HA is responding."""
         try:
