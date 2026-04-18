@@ -210,10 +210,18 @@
           "web_username": "Web Username",
           "web_password": "Web Password (or MD5 hash)"
         }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate FoxESS Control",
+        "description": "Your FoxESS API key is no longer valid. Please enter a new API key.",
+        "data": {
+          "api_key": "API Key"
+        }
       }
     },
     "abort": {
-      "reconfigure_successful": "Web credentials updated successfully."
+      "reconfigure_successful": "Web credentials updated successfully.",
+      "reauth_successful": "API key updated successfully."
     },
     "error": {
       "cannot_connect": "Cannot connect to FoxESS Cloud API. Check your network connection.",

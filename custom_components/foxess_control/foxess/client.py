@@ -14,9 +14,15 @@ import requests
 class FoxESSApiError(Exception):
     """Error returned by the FoxESS Cloud API."""
 
+    AUTH_ERRNOS = {41807, 41808, 41809}
+
     def __init__(self, errno: int, msg: str) -> None:
         self.errno = errno
         super().__init__(f"FoxESS API error {errno}: {msg}")
+
+    @property
+    def is_auth_error(self) -> bool:
+        return self.errno in self.AUTH_ERRNOS
 
 
 # HTTP status codes that are transient and worth retrying.

@@ -234,6 +234,44 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
+        """Handle re-authentication when API key becomes invalid."""
+        self._api_data = dict(entry_data)
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Prompt the user for a new API key."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            new_key = user_input[CONF_API_KEY]
+            serial = self._api_data[CONF_DEVICE_SERIAL]
+            try:
+                await self.hass.async_add_executor_job(
+                    _validate_credentials, new_key, serial
+                )
+            except FoxESSApiError as err:
+                _LOGGER.warning("FoxESS API rejected credentials: %s", err)
+                errors["base"] = "invalid_auth"
+            except requests.RequestException as err:
+                _LOGGER.warning("Could not reach FoxESS Cloud API: %s", err)
+                errors["base"] = "cannot_connect"
+            else:
+                entry = self.hass.config_entries.async_get_entry(
+                    self.context["entry_id"]
+                )
+                assert entry is not None
+                updated_data = {**entry.data, CONF_API_KEY: new_key}
+                return self.async_update_reload_and_abort(entry, data=updated_data)
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({vol.Required(CONF_API_KEY): str}),
+            errors=errors,
+        )
+
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:

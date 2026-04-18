@@ -8,6 +8,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import callback
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -132,15 +133,22 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
     async def _async_update_data(self) -> dict[str, Any]:
+        from .foxess.client import FoxESSApiError
+
         try:
             data: dict[str, Any] = await self.hass.async_add_executor_job(
                 self._fetch_all
             )
+        except FoxESSApiError as err:
+            if err.is_auth_error:
+                raise ConfigEntryAuthFailed(
+                    "FoxESS API key is invalid or expired"
+                ) from err
+            if self.data is not None:
+                _LOGGER.warning("REST poll failed, keeping last-known data: %s", err)
+                return dict(self.data)
+            raise UpdateFailed(f"Error fetching FoxESS data: {err}") from err
         except Exception as err:
-            # If we already have data (from a previous poll or WS injection),
-            # keep showing it rather than making all entities unavailable.
-            # This avoids a brief "—" flash when REST is temporarily down
-            # but WS was just providing valid data.
             if self.data is not None:
                 _LOGGER.warning("REST poll failed, keeping last-known data: %s", err)
                 return dict(self.data)
