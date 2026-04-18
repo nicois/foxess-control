@@ -60,6 +60,7 @@ class Inverter:
         self.client = client
         self.sn = serial_number
         self._max_power_w: int | None = None
+        self._device_type: str | None = None
 
     @property
     def max_power_w(self) -> int:
@@ -72,7 +73,13 @@ class Inverter:
                     "Could not determine inverter capacity from device detail"
                 )
             self._max_power_w = capacity_kw * self.CAPACITY_TO_FD_PWR
+            self._device_type = detail.get("deviceType")
         return self._max_power_w
+
+    @property
+    def device_type(self) -> str | None:
+        """Inverter model name, cached from device detail."""
+        return self._device_type
 
     @classmethod
     def auto_detect(cls, client: FoxESSClient) -> Inverter:

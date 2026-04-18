@@ -65,12 +65,14 @@ DEBUG_LOG_ENTITY = "input_boolean.foxess_control_debug_log"
 _DEBUG_LOG_BUFFER_SIZE = 75
 
 
-def _device_info(entry: ConfigEntry) -> DeviceInfo:
+def _device_info(entry: ConfigEntry, *, model: str | None = None) -> DeviceInfo:
     """Build DeviceInfo so all sensors are grouped under one device."""
     return DeviceInfo(
         identifiers={(DOMAIN, entry.entry_id)},
         name="FoxESS",
         manufacturer="FoxESS",
+        model=model,
+        configuration_url="https://www.foxesscloud.com",
     )
 
 
@@ -180,12 +182,13 @@ async def async_setup_entry(
         BatteryForecastSensor(hass, entry),
     ]
 
-    coordinator: FoxESSDataCoordinator | None = (
-        hass.data[DOMAIN].get(entry.entry_id, {}).get("coordinator")
-    )
+    entry_data = hass.data[DOMAIN].get(entry.entry_id, {})
+    coordinator: FoxESSDataCoordinator | None = entry_data.get("coordinator")
     if coordinator is not None:
+        inverter = entry_data.get("inverter")
+        model: str | None = inverter.device_type if inverter else None
         entities.extend(
-            FoxESSPolledSensor(coordinator, entry, desc)
+            FoxESSPolledSensor(coordinator, entry, desc, model=model)
             for desc in POLLED_SENSOR_DESCRIPTIONS
         )
         entities.append(FoxESSWorkModeSensor(coordinator, entry))
@@ -558,6 +561,8 @@ class FoxESSPolledSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity)
         coordinator: FoxESSDataCoordinator,
         entry: ConfigEntry,
         desc: _PolledSensorDescription,
+        *,
+        model: str | None = None,
     ) -> None:
         super().__init__(coordinator)
         self._variable = desc.variable
@@ -567,7 +572,7 @@ class FoxESSPolledSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity)
         self._attr_native_unit_of_measurement = desc.unit
         self._attr_state_class = desc.state_class
         self._attr_icon = desc.icon
-        self._attr_device_info = _device_info(entry)
+        self._attr_device_info = _device_info(entry, model=model)
         if desc.entity_category is not None:
             self._attr_entity_category = desc.entity_category
         if not desc.enabled_default:
