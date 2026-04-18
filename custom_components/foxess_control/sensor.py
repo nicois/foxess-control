@@ -219,6 +219,7 @@ class _PolledSensorDescription:
         "icon",
         "entity_category",
         "enabled_default",
+        "display_precision",
     )
 
     def __init__(
@@ -233,6 +234,7 @@ class _PolledSensorDescription:
         *,
         entity_category: EntityCategory | None = None,
         enabled_default: bool = True,
+        display_precision: int | None = None,
     ) -> None:
         self.variable = variable
         self.name = name
@@ -243,6 +245,7 @@ class _PolledSensorDescription:
         self.icon = icon
         self.entity_category = entity_category
         self.enabled_default = enabled_default
+        self.display_precision = display_precision
 
 
 POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
@@ -254,6 +257,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "%",
         SensorStateClass.MEASUREMENT,
         "mdi:battery",
+        display_precision=0,
     ),
     _PolledSensorDescription(
         "batChargePower",
@@ -263,6 +267,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "kW",
         SensorStateClass.MEASUREMENT,
         "mdi:battery-charging",
+        display_precision=2,
     ),
     _PolledSensorDescription(
         "batDischargePower",
@@ -272,6 +277,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "kW",
         SensorStateClass.MEASUREMENT,
         "mdi:battery-arrow-down",
+        display_precision=2,
     ),
     _PolledSensorDescription(
         "loadsPower",
@@ -281,6 +287,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "kW",
         SensorStateClass.MEASUREMENT,
         "mdi:home-lightning-bolt",
+        display_precision=2,
     ),
     _PolledSensorDescription(
         "pvPower",
@@ -290,6 +297,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "kW",
         SensorStateClass.MEASUREMENT,
         "mdi:solar-power",
+        display_precision=2,
     ),
     _PolledSensorDescription(
         "batTemperature",
@@ -300,6 +308,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         SensorStateClass.MEASUREMENT,
         "mdi:thermometer",
         entity_category=EntityCategory.DIAGNOSTIC,
+        display_precision=1,
     ),
     _PolledSensorDescription(
         "gridConsumptionPower",
@@ -309,6 +318,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "kW",
         SensorStateClass.MEASUREMENT,
         "mdi:transmission-tower-import",
+        display_precision=2,
     ),
     _PolledSensorDescription(
         "feedinPower",
@@ -318,6 +328,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "kW",
         SensorStateClass.MEASUREMENT,
         "mdi:transmission-tower-export",
+        display_precision=2,
     ),
     _PolledSensorDescription(
         "generationPower",
@@ -327,6 +338,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "kW",
         SensorStateClass.MEASUREMENT,
         "mdi:solar-power-variant",
+        display_precision=2,
     ),
     _PolledSensorDescription(
         "batVolt",
@@ -338,6 +350,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "mdi:flash-triangle",
         entity_category=EntityCategory.DIAGNOSTIC,
         enabled_default=False,
+        display_precision=1,
     ),
     _PolledSensorDescription(
         "batCurrent",
@@ -349,6 +362,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "mdi:current-dc",
         entity_category=EntityCategory.DIAGNOSTIC,
         enabled_default=False,
+        display_precision=1,
     ),
     _PolledSensorDescription(
         "pv1Power",
@@ -360,6 +374,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "mdi:solar-panel",
         entity_category=EntityCategory.DIAGNOSTIC,
         enabled_default=False,
+        display_precision=2,
     ),
     _PolledSensorDescription(
         "pv2Power",
@@ -371,6 +386,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "mdi:solar-panel",
         entity_category=EntityCategory.DIAGNOSTIC,
         enabled_default=False,
+        display_precision=2,
     ),
     _PolledSensorDescription(
         "ambientTemperation",
@@ -382,6 +398,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "mdi:thermometer",
         entity_category=EntityCategory.DIAGNOSTIC,
         enabled_default=False,
+        display_precision=1,
     ),
     _PolledSensorDescription(
         "invTemperation",
@@ -393,6 +410,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "mdi:thermometer-alert",
         entity_category=EntityCategory.DIAGNOSTIC,
         enabled_default=False,
+        display_precision=1,
     ),
     # Cumulative energy counters (lifetime kWh)
     _PolledSensorDescription(
@@ -403,6 +421,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "kWh",
         SensorStateClass.TOTAL_INCREASING,
         "mdi:transmission-tower-export",
+        display_precision=2,
     ),
     _PolledSensorDescription(
         "gridConsumption",
@@ -412,6 +431,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "kWh",
         SensorStateClass.TOTAL_INCREASING,
         "mdi:transmission-tower-import",
+        display_precision=2,
     ),
     _PolledSensorDescription(
         "generation",
@@ -421,6 +441,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "kWh",
         SensorStateClass.TOTAL_INCREASING,
         "mdi:solar-power-variant",
+        display_precision=2,
     ),
     _PolledSensorDescription(
         "chargeEnergyToTal",
@@ -430,6 +451,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "kWh",
         SensorStateClass.TOTAL_INCREASING,
         "mdi:battery-charging",
+        display_precision=2,
     ),
     _PolledSensorDescription(
         "dischargeEnergyToTal",
@@ -439,6 +461,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "kWh",
         SensorStateClass.TOTAL_INCREASING,
         "mdi:battery-arrow-down",
+        display_precision=2,
     ),
     _PolledSensorDescription(
         "loads",
@@ -448,6 +471,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "kWh",
         SensorStateClass.TOTAL_INCREASING,
         "mdi:home-lightning-bolt",
+        display_precision=2,
     ),
     _PolledSensorDescription(
         "energyThroughput",
@@ -459,6 +483,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "mdi:battery-sync",
         entity_category=EntityCategory.DIAGNOSTIC,
         enabled_default=False,
+        display_precision=2,
     ),
     # Grid connection
     _PolledSensorDescription(
@@ -470,6 +495,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         SensorStateClass.MEASUREMENT,
         "mdi:meter-electric",
         entity_category=EntityCategory.DIAGNOSTIC,
+        display_precision=2,
     ),
     _PolledSensorDescription(
         "RVolt",
@@ -480,6 +506,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         SensorStateClass.MEASUREMENT,
         "mdi:flash-triangle",
         entity_category=EntityCategory.DIAGNOSTIC,
+        display_precision=1,
     ),
     _PolledSensorDescription(
         "RCurrent",
@@ -491,6 +518,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "mdi:current-ac",
         entity_category=EntityCategory.DIAGNOSTIC,
         enabled_default=False,
+        display_precision=1,
     ),
     _PolledSensorDescription(
         "RFreq",
@@ -502,6 +530,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "mdi:sine-wave",
         entity_category=EntityCategory.DIAGNOSTIC,
         enabled_default=False,
+        display_precision=1,
     ),
     # EPS / backup
     _PolledSensorDescription(
@@ -514,6 +543,7 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "mdi:power-plug-battery",
         entity_category=EntityCategory.DIAGNOSTIC,
         enabled_default=False,
+        display_precision=2,
     ),
 ]
 
@@ -542,6 +572,8 @@ class FoxESSPolledSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity)
             self._attr_entity_category = desc.entity_category
         if not desc.enabled_default:
             self._attr_entity_registry_enabled_default = False
+        if desc.display_precision is not None:
+            self._attr_suggested_display_precision = desc.display_precision
         # Only expose data_source when multiple sources are configured
         self._has_multiple_sources = bool(entry.data.get(CONF_WEB_USERNAME))
 

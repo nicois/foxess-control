@@ -11,6 +11,7 @@
 - **Diagnostics platform**: "Download Diagnostics" button in the integration page exports coordinator data, session state, WebSocket status, taper profile, and config — with API keys and credentials redacted.
 - **Entity categories**: diagnostic-only sensors (temperatures, voltages, currents, grid frequency, EPS, throughput) marked as `DIAGNOSTIC` so they don't clutter default dashboards.
 - **Disabled by default**: rarely-used sensors (PV1/PV2, battery voltage/current, ambient/inverter temp, grid current/frequency, EPS, throughput) disabled by default — users can enable them as needed.
+- **Display precision**: all polled sensors set `suggested_display_precision` (0 for SoC, 2 for kW/kWh, 1 for °C/V/A/Hz) for clean dashboard values.
 
 ## 1.0.6-beta.1
 
