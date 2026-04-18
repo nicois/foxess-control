@@ -162,6 +162,33 @@ def _record_error(hass: HomeAssistant, domain: str, message: str) -> None:
         "last_error_at": dt_util.now().isoformat(),
         "error_count": prev.get("error_count", 0) + 1,
     }
+    _create_session_issue(hass, domain, message)
+
+
+def _create_session_issue(hass: HomeAssistant, domain: str, message: str) -> None:
+    """Surface a session abort as an HA Repair issue."""
+    from homeassistant.helpers.issue_registry import IssueSeverity, async_create_issue
+
+    session_type = "charge" if "harge" in message else "discharge"
+    async_create_issue(
+        hass,
+        domain,
+        "session_aborted",
+        is_fixable=False,
+        severity=IssueSeverity.WARNING,
+        translation_key="session_aborted",
+        translation_placeholders={
+            "session_type": session_type,
+            "reason": message,
+        },
+    )
+
+
+def _clear_session_issue(hass: HomeAssistant, domain: str) -> None:
+    """Clear the session abort issue when a new session starts."""
+    from homeassistant.helpers.issue_registry import async_delete_issue
+
+    async_delete_issue(hass, domain, "session_aborted")
 
 
 def _get_taper_profile(hass: HomeAssistant, domain: str) -> TaperProfile | None:
@@ -269,6 +296,7 @@ def setup_smart_charge_listeners(
     """
     from .types import WorkMode
 
+    _clear_session_issue(hass, domain)
     state = hass.data[domain]["_smart_charge_state"]
     end: datetime.datetime = state["end"]
     end_utc = dt_util.as_utc(end)
@@ -578,6 +606,7 @@ def setup_smart_discharge_listeners(
     """
     from .types import WorkMode
 
+    _clear_session_issue(hass, domain)
     state = hass.data[domain]["_smart_discharge_state"]
     end: datetime.datetime = state["end"]
     end_utc = dt_util.as_utc(end)

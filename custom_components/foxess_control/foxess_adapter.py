@@ -15,8 +15,12 @@ import datetime  # noqa: TC003 — used at runtime by adapters
 import logging
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.persistent_notification import async_create as pn_create
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers.issue_registry import (
+    IssueSeverity,
+    async_create_issue,
+    async_delete_issue,
+)
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -25,6 +29,7 @@ from .const import (
     CONF_MIN_SOC_ENTITY,
     CONF_WORK_MODE_ENTITY,
     DEFAULT_API_MIN_SOC,
+    DOMAIN,
 )
 from .foxess import Inverter, WorkMode
 from .smart_battery.algorithms import (
@@ -135,13 +140,21 @@ def _check_schedule_safe(
                 f"FoxESS app, then retry the operation."
             )
             if hass is not None:
-                pn_create(
+                async_create_issue(
                     hass,
-                    message=message,
-                    title="FoxESS Control: unmanaged work mode detected",
-                    notification_id="foxess_control_unmanaged_mode",
+                    DOMAIN,
+                    "unmanaged_work_mode",
+                    is_fixable=False,
+                    severity=IssueSeverity.ERROR,
+                    translation_key="unmanaged_work_mode",
+                    translation_placeholders={
+                        "work_mode": mode,
+                        "time_range": time_range,
+                    },
                 )
             raise ServiceValidationError(message)
+    if hass is not None:
+        async_delete_issue(hass, DOMAIN, "unmanaged_work_mode")
 
 
 def _is_expired(group: ScheduleGroup) -> bool:
@@ -358,8 +371,6 @@ class FoxESSCloudAdapter:
 
         # Surface the horizon in session state for the Lovelace card
         if mode == WorkMode.FORCE_DISCHARGE and safe_end != self._end:
-            from .const import DOMAIN
-
             ds = hass.data.get(DOMAIN, {}).get("_smart_discharge_state")
             if ds is not None:
                 ds["schedule_horizon"] = safe_end.isoformat()
