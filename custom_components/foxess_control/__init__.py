@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
+from homeassistant.exceptions import (
+    ConfigEntryNotReady,
+    HomeAssistantError,
+    ServiceValidationError,
+)
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
@@ -132,7 +136,7 @@ from .smart_battery.types import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
+    from collections.abc import Callable, Coroutine
 
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant, ServiceCall
@@ -1675,6 +1679,32 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await store.async_remove()
 
 
+def _api_error_handler(
+    func: Callable[[ServiceCall], Coroutine[Any, Any, None]],
+) -> Callable[[ServiceCall], Coroutine[Any, Any, None]]:
+    """Wrap service handlers to translate API errors into HomeAssistantError."""
+    import functools
+
+    import requests
+
+    from .foxess.client import FoxESSApiError
+
+    @functools.wraps(func)
+    async def wrapper(call: ServiceCall) -> None:
+        try:
+            await func(call)
+        except (ServiceValidationError, HomeAssistantError):
+            raise
+        except FoxESSApiError as err:
+            raise HomeAssistantError(f"FoxESS API error: {err}") from err
+        except requests.RequestException as err:
+            raise HomeAssistantError(
+                "Could not reach FoxESS Cloud API. Check your network connection."
+            ) from err
+
+    return wrapper
+
+
 def _register_services(hass: HomeAssistant) -> None:
     """Register inverter control services."""
 
@@ -2294,30 +2324,33 @@ def _register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         SERVICE_CLEAR_OVERRIDES,
-        handle_clear_overrides,
+        _api_error_handler(handle_clear_overrides),
         schema=SCHEMA_CLEAR_OVERRIDES,
     )
     hass.services.async_register(
-        DOMAIN, SERVICE_FEEDIN, handle_feedin, schema=SCHEMA_FEEDIN
+        DOMAIN, SERVICE_FEEDIN, _api_error_handler(handle_feedin), schema=SCHEMA_FEEDIN
     )
     hass.services.async_register(
-        DOMAIN, SERVICE_FORCE_CHARGE, handle_force_charge, schema=SCHEMA_FORCE_CHARGE
+        DOMAIN,
+        SERVICE_FORCE_CHARGE,
+        _api_error_handler(handle_force_charge),
+        schema=SCHEMA_FORCE_CHARGE,
     )
     hass.services.async_register(
         DOMAIN,
         SERVICE_FORCE_DISCHARGE,
-        handle_force_discharge,
+        _api_error_handler(handle_force_discharge),
         schema=SCHEMA_FORCE_DISCHARGE,
     )
     hass.services.async_register(
         DOMAIN,
         SERVICE_SMART_CHARGE,
-        handle_smart_charge,
+        _api_error_handler(handle_smart_charge),
         schema=SCHEMA_SMART_CHARGE,
     )
     hass.services.async_register(
         DOMAIN,
         SERVICE_SMART_DISCHARGE,
-        handle_smart_discharge,
+        _api_error_handler(handle_smart_discharge),
         schema=SCHEMA_SMART_DISCHARGE,
     )
