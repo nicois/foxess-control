@@ -191,3 +191,8 @@ be preserved during refactoring.
 - **Error state over false idle**: when no session is active but the
   last session ended with an error, show "error" rather than "idle"
   so the user knows something went wrong.
+- **SoC precision matches confidence**: the card shows integer SoC
+  until the first confirmed integer change (e.g. 93→92), then switches
+  to 2dp. Before the first change, the interpolated value is just an
+  estimate; after the change, the real SoC is known to be near X.5,
+  making interpolation meaningful.
