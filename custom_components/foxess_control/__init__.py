@@ -1564,6 +1564,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Recover smart sessions persisted before a restart
     await _recover_sessions(hass, inverter)
 
+    # Notify coordinator so sensors reflect recovered session state immediately
+    # (otherwise RestoreSensor shows stale text until the first poll).
+    coord = hass.data[DOMAIN].get(entry.entry_id, {}).get("coordinator")
+    if coord is not None and coord.data is not None:
+        coord.async_set_updated_data(dict(coord.data))
+
     # "always" mode: start WS at integration startup and register a
     # watchdog that re-establishes the connection if it drops.
     if _get_ws_mode(hass) == WS_MODE_ALWAYS:
@@ -1611,6 +1617,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     remaining = {k for k in hass.data[DOMAIN] if not k.startswith("_")}
     if not remaining:
         _LOGGER.info("Unloading last entry %s — cleaning up domain", entry.entry_id)
+        # Flush active sessions to disk before teardown.  save_session uses
+        # async_delay_save (60s coalesce) which won't fire during a reload.
+        await _persist_active_sessions(hass)
+        store: Store[dict[str, Any]] | None = hass.data[DOMAIN].get("_store")
+        if store is not None:
+            stored = await store.async_load() or {}
+            if stored:
+                await store.async_save(stored)
         # Preserve persisted sessions so recovery works after options reload
         ws_stop = _cancel_smart_discharge(hass, clear_storage=False)
         if ws_stop is not None:
