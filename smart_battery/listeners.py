@@ -442,7 +442,7 @@ def setup_smart_charge_listeners(
                 headroom=headroom,
                 taper_profile=taper,
             )
-            await adapter.apply_mode(hass, WorkMode.FORCE_CHARGE, new_power)
+            await adapter.apply_mode(hass, WorkMode.FORCE_CHARGE, new_power, fd_soc=100)
 
             # Re-check state after await
             if not _is_my_session():
@@ -522,7 +522,7 @@ def setup_smart_charge_listeners(
             )
 
         cur_state["last_power_w"] = new_power
-        await adapter.apply_mode(hass, WorkMode.FORCE_CHARGE, new_power)
+        await adapter.apply_mode(hass, WorkMode.FORCE_CHARGE, new_power, fd_soc=100)
 
         # Re-check state after await
         if not _is_my_session():

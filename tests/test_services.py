@@ -3680,6 +3680,113 @@ class TestRecoverSessions:
         assert len(unsubs) == 2
 
     @pytest.mark.asyncio
+    async def test_recovered_charge_listener_sets_fdsoc_100(self) -> None:
+        """After recovery, the interval callback must set fdSoc=100 for charge.
+
+        Recovery always starts with empty adapter groups (slow path).
+        If apply_mode defaults fd_soc to 11 instead of 100, the inverter
+        charges to 11% instead of the target — a major regression.
+        """
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [
+                {
+                    "enable": 1,
+                    "workMode": "ForceCharge",
+                    "startHour": 2,
+                    "startMinute": 0,
+                    "endHour": 6,
+                    "endMinute": 0,
+                    "minSocOnGrid": 15,
+                    "fdSoc": 100,
+                    "fdPwr": 5000,
+                }
+            ],
+        }
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=10.0,
+            coordinator_data={"SoC": 50.0, "loadsPower": 0.0, "pvPower": 0.0},
+        )
+        store = hass.data[DOMAIN]["_store"]
+        store.async_load = AsyncMock(
+            return_value={
+                "smart_charge": {
+                    "date": "2026-04-08",
+                    "start_hour": 2,
+                    "start_minute": 0,
+                    "end_hour": 6,
+                    "end_minute": 0,
+                    "target_soc": 80,
+                    "max_power_w": 10500,
+                    "battery_capacity_kwh": 10.0,
+                    "min_soc_on_grid": 15,
+                    "min_power_change": 500,
+                    "force": False,
+                    "charging_started": True,
+                }
+            }
+        )
+
+        from custom_components.foxess_control import _recover_sessions
+
+        captured_interval = None
+
+        def capture_interval(_hass: Any, callback: Any, _interval: Any) -> MagicMock:
+            nonlocal captured_interval
+            captured_interval = callback
+            return MagicMock()
+
+        with (
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 8, 4, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
+                side_effect=capture_interval,
+            ),
+        ):
+            await _recover_sessions(hass, inv)
+
+        assert captured_interval is not None
+
+        # Reset set_schedule call count from recovery
+        inv.set_schedule.reset_mock()
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+
+        # Change SoC so the power recalculation produces a different value,
+        # forcing the listener to call apply_mode (which hits the slow path
+        # because recovered sessions start with empty adapter groups).
+        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+            "SoC": 30.0,
+            "loadsPower": 0.0,
+            "pvPower": 0.0,
+        }
+        # Ensure power change exceeds threshold
+        hass.data[DOMAIN]["_smart_charge_state"]["last_power_w"] = 0
+
+        # Fire the interval callback — adapter has empty groups (slow path)
+        with patch(
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 4, 5, 0),
+        ):
+            await captured_interval(datetime.datetime(2026, 4, 8, 4, 5, 0))
+
+        inv.set_schedule.assert_called()
+        groups = inv.set_schedule.call_args.args[0]
+        charge_group = next(g for g in groups if g.get("workMode") == "ForceCharge")
+        assert charge_group["fdSoc"] == 100, (
+            f"fdSoc should be 100 for charge, got {charge_group['fdSoc']}"
+        )
+
+    @pytest.mark.asyncio
     async def test_deferred_charge_recovery_shows_zero_power(self) -> None:
         """Recovered deferred charge session should show last_power_w=0."""
         inv = MagicMock(spec=Inverter)
