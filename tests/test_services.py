@@ -30,6 +30,10 @@ from custom_components.foxess_control.const import (
     DEFAULT_SMART_HEADROOM,
     DOMAIN,
 )
+from custom_components.foxess_control.domain_data import (
+    FoxESSControlData,
+    FoxESSEntryData,
+)
 from custom_components.foxess_control.foxess.inverter import Inverter
 
 
@@ -182,12 +186,10 @@ class TestSetupEntry:
         mock_store = MagicMock()
         mock_store.async_load = AsyncMock(return_value={})
         mock_store.async_save = AsyncMock()
-        hass.data = {
-            DOMAIN: {
-                "existing": {"inverter": MagicMock()},
-                "_store": mock_store,
-            }
-        }
+        dd = FoxESSControlData()
+        dd.entries["existing"] = FoxESSEntryData(inverter=MagicMock())
+        dd.store = mock_store
+        hass.data = {DOMAIN: dd}
 
         entry = MagicMock()
         entry.entry_id = "entry2"

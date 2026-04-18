@@ -1436,12 +1436,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.options.get(CONF_MIN_POWER_CHANGE, DEFAULT_MIN_POWER_CHANGE),
         entry.options.get(CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL),
     )
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN].setdefault("_smart_discharge_unsubs", [])
-    hass.data[DOMAIN].setdefault("_smart_charge_unsubs", [])
-    hass.data[DOMAIN].setdefault(
-        "_store", Store[dict[str, Any]](hass, STORAGE_VERSION, STORAGE_KEY)
-    )
+    from .domain_data import FoxESSControlData
+
+    if not isinstance(hass.data.get(DOMAIN), FoxESSControlData):
+        hass.data[DOMAIN] = FoxESSControlData()
+    dd: FoxESSControlData = hass.data[DOMAIN]
+    if dd.store is None:
+        dd.store = Store[dict[str, Any]](hass, STORAGE_VERSION, STORAGE_KEY)
 
     # Post-cancel hook: stop WebSocket and clear stale work mode.
     # Called by the brand-agnostic cancel_smart_session after clearing state.
