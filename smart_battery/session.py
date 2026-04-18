@@ -62,6 +62,13 @@ async def clear_stored_session(
         await store.async_save(stored)
 
 
+def _serialise_groups(groups: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Serialise schedule groups for storage (cloud mode only)."""
+    if not groups:
+        return []
+    return [dict(g) for g in groups]
+
+
 def session_data_from_charge_state(state: dict[str, Any]) -> dict[str, Any]:
     """Build a serialisable dict from a smart charge state dict."""
     return {
@@ -85,6 +92,7 @@ def session_data_from_charge_state(state: dict[str, Any]) -> dict[str, Any]:
         ),
         "charging_started_energy_kwh": state.get("charging_started_energy_kwh"),
         "start_soc": state.get("start_soc"),
+        "groups": _serialise_groups(state.get("groups")),
     }
 
 
@@ -113,6 +121,7 @@ def session_data_from_discharge_state(state: dict[str, Any]) -> dict[str, Any]:
     data["discharging_started_at"] = started_at.isoformat() if started_at else None
     data["consumption_peak_kw"] = state.get("consumption_peak_kw", 0.0)
     data["start_soc"] = state.get("start_soc")
+    data["groups"] = _serialise_groups(state.get("groups"))
     return data
 
 
