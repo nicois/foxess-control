@@ -264,7 +264,7 @@
   "issues": {
     "unmanaged_work_mode": {
       "title": "Unmanaged work mode detected",
-      "description": "The inverter schedule contains a **{work_mode}** group ({time_range}) which is not managed by this integration. FoxESS Control expects Self Use as the default work mode and will not modify the schedule while an unmanaged mode is present.\n\nPlease remove the '{work_mode}' schedule group via the FoxESS app, then retry the operation."
+      "description": "The inverter schedule contains a **{work_mode}** group ({time_range}) which is not managed by this integration. FoxESS Control expects Self Use as the default work mode and will not modify the schedule while an unmanaged mode is present.\n\nPlease remove the \"{work_mode}\" schedule group via the FoxESS app, then retry the operation."
     },
     "session_aborted": {
       "title": "Smart {session_type} session aborted",
