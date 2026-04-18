@@ -435,15 +435,14 @@ class TestControlCard:
         """Schedule horizon attribute is set and marker renders on card."""
         if connection_mode != "cloud":
             pytest.skip("progressive schedule extension is cloud-adapter only")
-        # Low SoC headroom so the safe horizon is shorter than the
-        # window — with SoC=35/min=30, only 0.5kWh available, so
-        # the horizon is ~4 min vs the 10 min window.
+        # SoC=55/min=30 gives ~15 min discharge at max power (no deferral)
+        # but horizon = 15/1.5 = ~10 min < 12 min window (marker visible).
         assert foxess_sim is not None
-        set_inverter_state("cloud", foxess_sim, ha_e2e, soc=35, solar_kw=0, load_kw=0.5)
+        set_inverter_state("cloud", foxess_sim, ha_e2e, soc=55, solar_kw=0, load_kw=0.5)
         ha_e2e.wait_for_numeric_state(
-            "sensor.foxess_battery_soc", "le", 36, timeout_s=120
+            "sensor.foxess_battery_soc", "le", 56, timeout_s=120
         )
-        start, end = _tight_window(10)
+        start, end = _tight_window(12)
         ha_e2e.call_service(
             "foxess_control",
             "smart_discharge",
