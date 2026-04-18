@@ -13,7 +13,11 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.components.sensor import (
+    RestoreSensor,
+    SensorDeviceClass,
+    SensorEntity,
+)
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -612,7 +616,7 @@ class OverrideStatusSensor(SensorEntity):
         return None
 
 
-class SmartOperationsOverviewSensor(SensorEntity):
+class SmartOperationsOverviewSensor(RestoreSensor):
     """Dashboard sensor providing a rich overview of smart operations."""
 
     _attr_has_entity_name = True
@@ -644,15 +648,23 @@ class SmartOperationsOverviewSensor(SensorEntity):
             "charge_discharge_active",
         ]
         self.hass = hass
+        self._restored_state: str | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to coordinator updates for instant state changes."""
+        """Restore last state and subscribe to coordinator updates."""
+        await super().async_added_to_hass()
+        last_data = await self.async_get_last_sensor_data()
+        if last_data and last_data.native_value:
+            self._restored_state = str(last_data.native_value)
         entry_data = self.hass.data.get(self._domain, {}).get(self._entry.entry_id, {})
         coordinator = entry_data.get("coordinator")
         if coordinator is not None:
-            self.async_on_remove(
-                coordinator.async_add_listener(self.async_write_ha_state)
-            )
+
+            def _on_coordinator_update() -> None:
+                self._restored_state = None
+                self.async_write_ha_state()
+
+            self.async_on_remove(coordinator.async_add_listener(_on_coordinator_update))
 
     @property
     def native_value(self) -> str:
@@ -685,6 +697,9 @@ class SmartOperationsOverviewSensor(SensorEntity):
         err = self.hass.data.get(self._domain, {}).get("_smart_error_state")
         if err and err.get("last_error"):
             return "error"
+
+        if self._restored_state and self._restored_state in (self._attr_options or ()):
+            return self._restored_state
 
         return "idle"
 

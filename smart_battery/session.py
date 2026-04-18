@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from homeassistant.helpers.storage import Store
 
 _LOGGER = logging.getLogger(__name__)
+_SAVE_DELAY = 60
 
 
 async def load_taper_profile(
@@ -41,12 +42,17 @@ async def save_session(
     key: str,
     data: dict[str, Any],
 ) -> None:
-    """Persist a smart session to storage."""
+    """Persist a smart session to storage.
+
+    Uses ``async_delay_save`` to coalesce frequent writes (e.g. every
+    listener tick) into a single disk write.  ``EVENT_HOMEASSISTANT_FINAL_WRITE``
+    guarantees a flush at shutdown so no data is lost.
+    """
     if store is None:
         return
     stored: dict[str, Any] = await store.async_load() or {}
     stored[key] = data
-    await store.async_save(stored)
+    store.async_delay_save(lambda: stored, _SAVE_DELAY)
 
 
 async def clear_stored_session(
