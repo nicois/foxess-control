@@ -15,6 +15,7 @@
 - **Enriched DeviceInfo**: device page shows inverter model name (from API device detail) and links to FoxESS Cloud portal.
 - **Reauthentication flow**: when the FoxESS API key expires or becomes invalid, HA shows a "Reconfigure" prompt instead of silently failing. Users can enter a new key without removing and re-adding the integration.
 - **Service action error handling**: API errors and network failures in service calls (force charge, smart discharge, etc.) now surface as user-friendly HA error toasts instead of generic "An error occurred".
+- **icons.json**: all sensors, binary sensors, and service actions have Material Design Icons defined via `icons.json`. Smart Operations sensor uses state-aware icons (charging, discharging, deferred, etc.).
 
 ## 1.0.6-beta.1
 

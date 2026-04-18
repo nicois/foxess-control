@@ -1,0 +1,150 @@
+{
+  "entity": {
+    "sensor": {
+      "battery_soc": {
+        "default": "mdi:battery"
+      },
+      "bat_charge_power": {
+        "default": "mdi:battery-charging"
+      },
+      "bat_discharge_power": {
+        "default": "mdi:battery-arrow-down"
+      },
+      "loads_power": {
+        "default": "mdi:home-lightning-bolt"
+      },
+      "pv_power": {
+        "default": "mdi:solar-power"
+      },
+      "bat_temperature": {
+        "default": "mdi:thermometer"
+      },
+      "grid_consumption": {
+        "default": "mdi:transmission-tower-import"
+      },
+      "feedin_power": {
+        "default": "mdi:transmission-tower-export"
+      },
+      "generation_power": {
+        "default": "mdi:solar-power-variant"
+      },
+      "bat_volt": {
+        "default": "mdi:flash-triangle"
+      },
+      "bat_current": {
+        "default": "mdi:current-dc"
+      },
+      "pv1_power": {
+        "default": "mdi:solar-panel"
+      },
+      "pv2_power": {
+        "default": "mdi:solar-panel"
+      },
+      "ambient_temp": {
+        "default": "mdi:thermometer"
+      },
+      "inverter_temp": {
+        "default": "mdi:thermometer-alert"
+      },
+      "feedin_energy": {
+        "default": "mdi:transmission-tower-export"
+      },
+      "grid_consumption_energy": {
+        "default": "mdi:transmission-tower-import"
+      },
+      "generation_energy": {
+        "default": "mdi:solar-power-variant"
+      },
+      "charge_energy_total": {
+        "default": "mdi:battery-charging"
+      },
+      "discharge_energy_total": {
+        "default": "mdi:battery-arrow-down"
+      },
+      "loads_energy": {
+        "default": "mdi:home-lightning-bolt"
+      },
+      "energy_throughput": {
+        "default": "mdi:battery-sync"
+      },
+      "meter_power": {
+        "default": "mdi:meter-electric"
+      },
+      "grid_voltage": {
+        "default": "mdi:sine-wave"
+      },
+      "grid_current": {
+        "default": "mdi:current-ac"
+      },
+      "grid_frequency": {
+        "default": "mdi:waveform"
+      },
+      "eps_power": {
+        "default": "mdi:power-plug-battery"
+      },
+      "work_mode": {
+        "default": "mdi:state-machine"
+      },
+      "debug_log": {
+        "default": "mdi:math-log"
+      },
+      "smart_operations": {
+        "default": "mdi:home-battery",
+        "state": {
+          "idle": "mdi:home-battery",
+          "charging": "mdi:battery-charging",
+          "deferred": "mdi:battery-clock",
+          "target_reached": "mdi:battery-check",
+          "discharging": "mdi:battery-arrow-down",
+          "discharge_deferred": "mdi:battery-clock",
+          "discharge_scheduled": "mdi:calendar-clock",
+          "discharge_suspended": "mdi:battery-lock",
+          "charge_discharge_active": "mdi:battery-sync"
+        }
+      },
+      "override_status": {
+        "default": "mdi:toggle-switch-variant"
+      },
+      "charge_power": {
+        "default": "mdi:flash"
+      },
+      "charge_window": {
+        "default": "mdi:clock-outline"
+      },
+      "charge_remaining": {
+        "default": "mdi:timer-sand"
+      },
+      "discharge_power": {
+        "default": "mdi:flash"
+      },
+      "discharge_window": {
+        "default": "mdi:clock-outline"
+      },
+      "discharge_remaining": {
+        "default": "mdi:timer-sand"
+      },
+      "battery_forecast": {
+        "default": "mdi:chart-timeline-variant"
+      },
+      "data_freshness": {
+        "default": "mdi:clock-check-outline"
+      }
+    },
+    "binary_sensor": {
+      "smart_charge_active": {
+        "default": "mdi:battery-charging"
+      },
+      "smart_discharge_active": {
+        "default": "mdi:battery-arrow-down"
+      }
+    }
+  },
+  "services": {
+    "clear_overrides": "mdi:restore",
+    "feedin": "mdi:transmission-tower-export",
+    "force_charge": "mdi:battery-charging-high",
+    "force_discharge": "mdi:battery-arrow-down-outline",
+    "smart_charge": "mdi:battery-charging-wireless",
+    "smart_discharge": "mdi:battery-arrow-down"
+  }
+}
