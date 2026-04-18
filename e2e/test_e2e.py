@@ -1090,17 +1090,10 @@ class TestReloadRecovery:
         connection_mode: str,
         event_stream: HAEventStream,
     ) -> None:
-        """Session discarded when window has passed by the time of reload."""
+        """No phantom session after reload when window already expired."""
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=80, load_kw=0.5)
 
-        now = datetime.datetime.now(tz=datetime.UTC)
-        now_min = now.hour * 60 + now.minute
-        start_min = max(0, now_min - 5)
-        end_min = max(0, now_min - 1)
-        if start_min >= end_min:
-            pytest.skip("Cannot create expired window near midnight")
-        start = f"{start_min // 60:02d}:{start_min % 60:02d}:00"
-        end_str = f"{end_min // 60:02d}:{end_min % 60:02d}:00"
+        start, end_str = _tight_window(4)
 
         ha_e2e.call_service(
             "foxess_control",
@@ -1114,15 +1107,20 @@ class TestReloadRecovery:
             fatal_states=FATAL_FOR_ACTIVE,
         )
 
-        time.sleep(90)
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "idle",
+            timeout_s=300,
+        )
 
         _reload_integration(ha_e2e)
 
-        ha_e2e.wait_for_state(
+        state = ha_e2e.wait_for_state(
             "sensor.foxess_smart_operations",
             "idle",
             timeout_s=60,
         )
+        assert state == "idle"
 
     def test_entity_mode_discharge_resumes_after_reload(
         self,
