@@ -379,6 +379,17 @@ def ha_e2e(
 
     yield ha
 
+    try:
+        logs = subprocess.run(
+            ["podman", "logs", "--tail", "200", name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if logs.stdout:
+            print(f"\n=== HA container logs (tail) ===\n{logs.stdout[-5000:]}")
+    except Exception:
+        pass
     _stop_container(name)
     _kill_process(proc)
     shutil.rmtree(tmpdir, ignore_errors=True)

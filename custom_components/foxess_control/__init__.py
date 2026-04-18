@@ -1702,6 +1702,9 @@ def _api_error_handler(
             raise HomeAssistantError(
                 "Could not reach FoxESS Cloud API. Check your network connection."
             ) from err
+        except Exception:
+            _LOGGER.exception("Unhandled error in service %s", func.__name__)
+            raise
 
     return wrapper
 
