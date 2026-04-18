@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: Session Management
-last_verified: 2026-04-17
+last_verified: 2026-04-18
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -206,8 +206,7 @@ retried silently per D-025.
 ## Async Flow Diagrams
 
 These diagrams trace the concurrent async operations during the
-highest-risk session transitions. The cancel+linger race documented
-here is the root cause of the stale-discharge-value regression (D-009).
+highest-risk session transitions.
 
 Source files: `smart_battery/session.py::cancel_smart_session`,
 `smart_battery/listeners.py::_on_timer_expire`,
@@ -216,18 +215,18 @@ Source files: `smart_battery/session.py::cancel_smart_session`,
 
 ### Session cancel with WS linger (auto/smart_sessions mode)
 
-The cancel hook fires `_stop_realtime_ws` as a fire-and-forget task.
-The linger and the override removal run concurrently — the linger
-may capture a WS push that still shows high discharge power because
-the inverter hasn't processed the override removal yet.
+The cancel hook returns a `_stop_realtime_ws` coroutine (not a task).
+The caller awaits it AFTER the override removal API call completes.
+This ensures the linger only captures WS data after the inverter has
+reverted to self-use.
 
 ```mermaid
 sequenceDiagram
     participant Timer as HA Timer (_on_timer_expire)
     participant Cancel as cancel_smart_session
     participant Hook as _on_session_cancel
-    participant Linger as _stop_realtime_ws (task)
     participant API as FoxESS Cloud API
+    participant Linger as _stop_realtime_ws (awaited)
     participant WS as WebSocket stream
     participant Coord as Coordinator
 
@@ -236,48 +235,45 @@ sequenceDiagram
     Note over Cancel: SYNC: unsub all listeners
     Cancel->>Cancel: pop _smart_discharge_state
     Cancel->>Cancel: async_create_task(clear_stored_session)
-    Cancel->>Hook: _on_session_cancel()
+    Cancel->>Hook: ws_stop = _on_session_cancel()
     activate Hook
     Hook->>Hook: pop _ws_discharge_callback
     Hook->>Hook: _should_start_realtime_ws → False (state gone)
-    Hook->>Linger: async_create_task(_stop_realtime_ws)
+    Hook-->>Cancel: return _stop_realtime_ws coroutine
     Note over Hook: SYNC: clear _work_mode on coordinator
     Hook->>Coord: async_set_updated_data({_work_mode: None})
     deactivate Hook
     deactivate Cancel
 
-    Note over Timer: cancel_smart_session returned (sync)
+    Note over Timer: cancel_smart_session returned ws_stop
     Timer->>API: await _remove_discharge_override()
     activate API
-    Note over API: Network call ~1-5s
+    API-->>Timer: override removed
+    deactivate API
 
+    Note over Timer: Override removed — now safe to linger
+    Timer->>Linger: await ws_stop
     activate Linger
     Linger->>Linger: pop _realtime_ws
     Linger->>Linger: replace _on_data with linger wrapper
     Note over Linger: await WS push (up to 30s)
 
     WS-->>Linger: data push (~5s cycle)
-    Note over WS,Linger: ⚠ Inverter STILL discharging<br/>(API removal not complete)
-    Linger->>Coord: inject_realtime_data(stale high power)
+    Note over WS,Linger: ✓ Inverter in self-use<br/>(override already removed)
+    Linger->>Coord: inject_realtime_data(fresh post-session data)
     Linger->>Linger: received.set()
     Linger->>WS: async_disconnect()
     Linger->>Coord: _data_source = "api"
     deactivate Linger
-
-    API-->>Timer: override removed
-    deactivate API
-    Note over Coord: REST poll in ~5 min shows<br/>correct (low) discharge power
-    Note over Coord: ⚠ Card shows stale high value<br/>until REST poll
+    Note over Coord: Card shows correct post-session values ✓
 ```
 
-**Root cause**: The linger captures a WS push before the API has
-removed the override, so it injects still-discharging values. After
-linger disconnects, no further updates arrive until the next REST
-poll (~5 min). The card shows stale high discharge power.
-
-**Fix direction**: The linger should wait for the override removal
-to complete before accepting a WS push, or continue lingering until
-it sees discharge power drop below a threshold.
+**Historical note**: The original implementation (pre-beta.29)
+scheduled `_stop_realtime_ws` as a fire-and-forget task via
+`async_create_task`. The linger and override removal ran concurrently,
+causing the linger to capture stale forced-discharge values before
+the API had removed the override. Fixed by returning the coroutine
+from the cancel hook and awaiting it after override removal.
 
 ### Session cancel (always mode)
 

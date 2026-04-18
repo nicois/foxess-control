@@ -72,21 +72,22 @@ def _parse_power_kw(text: str) -> float:
 
 
 def _tight_window(minutes: int = 30) -> tuple[str, str]:
-    """Return a tight window starting ~now (UTC).
+    """Return a tight window starting ~2 min before now (UTC).
 
-    Avoids midnight crossings (C-009): if end would fall past 23:59,
-    clamp end to 23:59 and push start back to stay within *minutes*.
+    Avoids midnight crossings (C-009): clamps end to 23:59 and
+    ensures start >= 00:00.  When ``now`` is near midnight the
+    window shifts so the current minute always falls inside [start, end).
     """
     now = datetime.datetime.now(tz=datetime.UTC)
-    start = now - datetime.timedelta(minutes=2)
-    end = start + datetime.timedelta(minutes=minutes)
-    midnight = now.replace(hour=23, minute=59, second=0, microsecond=0)
-    if end > midnight:
-        end = midnight
-        start = max(start, end - datetime.timedelta(minutes=minutes))
+    now_min = now.hour * 60 + now.minute
+    start_min = max(0, now_min - 2)
+    end_min = start_min + minutes
+    if end_min > 23 * 60 + 59:
+        end_min = 23 * 60 + 59
+        start_min = max(0, end_min - minutes)
     return (
-        f"{start.hour:02d}:{start.minute:02d}:00",
-        f"{end.hour:02d}:{end.minute:02d}:00",
+        f"{start_min // 60:02d}:{start_min % 60:02d}:00",
+        f"{end_min // 60:02d}:{end_min % 60:02d}:00",
     )
 
 

@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 2
-last_verified: 2026-04-17
+last_verified: 2026-04-18
 traces_up: [01-vision.md]
 traces_down: [03-architecture.md, 04-design/]
 ---
@@ -350,20 +350,28 @@ normally when it is actually failing.
 
 ## Invariants — Testing
 
-### C-028: Simulator over mocks
+### C-028: Simulator over mocks, with instance isolation
 **Statement**: Tests that exercise FoxESS API or WebSocket behaviour
 must use the FoxESS simulator (`simulator/`) rather than response
 mocking libraries. Mocks are acceptable only for HA framework
-internals that the simulator cannot replace.
+internals that the simulator cannot replace. Each test must have an
+independent simulator instance with no shared mutable state — the
+`InverterModel` and WebSocket client list must be per-app, not
+module-level.
 **Rationale**: Mocks encode assumptions about API behaviour that
 drift from reality. The simulator implements the actual API contract
 (REST, WS, schedule validation, fault injection) and is authoritative
 for the integration's external interface. Tests that mock the API
-pass when the mock is wrong.
+pass when the mock is wrong. Instance isolation prevents cross-test
+contamination under parallel execution (pytest-xdist): a module-level
+singleton was the root cause of ~0.5% flaky test rate where teardown
+`reset()` from one worker clobbered another test's state.
 **Violation consequence**: Tests pass against a mock that doesn't
-match real API behaviour, masking integration bugs.
+match real API behaviour, masking integration bugs. Shared simulator
+state causes intermittent test failures under parallel execution.
 **Traces**: `tests/test_client.py`, `tests/test_inverter.py`
-(migrated from `responses` library to simulator)
+(migrated from `responses` library to simulator);
+`simulator/server.py::create_app` (per-app state isolation)
 
 ### C-029: E2E tests for HA-dependent behaviour
 **Statement**: Behaviour that depends on HA's runtime environment —

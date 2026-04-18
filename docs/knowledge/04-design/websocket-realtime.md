@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: WebSocket Real-Time Data
-last_verified: 2026-04-17
+last_verified: 2026-04-18
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -62,6 +62,10 @@ transient cloud outages without manual intervention.
 ### D-009: Post-session linger timeout
 **Decision**: After a smart session ends, keep the WebSocket open for
 30 seconds to capture one more fresh data push before disconnecting.
+The cancel hook (`_on_session_cancel`) returns the WS stop coroutine
+instead of scheduling it as a fire-and-forget task; callers await it
+AFTER the override removal API call completes. This ensures the linger
+only captures data after the inverter has reverted to self-use.
 **Context**: After the session ends and the inverter reverts to self-use,
 the REST API may still return the old snapshot for up to 5 minutes.
 **Rationale**: One more WebSocket push (~5s) injects fresh
@@ -70,17 +74,14 @@ post-session values so the overview card immediately reflects reality.
 - Immediate disconnect: rejected because UI shows stale state for
   minutes
 - Keep WS open until next REST poll: rejected as wasteful (up to 5 min)
-**Known issue** (regression): The linger races with the override
-removal API call. The cancel hook fires `_stop_realtime_ws` as a
-fire-and-forget task, and `_remove_discharge_override()` runs
-concurrently. If the WS push arrives before the API removes the
-override, the linger captures still-discharging values and then
-disconnects — leaving stale high power on the card until the next
-REST poll (~5 min). See the sequence diagram in
-`session-management.md` (Session cancel with WS linger) for the
-full async trace. The `always` ws_mode is unaffected because the
-WS stays connected and delivers fresh post-session data within ~5s.
-**Traces**: C-007, C-020
+- Fire-and-forget linger (original implementation): replaced because
+  the linger raced with the override removal — the WS push arrived
+  before the API removed the override, capturing stale high-power
+  values. See `session-management.md` async flow diagrams for the
+  race analysis. The `always` ws_mode was unaffected because the WS
+  stays connected and delivers fresh post-session data within ~5s.
+**Traces**: C-007, C-020;
+`e2e/test_e2e.py::TestDataSource::test_ws_linger_captures_post_discharge_data`
 
 ### D-010: Power balance for grid direction
 **Decision**: Derive grid import/export from power balance
@@ -126,6 +127,31 @@ sources are configured is itself a source of confusion.
 `tests/test_sensor.py::TestFoxESSPolledSensor::test_data_source_exposed_as_attribute`,
 `tests/test_sensor.py::TestFoxESSPolledSensor::test_data_source_absent_when_not_set`
 
+### D-030: Data staleness indicator on Lovelace cards
+**Decision**: Both Lovelace cards (overview and control) compute data
+age client-side from the `_data_last_update` ISO timestamp stored by
+the coordinator on each REST poll or WS push. When the age exceeds
+30 seconds, the data source badge gains a `stale` CSS class (red
+styling) and appends a human-readable age suffix (e.g. "ws 45s",
+"api 3m"). The age is recomputed on each LitElement render cycle.
+**Context**: The data source badge (D-021) tells the user WHICH source
+is active, but not HOW FRESH the data is. During WS disconnection or
+API polling gaps, the displayed values may be minutes old with no
+visual indication. Users monitoring live discharge sessions need to
+know whether displayed power values are current.
+**Rationale**: Client-side computation avoids adding a new sensor
+entity for a purely cosmetic concern. The 30-second threshold matches
+C-005 (WS stale message filter) — if the WS itself considers data
+stale at 30s, the UI should too. Red styling is a clear warning
+without being disruptive.
+**Alternatives considered**:
+- Server-side staleness sensor: rejected because it adds entity
+  overhead for a display-only concern
+- Separate "last updated" text below the badge: rejected because it
+  clutters the card for the common (non-stale) case
+**Traces**: C-020;
+`e2e/test_ui.py::TestOverviewCard::test_data_source_badge_matches_mode`
+
 ## Key Behaviours
 
 - WebSocket requires web portal credentials (username + MD5(password)),
@@ -134,6 +160,9 @@ sources are configured is itself a source of confusion.
 - Exponential backoff reconnection: 5 attempts, base 5s, max 60s, jitter.
 - Feed-in energy is integrated trapezoidally between REST polls for
   more accurate cumulative tracking.
+- Interpolated SoC (`_soc_interpolated`) is stored at full float
+  precision in coordinator data. Rounding is applied only for change
+  detection (2dp gate to prevent entity update storms).
 
 ## Edge Cases
 

@@ -27,21 +27,22 @@ pytestmark = pytest.mark.slow
 
 
 def _tight_window(minutes: int = 30) -> tuple[str, str]:
-    """Return a tight window starting ~now (UTC).
+    """Return a tight window starting ~2 min before now (UTC).
 
-    Avoids midnight crossings (C-009): if end would fall past 23:59,
-    clamp end to 23:59 and push start back to stay within *minutes*.
+    Avoids midnight crossings (C-009): clamps end to 23:59 and
+    ensures start >= 00:00.  When ``now`` is near midnight the
+    window shifts so the current minute always falls inside [start, end).
     """
     now = datetime.datetime.now(tz=datetime.UTC)
-    start = now - datetime.timedelta(minutes=2)
-    end = start + datetime.timedelta(minutes=minutes)
-    midnight = now.replace(hour=23, minute=59, second=0, microsecond=0)
-    if end > midnight:
-        end = midnight
-        start = max(start, end - datetime.timedelta(minutes=minutes))
+    now_min = now.hour * 60 + now.minute
+    start_min = max(0, now_min - 2)
+    end_min = start_min + minutes
+    if end_min > 23 * 60 + 59:
+        end_min = 23 * 60 + 59
+        start_min = max(0, end_min - minutes)
     return (
-        f"{start.hour:02d}:{start.minute:02d}:00",
-        f"{end.hour:02d}:{end.minute:02d}:00",
+        f"{start_min // 60:02d}:{start_min % 60:02d}:00",
+        f"{end_min // 60:02d}:{end_min % 60:02d}:00",
     )
 
 
@@ -717,6 +718,11 @@ class TestDataSource:
             timeout_s=30,
         )
 
+        # Zero out load so self-use produces no discharge — this lets us
+        # distinguish "linger captured post-session data" from "linger
+        # captured stale forced-discharge data".
+        foxess_sim.set(load_kw=0)
+
         # End session via clear_overrides
         ha_e2e.call_service("foxess_control", "clear_overrides", {})
         ha_e2e.wait_for_state(
@@ -733,8 +739,8 @@ class TestDataSource:
             timeout_s=60,
         )
 
-        # The discharge rate should reflect self-use (0), not the
-        # stale forced-discharge value captured during linger.
+        # The discharge rate should reflect self-use with no load (0),
+        # not the stale forced-discharge value captured during linger.
         ha_e2e.wait_for_numeric_state(
             "sensor.foxess_discharge_rate",
             "le",

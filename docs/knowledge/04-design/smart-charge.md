@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: Smart Charge
-last_verified: 2026-04-14
+last_verified: 2026-04-18
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---

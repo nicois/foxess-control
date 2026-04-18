@@ -271,6 +271,7 @@ class InverterModel:
             )
         ]
         self.schedule_enabled = bool(self.schedule_groups)
+        self.tick(0)
 
     def _fuzz(self, value: float) -> float:
         """Apply jitter if fuzzing is enabled."""

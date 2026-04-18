@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 3
-last_verified: 2026-04-17
+last_verified: 2026-04-18
 traces_up: [02-constraints.md]
 traces_down: [04-design/]
 ---

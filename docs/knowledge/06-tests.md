@@ -1,12 +1,12 @@
 ---
 project: FoxESS Control
 level: 6
-last_verified: 2026-04-17
+last_verified: 2026-04-18
 traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-570 unit tests + 66 E2E tests = 636 total.
+583 unit tests + 74 E2E tests = 657 total.
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
@@ -214,7 +214,7 @@ Key tests:
 
 ## E2E Tests (Containerised HA + Simulator + Playwright)
 
-**Source**: `e2e/test_e2e.py` (28 tests), `e2e/test_ui.py` (38 tests)
+**Source**: `e2e/test_e2e.py` (32 tests), `e2e/test_ui.py` (42 tests)
 **Infrastructure**: Podman HA container, FoxESS simulator, Playwright Chromium
 
 | Test | Verifies | Constraint |
@@ -233,11 +233,12 @@ Key tests:
 | `TestDataSource::test_ws_recovers_after_stream_stolen` | WS reconnects after theft | C-024 |
 | `TestDataSource::test_ws_reconnects_after_reload_at_max_power` | WS reconnects after reload | C-024 |
 | `TestDataSource::test_ws_mode_persists_via_options_flow` | ws_mode saved in options | C-020 |
+| `TestDataSource::test_ws_linger_captures_post_discharge_data` | Linger captures post-session data after override removal | C-007, C-020 |
 | `TestFeedinPacing::test_feedin_power_adjusts_over_time` | Feed-in pacing E2E | C-001 |
 | `TestOverviewCard::test_card_renders` | Overview card in shadow DOM | -- |
 | `TestOverviewCard::test_shows_soc` | SoC displayed on card | -- |
 | `TestOverviewCard::test_house_load_never_greyed` | House node active at low load | C-020 |
-| `TestOverviewCard::test_data_source_badge_matches_mode[api/ws/entity]` | Badge reflects active data path | C-020 |
+| `TestOverviewCard::test_data_source_badge_matches_mode[api/ws/entity]` | Badge reflects active data path + staleness suffix | C-020 |
 | `TestOverviewCard::test_pv_values_consistent_with_solar_total[api/ws/entity]` | PV1+PV2 ≈ total solar | C-020 |
 | `TestControlCard::test_card_renders` | Control card in shadow DOM | -- |
 | `TestControlCard::test_soc_displayed` | SoC percentage in header | -- |
@@ -249,7 +250,7 @@ Key tests:
 
 Tests are parametrized across `[cloud, entity]` connection modes and
 `[api, ws, entity]` data sources. The `ws_refuse` simulator fault blocks
-WS connections for API-only mode. Total E2E count is 66 (28 + 38).
+WS connections for API-only mode. Total E2E count is 74 (32 + 42).
 
 ## Unmapped Tests
 

@@ -515,11 +515,13 @@ async def _save_taper_profile(hass: HomeAssistant, profile: _TaperProfile) -> No
     await store.async_save(stored)
 
 
-def _cancel_smart_discharge(hass: HomeAssistant, *, clear_storage: bool = True) -> None:
-    """Cancel any active smart discharge listeners and clear stored session."""
-    ws_stop = _sb_cancel_smart_discharge(hass, DOMAIN, clear_storage=clear_storage)
-    if ws_stop is not None:
-        hass.async_create_task(ws_stop)
+def _cancel_smart_discharge(hass: HomeAssistant, *, clear_storage: bool = True) -> Any:
+    """Cancel any active smart discharge listeners and clear stored session.
+
+    Returns the WS stop coroutine (if any) so callers that need ordered
+    shutdown can await it after override removal.
+    """
+    return _sb_cancel_smart_discharge(hass, DOMAIN, clear_storage=clear_storage)
 
 
 async def _save_session(hass: HomeAssistant, key: str, data: dict[str, Any]) -> None:
@@ -572,11 +574,13 @@ async def _async_remove_override(
         )
 
 
-def _cancel_smart_charge(hass: HomeAssistant, *, clear_storage: bool = True) -> None:
-    """Cancel any active smart charge listeners and clear stored session."""
-    ws_stop = _sb_cancel_smart_charge(hass, DOMAIN, clear_storage=clear_storage)
-    if ws_stop is not None:
-        hass.async_create_task(ws_stop)
+def _cancel_smart_charge(hass: HomeAssistant, *, clear_storage: bool = True) -> Any:
+    """Cancel any active smart charge listeners and clear stored session.
+
+    Returns the WS stop coroutine (if any) so callers that need ordered
+    shutdown can await it after override removal.
+    """
+    return _sb_cancel_smart_charge(hass, DOMAIN, clear_storage=clear_storage)
 
 
 def _build_foxess_adapter(
@@ -1613,8 +1617,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not remaining:
         _LOGGER.info("Unloading last entry %s — cleaning up domain", entry.entry_id)
         # Preserve persisted sessions so recovery works after options reload
-        _cancel_smart_discharge(hass, clear_storage=False)
-        _cancel_smart_charge(hass, clear_storage=False)
+        ws_stop = _cancel_smart_discharge(hass, clear_storage=False)
+        if ws_stop is not None:
+            hass.async_create_task(ws_stop)
+        ws_stop = _cancel_smart_charge(hass, clear_storage=False)
+        if ws_stop is not None:
+            hass.async_create_task(ws_stop)
         # Stop WebSocket unconditionally — _on_session_cancel skips this
         # for "always" mode since _should_start_realtime_ws returns True.
         ws: FoxESSRealtimeWS | None = hass.data[DOMAIN].pop("_realtime_ws", None)
@@ -1657,11 +1665,17 @@ def _register_services(hass: HomeAssistant) -> None:
         mode_filter: str | None = call.data.get("mode")
 
         # Cancel smart listeners BEFORE any awaits to prevent old callbacks
-        # from racing with the override removal.
+        # from racing with the override removal.  Collect ws_stop coroutines
+        # so we can await them AFTER the override is removed (D-009 fix).
+        ws_stops: list[Any] = []
         if mode_filter is None or mode_filter == WorkMode.FORCE_CHARGE.value:
-            _cancel_smart_charge(hass)
+            ws_stop = _cancel_smart_charge(hass)
+            if ws_stop is not None:
+                ws_stops.append(ws_stop)
         if mode_filter is None or mode_filter == WorkMode.FORCE_DISCHARGE.value:
-            _cancel_smart_discharge(hass)
+            ws_stop = _cancel_smart_discharge(hass)
+            if ws_stop is not None:
+                ws_stops.append(ws_stop)
 
         # Clear force-op WS tracking
         domain_data = hass.data.get(DOMAIN, {})
@@ -1669,8 +1683,8 @@ def _register_services(hass: HomeAssistant) -> None:
         if timer is not None:
             timer.cancel()
         domain_data.pop("_force_op_end", None)
-        if not _should_start_realtime_ws(hass):
-            hass.async_create_task(_stop_realtime_ws(hass))
+        if not _should_start_realtime_ws(hass) and not ws_stops:
+            ws_stops.append(_stop_realtime_ws(hass))
 
         if _is_entity_mode(hass):
             _LOGGER.info("Clearing overrides via entity backend, setting SelfUse")
@@ -1702,6 +1716,10 @@ def _register_services(hass: HomeAssistant) -> None:
             else:
                 await hass.async_add_executor_job(inverter.self_use, min_soc_on_grid)
 
+        # WS linger AFTER override removal so it captures post-session data
+        for coro in ws_stops:
+            await coro
+
     async def handle_force_charge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
         power: int | None = call.data.get("power")
@@ -1720,8 +1738,12 @@ def _register_services(hass: HomeAssistant) -> None:
 
         # Cancel smart sessions BEFORE any awaits to prevent old callbacks
         # from racing with the schedule change.
-        _cancel_smart_charge(hass)
-        _cancel_smart_discharge(hass)
+        ws_stop = _cancel_smart_charge(hass)
+        if ws_stop is not None:
+            hass.async_create_task(ws_stop)
+        ws_stop = _cancel_smart_discharge(hass)
+        if ws_stop is not None:
+            hass.async_create_task(ws_stop)
 
         if _is_entity_mode(hass):
             await _apply_mode_via_entities(hass, WorkMode.FORCE_CHARGE, power)
@@ -1769,8 +1791,12 @@ def _register_services(hass: HomeAssistant) -> None:
 
         # Cancel smart sessions BEFORE any awaits to prevent old callbacks
         # from racing with the schedule change.
-        _cancel_smart_charge(hass)
-        _cancel_smart_discharge(hass)
+        ws_stop = _cancel_smart_charge(hass)
+        if ws_stop is not None:
+            hass.async_create_task(ws_stop)
+        ws_stop = _cancel_smart_discharge(hass)
+        if ws_stop is not None:
+            hass.async_create_task(ws_stop)
 
         if _is_entity_mode(hass):
             api_min_soc = _get_api_min_soc(hass)
@@ -1885,12 +1911,16 @@ def _register_services(hass: HomeAssistant) -> None:
         )
 
         # Cancel any previous smart discharge listeners
-        _cancel_smart_discharge(hass)
+        ws_stop = _cancel_smart_discharge(hass)
+        if ws_stop is not None:
+            hass.async_create_task(ws_stop)
 
         # Cancel any active smart charge — the two sessions would conflict
         if hass.data[DOMAIN].get("_smart_charge_state") is not None:
             _LOGGER.info("Smart discharge: cancelling active smart charge session")
-            _cancel_smart_charge(hass)
+            ws_stop = _cancel_smart_charge(hass)
+            if ws_stop is not None:
+                hass.async_create_task(ws_stop)
 
         max_power_w = power if power is not None else _get_max_power_w(hass)
         battery_capacity_kwh = _get_battery_capacity_kwh(hass)
@@ -2110,10 +2140,14 @@ def _register_services(hass: HomeAssistant) -> None:
 
         # Cancel previous sessions before any schedule mutation to prevent
         # old callbacks from racing with the new session's setup.
-        _cancel_smart_charge(hass)
+        ws_stop = _cancel_smart_charge(hass)
+        if ws_stop is not None:
+            hass.async_create_task(ws_stop)
         if hass.data[DOMAIN].get("_smart_discharge_state") is not None:
             _LOGGER.info("Smart charge: cancelling active smart discharge session")
-            _cancel_smart_discharge(hass)
+            ws_stop = _cancel_smart_discharge(hass)
+            if ws_stop is not None:
+                hass.async_create_task(ws_stop)
 
         # Decide whether to start charging now or defer
         now = dt_util.now()

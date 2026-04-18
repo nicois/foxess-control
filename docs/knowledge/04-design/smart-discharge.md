@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: Smart Discharge
-last_verified: 2026-04-14
+last_verified: 2026-04-18
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -109,9 +109,14 @@ projected completion time stops discharge precisely.
   because min_soc target would be missed
 - Stop at next poll after limit reached: rejected because up to
   5 minutes of excess export may incur penalties on capped tariffs
+The feed-in baseline (the coordinator's `feedin` value at session
+start) is captured on the listener's first tick rather than at session
+setup time, because the coordinator data may not be populated yet when
+the service call runs.
 **Traces**: C-001;
 `tests/test_smart_battery_algorithms.py::TestDischargePowerFeedinConstraint`,
-`tests/test_services.py::TestFeedinEnergyLimit`
+`tests/test_services.py::TestFeedinEnergyLimit`,
+`tests/test_services.py::test_feedin_baseline_not_captured_at_session_start`
 
 ### D-023: Progressive schedule extension (safe horizon)
 **Decision**: Instead of setting the inverter schedule end time to the
