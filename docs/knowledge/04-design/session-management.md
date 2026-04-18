@@ -364,6 +364,14 @@ sequenceDiagram
     Note over WS: WS connects, starts streaming
 ```
 
+## Session State Construction
+
+Session state dicts are built by `create_charge_session()` and
+`create_discharge_session()` factory functions in `smart_battery/types.py`.
+These centralise the ~20 fields per session type, preventing
+field-omission bugs and ensuring consistent initialisation across
+all call sites (`smart_battery/services.py` and `__init__.py`).
+
 ## Key Behaviours
 
 - Charge sessions check SoC every 5 minutes, adjust power accordingly.

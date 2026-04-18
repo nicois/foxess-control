@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import datetime
 import logging
-import uuid
 from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
@@ -60,7 +59,7 @@ from .session import (
     session_data_from_charge_state,
     session_data_from_discharge_state,
 )
-from .types import WorkMode
+from .types import WorkMode, create_charge_session, create_discharge_session
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant, ServiceCall
@@ -412,27 +411,23 @@ def register_services(
             if safe_end != end:
                 schedule_horizon = safe_end.isoformat()
 
-        hass.data[domain]["_smart_discharge_state"] = {
-            "session_id": str(uuid.uuid4()),
-            "groups": [],
-            "start": start,
-            "end": end,
-            "min_soc": min_soc,
-            "max_power_w": max_power_w,
-            "last_power_w": initial_power,
-            "soc_below_min_count": 0,
-            "soc_unavailable_count": 0,
-            "feedin_energy_limit_kwh": feedin_energy_limit,
-            "feedin_start_kwh": None,
-            "battery_capacity_kwh": battery_capacity_kwh,
-            "min_power_change": min_power_change,
-            "pacing_enabled": pacing_enabled,
-            "start_soc": current_soc,
-            "discharging_started": not should_defer,
-            "discharging_started_at": None if should_defer else now,
-            "consumption_peak_kw": max(0.0, net_consumption),
-            "schedule_horizon": schedule_horizon,
-        }
+        hass.data[domain]["_smart_discharge_state"] = create_discharge_session(
+            start=start,
+            end=end,
+            min_soc=min_soc,
+            max_power_w=max_power_w,
+            initial_power=initial_power,
+            battery_capacity_kwh=battery_capacity_kwh,
+            min_power_change=min_power_change,
+            pacing_enabled=pacing_enabled,
+            current_soc=current_soc,
+            net_consumption=net_consumption,
+            should_defer=should_defer,
+            now=now,
+            feedin_energy_limit=feedin_energy_limit,
+            schedule_horizon=schedule_horizon,
+            groups=[],
+        )
 
         setup_smart_discharge_listeners(hass, domain, adapter)
 
@@ -545,33 +540,22 @@ def register_services(
             )
         )
 
-        hass.data[domain]["_smart_charge_state"] = {
-            "session_id": str(uuid.uuid4()),
-            "groups": [],
-            "start": start,
-            "end": end,
-            "target_soc": target_soc,
-            "battery_capacity_kwh": battery_capacity_kwh,
-            "max_power_w": effective_max_power,
-            "last_power_w": initial_power,
-            "min_soc_on_grid": min_soc_on_grid,
-            "min_power_change": min_power_change,
-            "api_min_soc": api_min_soc,
-            "charging_started": not should_defer,
-            "charging_started_at": None if should_defer else now,
-            "charging_started_energy_kwh": (
-                None
-                if should_defer
-                else (
-                    current_soc / 100.0 * battery_capacity_kwh
-                    if current_soc is not None
-                    else None
-                )
-            ),
-            "force": False,
-            "soc_unavailable_count": 0,
-            "start_soc": current_soc,
-        }
+        hass.data[domain]["_smart_charge_state"] = create_charge_session(
+            start=start,
+            end=end,
+            target_soc=target_soc,
+            battery_capacity_kwh=battery_capacity_kwh,
+            max_power_w=effective_max_power,
+            initial_power=initial_power,
+            min_soc_on_grid=min_soc_on_grid,
+            min_power_change=min_power_change,
+            api_min_soc=api_min_soc,
+            force=False,
+            current_soc=current_soc,
+            should_defer=should_defer,
+            now=now,
+            groups=[],
+        )
 
         setup_smart_charge_listeners(hass, domain, adapter)
 

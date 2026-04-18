@@ -186,6 +186,31 @@ async def _save_taper_profile(
     await store.async_save(stored)
 
 
+def _record_taper_observation(
+    hass: HomeAssistant,
+    domain: str,
+    taper: TaperProfile | None,
+    cur_state: dict[str, Any],
+    soc: float,
+    coordinator_var: str,
+    record_fn_name: str,
+    save_every: int,
+) -> None:
+    """Record a taper observation if conditions are met.
+
+    Shared between charge and discharge listeners.
+    """
+    if taper is None or cur_state.get("last_power_w", 0) < 500:
+        return
+    actual_kw = _get_coordinator_value(hass, domain, coordinator_var)
+    if actual_kw is None:
+        return
+    getattr(taper, record_fn_name)(soc, cur_state["last_power_w"], actual_kw * 1000)
+    cur_state["taper_tick"] = cur_state.get("taper_tick", 0) + 1
+    if cur_state["taper_tick"] % save_every == 0:
+        hass.async_create_task(_save_taper_profile(hass, domain, taper))
+
+
 def cancel_smart_charge(
     hass: HomeAssistant,
     domain: str,
@@ -388,20 +413,17 @@ def setup_smart_charge_listeners(
         headroom = _get_smart_headroom(hass, domain)
         taper = _get_taper_profile(hass, domain)
 
-        # Record taper observation from previous tick's requested power
-        if (
-            taper is not None
-            and cur_state.get("charging_started")
-            and cur_state.get("last_power_w", 0) >= 500
-        ):
-            actual_kw = _get_coordinator_value(hass, domain, "batChargePower")
-            if actual_kw is not None:
-                taper.record_charge(
-                    cur_soc, cur_state["last_power_w"], actual_kw * 1000
-                )
-                cur_state["taper_tick"] = cur_state.get("taper_tick", 0) + 1
-                if cur_state["taper_tick"] % 3 == 0:
-                    hass.async_create_task(_save_taper_profile(hass, domain, taper))
+        if cur_state.get("charging_started"):
+            _record_taper_observation(
+                hass,
+                domain,
+                taper,
+                cur_state,
+                cur_soc,
+                "batChargePower",
+                "record_charge",
+                save_every=3,
+            )
 
         if not cur_state["charging_started"]:
             # Check if it's time to start deferred charging
@@ -834,21 +856,18 @@ def setup_smart_discharge_listeners(
             return
         cur_state["soc_unavailable_count"] = 0
 
-        # Record taper observation for discharge
         taper = _get_taper_profile(hass, domain)
-        if (
-            taper is not None
-            and cur_state.get("last_power_w", 0) >= 500
-            and not cur_state.get("suspended", False)
-        ):
-            actual_kw = _get_coordinator_value(hass, domain, "batDischargePower")
-            if actual_kw is not None:
-                taper.record_discharge(
-                    soc_value, cur_state["last_power_w"], actual_kw * 1000
-                )
-                cur_state["taper_tick"] = cur_state.get("taper_tick", 0) + 1
-                if cur_state["taper_tick"] % 5 == 0:
-                    hass.async_create_task(_save_taper_profile(hass, domain, taper))
+        if not cur_state.get("suspended", False):
+            _record_taper_observation(
+                hass,
+                domain,
+                taper,
+                cur_state,
+                soc_value,
+                "batDischargePower",
+                "record_discharge",
+                save_every=5,
+            )
 
         if cur_state.get("pacing_enabled") and soc_value > cur_state["min_soc"]:
             now_dt = dt_util.now()

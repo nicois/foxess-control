@@ -124,6 +124,11 @@ class InverterModel:
     active_fault: str | None = None
     fault_remaining: int = 0  # auto-clear after N requests (0 = permanent)
 
+    # Taper simulation: linear charge reduction above this SoC threshold
+    charge_taper_soc: float = 90.0
+    # Taper simulation: linear discharge reduction below this SoC threshold
+    discharge_taper_soc: float = 15.0
+
     # WS config overrides
     ws_unit: str = "W"  # "W" or "kW"
     ws_time_diff: int = 5  # normal
@@ -157,6 +162,20 @@ class InverterModel:
                 return g
         return None
 
+    def _charge_taper_factor(self) -> float:
+        """BMS reduces charge acceptance above charge_taper_soc."""
+        if self.soc <= self.charge_taper_soc:
+            return 1.0
+        return max(0.0, (100.0 - self.soc) / (100.0 - self.charge_taper_soc))
+
+    def _discharge_taper_factor(self) -> float:
+        """BMS reduces discharge rate near min_soc (linear from discharge_taper_soc)."""
+        if self.soc >= self.discharge_taper_soc:
+            return 1.0
+        if self.soc <= self.min_soc:
+            return 0.0
+        return (self.soc - self.min_soc) / (self.discharge_taper_soc - self.min_soc)
+
     def tick(self, dt_seconds: float) -> None:
         """Advance the model by dt_seconds."""
         dt_hours = dt_seconds / 3600.0
@@ -169,28 +188,27 @@ class InverterModel:
         self.grid_import_kw = 0.0
         self.grid_export_kw = 0.0
 
+        charge_taper = self._charge_taper_factor()
+        discharge_taper = self._discharge_taper_factor()
+
         if mode == "ForceCharge":
-            # Charge at fdPwr from grid, solar assists
             target_charge_kw = (
                 (group.fdPwr / 1000.0) if group else (self.max_power_w / 1000.0)
             )
-            # Solar goes to load first, remainder to battery
             solar_to_load = min(self.solar_kw, self.load_kw)
             solar_to_bat = self.solar_kw - solar_to_load
             grid_to_load = self.load_kw - solar_to_load
-            # Battery charges from grid + remaining solar
-            self.bat_charge_kw = min(target_charge_kw, self.max_power_w / 1000.0)
-            self.grid_import_kw = grid_to_load + max(
-                0, self.bat_charge_kw - solar_to_bat
-            )
+            max_accept = min(target_charge_kw, self.max_power_w / 1000.0) * charge_taper
+            self.bat_charge_kw = min(solar_to_bat + max_accept, max_accept)
+            grid_charge = max(0.0, self.bat_charge_kw - solar_to_bat)
+            self.grid_import_kw = grid_to_load + grid_charge
 
         elif mode == "ForceDischarge":
-            # Discharge at fdPwr
             target_discharge_kw = (
                 (group.fdPwr / 1000.0) if group else (self.max_power_w / 1000.0)
             )
-            self.bat_discharge_kw = min(target_discharge_kw, self.max_power_w / 1000.0)
-            # Solar serves load, battery covers rest + exports
+            effective = min(target_discharge_kw, self.max_power_w / 1000.0)
+            self.bat_discharge_kw = effective * discharge_taper
             net_export = self.bat_discharge_kw + self.solar_kw - self.load_kw
             if net_export > 0:
                 self.grid_export_kw = net_export
@@ -198,9 +216,9 @@ class InverterModel:
                 self.grid_import_kw = -net_export
 
         elif mode == "Feedin":
-            # Export at fdPwr
             target_kw = (group.fdPwr / 1000.0) if group else (self.max_power_w / 1000.0)
-            self.bat_discharge_kw = min(target_kw, self.max_power_w / 1000.0)
+            effective = min(target_kw, self.max_power_w / 1000.0)
+            self.bat_discharge_kw = effective * discharge_taper
             net = self.bat_discharge_kw + self.solar_kw - self.load_kw
             if net > 0:
                 self.grid_export_kw = net
@@ -208,19 +226,21 @@ class InverterModel:
                 self.grid_import_kw = -net
 
         else:  # SelfUse
-            # Solar serves load, excess charges battery
             solar_to_load = min(self.solar_kw, self.load_kw)
             remaining_load = self.load_kw - solar_to_load
             excess_solar = self.solar_kw - solar_to_load
 
             if excess_solar > 0:
-                self.bat_charge_kw = min(excess_solar, self.max_power_w / 1000.0)
+                max_accept = min(excess_solar, self.max_power_w / 1000.0) * charge_taper
+                if self.soc >= 100.0:
+                    max_accept = 0.0
+                self.bat_charge_kw = max_accept
                 leftover = excess_solar - self.bat_charge_kw
                 if leftover > 0:
                     self.grid_export_kw = leftover
             if remaining_load > 0:
-                # Battery covers remaining load
-                self.bat_discharge_kw = min(remaining_load, self.max_power_w / 1000.0)
+                available = min(remaining_load, self.max_power_w / 1000.0)
+                self.bat_discharge_kw = available * discharge_taper
                 shortfall = remaining_load - self.bat_discharge_kw
                 if shortfall > 0:
                     self.grid_import_kw = shortfall
@@ -228,9 +248,12 @@ class InverterModel:
         # Clamp discharge at min_soc
         if self.soc <= self.min_soc and self.bat_discharge_kw > 0:
             self.bat_discharge_kw = 0.0
-            # Recalculate grid to cover load
             self.grid_import_kw = max(0, self.load_kw - self.solar_kw)
             self.grid_export_kw = max(0, self.solar_kw - self.load_kw)
+
+        # Clamp charge at 100%
+        if self.soc >= 100.0 and self.bat_charge_kw > 0:
+            self.bat_charge_kw = 0.0
 
         # Update SoC
         net_bat_kw = self.bat_charge_kw - self.bat_discharge_kw

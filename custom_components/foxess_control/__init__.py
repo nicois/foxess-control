@@ -21,12 +21,9 @@ from .const import (
     CONF_API_KEY,
     CONF_API_MIN_SOC,
     CONF_BATTERY_CAPACITY_KWH,
-    CONF_CHARGE_POWER_ENTITY,
     CONF_DEVICE_SERIAL,
-    CONF_DISCHARGE_POWER_ENTITY,
     CONF_INVERTER_POWER,
     CONF_MIN_POWER_CHANGE,
-    CONF_MIN_SOC_ENTITY,
     CONF_MIN_SOC_ON_GRID,
     CONF_POLLING_INTERVAL,
     CONF_SMART_HEADROOM,
@@ -54,21 +51,18 @@ from .coordinator import (
     get_coordinator_soc,
 )
 from .foxess import FoxESSClient, FoxESSRealtimeWS, FoxESSWebSession, Inverter, WorkMode
-
-# Re-export schedule utilities from foxess_adapter for backward
-# compatibility with tests that import them from __init__.py.
-from .foxess_adapter import (  # noqa: F401
+from .foxess_adapter import (
     FoxESSCloudAdapter,
     FoxESSEntityAdapter,
     _build_override_group,
     _check_schedule_safe,
-    _groups_overlap,
-    _is_expired,
+    _groups_overlap,  # noqa: F401 — re-exported for tests
+    _is_expired,  # noqa: F401 — re-exported for tests
     _is_placeholder,
     _merge_with_existing,
     _remove_mode_from_schedule,
     _sanitize_group,
-    _to_minutes,
+    _to_minutes,  # noqa: F401 — re-exported for tests
 )
 from .smart_battery.algorithms import (
     DISCHARGE_SAFETY_FACTOR as _DISCHARGE_SAFETY_FACTOR,
@@ -129,6 +123,12 @@ from .smart_battery.session import (
     session_data_from_discharge_state as _session_data_from_discharge_state,
 )
 from .smart_battery.taper import TaperProfile as _TaperProfile
+from .smart_battery.types import (
+    create_charge_session as _create_charge_session,
+)
+from .smart_battery.types import (
+    create_discharge_session as _create_discharge_session,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -336,20 +336,12 @@ def _get_max_power_w(hass: HomeAssistant) -> int:
         return DEFAULT_INVERTER_POWER
 
 
-# Map foxess_control WorkMode values to foxess_modbus select entity options.
-_ENTITY_MODE_MAP: dict[str, str] = {
-    WorkMode.SELF_USE: "Self Use",
-    WorkMode.FORCE_CHARGE: "Force Charge",
-    WorkMode.FORCE_DISCHARGE: "Force Discharge",
-    WorkMode.BACKUP: "Back-up",
-    WorkMode.FEEDIN: "Feed-in First",
-}
-
-
-def _entity_service_domain(entity_id: str, default: str) -> str:
-    """Derive service domain from entity ID (input_select → input_select)."""
-    prefix = entity_id.split(".", 1)[0]
-    return prefix if prefix.startswith("input_") else default
+def _get_entity_adapter(hass: HomeAssistant) -> FoxESSEntityAdapter:
+    """Build a one-shot entity adapter from the current config."""
+    return FoxESSEntityAdapter(
+        entry_options=dict(_get_first_entry(hass).options),
+        max_power_w=_get_max_power_w(hass),
+    )
 
 
 async def _apply_mode_via_entities(
@@ -358,54 +350,9 @@ async def _apply_mode_via_entities(
     power_w: int | None = None,
     fd_soc: int = 11,
 ) -> None:
-    """Set inverter mode by writing to external entities (foxess_modbus interop).
-
-    Sets the work mode via a ``select`` entity and optionally adjusts the
-    charge/discharge power limit and min SoC via ``number`` entities.
-    Detects ``input_select`` / ``input_number`` entities and uses the
-    correct service domain.
-    """
-    opts = _get_first_entry(hass).options
-
-    _LOGGER.debug(
-        "Entity backend: setting mode=%s power=%s fd_soc=%d",
-        mode,
-        f"{power_w}W" if power_w is not None else "unchanged",
-        fd_soc,
-    )
-
-    wm_entity = opts[CONF_WORK_MODE_ENTITY]
-    mode_option = _ENTITY_MODE_MAP.get(mode)
-    if mode_option:
-        await hass.services.async_call(
-            _entity_service_domain(wm_entity, "select"),
-            "select_option",
-            {"entity_id": wm_entity, "option": mode_option},
-        )
-
-    if power_w is not None and mode in (
-        WorkMode.FORCE_CHARGE,
-        WorkMode.FORCE_DISCHARGE,
-    ):
-        power_entity = (
-            opts.get(CONF_CHARGE_POWER_ENTITY)
-            if mode == WorkMode.FORCE_CHARGE
-            else opts.get(CONF_DISCHARGE_POWER_ENTITY)
-        )
-        if power_entity:
-            await hass.services.async_call(
-                _entity_service_domain(power_entity, "number"),
-                "set_value",
-                {"entity_id": power_entity, "value": power_w},
-            )
-
-    min_soc_entity = opts.get(CONF_MIN_SOC_ENTITY)
-    if min_soc_entity and mode == WorkMode.FORCE_DISCHARGE:
-        await hass.services.async_call(
-            _entity_service_domain(min_soc_entity, "number"),
-            "set_value",
-            {"entity_id": min_soc_entity, "value": fd_soc},
-        )
+    """Set inverter mode via the entity adapter."""
+    adapter = _get_entity_adapter(hass)
+    await adapter.apply_mode(hass, mode, power_w, fd_soc)
 
 
 def _get_api_min_soc(hass: HomeAssistant) -> int:
@@ -2061,27 +2008,23 @@ def _register_services(hass: HomeAssistant) -> None:
             if safe_end != end:
                 schedule_horizon = safe_end.isoformat()
 
-        hass.data[DOMAIN]["_smart_discharge_state"] = {
-            "session_id": str(uuid.uuid4()),
-            "groups": groups,
-            "start": start,
-            "end": end,
-            "min_soc": min_soc,
-            "max_power_w": max_power_w,
-            "last_power_w": initial_power,
-            "soc_below_min_count": 0,
-            "soc_unavailable_count": 0,
-            "feedin_energy_limit_kwh": feedin_energy_limit,
-            "feedin_start_kwh": None,
-            "battery_capacity_kwh": battery_capacity_kwh,
-            "min_power_change": _get_min_power_change(hass),
-            "pacing_enabled": pacing_enabled,
-            "discharging_started": not should_defer,
-            "discharging_started_at": None if should_defer else now,
-            "consumption_peak_kw": max(0.0, net_consumption),
-            "start_soc": current_soc,
-            "schedule_horizon": schedule_horizon,
-        }
+        hass.data[DOMAIN]["_smart_discharge_state"] = _create_discharge_session(
+            start=start,
+            end=end,
+            min_soc=min_soc,
+            max_power_w=max_power_w,
+            initial_power=initial_power,
+            battery_capacity_kwh=battery_capacity_kwh,
+            min_power_change=_get_min_power_change(hass),
+            pacing_enabled=pacing_enabled,
+            current_soc=current_soc,
+            net_consumption=net_consumption,
+            should_defer=should_defer,
+            now=now,
+            feedin_energy_limit=feedin_energy_limit,
+            schedule_horizon=schedule_horizon,
+            groups=groups,
+        )
 
         _setup_smart_discharge_listeners(hass, inverter)
 
@@ -2270,34 +2213,22 @@ def _register_services(hass: HomeAssistant) -> None:
         hass.data[DOMAIN].pop("_smart_error_state", None)
 
         # Store state for periodic adjustments
-        hass.data[DOMAIN]["_smart_charge_state"] = {
-            "session_id": str(uuid.uuid4()),
-            "groups": initial_groups,
-            "start": start,
-            "end": end,
-            "target_soc": target_soc,
-            "battery_capacity_kwh": battery_capacity_kwh,
-            "max_power_w": effective_max_power,
-            "last_power_w": initial_power,
-            "min_soc_on_grid": min_soc_on_grid,
-            "min_power_change": min_power_change,
-            "api_min_soc": api_min_soc,
-            "charging_started": not should_defer,
-            "charging_started_at": None if should_defer else now,
-            "charging_started_energy_kwh": (
-                None
-                if should_defer
-                else (
-                    current_soc / 100.0 * battery_capacity_kwh
-                    if current_soc is not None
-                    else None
-                )
-            ),
-            "force": force,
-            "soc_unavailable_count": 0,
-            "soc_above_target_count": 0,
-            "start_soc": current_soc,
-        }
+        hass.data[DOMAIN]["_smart_charge_state"] = _create_charge_session(
+            start=start,
+            end=end,
+            target_soc=target_soc,
+            battery_capacity_kwh=battery_capacity_kwh,
+            max_power_w=effective_max_power,
+            initial_power=initial_power,
+            min_soc_on_grid=min_soc_on_grid,
+            min_power_change=min_power_change,
+            api_min_soc=api_min_soc,
+            force=force,
+            current_soc=current_soc,
+            should_defer=should_defer,
+            now=now,
+            groups=initial_groups,
+        )
 
         _setup_smart_charge_listeners(hass, inverter)
 

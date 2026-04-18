@@ -32,7 +32,9 @@ pacing logic. The `InverterAdapter` protocol is the abstraction boundary.
 **Key interfaces**: `InverterAdapter` (Protocol), `EntityAdapter` (impl),
 `calculate_charge_power()`, `calculate_discharge_power()`,
 `should_suspend_discharge()`, `TaperProfile`,
-`SessionContextFilter` (structured logging).
+`SessionContextFilter` (structured logging),
+`create_charge_session()`, `create_discharge_session()` (factory
+functions centralising session state construction).
 
 ### `foxess/` — FoxESS Cloud API client
 **Path**: `custom_components/foxess_control/foxess/`
@@ -56,6 +58,9 @@ and service registration in `__init__.py`), partly tech debt. The
 FoxESS-specific session orchestration (schedule merging, override
 tracking, WS lifecycle) should be extracted into a FoxESS session
 manager, leaving `__init__.py` as a thin setup/teardown layer.
+Entity-mode dispatch (`_apply_mode_via_entities`) delegates to
+`FoxESSEntityAdapter` — the inline mode-map/dispatch was consolidated
+into the adapter class in beta.32.
 
 ### `coordinator.py` — Data coordinators
 **Path**: `custom_components/foxess_control/coordinator.py`
@@ -132,6 +137,24 @@ via `async_set_updated_data()`, giving sensors immediate updates.
 | Dependency | Role | Why chosen |
 |---|---|---|
 | `wasmtime` | WASM runtime for signature generation | FoxESS web portal requires a specific signature algorithm; WASM is the only available implementation (reverse-engineered from JS) |
+
+## Simulator Fidelity
+
+The FoxESS simulator (`simulator/model.py`) models real inverter physics
+to minimise deviations from production behaviour (C-033):
+
+- **Charge taper**: Linear reduction from 100% acceptance at
+  `charge_taper_soc` (90%) to 0% at SoC 100%, modelling BMS
+  constant-voltage phase behaviour.
+- **Discharge taper**: Linear reduction from 100% output at
+  `discharge_taper_soc` (15%) to 0% at `min_soc`, modelling BMS
+  low-SoC current limiting.
+- **SelfUse at full SoC**: Excess solar routes to grid export when
+  battery is at 100% (no phantom charging).
+- **ForceCharge solar contribution**: Solar assists grid charging,
+  reducing grid import.
+- **Fuzzing**: ±2% random jitter on power readings prevents tests
+  from overfitting to exact values.
 | `aiohttp` | WebSocket client | Standard async HTTP/WS library; HA already uses it |
 | `requests` | REST API client (sync) | Used in the FoxESS client for synchronous API calls within HA's executor |
 | `voluptuous` | Schema validation | Used for service call and config flow schemas; ships with HA but used directly |
