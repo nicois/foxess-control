@@ -11,6 +11,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.event import async_track_time_interval
@@ -486,6 +487,25 @@ async def _clear_stored_session(hass: HomeAssistant, key: str) -> None:
     await _sb_clear_stored_session(store, key)
 
 
+async def _persist_active_sessions(hass: HomeAssistant) -> None:
+    """Persist all active session state to storage.
+
+    Called on EVENT_HOMEASSISTANT_STOP to ensure recovery has fresh data
+    including cached adapter groups (avoids slow-path rebuild).
+    """
+    domain_data = hass.data.get(DOMAIN)
+    if domain_data is None:
+        return
+    cs = domain_data.get("_smart_charge_state")
+    if cs is not None:
+        await _save_session(hass, "smart_charge", _session_data_from_charge_state(cs))
+    ds = domain_data.get("_smart_discharge_state")
+    if ds is not None:
+        await _save_session(
+            hass, "smart_discharge", _session_data_from_discharge_state(ds)
+        )
+
+
 def _get_battery_capacity_kwh(hass: HomeAssistant) -> float:
     """Get battery_capacity_kwh from the first config entry's options."""
     entry_id = _first_entry_id(hass)
@@ -762,7 +782,7 @@ async def _recover_charge_session(
 
         hass.data[DOMAIN]["_smart_charge_state"] = {
             "session_id": str(uuid.uuid4()),
-            "groups": [],
+            "groups": charge_data.get("groups") or [],
             "start": start,
             "end": end,
             "target_soc": target_soc,
@@ -906,7 +926,7 @@ async def _recover_discharge_session(
 
         hass.data[DOMAIN]["_smart_discharge_state"] = {
             "session_id": str(uuid.uuid4()),
-            "groups": [],
+            "groups": discharge_data.get("groups") or [],
             "start": start,
             "end": end,
             "min_soc": min_soc,
@@ -1560,6 +1580,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 datetime.timedelta(seconds=polling_interval),
             )
         )
+
+    # Persist session state on HA shutdown so recovery has fresh data
+    # (including cached adapter groups). async_unload_entry runs too but
+    # EVENT_HOMEASSISTANT_STOP fires first and guarantees a clean save.
+    async def _on_ha_stop(_event: Any) -> None:
+        await _persist_active_sessions(hass)
+
+    entry.async_on_unload(
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _on_ha_stop)
+    )
 
     # Reload entry when options change (picks up new polling interval)
     entry.async_on_unload(entry.add_update_listener(_async_update_options))
