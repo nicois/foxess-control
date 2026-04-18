@@ -60,7 +60,7 @@ SCAN_INTERVAL = datetime.timedelta(seconds=30)
 # If this input_boolean exists and is "on", the integration captures log
 # messages into a sensor entity queryable via the HA REST API.
 DEBUG_LOG_ENTITY = "input_boolean.foxess_control_debug_log"
-_DEBUG_LOG_BUFFER_SIZE = 200
+_DEBUG_LOG_BUFFER_SIZE = 75
 
 
 def _device_info(entry: ConfigEntry) -> DeviceInfo:
@@ -636,6 +636,7 @@ class DebugLogSensor(SensorEntity):
     _attr_has_entity_name = True
     _attr_icon = "mdi:math-log"
     _attr_entity_registry_enabled_default = True
+    _unrecorded_attributes = frozenset({"entries"})
 
     def __init__(
         self,

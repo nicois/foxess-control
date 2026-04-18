@@ -4008,6 +4008,141 @@ class TestRecoverSessions:
         assert len(unsubs) == 2
 
     @pytest.mark.asyncio
+    async def test_discharge_recovery_with_schedule_horizon(self) -> None:
+        """Discharge session recovers when inverter schedule uses horizon end time.
+
+        C-027 sets the schedule end to a safe horizon (e.g. 19:24) that is
+        earlier than the session window end (e.g. 20:01). Recovery must still
+        find the schedule group even when the end times don't match exactly.
+        """
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [
+                {
+                    "enable": 1,
+                    "workMode": "ForceDischarge",
+                    "startHour": 18,
+                    "startMinute": 0,
+                    "endHour": 19,
+                    "endMinute": 24,
+                    "minSocOnGrid": 15,
+                    "fdSoc": 11,
+                    "fdPwr": 8054,
+                }
+            ],
+        }
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 68.0},
+        )
+        store = hass.data[DOMAIN]["_store"]
+        store.async_load = AsyncMock(
+            return_value={
+                "smart_discharge": {
+                    "date": "2026-04-18",
+                    "start_hour": 18,
+                    "start_minute": 0,
+                    "end_hour": 20,
+                    "end_minute": 1,
+                    "min_soc": 40,
+                    "last_power_w": 8054,
+                    "discharging_started": True,
+                }
+            }
+        )
+
+        from custom_components.foxess_control import _recover_sessions
+
+        with (
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 18, 19, 6, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            await _recover_sessions(hass, inv)
+
+        assert "_smart_discharge_state" in hass.data[DOMAIN], (
+            "Discharge session should be recovered when inverter schedule "
+            "uses horizon end time different from session window end"
+        )
+        state = hass.data[DOMAIN]["_smart_discharge_state"]
+        assert state["min_soc"] == 40
+
+    @pytest.mark.asyncio
+    async def test_charge_recovery_with_schedule_horizon(self) -> None:
+        """Charge session recovers when schedule end differs from window end."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [
+                {
+                    "enable": 1,
+                    "workMode": "ForceCharge",
+                    "startHour": 1,
+                    "startMinute": 0,
+                    "endHour": 4,
+                    "endMinute": 30,
+                    "minSocOnGrid": 15,
+                    "fdSoc": 100,
+                    "fdPwr": 5000,
+                }
+            ],
+        }
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 80.0},
+        )
+        store = hass.data[DOMAIN]["_store"]
+        store.async_load = AsyncMock(
+            return_value={
+                "smart_charge": {
+                    "date": "2026-04-18",
+                    "start_hour": 1,
+                    "start_minute": 0,
+                    "end_hour": 6,
+                    "end_minute": 0,
+                    "target_soc": 100,
+                    "last_power_w": 5000,
+                    "charging_started": True,
+                }
+            }
+        )
+
+        from custom_components.foxess_control import _recover_sessions
+
+        with (
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 18, 3, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            await _recover_sessions(hass, inv)
+
+        assert "_smart_charge_state" in hass.data[DOMAIN], (
+            "Charge session should be recovered when inverter schedule "
+            "uses horizon end time different from session window end"
+        )
+
+    @pytest.mark.asyncio
     async def test_empty_store_no_op(self) -> None:
         """No stored sessions means nothing to recover."""
         inv = MagicMock(spec=Inverter)

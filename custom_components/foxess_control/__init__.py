@@ -634,16 +634,16 @@ def _has_matching_schedule_group(
     end_hour: int,
     end_minute: int,
 ) -> bool:
-    """Check if the inverter has a matching schedule group still active."""
+    """Check if the inverter has a matching schedule group still active.
+
+    Matches on work mode only — the schedule end time may differ from the
+    session window end because C-027 sets a safe horizon (SoC/rate/safety).
+    """
     schedule = inverter.get_schedule()
     for group in schedule.get("groups", []):
         if _is_placeholder(group):
             continue
-        if (
-            group.get("workMode") == work_mode.value
-            and group.get("endHour") == end_hour
-            and group.get("endMinute") == end_minute
-        ):
+        if group.get("workMode") == work_mode.value:
             return True
     return False
 
