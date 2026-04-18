@@ -439,7 +439,10 @@ class TestControlCard:
         # window — with SoC=35/min=30, only 0.5kWh available, so
         # the horizon is ~4 min vs the 10 min window.
         assert foxess_sim is not None
-        foxess_sim.set(soc=35, solar_kw=0, load_kw=0.5)
+        set_inverter_state("cloud", foxess_sim, ha_e2e, soc=35, solar_kw=0, load_kw=0.5)
+        ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_battery_soc", "le", 36, timeout_s=120
+        )
         start, end = _tight_window(10)
         ha_e2e.call_service(
             "foxess_control",

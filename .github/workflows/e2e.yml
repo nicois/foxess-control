@@ -90,11 +90,13 @@ jobs:
 
       - name: Summarise
         run: |
-          passed=0; failed=0; skipped=0
+          shopt -s nullglob
+          passed=0; failed=0; skipped=0; found=0
           for f in results/*/e2e-*.xml; do
-            p=$(grep -oP 'tests="\K[0-9]+' "$f" | head -1)
-            f_count=$(grep -oP 'failures="\K[0-9]+' "$f" | head -1)
-            s_count=$(grep -oP 'skipped="\K[0-9]+' "$f" | head -1)
+            found=$((found + 1))
+            p=$(grep -oP 'tests="\K[0-9]+' "$f" | head -1 || true)
+            f_count=$(grep -oP 'failures="\K[0-9]+' "$f" | head -1 || true)
+            s_count=$(grep -oP 'skipped="\K[0-9]+' "$f" | head -1 || true)
             passed=$((passed + ${p:-0} - ${f_count:-0} - ${s_count:-0}))
             failed=$((failed + ${f_count:-0}))
             skipped=$((skipped + ${s_count:-0}))
@@ -104,6 +106,13 @@ jobs:
           echo "| Passed | Failed | Skipped |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|--------|---------|" >> $GITHUB_STEP_SUMMARY
           echo "| $passed | $failed | $skipped |" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$found" -eq 0 ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**No XML result files found.**" >> $GITHUB_STEP_SUMMARY
+            ls -R results/ >> $GITHUB_STEP_SUMMARY 2>&1 || true
+            exit 1
+          fi
 
           if [ "$failed" -gt 0 ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
