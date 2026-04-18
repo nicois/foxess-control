@@ -1669,6 +1669,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Clean up persistent storage when the integration is removed entirely."""
+    store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+    await store.async_remove()
+
+
 def _register_services(hass: HomeAssistant) -> None:
     """Register inverter control services."""
 
