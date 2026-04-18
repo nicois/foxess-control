@@ -856,7 +856,8 @@ class FoxESSControlCard extends HTMLElement {
         socPct = Math.min(100, Math.max(0, ((current - startSoc) / (target - startSoc)) * 100));
         confirmedPct = Math.min(100, Math.max(0, ((confirmed - startSoc) / (target - startSoc)) * 100));
       }
-      const curStr = current != null ? current.toFixed(2) + "%" : "?%";
+      const socChanged = confirmed != null && startSoc != null && Math.round(confirmed) !== Math.round(startSoc);
+      const curStr = current != null ? (socChanged ? current.toFixed(2) : Math.round(current)) + "%" : "?%";
       const tgtStr = target != null ? target + "%" : "?%";
       const socLabel = startSoc != null && Math.round(startSoc) !== Math.round(current ?? startSoc)
         ? `${Math.round(startSoc)}% → ${curStr} → ${tgtStr}`
@@ -864,7 +865,7 @@ class FoxESSControlCard extends HTMLElement {
       const time = this._timeProgress(a.charge_start_time, a.charge_end_time, now);
 
       const socTip = current != null && target != null
-        ? this._t("tip_soc_charge").replace("{0}", current.toFixed(2)).replace("{1}", target).replace("{2}", Math.max(0, target - current).toFixed(1))
+        ? this._t("tip_soc_charge").replace("{0}", socChanged ? current.toFixed(2) : String(Math.round(current))).replace("{1}", target).replace("{2}", Math.max(0, target - current).toFixed(1))
         : "";
       const timeTip = time.label
         ? this._t("tip_time").replace("{0}", this._formatDuration(now - new Date(a.charge_start_time).getTime())).replace("{1}", this._formatDuration(new Date(a.charge_end_time).getTime() - new Date(a.charge_start_time).getTime())).replace("{2}", this._formatDuration(time.remaining))
@@ -895,14 +896,15 @@ class FoxESSControlCard extends HTMLElement {
         socPct = Math.min(100, Math.max(0, ((startSoc - current) / (startSoc - minSoc)) * 100));
         confirmedPct = Math.min(100, Math.max(0, ((startSoc - confirmed) / (startSoc - minSoc)) * 100));
       }
-      const curStr = current != null ? current.toFixed(2) + "%" : "?%";
+      const socChanged = confirmed != null && startSoc != null && Math.round(confirmed) !== Math.round(startSoc);
+      const curStr = current != null ? (socChanged ? current.toFixed(2) : Math.round(current)) + "%" : "?%";
       const minStr = minSoc != null ? minSoc + "%" : "?%";
       const socLabel = startSoc != null && Math.round(startSoc) !== Math.round(current ?? startSoc)
         ? `${Math.round(startSoc)}% → ${curStr} → ${minStr}`
         : `${curStr} → ${minStr}`;
 
       const socTip = current != null && minSoc != null
-        ? this._t("tip_soc_discharge").replace("{0}", current.toFixed(2)).replace("{1}", minSoc).replace("{2}", Math.max(0, current - minSoc).toFixed(1))
+        ? this._t("tip_soc_discharge").replace("{0}", socChanged ? current.toFixed(2) : String(Math.round(current))).replace("{1}", minSoc).replace("{2}", Math.max(0, current - minSoc).toFixed(1))
         : "";
       bars += this._socProgressBar(this._t("soc"), socLabel, confirmedPct, socPct, "discharge-fill", socTip, "discharge-soc");
 
