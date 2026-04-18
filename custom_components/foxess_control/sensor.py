@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+PARALLEL_UPDATES = 0
 SCAN_INTERVAL = datetime.timedelta(seconds=30)
 
 # If this input_boolean exists and is "on", the integration captures log
