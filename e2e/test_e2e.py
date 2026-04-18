@@ -12,9 +12,11 @@ Fixture scoping:
 from __future__ import annotations
 
 import datetime
+import time
 from typing import TYPE_CHECKING
 
 import pytest
+import requests as _requests
 
 from .conftest import set_inverter_state
 from .ha_client import FATAL_FOR_ACTIVE, HAEventStream
@@ -631,27 +633,7 @@ class TestDataSource:
             timeout_s=90,
         )
 
-        # Reload the integration — simulates HA restart.
-        # Triggers async_unload_entry + async_setup_entry, which
-        # recovers the session from persistent storage.
-        import requests as _requests
-
-        session = _requests.Session()
-        session.headers.update(
-            {
-                "Authorization": ha_e2e._session.headers["Authorization"],
-                "Content-Type": "application/json",
-            }
-        )
-        entries = session.get(
-            f"{ha_e2e.base_url}/api/config/config_entries/entry"
-        ).json()
-        foxess_entry = next(e for e in entries if e["domain"] == "foxess_control")
-        r = session.post(
-            f"{ha_e2e.base_url}/api/config/config_entries/entry/"
-            f"{foxess_entry['entry_id']}/reload"
-        )
-        assert r.ok, f"Reload failed: {r.status_code}"
+        _reload_integration(ha_e2e)
 
         # Wait for session to resume after reload
         ha_e2e.wait_for_state(
@@ -884,3 +866,296 @@ class TestEntityMode:
 
         mode = ha_e2e.get_state("input_select.foxess_work_mode")
         assert mode == "Self Use"
+
+
+# ---------------------------------------------------------------------------
+# Integration reload / HA restart recovery
+# ---------------------------------------------------------------------------
+
+
+def _reload_integration(ha_e2e: HAClient) -> None:
+    """Reload the foxess_control config entry (simulates HA restart)."""
+    session = _requests.Session()
+    session.headers.update(
+        {
+            "Authorization": ha_e2e._session.headers["Authorization"],
+            "Content-Type": "application/json",
+        }
+    )
+    entries = session.get(f"{ha_e2e.base_url}/api/config/config_entries/entry").json()
+    foxess_entry = next(e for e in entries if e["domain"] == "foxess_control")
+    r = session.post(
+        f"{ha_e2e.base_url}/api/config/config_entries/entry/"
+        f"{foxess_entry['entry_id']}/reload"
+    )
+    assert r.ok, f"Reload failed: {r.status_code}"
+    time.sleep(5)
+
+
+class TestReloadRecovery:
+    """Session recovery after integration reload (simulated HA restart)."""
+
+    def test_discharge_resumes_after_reload(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+        event_stream: HAEventStream,
+    ) -> None:
+        """Active discharge session resumes after reload with power > 0."""
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=80, load_kw=0.5)
+
+        start, end = _tight_window(15)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        attrs_before = ha_e2e.get_attributes("sensor.foxess_smart_operations")
+        power_before = attrs_before.get("discharge_power_w", 0)
+        assert power_before > 0, "Should be discharging before reload"
+
+        _reload_integration(ha_e2e)
+
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        attrs_after = ha_e2e.get_attributes("sensor.foxess_smart_operations")
+        assert attrs_after.get("discharge_power_w", 0) > 0
+
+    def test_charge_resumes_after_reload(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+        event_stream: HAEventStream,
+    ) -> None:
+        """Active charge session resumes after reload."""
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=30, load_kw=0.5)
+
+        start, end = _tight_window(15)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_charge",
+            {"start_time": start, "end_time": end, "target_soc": 80},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "charging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        _reload_integration(ha_e2e)
+
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "charging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+    def test_ws_reconnects_after_discharge_reload(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+        event_stream: HAEventStream,
+    ) -> None:
+        """WS data source recovers after reload during paced discharge."""
+        if connection_mode != "cloud":
+            pytest.skip("WS is cloud-specific")
+        assert foxess_sim is not None
+        ha_e2e.set_options(ws_mode="smart_sessions")
+        foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
+
+        start, end = _tight_window(15)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_battery_soc",
+            "data_source",
+            "ws",
+            timeout_s=90,
+        )
+
+        _reload_integration(ha_e2e)
+
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_battery_soc",
+            "data_source",
+            "ws",
+            timeout_s=90,
+        )
+
+    def test_ws_reconnects_after_charge_reload(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+        event_stream: HAEventStream,
+    ) -> None:
+        """WS data source recovers after reload during charge."""
+        if connection_mode != "cloud":
+            pytest.skip("WS is cloud-specific")
+        assert foxess_sim is not None
+        ha_e2e.set_options(ws_mode="smart_sessions")
+        foxess_sim.set(soc=30, solar_kw=0, load_kw=0.5)
+
+        start, end = _tight_window(15)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_charge",
+            {"start_time": start, "end_time": end, "target_soc": 80},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "charging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_battery_soc",
+            "data_source",
+            "ws",
+            timeout_s=90,
+        )
+
+        _reload_integration(ha_e2e)
+
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "charging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_battery_soc",
+            "data_source",
+            "ws",
+            timeout_s=90,
+        )
+
+    def test_idle_after_reload_with_no_session(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+        event_stream: HAEventStream,
+    ) -> None:
+        """Reload with no active session stays idle."""
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=80, load_kw=0.5)
+
+        state = ha_e2e.get_state("sensor.foxess_smart_operations")
+        assert state == "idle"
+
+        _reload_integration(ha_e2e)
+
+        state = ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "idle",
+            timeout_s=60,
+        )
+        assert state == "idle"
+
+    def test_session_clears_after_window_expires_during_reload(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+        event_stream: HAEventStream,
+    ) -> None:
+        """Session discarded when window has passed by the time of reload."""
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=80, load_kw=0.5)
+
+        now = datetime.datetime.now(tz=datetime.UTC)
+        now_min = now.hour * 60 + now.minute
+        start_min = max(0, now_min - 5)
+        end_min = max(0, now_min - 1)
+        if start_min >= end_min:
+            pytest.skip("Cannot create expired window near midnight")
+        start = f"{start_min // 60:02d}:{start_min % 60:02d}:00"
+        end_str = f"{end_min // 60:02d}:{end_min % 60:02d}:00"
+
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end_str, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        time.sleep(90)
+
+        _reload_integration(ha_e2e)
+
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "idle",
+            timeout_s=60,
+        )
+
+    def test_entity_mode_discharge_resumes_after_reload(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+        event_stream: HAEventStream,
+    ) -> None:
+        """Entity-mode discharge resumes after reload (no schedule group check)."""
+        if connection_mode != "entity":
+            pytest.skip("Entity-mode-specific test")
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=80, load_kw=0.5)
+
+        start, end = _tight_window(15)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        _reload_integration(ha_e2e)
+
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        mode = ha_e2e.get_state("input_select.foxess_work_mode")
+        assert mode == "Force Discharge"
