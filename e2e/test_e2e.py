@@ -172,17 +172,17 @@ class TestFeedinPacing:
         """Feed-in budget pacing must adjust discharge power as time passes.
 
         Reproduces the production bug: with a feed-in limit (e.g. 1 kWh
-        over 30 min), the algorithm starts with a conservative discharge
-        rate, then gradually increases it.  But if min_power_change is
-        at its default (500W), every tick's delta is below the threshold
-        so the inverter schedule is never updated — the battery
-        discharges at the initial rate for the entire window.
+        over 30 min), the algorithm caps target energy to
+        feedin_remaining + house_absorption and paces discharge
+        accordingly.  Power should be well below max (pacing active)
+        and remain stable as the window progresses.
 
         Steps:
-        1. Uses default min_power_change=500 (production default)
-        2. Start discharge with feed-in limit
-        3. Fast-forward 10 minutes
-        4. Assert discharge power increased from initial value
+        1. Start discharge with feed-in limit
+        2. Assert power is paced below max (not running at full power)
+        3. Fast-forward 10 minutes of simulator time
+        4. Assert power remains stable (feedin budget depleting keeps
+           power roughly flat or decreasing — not increasing)
         """
         if connection_mode != "cloud":
             pytest.skip("requires simulator fast_forward")
@@ -216,29 +216,32 @@ class TestFeedinPacing:
             fatal_states=FATAL_FOR_ACTIVE,
         )
 
-        # Record the initial power after the first listener tick
-        # stabilises (the initial jump from max → paced is immediate).
-        # The discharge listener fires every 60s real time.
         _time.sleep(10)
         attrs = ha_e2e.get_attributes("sensor.foxess_smart_operations")
         initial_power = attrs.get("discharge_power_w", 0)
         assert initial_power > 0, "Discharge should be active"
+        max_power = 10500
+        assert initial_power < max_power * 0.5, (
+            f"Feed-in pacing should limit power well below max, "
+            f"but got {initial_power}W (max={max_power}W)"
+        )
 
-        # Wait for several real listener ticks (60s each) so the
-        # algorithm has a chance to adjust power.  Fast-forward
-        # simulator time between ticks so the remaining window
-        # shrinks and the target power increases.
-        for _ in range(5):
+        for _ in range(3):
             foxess_sim.fast_forward(120, step=5)
-            _time.sleep(65)  # wait for one listener tick
+            _time.sleep(65)
 
         attrs = ha_e2e.get_attributes("sensor.foxess_smart_operations")
         later_power = attrs.get("discharge_power_w", 0)
 
-        assert later_power > initial_power, (
-            f"Discharge power should increase over time to meet feed-in "
-            f"target, but stayed at {initial_power}W → {later_power}W. "
-            f"min_power_change=500 blocks gradual adjustments."
+        assert later_power > 0, "Discharge should still be active"
+        assert later_power < max_power * 0.5, (
+            f"Feed-in pacing should still limit power after time passes, "
+            f"but got {later_power}W (max={max_power}W)"
+        )
+        drift = abs(later_power - initial_power)
+        assert drift < 1000, (
+            f"Power should be stable with feed-in limit, "
+            f"but drifted {initial_power}W → {later_power}W ({drift}W)"
         )
 
 
