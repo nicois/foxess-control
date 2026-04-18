@@ -80,17 +80,12 @@ def get_coordinator_soc(
     domain: str,
 ) -> float | None:
     """Read SoC from the first available coordinator in hass.data[domain]."""
-    domain_data = hass.data.get(domain)
-    if domain_data is None:
-        return None
-    for key in domain_data:
-        if not str(key).startswith("_"):
-            entry_data = domain_data.get(key)
-            if isinstance(entry_data, dict):
-                coordinator = entry_data.get("coordinator")
-                if coordinator is not None and coordinator.data:
-                    try:
-                        return float(coordinator.data["SoC"])
-                    except (KeyError, ValueError, TypeError):
-                        pass
+    from .domain_data import get_first_coordinator
+
+    coordinator = get_first_coordinator(hass, domain)
+    if coordinator is not None and coordinator.data:
+        try:
+            return float(coordinator.data["SoC"])
+        except (KeyError, ValueError, TypeError):
+            pass
     return None

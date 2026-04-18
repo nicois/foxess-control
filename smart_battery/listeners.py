@@ -34,6 +34,7 @@ from .const import (
     SMART_CHARGE_ADJUST_SECONDS,
     SMART_DISCHARGE_CHECK_SECONDS,
 )
+from .domain_data import get_domain_data, get_first_coordinator
 from .session import (
     cancel_smart_session,
     save_session,
@@ -65,21 +66,14 @@ def _get_coordinator_value(
     variable: str,
 ) -> float | None:
     """Read a numeric variable from the first coordinator in domain data."""
-    domain_data = hass.data.get(domain)
-    if domain_data is None:
-        return None
-    for key in domain_data:
-        if not str(key).startswith("_"):
-            entry_data = domain_data.get(key)
-            if isinstance(entry_data, dict):
-                coordinator = entry_data.get("coordinator")
-                if coordinator is not None and coordinator.data:
-                    raw = coordinator.data.get(variable)
-                    if raw is not None:
-                        try:
-                            return float(raw)
-                        except (ValueError, TypeError):
-                            return None
+    coordinator = get_first_coordinator(hass, domain)
+    if coordinator is not None and coordinator.data:
+        raw = coordinator.data.get(variable)
+        if raw is not None:
+            try:
+                return float(raw)
+            except (ValueError, TypeError):
+                return None
     return None
 
 
@@ -90,21 +84,14 @@ def _get_current_soc(hass: HomeAssistant, domain: str) -> float | None:
 
 def _get_net_consumption(hass: HomeAssistant, domain: str) -> float:
     """Return net site consumption (loads minus solar) in kW."""
-    domain_data = hass.data.get(domain)
-    if domain_data is None:
-        return 0.0
-    for key in domain_data:
-        if not str(key).startswith("_"):
-            entry_data = domain_data.get(key)
-            if isinstance(entry_data, dict):
-                coordinator = entry_data.get("coordinator")
-                if coordinator is not None and coordinator.data:
-                    try:
-                        loads = float(coordinator.data.get("loadsPower", 0))
-                        pv = float(coordinator.data.get("pvPower", 0))
-                        return loads - pv
-                    except (ValueError, TypeError):
-                        return 0.0
+    coordinator = get_first_coordinator(hass, domain)
+    if coordinator is not None and coordinator.data:
+        try:
+            loads = float(coordinator.data.get("loadsPower", 0))
+            pv = float(coordinator.data.get("pvPower", 0))
+            return loads - pv
+        except (ValueError, TypeError):
+            return 0.0
     return 0.0
 
 
@@ -117,17 +104,12 @@ def _get_smart_headroom(hass: HomeAssistant, domain: str) -> float:
     """Return the charge headroom as a fraction (e.g. 0.10 for 10%)."""
     from .const import CONF_SMART_HEADROOM, DEFAULT_SMART_HEADROOM
 
-    domain_data = hass.data.get(domain, {})
-    for key in domain_data:
-        if not str(key).startswith("_"):
-            entry_data = domain_data.get(key)
-            if isinstance(entry_data, dict):
-                entry = entry_data.get("entry")
-                if entry is not None:
-                    pct: int = entry.options.get(
-                        CONF_SMART_HEADROOM, DEFAULT_SMART_HEADROOM
-                    )
-                    return pct / 100.0
+    dd = get_domain_data(hass, domain)
+    for entry_data in dd.entries.values():
+        entry = getattr(entry_data, "entry", None)
+        if entry is not None:
+            pct: int = entry.options.get(CONF_SMART_HEADROOM, DEFAULT_SMART_HEADROOM)
+            return pct / 100.0
     return DEFAULT_SMART_HEADROOM / 100.0
 
 
@@ -135,20 +117,15 @@ def _get_polling_interval_seconds(hass: HomeAssistant, domain: str) -> int:
     """Return the coordinator's polling interval in seconds."""
     from .const import DEFAULT_POLLING_INTERVAL
 
-    domain_data = hass.data.get(domain, {})
-    for key in domain_data:
-        if not str(key).startswith("_"):
-            entry_data = domain_data.get(key)
-            if isinstance(entry_data, dict):
-                coordinator = entry_data.get("coordinator")
-                if coordinator is not None and coordinator.update_interval is not None:
-                    return int(coordinator.update_interval.total_seconds())
+    coordinator = get_first_coordinator(hass, domain)
+    if coordinator is not None and coordinator.update_interval is not None:
+        return int(coordinator.update_interval.total_seconds())
     return DEFAULT_POLLING_INTERVAL
 
 
 def _get_store(hass: HomeAssistant, domain: str) -> Store[dict[str, Any]] | None:
     """Return the session Store from domain data."""
-    return hass.data.get(domain, {}).get("_store")  # type: ignore[no-any-return]
+    return get_domain_data(hass, domain).store
 
 
 def _record_error(hass: HomeAssistant, domain: str, message: str) -> None:
@@ -156,7 +133,7 @@ def _record_error(hass: HomeAssistant, domain: str, message: str) -> None:
     domain_data = hass.data.get(domain)
     if domain_data is None:
         return
-    prev = domain_data.get("_smart_error_state", {})
+    prev = domain_data.get("_smart_error_state") or {}
     domain_data["_smart_error_state"] = {
         "last_error": message,
         "last_error_at": dt_util.now().isoformat(),
@@ -198,7 +175,7 @@ def _get_taper_profile(hass: HomeAssistant, domain: str) -> TaperProfile | None:
     integrations should load it on startup via
     :func:`~smart_battery.session.load_taper_profile`.
     """
-    return hass.data.get(domain, {}).get("_taper_profile")  # type: ignore[no-any-return]
+    return get_domain_data(hass, domain).taper_profile
 
 
 async def _save_taper_profile(

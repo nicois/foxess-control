@@ -56,11 +56,47 @@ class SmartBatteryDomainData:
     pending_override_cleanup: dict[str, Any] | None = None
 
 
+_LEGACY_KEY_MAP: dict[str, str] = {
+    "_smart_charge_state": "smart_charge_state",
+    "_smart_discharge_state": "smart_discharge_state",
+    "_smart_error_state": "smart_error_state",
+    "_smart_charge_unsubs": "smart_charge_unsubs",
+    "_smart_discharge_unsubs": "smart_discharge_unsubs",
+    "_store": "store",
+    "_taper_profile": "taper_profile",
+    "_on_session_cancel": "on_session_cancel",
+    "_pending_override_cleanup": "pending_override_cleanup",
+}
+
+
+def _convert_legacy_dict(data: dict[str, Any]) -> SmartBatteryDomainData:
+    """Convert a plain dict (legacy test setup) to SmartBatteryDomainData."""
+    dd = SmartBatteryDomainData()
+    for key, val in data.items():
+        attr = _LEGACY_KEY_MAP.get(key)
+        if attr:
+            object.__setattr__(dd, attr, val)
+        elif not key.startswith("_"):
+            ed = EntryData()
+            if isinstance(val, dict):
+                ed.coordinator = val.get("coordinator")
+                ed.inverter = val.get("inverter")
+            dd.entries[key] = ed
+    return dd
+
+
 def get_domain_data(hass: HomeAssistant, domain: str) -> SmartBatteryDomainData:
-    """Return the typed domain data, creating it if absent."""
+    """Return the typed domain data, creating it if absent.
+
+    Legacy plain dicts are converted on the fly but NOT replaced in
+    ``hass.data`` — unmigrated code that still iterates the dict keeps
+    working until it is migrated.
+    """
     data = hass.data.get(domain)
     if isinstance(data, SmartBatteryDomainData):
         return data
+    if isinstance(data, dict):
+        return _convert_legacy_dict(data)
     dd = SmartBatteryDomainData()
     hass.data[domain] = dd
     return dd
@@ -68,9 +104,9 @@ def get_domain_data(hass: HomeAssistant, domain: str) -> SmartBatteryDomainData:
 
 def get_first_coordinator(hass: HomeAssistant, domain: str) -> Any:
     """Return the coordinator from the first entry, or None."""
-    dd = hass.data.get(domain)
-    if not isinstance(dd, SmartBatteryDomainData):
+    if domain not in hass.data:
         return None
+    dd = get_domain_data(hass, domain)
     for entry_data in dd.entries.values():
         if entry_data.coordinator is not None:
             return entry_data.coordinator
@@ -79,9 +115,9 @@ def get_first_coordinator(hass: HomeAssistant, domain: str) -> Any:
 
 def get_first_entry_id(hass: HomeAssistant, domain: str) -> str | None:
     """Return the first entry_id, or None."""
-    dd = hass.data.get(domain)
-    if not isinstance(dd, SmartBatteryDomainData):
+    if domain not in hass.data:
         return None
+    dd = get_domain_data(hass, domain)
     for eid in dd.entries:
         return eid
     return None

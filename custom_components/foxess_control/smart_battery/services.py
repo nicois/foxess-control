@@ -46,6 +46,7 @@ from .const import (
     SERVICE_SMART_CHARGE,
     SERVICE_SMART_DISCHARGE,
 )
+from .domain_data import get_domain_data
 from .listeners import (
     _get_current_soc,
     _get_net_consumption,
@@ -206,14 +207,11 @@ def _get_entry_option(
     default: Any,
 ) -> Any:
     """Read an option from the first config entry."""
-    domain_data = hass.data.get(domain, {})
-    for k in domain_data:
-        if not str(k).startswith("_"):
-            entry_data = domain_data.get(k)
-            if isinstance(entry_data, dict):
-                entry = entry_data.get("entry")
-                if entry is not None:
-                    return entry.options.get(key, default)
+    dd = get_domain_data(hass, domain)
+    for entry_data in dd.entries.values():
+        entry = getattr(entry_data, "entry", None)
+        if entry is not None:
+            return entry.options.get(key, default)
     return default
 
 
@@ -229,7 +227,7 @@ def register_services(
     """
 
     def _get_store() -> Store[dict[str, Any]] | None:
-        return hass.data.get(domain, {}).get("_store")  # type: ignore[no-any-return]
+        return get_domain_data(hass, domain).store
 
     async def handle_clear_overrides(call: ServiceCall) -> None:
         mode_filter: str | None = call.data.get("mode")
@@ -337,7 +335,7 @@ def register_services(
                 net_consumption_kw=net_consumption,
                 start=start,
                 headroom=headroom,
-                taper_profile=hass.data.get(domain, {}).get("_taper_profile"),
+                taper_profile=get_domain_data(hass, domain).taper_profile,
                 feedin_energy_limit_kwh=feedin_energy_limit,
             )
             should_defer = now < deferred_start
@@ -503,7 +501,7 @@ def register_services(
                 net_consumption_kw=net_consumption,
                 start=start,
                 headroom=headroom,
-                taper_profile=hass.data.get(domain, {}).get("_taper_profile"),
+                taper_profile=get_domain_data(hass, domain).taper_profile,
             )
             should_defer = now < deferred_start
 
