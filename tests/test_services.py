@@ -3439,8 +3439,9 @@ class TestSessionPersistence:
             )
 
         store = hass.data[DOMAIN]["_store"]
-        store.async_save.assert_called()
-        saved = store.async_save.call_args.args[0]
+        store.async_delay_save.assert_called()
+        data_func = store.async_delay_save.call_args.args[0]
+        saved = data_func()
         assert "smart_charge" in saved
         sc = saved["smart_charge"]
         assert sc["date"] == "2026-04-08"
@@ -3489,8 +3490,9 @@ class TestSessionPersistence:
             )
 
         store = hass.data[DOMAIN]["_store"]
-        store.async_save.assert_called()
-        saved = store.async_save.call_args.args[0]
+        store.async_delay_save.assert_called()
+        data_func = store.async_delay_save.call_args.args[0]
+        saved = data_func()
         assert "smart_discharge" in saved
         sd = saved["smart_discharge"]
         assert sd["date"] == "2026-04-08"
