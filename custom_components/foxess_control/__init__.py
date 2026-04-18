@@ -93,6 +93,9 @@ from .smart_battery.algorithms import (  # noqa: F401
 )
 from .smart_battery.config_flow_base import build_entity_map as _build_entity_map
 from .smart_battery.const import (
+    SMART_CHARGE_ADJUST_SECONDS as _sb_SMART_CHARGE_ADJUST_SECONDS,
+)
+from .smart_battery.const import (
     SMART_DISCHARGE_CHECK_SECONDS as _sb_SMART_DISCHARGE_CHECK_SECONDS,
 )
 from .smart_battery.listeners import (
@@ -621,13 +624,28 @@ def _setup_smart_charge_listeners(
     """Register HA listeners for an active smart charge session.
 
     Delegates to the brand-agnostic smart_battery listeners via a
-    FoxESS-specific InverterAdapter.
+    FoxESS-specific InverterAdapter, then replaces the periodic timer
+    with a WS-aware wrapper so _maybe_start_realtime_ws fires after
+    every charge check (reconnects WS if it dropped mid-session).
     """
     state = hass.data[DOMAIN]["_smart_charge_state"]
     adapter = _build_foxess_adapter(hass, inverter, state)
-    _sb_setup_smart_charge_listeners(hass, DOMAIN, adapter)  # type: ignore[arg-type]
-    # Trigger WS check — needed for smart_sessions and always modes
-    hass.async_create_task(_maybe_start_realtime_ws(hass))
+    cb = _sb_setup_smart_charge_listeners(hass, DOMAIN, adapter)  # type: ignore[arg-type]
+
+    async def _ws_aware_charge_cb(now: datetime.datetime) -> None:
+        await cb(now)
+        await _maybe_start_realtime_ws(hass)
+
+    unsubs = hass.data[DOMAIN].get("_smart_charge_unsubs", [])
+    if len(unsubs) >= 2:
+        unsubs[1]()
+        unsubs[1] = async_track_time_interval(
+            hass,
+            _ws_aware_charge_cb,
+            datetime.timedelta(
+                seconds=_sb_SMART_CHARGE_ADJUST_SECONDS,
+            ),
+        )
 
 
 def _setup_smart_discharge_listeners(

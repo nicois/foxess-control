@@ -234,8 +234,11 @@ def setup_smart_charge_listeners(
     hass: HomeAssistant,
     domain: str,
     adapter: InverterAdapter,
-) -> None:
+) -> Any:
     """Register HA listeners for an active smart charge session.
+
+    Returns the periodic callback so callers can wrap it (e.g. with
+    a WebSocket reconnect check).
 
     Reads all parameters from ``hass.data[domain]["_smart_charge_state"]``.
     """
@@ -539,6 +542,7 @@ def setup_smart_charge_listeners(
         ),
     ]
     hass.data[domain]["_smart_charge_unsubs"] = unsubs
+    return _adjust_charge_power
 
 
 def setup_smart_discharge_listeners(

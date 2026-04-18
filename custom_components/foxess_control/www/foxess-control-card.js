@@ -425,15 +425,38 @@ class FoxESSControlCard extends HTMLElement {
       operations_entity:
         config.operations_entity || "sensor.foxess_smart_operations",
       soc_entity: config.soc_entity || "sensor.foxess_battery_soc",
-      freshness_entity:
-        config.freshness_entity || "sensor.foxess_data_freshness",
       ...config,
     };
+    this._entityMap = null;
+    this._fetchPending = false;
   }
 
   set hass(hass) {
     this._hass = hass;
+    if (!this._entityMap && !this._fetchPending) {
+      this._fetchPending = true;
+      this._fetchEntityMap();
+    }
     this._render();
+  }
+
+  async _fetchEntityMap() {
+    try {
+      this._entityMap = await this._hass.callWS({
+        type: "foxess_control/entity_map",
+      });
+    } catch (_e) {
+      this._entityMap = {};
+    }
+    this._fetchPending = false;
+    this._render();
+  }
+
+  _getFreshnessEntityId() {
+    if (this._config.freshness_entity) return this._config.freshness_entity;
+    if (this._entityMap && this._entityMap.data_freshness)
+      return this._entityMap.data_freshness;
+    return null;
   }
 
   getCardSize() {
@@ -586,7 +609,8 @@ class FoxESSControlCard extends HTMLElement {
     else if (socPct <= 30) barColor = "var(--warning-color, #ff9800)";
 
     const dataSource = this._getDataSource();
-    const freshnessEntity = this._entity(this._config.freshness_entity);
+    const freshnessId = this._getFreshnessEntityId();
+    const freshnessEntity = freshnessId && this._entity(freshnessId);
     const lastUpdate = freshnessEntity && freshnessEntity.attributes && freshnessEntity.attributes.last_update;
     const ageSeconds = lastUpdate ? Math.max(0, Math.round((Date.now() - new Date(lastUpdate).getTime()) / 1000)) : null;
 
