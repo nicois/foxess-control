@@ -1327,10 +1327,17 @@ class TestFaultRecovery:
 
         foxess_sim.fault("rate_limit", count=2)
 
-        # Wait enough time for the 2 faulty requests to be consumed
-        # and at least one successful tick after. Discharge ticks every
-        # 60s, so ~3 min should suffice for 2 failures + 1 success.
-        time.sleep(200)
+        # Advance simulator time so SoC drops. If the session survived
+        # the transient faults, the schedule is still active and SoC
+        # will decrease. Discharge ticks every 60s; the 2 rate-limit
+        # errors are consumed by the first 2 ticks, then subsequent
+        # ticks succeed normally.
+        foxess_sim.fast_forward(300, step=5)
+
+        soc = ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_battery_soc", "lt", 80.0, timeout_s=120
+        )
+        assert soc < 80, "SoC should drop, proving session survived rate-limit"
 
         state = ha_e2e.get_state("sensor.foxess_smart_operations")
         assert state == "discharging", (
@@ -1461,8 +1468,14 @@ class TestFaultRecovery:
 
         foxess_sim.fault("api_500", count=2)
 
-        # Wait for the 2 faulty requests to clear + 1 successful tick
-        time.sleep(200)
+        # Advance simulator time so SoC drops. If the session survived,
+        # the schedule is still active and energy flows.
+        foxess_sim.fast_forward(300, step=5)
+
+        soc = ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_battery_soc", "lt", 80.0, timeout_s=120
+        )
+        assert soc < 80, "SoC should drop, proving session survived API 500"
 
         state = ha_e2e.get_state("sensor.foxess_smart_operations")
         assert state == "discharging", "Session should survive transient API 500 errors"

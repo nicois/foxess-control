@@ -181,11 +181,11 @@ class FoxESSWebSession:
                 f"&platform=web&lang=en"
             )
             async with session.ws_connect(
-                url, timeout=aiohttp.ClientWSTimeout(ws_close=15.0)
+                url, timeout=aiohttp.ClientWSTimeout(ws_close=5.0)
             ) as ws:
                 await ws.send_str("getdata")
-                for _ in range(5):
-                    msg = await asyncio.wait_for(ws.receive(), timeout=15)
+                for _ in range(3):
+                    msg = await asyncio.wait_for(ws.receive(), timeout=5)
                     if msg.type != aiohttp.WSMsgType.TEXT:
                         continue
                     data = msg.json()
