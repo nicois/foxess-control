@@ -568,7 +568,87 @@ class FoxESSOverviewCard extends HTMLElement {
       .bat-soc { font-size: 16px; font-weight: 700; color: var(--primary-text-color); }
     `;
   }
+
+  static getConfigElement() {
+    return document.createElement("foxess-overview-card-editor");
+  }
 }
+
+// -- Card editor -----------------------------------------------------------
+
+class FoxESSOverviewCardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._config = {};
+  }
+
+  setConfig(config) {
+    this._config = config || {};
+    this._render();
+  }
+
+  _render() {
+    const fields = [
+      { id: "solar_entity", label: "Solar Power Entity", placeholder: "sensor.foxess_solar_power" },
+      { id: "house_entity", label: "House Load Entity", placeholder: "sensor.foxess_house_load" },
+      { id: "grid_import_entity", label: "Grid Import Entity", placeholder: "sensor.foxess_grid_consumption" },
+      { id: "grid_export_entity", label: "Grid Export Entity", placeholder: "sensor.foxess_grid_feed_in" },
+      { id: "battery_charge_entity", label: "Charge Rate Entity", placeholder: "sensor.foxess_charge_rate" },
+      { id: "battery_discharge_entity", label: "Discharge Rate Entity", placeholder: "sensor.foxess_discharge_rate" },
+      { id: "soc_entity", label: "SoC Entity", placeholder: "sensor.foxess_battery_soc" },
+      { id: "work_mode_entity", label: "Work Mode Entity", placeholder: "sensor.foxess_work_mode" },
+    ];
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display: block; padding: 8px 0; }
+        .row { display: flex; flex-direction: column; margin-bottom: 12px; }
+        label { font-size: 12px; font-weight: 500; margin-bottom: 4px;
+                color: var(--secondary-text-color); }
+        input { padding: 8px; border: 1px solid var(--divider-color);
+                border-radius: 4px; font-size: 14px;
+                background: var(--card-background-color);
+                color: var(--primary-text-color); }
+        .hint { font-size: 11px; color: var(--secondary-text-color);
+                margin-top: 2px; }
+      </style>
+      ${fields
+        .map(
+          (f) => `
+        <div class="row">
+          <label>${f.label}</label>
+          <input type="text" id="${f.id}"
+                 value="${this._config[f.id] || ""}"
+                 placeholder="${f.placeholder}">
+          <span class="hint">Auto-discovered if left blank</span>
+        </div>`
+        )
+        .join("")}
+    `;
+    this.shadowRoot.querySelectorAll("input").forEach((input) => {
+      input.addEventListener("input", () => this._valueChanged());
+    });
+  }
+
+  _valueChanged() {
+    const cfg = { ...this._config };
+    const fieldIds = [
+      "solar_entity", "house_entity", "grid_import_entity", "grid_export_entity",
+      "battery_charge_entity", "battery_discharge_entity", "soc_entity", "work_mode_entity",
+    ];
+    for (const id of fieldIds) {
+      const val = this.shadowRoot.getElementById(id)?.value?.trim();
+      if (val) cfg[id] = val;
+      else delete cfg[id];
+    }
+    this._config = cfg;
+    this.dispatchEvent(
+      new CustomEvent("config-changed", { detail: { config: cfg } })
+    );
+  }
+}
+
+customElements.define("foxess-overview-card-editor", FoxESSOverviewCardEditor);
 
 customElements.define("foxess-overview-card", FoxESSOverviewCard);
 

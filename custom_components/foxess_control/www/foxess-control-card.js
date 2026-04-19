@@ -1250,7 +1250,82 @@ class FoxESSControlCard extends HTMLElement {
       }
     `;
   }
+
+  static getConfigElement() {
+    return document.createElement("foxess-control-card-editor");
+  }
 }
+
+// -- Card editor -----------------------------------------------------------
+
+class FoxESSControlCardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._config = {};
+  }
+
+  setConfig(config) {
+    this._config = config || {};
+    this._render();
+  }
+
+  _render() {
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display: block; padding: 8px 0; }
+        .row { display: flex; flex-direction: column; margin-bottom: 12px; }
+        label { font-size: 12px; font-weight: 500; margin-bottom: 4px;
+                color: var(--secondary-text-color); }
+        input { padding: 8px; border: 1px solid var(--divider-color);
+                border-radius: 4px; font-size: 14px;
+                background: var(--card-background-color);
+                color: var(--primary-text-color); }
+        .hint { font-size: 11px; color: var(--secondary-text-color);
+                margin-top: 2px; }
+      </style>
+      <div class="row">
+        <label>Operations Entity</label>
+        <input type="text" id="operations_entity"
+               value="${this._config.operations_entity || ""}"
+               placeholder="sensor.foxess_smart_operations">
+        <span class="hint">Auto-discovered if left blank</span>
+      </div>
+      <div class="row">
+        <label>SoC Entity</label>
+        <input type="text" id="soc_entity"
+               value="${this._config.soc_entity || ""}"
+               placeholder="sensor.foxess_battery_soc">
+        <span class="hint">Auto-discovered if left blank</span>
+      </div>
+      <div class="row">
+        <label>Freshness Entity</label>
+        <input type="text" id="freshness_entity"
+               value="${this._config.freshness_entity || ""}"
+               placeholder="sensor.foxess_data_freshness">
+        <span class="hint">Auto-discovered if left blank</span>
+      </div>
+    `;
+    this.shadowRoot.querySelectorAll("input").forEach((input) => {
+      input.addEventListener("input", () => this._valueChanged());
+    });
+  }
+
+  _valueChanged() {
+    const cfg = { ...this._config };
+    for (const id of ["operations_entity", "soc_entity", "freshness_entity"]) {
+      const val = this.shadowRoot.getElementById(id)?.value?.trim();
+      if (val) cfg[id] = val;
+      else delete cfg[id];
+    }
+    this._config = cfg;
+    this.dispatchEvent(
+      new CustomEvent("config-changed", { detail: { config: cfg } })
+    );
+  }
+}
+
+customElements.define("foxess-control-card-editor", FoxESSControlCardEditor);
 
 // Register the card
 customElements.define("foxess-control-card", FoxESSControlCard);
