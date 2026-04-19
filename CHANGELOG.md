@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.7-beta.1
+
+### Added
+- **BMS battery temperature sensor**: new `sensor.foxess_bms_battery_temperature` exposes the min cell temperature from the BMS via the FoxESS web portal API. This is operationally critical — low BMS temperatures inhibit charge rate, unlike the Open API's `batTemperature` which reports the inverter's own sensor.
+- **E2E tests moved under `tests/`**: ensures they are discovered by default pytest collection; the `slow` marker allows skipping when desired.
+
 ## 1.0.6-beta.2
 
 ### Added
