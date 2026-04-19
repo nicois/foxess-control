@@ -17,7 +17,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util  # noqa: F401 — test patching target
 
-from .const import CONF_WEB_USERNAME, DOMAIN
+from .const import CONF_DEVICE_SERIAL, CONF_WEB_USERNAME, DOMAIN
 from .coordinator import FoxESSDataCoordinator
 from .smart_battery.sensor_base import (
     BatteryForecastSensor as _BatteryForecastSensor,
@@ -72,6 +72,7 @@ def _device_info(entry: ConfigEntry, *, model: str | None = None) -> DeviceInfo:
         name="FoxESS",
         manufacturer="FoxESS",
         model=model,
+        serial_number=entry.data.get(CONF_DEVICE_SERIAL),
         configuration_url="https://www.foxesscloud.com",
     )
 

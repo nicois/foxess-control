@@ -4,6 +4,8 @@ Brand-specific constants (API keys, device serials, polled variable lists)
 remain in each brand's own ``const.py``.
 """
 
+from homeassistant.const import Platform
+
 # --- Battery & algorithm configuration ---
 CONF_BATTERY_CAPACITY_KWH = "battery_capacity_kwh"
 CONF_MIN_POWER_CHANGE = "min_power_change"
@@ -33,7 +35,7 @@ CONF_LOADS_POWER_ENTITY = "loads_power_entity"
 CONF_PV_POWER_ENTITY = "pv_power_entity"
 CONF_FEEDIN_ENERGY_ENTITY = "feedin_energy_entity"
 
-PLATFORMS: list[str] = ["binary_sensor", "sensor"]
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
 
 # --- Service names ---
 SERVICE_CLEAR_OVERRIDES = "clear_overrides"
