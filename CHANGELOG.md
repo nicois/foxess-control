@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.7-beta.16
+
+### Added
+- **E2E test for BMS battery temperature after reload**: verifies the sensor reads a valid temperature, survives integration reload, and recovers with the re-discovered compound ID. Simulator now serves `batteryId`/`multipleBatterySoc` in WS messages and the `/dew/v0/device/detail` endpoint.
+- **`entry` field on `EntryData`**: allows shared helpers to access the config entry directly.
+
 ## 1.0.7-beta.15
 
 ### Fixed
