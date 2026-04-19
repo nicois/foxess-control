@@ -304,7 +304,9 @@ def register_services(
 
         if _get_current_soc(hass, domain) is None:
             raise ServiceValidationError(
-                "Battery SoC is not available. Wait for the poll to complete."
+                "Battery SoC is not available",
+                translation_domain=domain,
+                translation_key="soc_unavailable",
             )
 
         api_min_soc = int(
@@ -447,7 +449,9 @@ def register_services(
 
         if _get_current_soc(hass, domain) is None:
             raise ServiceValidationError(
-                "Battery SoC is not available. Wait for the poll to complete."
+                "Battery SoC is not available",
+                translation_domain=domain,
+                translation_key="soc_unavailable",
             )
 
         battery_capacity_kwh: float = _get_entry_option(
@@ -455,8 +459,9 @@ def register_services(
         )
         if battery_capacity_kwh <= 0:
             raise ServiceValidationError(
-                "Battery capacity (kWh) not configured. Set it in the "
-                "integration options before using smart charge."
+                "Battery capacity (kWh) not configured",
+                translation_domain=domain,
+                translation_key="battery_capacity_not_configured",
             )
 
         min_soc_on_grid = int(
@@ -474,8 +479,13 @@ def register_services(
         current_soc = _get_current_soc(hass, domain)
         if current_soc is not None and current_soc >= target_soc:
             raise ServiceValidationError(
-                f"Current SoC ({current_soc}%) already at or above "
-                f"target ({target_soc}%)"
+                f"Current SoC ({current_soc}%) at or above target ({target_soc}%)",
+                translation_domain=domain,
+                translation_key="soc_above_target",
+                translation_placeholders={
+                    "current_soc": str(current_soc),
+                    "target_soc": str(target_soc),
+                },
             )
 
         cancel_smart_charge(hass, domain)
