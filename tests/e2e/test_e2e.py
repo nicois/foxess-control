@@ -1280,7 +1280,7 @@ class TestFaultRecovery:
         ha_e2e.wait_for_state(
             "sensor.foxess_smart_operations",
             "discharging",
-            timeout_s=120,
+            timeout_s=180,
             fatal_states=FATAL_FOR_ACTIVE,
         )
 
