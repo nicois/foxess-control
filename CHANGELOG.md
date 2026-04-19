@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.0.7-beta.14
+
+### Added
+- **Two-tier circuit breaker** (C-024): 3 consecutive adapter errors open the circuit breaker and hold position; 5 more ticks without recovery abort the session to self-use. Previously, 3 errors triggered immediate abort.
+- **Automatic session replay after outage**: when the circuit breaker aborts a session and the time window is still open, the integration probes the API every 5 minutes and restarts the session on recovery (up to 6 attempts).
+- **Proactive schedule conflict detection**: a 30-minute periodic check warns about unmanaged schedule modes (e.g. Backup) before they block a session start. Warnings surface via persistent notification and the `upcoming_conflicts` sensor attribute.
+- **Forecast chart card** (`foxess-forecast-card`): SVG-based Lovelace card showing projected SoC trajectory with actual history overlay, target/min SoC markers, and time axis.
+- **Session history timeline card** (`foxess-history-card`): 24h horizontal timeline with coloured session bars (charge/discharge/deferred/aborted) and SoC trace overlay.
+- **Action buttons on control card**: cancel (with double-tap confirmation), charge, and discharge buttons with inline parameter forms.
+- **Visual card editors**: both the control card and overview card now support HA's visual card editor for entity configuration.
+- **Troubleshooting guide** (`TROUBLESHOOTING.md`): 5 decision trees for common issues.
+- **Contributing guide** (`CONTRIBUTING.md`): local dev setup, simulator architecture, E2E infrastructure, adapter protocol.
+- **FAQ** (`FAQ.md`): answers to 7 common user questions.
+- **Performance regression gate**: CI job testing algorithm calculation time, taper profile throughput, and AST scan for sync I/O in async functions.
+- **Fault recovery E2E tests**: 5 cloud-mode tests covering circuit breaker, transient error survival, WS fallback, and WS reconnection.
+- **Entity-mode E2E parity**: discharge-drains-battery, charge lifecycle, and min_soc suspension tests now run in entity mode.
+
+### Improved
+- **Migration guide rewritten**: recommends clean install over side-by-side migration, with guidance for cleaning up orphaned entities.
+- **Circuit breaker attributes surfaced**: `circuit_breaker_active` and `circuit_breaker_since` on the smart_operations sensor for UI observability.
+- **Replay attributes surfaced**: `replay_pending`, `replay_type`, `replay_attempts` on the smart_operations sensor.
+
 ## 1.0.7-beta.13
 
 ### Fixed
