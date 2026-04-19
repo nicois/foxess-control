@@ -1,12 +1,13 @@
 # Changelog
 
-## 1.0.7-beta.6
+## 1.0.7-beta.7
 
 ### Added
 - **BMS battery temperature sensor**: new `sensor.foxess_bms_battery_temperature` exposes the min cell temperature from the BMS via the FoxESS web portal API. This is operationally critical — low BMS temperatures inhibit charge rate, unlike the Open API's `batTemperature` which reports the inverter's own sensor.
 - **E2E tests moved under `tests/`**: ensures they are discovered by default pytest collection; the `slow` marker allows skipping when desired.
 
 ### Improved
+- **Typed runtime data**: `entry.runtime_data` stores `FoxESSEntryData` (coordinator, inverter, adapter) instead of untyped `hass.data[DOMAIN]` dict. `FoxESSControlData` bridge layer preserves backward compatibility during migration.
 - **HA-managed aiohttp session**: `FoxESSWebSession` uses HA's shared HTTP session (`async_get_clientsession`) for proper SSL, proxy, and lifecycle management instead of creating its own.
 - **Named background tasks**: all `async_create_task` calls include descriptive names for easier debugging and HA lifecycle tracking.
 - **Theme-aware stale data badge**: stale data indicator uses `--primary-text-color` instead of amber, ensuring readability on both light and dark themes.
