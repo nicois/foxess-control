@@ -419,22 +419,11 @@ class TestControlCard:
         SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(SCREENSHOT_DIR / "discharge-progress.png"))
 
-        # Verify the control card renders with a progress section.
-        # HA nests cards deep in shadow DOM — use JS to traverse all
-        # shadow roots rather than relying on pierce selectors.
-        has_progress = page.evaluate(
+        # Poll until the card renders a progress section — the card
+        # may take several seconds to re-render after discharge starts,
+        # especially in the WS data-source variant.
+        page.wait_for_function(
             """() => {
-                function findInShadows(root, selector) {
-                    const el = root.querySelector(selector);
-                    if (el) return true;
-                    for (const child of root.querySelectorAll('*')) {
-                        if (child.shadowRoot
-                            && findInShadows(child.shadowRoot, selector))
-                                return true;
-                    }
-                    return false;
-                }
-                // First find the card, then look for progress-section inside it
                 function findCard(root) {
                     const card = root.querySelector('foxess-control-card');
                     if (card) return card;
@@ -447,14 +436,10 @@ class TestControlCard:
                     return null;
                 }
                 const card = findCard(document);
-                if (!card) return false;
-                const sr = card.shadowRoot;
-                if (!sr) return false;
-                return !!sr.querySelector('.progress-section');
-            }"""
-        )
-        assert has_progress, (
-            "Progress section not found in control card during discharge"
+                if (!card || !card.shadowRoot) return false;
+                return !!card.shadowRoot.querySelector('.progress-section');
+            }""",
+            timeout=30000,
         )
 
     def test_schedule_horizon_during_discharge(
