@@ -888,7 +888,12 @@ class TestEntityMode:
         connection_mode: str,
         event_stream: HAEventStream,
     ) -> None:
-        """Entity-mode charge: start → SoC rises → session completes."""
+        """Entity-mode charge: start → SoC rises → session completes.
+
+        When SoC reaches target the charge listener stops charging but
+        keeps monitoring until the window expires.  We use a short (5 min)
+        window so the session reaches idle promptly after target is hit.
+        """
         if connection_mode != "entity":
             pytest.skip("entity-mode only")
         set_inverter_state(
@@ -900,7 +905,7 @@ class TestEntityMode:
             load_kw=0.3,
         )
 
-        start, end = _tight_window(15)
+        start, end = _tight_window(5)
         ha_e2e.call_service(
             "foxess_control",
             "smart_charge",
@@ -918,8 +923,9 @@ class TestEntityMode:
 
         ha_e2e.set_input_number("input_number.foxess_soc", 50.0)
 
-        # Charge ticks every 5 min (300s).  Worst case: SoC update lands
-        # just after a tick, so we need almost two full intervals.
+        # After SoC reaches target the session monitors until the window
+        # expires.  With a 5 min window (starting 2 min before now),
+        # expiry is ~3 min away.  Add buffer for charge tick intervals.
         event_stream.wait_for_state(
             "sensor.foxess_smart_operations",
             "idle",
