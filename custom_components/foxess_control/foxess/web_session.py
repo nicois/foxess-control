@@ -63,7 +63,11 @@ class FoxESSWebSession:
     LANG = "en"
 
     def __init__(
-        self, username: str, password_md5: str, base_url: str | None = None
+        self,
+        username: str,
+        password_md5: str,
+        base_url: str | None = None,
+        session: aiohttp.ClientSession | None = None,
     ) -> None:
         self._username = username
         self._password_md5 = password_md5
@@ -71,12 +75,14 @@ class FoxESSWebSession:
             self.BASE_URL = base_url
         self._token: str | None = None
         self._last_login: float = 0.0
-        self._session: aiohttp.ClientSession | None = None
+        self._session: aiohttp.ClientSession | None = session
+        self._owns_session = session is None
         self._battery_device_id: str | None = None
 
     def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
+            self._owns_session = True
         return self._session
 
     def _make_headers(self, path: str) -> dict[str, str]:
@@ -234,7 +240,11 @@ class FoxESSWebSession:
         return self._token
 
     async def async_close(self) -> None:
-        """Close the underlying HTTP session."""
-        if self._session is not None and not self._session.closed:
+        """Close the underlying HTTP session if we created it."""
+        if (
+            self._owns_session
+            and self._session is not None
+            and not self._session.closed
+        ):
             await self._session.close()
             self._session = None

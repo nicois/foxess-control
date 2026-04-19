@@ -18,6 +18,7 @@ from homeassistant.exceptions import (
     ServiceValidationError,
 )
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
@@ -1265,7 +1266,9 @@ async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
     web_session: FoxESSWebSession | None = domain_data.get("_web_session")
     if web_session is None:
         _sim = os.environ.get("FOXESS_SIMULATOR_URL")
-        web_session = FoxESSWebSession(username, password_md5, base_url=_sim)
+        web_session = FoxESSWebSession(
+            username, password_md5, base_url=_sim, session=async_get_clientsession(hass)
+        )
         domain_data["_web_session"] = web_session
 
     # Discover plantId (cached after first call)
@@ -1566,6 +1569,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry.data[CONF_WEB_USERNAME],
             entry.data[CONF_WEB_PASSWORD],
             base_url=_sim,
+            session=async_get_clientsession(hass),
         )
         hass.data[DOMAIN]["_web_session"] = ws
         if not hass.data[DOMAIN].get("_plant_id") and inverter is not None:
