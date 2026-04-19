@@ -6,56 +6,47 @@ on:
       - "v*"
 
 jobs:
-  lint:
+  gate:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-      - uses: pre-commit/action@v3.0.1
+      - name: Wait for commit CI workflows to pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="${{ github.sha }}"
+          repo="${{ github.repository }}"
 
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-      - run: pip install -e '.[dev]'
-      - run: pytest -m "not slow" --tb=short
+          required=("Lint & Test" "E2E Tests" "Hassfest" "HACS")
+          echo "Waiting for ${#required[@]} workflows on $sha"
 
-  e2e:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-      - run: pip install -e '.[dev]'
-      - run: playwright install chromium
-      - name: Build E2E container
-        run: podman build -t ha-foxess-e2e tests/e2e/
-      - name: Run E2E tests
-        run: python -m pytest tests/e2e/ -m slow -n auto --tb=long -v
-
-  hassfest:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: home-assistant/actions/hassfest@master
-
-  hacs:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: hacs/action@main
-        with:
-          category: integration
+          for i in $(seq 1 60); do
+            all_passed=true
+            for name in "${required[@]}"; do
+              status=$(gh api "repos/$repo/actions/runs?head_sha=$sha&event=push" \
+                --jq ".workflow_runs[] | select(.name == \"$name\") | .conclusion" \
+                2>/dev/null | head -1)
+              if [ "$status" = "success" ]; then
+                echo "✓ $name"
+              elif [ "$status" = "failure" ] || [ "$status" = "cancelled" ]; then
+                echo "✗ $name ($status)"
+                exit 1
+              else
+                echo "· $name (pending)"
+                all_passed=false
+              fi
+            done
+            if $all_passed; then
+              echo "All required workflows passed"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "Timed out waiting for workflows"
+          exit 1
 
   release:
-    needs: [lint, test, e2e, hassfest, hacs]
+    needs: [gate]
     runs-on: ubuntu-latest
     permissions:
       contents: write
