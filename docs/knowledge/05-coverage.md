@@ -101,7 +101,7 @@ C-023 (solar-aware charge reduction) excluded — proposed, under investigation.
 ### Tests without traced constraints (ORPHAN)
 - `test_sensor.py::TestBatteryForecastSensor` (8 tests) — may protect
   an unstated constraint about forecast shape accuracy
-- `test_sensor.py::TestDebugLog` (6 tests) — operational utility
+- `test_sensor.py::TestDebugLog` (7 tests) — debug sensor lifecycle (rolling + init)
 - `test_inverter.py::test_max_power_cached` — performance optimisation
 
 ## Summary
@@ -114,5 +114,5 @@ C-023 (solar-aware charge reduction) excluded — proposed, under investigation.
 - **Unjustified design decisions**: 1 (D-015 — no C-NNN)
 - **Active regression**: none
 - **Orphan tests**: 80+ unit (test_services.py largely unmapped)
-- **Unit tests**: 596
+- **Unit tests**: 597
 - **E2E tests**: 88 (46 `test_e2e.py` + 42 `test_ui.py`) across cloud and entity modes

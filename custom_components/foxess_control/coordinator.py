@@ -48,7 +48,6 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             update_interval=datetime.timedelta(seconds=update_interval_seconds),
         )
         self.inverter = inverter
-        self._bms_battery_sn: str | None = None
         # WebSocket feed-in energy integration state
         self._ws_last_time: float | None = None
         self._ws_feedin_power_kw: float = 0.0
@@ -141,29 +140,14 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         web_session = domain_data.get("_web_session")
         if web_session is None:
             return
-        plant_id: str | None = domain_data.get("_plant_id")
-        if not plant_id:
-            return
-        if not self._bms_battery_sn:
-            try:
-                detail = await self.hass.async_add_executor_job(
-                    self.inverter.get_detail
-                )
-                for bat in detail.get("batteryList", []):
-                    if bat.get("type") == "bcu":
-                        self._bms_battery_sn = bat["batterySN"]
-                        break
-            except Exception:
-                _LOGGER.debug("Could not discover battery SN for BMS temp")
-                return
-        if not self._bms_battery_sn:
-            return
         try:
             temp = await web_session.async_get_battery_temperature(
-                plant_id, self._bms_battery_sn, device_sn=self.inverter.sn
+                device_sn=self.inverter.sn,
             )
             if temp is not None:
                 data["bmsBatteryTemperature"] = temp
+            else:
+                _LOGGER.debug("BMS temperature: no value returned")
         except Exception:
             _LOGGER.debug("BMS temperature fetch failed", exc_info=True)
 

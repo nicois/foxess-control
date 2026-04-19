@@ -156,8 +156,11 @@ is attached to the integration's logger hierarchy on setup and removed
 on unload. It enriches every log record with a `session` dict
 containing the active session's `session_id`, `session_type`,
 power levels, SoC counters, and suspension state — all read from
-the live session state dicts. The debug log sensor exposes these
-structured fields in its `attributes` for E2E tests and power users.
+the live session state dicts. Two debug log sensors expose these
+structured fields in their `attributes` for E2E tests and power users:
+a rolling sensor (`sensor.foxess_debug_log`, 75-entry deque) and a
+startup-capture sensor (`sensor.foxess_init_debug_log`, 75-entry
+non-wrapping buffer that preserves initialization messages).
 **Context**: Diagnosing session issues required correlating log lines
 with session state manually. E2E tests needed to assert on session
 properties without parsing log message text.

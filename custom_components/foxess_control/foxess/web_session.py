@@ -154,9 +154,7 @@ class FoxESSWebSession:
 
     async def async_get_battery_temperature(
         self,
-        plant_id: str,
-        battery_sn: str,
-        device_sn: str | None = None,
+        device_sn: str,
     ) -> float | None:
         """Fetch BMS battery temperature from the web portal.
 
@@ -168,8 +166,7 @@ class FoxESSWebSession:
         Returns the minimum temperature across all battery modules,
         which is the operationally relevant value for charge rate limiting.
         """
-        # Discover the internal device ID if we don't have one yet.
-        if not self._battery_device_id and device_sn:
+        if not self._battery_device_id:
             await self._discover_internal_device_id(device_sn)
         if not self._battery_device_id:
             return None

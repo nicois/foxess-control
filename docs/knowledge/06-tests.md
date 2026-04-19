@@ -6,7 +6,7 @@ traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-596 unit tests + 88 E2E tests = 684 total.
+597 unit tests + 88 E2E tests = 685 total.
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
@@ -274,7 +274,7 @@ files verify operational correctness, display logic, and setup plumbing.
 | Test | Appears to verify |
 |---|---|
 | `test_sensor.py::TestBatteryForecastSensor` (8 tests) | Forecast trajectory calculations |
-| `test_sensor.py::TestDebugLog` (6 tests) | Debug sensor lifecycle |
+| `test_sensor.py::TestDebugLog` (7 tests) | Debug sensor lifecycle (rolling + init) |
 | `test_sensor.py::TestFoxESSPolledSensor` (5 tests) | Sensor plumbing |
 | `test_sensor.py::TestFoxESSWorkModeSensor` (5 tests) | Work mode sensor |
 | `test_sensor.py` display tests (~25 tests) | Charge/discharge remaining, power, window formatting |

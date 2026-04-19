@@ -1585,12 +1585,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             session=async_get_clientsession(hass),
         )
         hass.data[DOMAIN]["_web_session"] = ws
-        if not hass.data[DOMAIN].get("_plant_id") and inverter is not None:
-            try:
-                plant_id = await hass.async_add_executor_job(inverter.get_plant_id)
-                hass.data[DOMAIN]["_plant_id"] = plant_id
-            except Exception:
-                _LOGGER.debug("Could not discover plantId for BMS temperature")
 
     # Register services, frontend card, and WS API once (first real entry)
     if len(dd.entries) == 1:

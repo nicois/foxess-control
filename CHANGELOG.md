@@ -3,7 +3,10 @@
 ## 1.0.7-beta.10
 
 ### Fixed
-- **BMS battery temperature always unknown**: previous fixes called wrong endpoints (`/dew/v0/device/detail`, `/dew/v0/plant/device/list`). Now uses the correct web portal endpoints reverse-engineered from the FoxESS JavaScript: `/generic/v0/device/list` for device ID discovery + `/generic/v0/device/battery/info` for temperature. Returns minimum temperature across all battery modules.
+- **BMS battery temperature always unknown**: removed unreliable Open API `get_detail` dependency for battery SN discovery (errno 40256). Now uses web portal `/generic/v0/device/list` for device discovery + `/generic/v0/device/battery/info` for temperature, bypassing the Open API entirely.
+
+### Added
+- **Init debug log sensor** (`sensor.foxess_init_debug_log`): non-wrapping buffer that preserves the first 75 log messages after HA startup, complementing the rolling `sensor.foxess_debug_log`. Captures startup exceptions and initialization flow that the rolling buffer would evict.
 
 ### Improved
 - **E2E test infrastructure hardened**: replaced all hardcoded `time.sleep()` calls with deterministic waits (`wait_for_state`, `wait_for_numeric_state`, `wait_for_attribute`). Narrowed blind `except Exception` to specific types. Deleted duplicate `_reload_integration`. Added `_wait_for_integration_ready` helper.

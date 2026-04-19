@@ -21,6 +21,7 @@ from custom_components.foxess_control.sensor import (
     DischargeWindowSensor,
     FoxESSPolledSensor,
     FoxESSWorkModeSensor,
+    InitDebugLogSensor,
     InverterOverrideStatusSensor,
     SmartOperationsOverviewSensor,
     _get_soc_value,
@@ -1205,8 +1206,10 @@ class TestDebugLog:
         hass.states.get.return_value = state
         result = setup_debug_log(hass, _make_entry())
         assert result is not None
-        sensor, handler = result
-        assert isinstance(sensor, DebugLogSensor)
+        sensors, handlers = result
+        assert any(isinstance(s, DebugLogSensor) for s in sensors)
+        assert any(isinstance(s, InitDebugLogSensor) for s in sensors)
+        assert len(handlers) == 2
 
     def test_handler_captures_log_messages(self) -> None:
         import logging
@@ -1215,7 +1218,8 @@ class TestDebugLog:
         state = MagicMock()
         state.state = "on"
         hass.states.get.return_value = state
-        sensor, handler = setup_debug_log(hass, _make_entry())  # type: ignore[misc]
+        sensors, handlers = setup_debug_log(hass, _make_entry())  # type: ignore[misc]
+        sensor = next(s for s in sensors if isinstance(s, DebugLogSensor))
 
         logger = logging.getLogger("custom_components.foxess_control")
         try:
@@ -1225,7 +1229,8 @@ class TestDebugLog:
             assert any("test message 42" in e["msg"] for e in entries)
             assert entries[-1]["level"] == "INFO"
         finally:
-            logger.removeHandler(handler)
+            for h in handlers:
+                logger.removeHandler(h)
 
     def test_buffer_is_bounded(self) -> None:
         import collections
@@ -1253,6 +1258,30 @@ class TestDebugLog:
         finally:
             logger.removeHandler(handler)
 
+    def test_init_buffer_does_not_wrap(self) -> None:
+        import logging
+
+        from custom_components.foxess_control.sensor import (
+            _DEBUG_LOG_BUFFER_SIZE,
+            _InitDebugLogHandler,
+        )
+
+        buf: list[dict[str, str]] = []
+        handler = _InitDebugLogHandler(buf, maxlen=_DEBUG_LOG_BUFFER_SIZE)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        logger = logging.getLogger("test.init_bounded")
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+        try:
+            for i in range(_DEBUG_LOG_BUFFER_SIZE + 50):
+                logger.info("msg %d", i)
+            assert len(buf) == _DEBUG_LOG_BUFFER_SIZE
+            # First messages are preserved (not evicted)
+            assert "msg 0" in buf[0]["msg"]
+            assert "msg 1" in buf[1]["msg"]
+        finally:
+            logger.removeHandler(handler)
+
     @pytest.mark.asyncio
     async def test_async_setup_entry_adds_debug_sensor_when_enabled(self) -> None:
         hass = _make_hass()
@@ -1268,7 +1297,9 @@ class TestDebugLog:
 
         await async_setup_entry(hass, entry, mock_add)  # type: ignore[arg-type]
 
-        # 39 base + 1 debug log sensor = 40
-        assert len(added) == 40
+        # 39 base + 2 debug log sensors = 41
+        assert len(added) == 41
         debug_sensors = [e for e in added if isinstance(e, DebugLogSensor)]
         assert len(debug_sensors) == 1
+        init_sensors = [e for e in added if isinstance(e, InitDebugLogSensor)]
+        assert len(init_sensors) == 1

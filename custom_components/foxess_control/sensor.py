@@ -200,9 +200,9 @@ async def async_setup_entry(
     # Opt-in debug log capture
     result = setup_debug_log(hass, entry)
     if result is not None:
-        sensor, handler = result
-        entities.append(sensor)
-        hass.data[DOMAIN].setdefault("_debug_log_handlers", []).append(handler)
+        sensors, handlers = result
+        entities.extend(sensors)
+        hass.data[DOMAIN].setdefault("_debug_log_handlers", []).extend(handlers)
 
     async_add_entities(entities)
 
@@ -743,25 +743,103 @@ class DebugLogSensor(SensorEntity):
         return {"entries": list(self._buffer)}
 
 
+class _InitDebugLogHandler(logging.Handler):
+    """Logging handler that captures the first N records, then stops."""
+
+    def __init__(
+        self,
+        buffer: list[dict[str, Any]],
+        maxlen: int,
+        original_level: int = logging.NOTSET,
+    ) -> None:
+        super().__init__()
+        self._buffer = buffer
+        self._maxlen = maxlen
+        self.original_level = original_level
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if len(self._buffer) >= self._maxlen:
+            return
+        try:
+            entry: dict[str, Any] = {
+                "t": datetime.datetime.fromtimestamp(
+                    record.created, tz=datetime.UTC
+                ).isoformat(timespec="seconds"),
+                "level": record.levelname,
+                "msg": self.format(record),
+            }
+            session: dict[str, Any] = getattr(record, "session", {})
+            if session:
+                entry["session"] = session
+            self._buffer.append(entry)
+        except Exception:  # noqa: BLE001
+            self.handleError(record)
+
+
+class InitDebugLogSensor(SensorEntity):
+    """Sensor capturing startup log entries (non-wrapping)."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:flag-checkered"
+    _attr_entity_registry_enabled_default = True
+    _unrecorded_attributes = frozenset({"entries"})
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        buffer: list[dict[str, Any]],
+        maxlen: int,
+    ) -> None:
+        self._buffer = buffer
+        self._maxlen = maxlen
+        self._attr_unique_id = f"{entry.entry_id}_init_debug_log"
+        self._attr_translation_key = "init_debug_log"
+        self._attr_device_info = _device_info(entry)
+
+    @property
+    def native_value(self) -> int:
+        return len(self._buffer)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"entries": list(self._buffer), "capacity": self._maxlen}
+
+
 def setup_debug_log(
     hass: Any,
     entry: ConfigEntry,
-) -> tuple[DebugLogSensor, _DebugLogHandler] | None:
-    """Attach a log handler and return a sensor if debug logging is opted-in."""
+) -> tuple[list[SensorEntity], list[logging.Handler]] | None:
+    """Attach log handlers and return sensors if debug logging is opted-in."""
     state = hass.states.get(DEBUG_LOG_ENTITY)
     if state is None or state.state != "on":
         return None
 
+    logger = logging.getLogger("custom_components.foxess_control")
+    original_level = logger.level
+    sensors: list[SensorEntity] = []
+    handlers: list[logging.Handler] = []
+
     buf: collections.deque[dict[str, Any]] = collections.deque(
         maxlen=_DEBUG_LOG_BUFFER_SIZE
     )
-    logger = logging.getLogger("custom_components.foxess_control")
-    handler = _DebugLogHandler(buf, original_level=logger.level)
+    handler = _DebugLogHandler(buf, original_level=original_level)
     handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
     handler.setLevel(logging.DEBUG)
     logger.addHandler(handler)
+    sensors.append(DebugLogSensor(entry, buf))
+    handlers.append(handler)
+
+    init_buf: list[dict[str, Any]] = []
+    init_handler = _InitDebugLogHandler(
+        init_buf, maxlen=_DEBUG_LOG_BUFFER_SIZE, original_level=original_level
+    )
+    init_handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+    init_handler.setLevel(logging.DEBUG)
+    logger.addHandler(init_handler)
+    sensors.append(InitDebugLogSensor(entry, init_buf, _DEBUG_LOG_BUFFER_SIZE))
+    handlers.append(init_handler)
+
     if logger.getEffectiveLevel() > logging.DEBUG:
         logger.setLevel(logging.DEBUG)
 
-    sensor = DebugLogSensor(entry, buf)
-    return sensor, handler
+    return sensors, handlers

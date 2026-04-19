@@ -158,9 +158,7 @@ class TestBMSBatteryTemperature:
                     base_url=base_url,
                     session=session,
                 )
-                temp = await ws.async_get_battery_temperature(
-                    "plant-123", "BAT-SN-001", device_sn="INV-SN-001"
-                )
+                temp = await ws.async_get_battery_temperature(device_sn="INV-SN-001")
                 assert temp == 18.5
         finally:
             await runner.cleanup()
@@ -208,9 +206,7 @@ class TestBMSBatteryTemperature:
                     base_url=base_url,
                     session=session,
                 )
-                temp = await ws.async_get_battery_temperature(
-                    "plant-123", "BAT-SN-001", device_sn="INV-SN-001"
-                )
+                temp = await ws.async_get_battery_temperature(device_sn="INV-SN-001")
                 assert temp == 14.5
         finally:
             await runner.cleanup()
@@ -250,9 +246,7 @@ class TestBMSBatteryTemperature:
                     base_url=base_url,
                     session=session,
                 )
-                temp = await ws.async_get_battery_temperature(
-                    "plant-123", "BAT-SN-001", device_sn="INV-SN-001"
-                )
+                temp = await ws.async_get_battery_temperature(device_sn="INV-SN-001")
                 assert temp is None
         finally:
             await runner.cleanup()
@@ -287,9 +281,7 @@ class TestBMSBatteryTemperature:
                     base_url=base_url,
                     session=session,
                 )
-                temp = await ws.async_get_battery_temperature(
-                    "plant-123", "BAT-SN-001", device_sn="INV-SN-001"
-                )
+                temp = await ws.async_get_battery_temperature(device_sn="INV-SN-001")
                 assert temp is None
         finally:
             await runner.cleanup()
@@ -333,9 +325,7 @@ class TestBMSBatteryTemperature:
                     base_url=base_url,
                     session=session,
                 )
-                temp = await ws.async_get_battery_temperature(
-                    "plant-123", "BAT-SN-001", device_sn="INV-SN-001"
-                )
+                temp = await ws.async_get_battery_temperature(device_sn="INV-SN-001")
                 assert temp is None
         finally:
             await runner.cleanup()
@@ -399,15 +389,11 @@ class TestBMSBatteryTemperature:
                     base_url=base_url,
                     session=session,
                 )
-                t1 = await ws.async_get_battery_temperature(
-                    "plant-1", "BAT-SN", device_sn="INV-SN"
-                )
+                t1 = await ws.async_get_battery_temperature(device_sn="INV-SN")
                 assert t1 == 20.0
                 assert call_count["device_list"] == 1
 
-                t2 = await ws.async_get_battery_temperature(
-                    "plant-1", "BAT-SN", device_sn="INV-SN"
-                )
+                t2 = await ws.async_get_battery_temperature(device_sn="INV-SN")
                 assert t2 == 20.0
                 assert call_count["device_list"] == 1  # NOT called again
                 assert call_count["battery_info"] == 2  # called twice
@@ -448,9 +434,7 @@ class TestBMSBatteryTemperature:
                     base_url=base_url,
                     session=session,
                 )
-                temp = await ws.async_get_battery_temperature(
-                    "plant-123", "BAT-SN", device_sn="INV-SN"
-                )
+                temp = await ws.async_get_battery_temperature(device_sn="INV-SN")
                 assert temp is None
         finally:
             await runner.cleanup()
