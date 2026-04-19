@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.7-beta.11
+
+### Fixed
+- **Blocking I/O on event loop**: `wasmtime.Module.from_file()` performed a synchronous file read during lazy signature engine init. WASM bytes are now pre-read at module import time (in HA's executor) and the Module constructed from memory.
+
+### Improved
+- **HA Integration Quality Scale compliance**:
+  - **Bronze — action-setup**: service registration moved from `async_setup_entry` to `async_setup`, so actions are available before any config entry loads.
+  - **Gold — exception-translations**: all `ServiceValidationError` and `HomeAssistantError` raises now include `translation_domain`/`translation_key` for HA's i18n framework.
+  - **Platinum — async-dependency**: WASM signature generation runs in the default executor via `_async_make_headers`, keeping the event loop unblocked.
+  - **Platinum — strict-typing**: added PEP-561 `py.typed` marker file.
+
 ## 1.0.7-beta.10
 
 ### Fixed
