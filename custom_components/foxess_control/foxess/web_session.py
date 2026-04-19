@@ -152,7 +152,10 @@ class FoxESSWebSession:
         return await self.async_login()
 
     async def async_get_battery_temperature(
-        self, plant_id: str, battery_sn: str
+        self,
+        plant_id: str,
+        battery_sn: str,
+        device_sn: str | None = None,
     ) -> float | None:
         """Fetch BMS battery temperature from the web portal.
 
@@ -160,26 +163,75 @@ class FoxESSWebSession:
         temperature reported by the BMS — a different (and operationally
         more relevant) value than the Open API's ``batTemperature``.
         Low BMS temperatures limit charge rate.
+
+        *device_sn* is the inverter's serial number.  When provided, the
+        device detail endpoint is called directly with ``sn`` — this
+        bypasses the device-list discovery step which may not be available
+        on the web portal API.
         """
+        return await self._fetch_battery_temperature(plant_id, battery_sn, device_sn)
+
+    async def _fetch_battery_temperature(
+        self,
+        plant_id: str,
+        battery_sn: str,
+        device_sn: str | None,
+    ) -> float | None:
+        """Internal: fetch battery temperature, trying SN-direct first."""
+        # Preferred path: use the inverter SN directly with device detail.
+        # This avoids the device-list discovery endpoint which may not exist
+        # on the web portal API (/dew/v0/plant/device/list returns 404).
+        if device_sn:
+            return await self._fetch_temp_by_sn(device_sn)
+
+        # Legacy fallback: try device-list discovery (for any environment
+        # where the device list endpoint does exist).
         if not self._battery_device_id:
             await self._discover_battery_device_id(plant_id, battery_sn)
         if not self._battery_device_id:
             return None
+        return await self._fetch_temp_by_id(self._battery_device_id)
+
+    async def _fetch_temp_by_sn(self, device_sn: str) -> float | None:
+        """Fetch battery temperature using the inverter device SN directly."""
         try:
             result = await self.async_post(
                 "/dew/v0/device/detail",
-                {"id": self._battery_device_id, "category": "battery"},
+                {"sn": device_sn, "category": "battery"},
             )
-            battery = result.get("battery", {})
-            temp = battery.get("temperature", {})
-            val = temp.get("value")
-            return float(val) if val is not None else None
+            return self._extract_temperature(result)
         except (FoxESSWebAuthError, ValueError, TypeError, KeyError) as exc:
-            _LOGGER.debug("BMS temperature fetch failed: %s", exc)
+            _LOGGER.debug("BMS temperature fetch (by SN) failed: %s", exc)
             return None
 
+    async def _fetch_temp_by_id(self, device_id: str) -> float | None:
+        """Fetch battery temperature using a discovered device ID."""
+        try:
+            result = await self.async_post(
+                "/dew/v0/device/detail",
+                {"id": device_id, "category": "battery"},
+            )
+            return self._extract_temperature(result)
+        except (FoxESSWebAuthError, ValueError, TypeError, KeyError) as exc:
+            _LOGGER.debug("BMS temperature fetch (by ID) failed: %s", exc)
+            return None
+
+    @staticmethod
+    def _extract_temperature(result: Any) -> float | None:
+        """Extract the numeric temperature value from a device detail result."""
+        battery = result.get("battery", {})
+        temp = battery.get("temperature", {})
+        val = temp.get("value")
+        return float(val) if val is not None else None
+
     async def _discover_battery_device_id(self, plant_id: str, battery_sn: str) -> None:
-        """Discover the web portal device ID for the BCU battery module."""
+        """Discover the web portal device ID for the BCU battery module.
+
+        Note: the ``/dew/v0/plant/device/list`` endpoint may not exist on
+        the FoxESS web portal (returns 404 in production).  When a
+        *device_sn* is available, the caller should prefer the SN-direct
+        path instead.
+        """
         try:
             result = await self.async_post(
                 "/dew/v0/plant/device/list",

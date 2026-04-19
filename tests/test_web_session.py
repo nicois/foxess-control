@@ -210,6 +210,162 @@ class TestBMSBatteryTemperature:
             await runner.cleanup()
 
     @pytest.mark.asyncio
+    async def test_battery_temperature_when_device_list_returns_404(self) -> None:
+        """Battery temperature must still be returned even when the device
+        list endpoint returns 404 (Not Found).
+
+        Production symptom: /dew/v0/plant/device/list returns 404, causing
+        _discover_battery_device_id to fail, leaving the BMS temperature
+        sensor permanently 'unknown'.
+
+        The fix should allow temperature fetching to work by using the
+        inverter device SN directly with the device detail endpoint,
+        bypassing the broken device list discovery.
+        """
+        from custom_components.foxess_control.foxess.web_session import (
+            FoxESSWebSession,
+        )
+
+        app = aiohttp.web.Application()
+
+        async def handle_login(req: aiohttp.web.Request) -> aiohttp.web.Response:
+            return aiohttp.web.json_response(
+                {"errno": 0, "result": {"token": "test-token"}}
+            )
+
+        async def handle_device_detail(
+            req: aiohttp.web.Request,
+        ) -> aiohttp.web.Response:
+            body = await req.json()
+            # Only return temperature if the request includes an sn
+            if body.get("sn"):
+                return aiohttp.web.json_response(
+                    {
+                        "errno": 0,
+                        "result": {
+                            "battery": {"temperature": {"value": 17.2, "unit": "°C"}},
+                        },
+                    }
+                )
+            return aiohttp.web.json_response(
+                {"errno": 41205, "result": None, "msg": "device not found"}
+            )
+
+        app.router.add_post("/basic/v0/user/login", handle_login)
+        # NO route for /dew/v0/plant/device/list — simulates production 404
+        app.router.add_post("/dew/v0/device/detail", handle_device_detail)
+
+        runner, base_url = await _start_test_server(app)
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                ws = FoxESSWebSession(
+                    "testuser",
+                    "d41d8cd98f00b204e9800998ecf8427e",
+                    base_url=base_url,
+                    session=session,
+                )
+                temp = await ws.async_get_battery_temperature(
+                    "plant-123", "BAT-SN-001", device_sn="INV-SN-001"
+                )
+                assert temp == 17.2, (
+                    f"Expected 17.2 but got {temp!r} — sensor would be 'unknown'"
+                )
+        finally:
+            await runner.cleanup()
+
+    @pytest.mark.asyncio
+    async def test_battery_temperature_device_list_404_no_device_sn(self) -> None:
+        """When device list returns 404 and no device_sn is provided,
+        temperature should gracefully return None (not raise).
+        """
+        from custom_components.foxess_control.foxess.web_session import (
+            FoxESSWebSession,
+        )
+
+        app = aiohttp.web.Application()
+
+        async def handle_login(req: aiohttp.web.Request) -> aiohttp.web.Response:
+            return aiohttp.web.json_response(
+                {"errno": 0, "result": {"token": "test-token"}}
+            )
+
+        # NO device list route
+        app.router.add_post("/basic/v0/user/login", handle_login)
+
+        runner, base_url = await _start_test_server(app)
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                ws = FoxESSWebSession(
+                    "testuser",
+                    "d41d8cd98f00b204e9800998ecf8427e",
+                    base_url=base_url,
+                    session=session,
+                )
+                # No device_sn, no device list — should return None gracefully
+                temp = await ws.async_get_battery_temperature("plant-123", "BAT-SN-001")
+                assert temp is None
+
+        finally:
+            await runner.cleanup()
+
+    @pytest.mark.asyncio
+    async def test_battery_temperature_direct_sn_bypasses_discovery(self) -> None:
+        """When device_sn is provided, the device detail endpoint should be
+        called with the SN directly, without needing device list discovery.
+        """
+        from custom_components.foxess_control.foxess.web_session import (
+            FoxESSWebSession,
+        )
+
+        call_count = {"device_detail": 0}
+
+        app = aiohttp.web.Application()
+
+        async def handle_login(req: aiohttp.web.Request) -> aiohttp.web.Response:
+            return aiohttp.web.json_response(
+                {"errno": 0, "result": {"token": "test-token"}}
+            )
+
+        async def handle_device_detail(
+            req: aiohttp.web.Request,
+        ) -> aiohttp.web.Response:
+            call_count["device_detail"] += 1
+            body = await req.json()
+            assert body.get("sn") == "INV-SN-001"
+            return aiohttp.web.json_response(
+                {
+                    "errno": 0,
+                    "result": {
+                        "battery": {"temperature": {"value": 15.0}},
+                    },
+                }
+            )
+
+        app.router.add_post("/basic/v0/user/login", handle_login)
+        # Deliberately NO device list endpoint
+        app.router.add_post("/dew/v0/device/detail", handle_device_detail)
+
+        runner, base_url = await _start_test_server(app)
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                ws = FoxESSWebSession(
+                    "testuser",
+                    "d41d8cd98f00b204e9800998ecf8427e",
+                    base_url=base_url,
+                    session=session,
+                )
+                temp = await ws.async_get_battery_temperature(
+                    "plant-123", "BAT-SN-001", device_sn="INV-SN-001"
+                )
+                assert temp == 15.0
+                assert call_count["device_detail"] == 1
+        finally:
+            await runner.cleanup()
+
+    @pytest.mark.asyncio
     async def test_device_id_cached_after_first_discovery(self) -> None:
         """The battery device ID should be cached, not re-discovered each time."""
         from custom_components.foxess_control.foxess.web_session import (

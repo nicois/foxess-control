@@ -160,7 +160,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         try:
             temp = await web_session.async_get_battery_temperature(
-                plant_id, self._bms_battery_sn
+                plant_id, self._bms_battery_sn, device_sn=self.inverter.sn
             )
             if temp is not None:
                 data["bmsBatteryTemperature"] = temp
