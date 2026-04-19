@@ -90,12 +90,17 @@ class TestSmartDischarge:
         ha_e2e: HAClient,
         foxess_sim: SimulatorHandle | None,
         connection_mode: str,
+        event_stream: HAEventStream,
     ) -> None:
-        """Fast-forward and verify SoC decreases (cloud only)."""
-        if connection_mode != "cloud":
-            pytest.skip("requires simulator fast_forward")
-        assert foxess_sim is not None
-        foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
+        """SoC decreases during discharge (both modes)."""
+        set_inverter_state(
+            connection_mode,
+            foxess_sim,
+            ha_e2e,
+            event_stream=event_stream,
+            soc=80,
+            load_kw=0.5,
+        )
 
         start, end = _tight_window(10)
         ha_e2e.call_service(
@@ -111,7 +116,11 @@ class TestSmartDischarge:
             fatal_states=FATAL_FOR_ACTIVE,
         )
 
-        foxess_sim.fast_forward(600, step=5)
+        if connection_mode == "cloud":
+            assert foxess_sim is not None
+            foxess_sim.fast_forward(600, step=5)
+        else:
+            ha_e2e.set_input_number("input_number.foxess_soc", 70.0)
 
         soc = ha_e2e.wait_for_numeric_state(
             "sensor.foxess_battery_soc", "lt", 80.0, timeout_s=60
@@ -871,6 +880,97 @@ class TestEntityMode:
 
         mode = ha_e2e.get_state("input_select.foxess_work_mode")
         assert mode == "Self Use"
+
+    def test_entity_mode_charge_lifecycle(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+        event_stream: HAEventStream,
+    ) -> None:
+        """Entity-mode charge: start → SoC rises → session completes."""
+        if connection_mode != "entity":
+            pytest.skip("entity-mode only")
+        set_inverter_state(
+            connection_mode,
+            foxess_sim,
+            ha_e2e,
+            event_stream=event_stream,
+            soc=20,
+            load_kw=0.3,
+        )
+
+        start, end = _tight_window(15)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_charge",
+            {"start_time": start, "end_time": end, "target_soc": 50},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "charging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        mode = ha_e2e.get_state("input_select.foxess_work_mode")
+        assert mode == "Force Charge"
+
+        ha_e2e.set_input_number("input_number.foxess_soc", 50.0)
+
+        event_stream.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "idle",
+            timeout_s=120,
+            rest_client=ha_e2e,
+        )
+
+        mode = ha_e2e.get_state("input_select.foxess_work_mode")
+        assert mode == "Self Use"
+
+    def test_entity_mode_discharge_suspends_at_min_soc(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+        event_stream: HAEventStream,
+    ) -> None:
+        """Entity-mode discharge suspends when SoC drops to min_soc."""
+        if connection_mode != "entity":
+            pytest.skip("entity-mode only")
+        set_inverter_state(
+            connection_mode,
+            foxess_sim,
+            ha_e2e,
+            event_stream=event_stream,
+            soc=80,
+            load_kw=0.5,
+        )
+
+        start, end = _tight_window(15)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        ha_e2e.set_input_number("input_number.foxess_soc", 30.0)
+
+        deadline = time.monotonic() + 180
+        suspended = False
+        while time.monotonic() < deadline:
+            attrs = ha_e2e.get_attributes("sensor.foxess_smart_operations")
+            if attrs.get("suspended") is True:
+                suspended = True
+                break
+            time.sleep(2)
+        assert suspended, "Discharge should suspend at min SoC"
 
 
 # ---------------------------------------------------------------------------
