@@ -23,7 +23,22 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install -e '.[dev]'
-      - run: pytest --tb=short
+      - run: pytest -m "not slow" --tb=short
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install -e '.[dev]'
+      - run: playwright install chromium
+      - name: Build E2E container
+        run: podman build -t ha-foxess-e2e tests/e2e/
+      - name: Run E2E tests
+        run: python -m pytest tests/e2e/ -m slow -n auto --tb=long -v
 
   hassfest:
     runs-on: ubuntu-latest
@@ -40,7 +55,7 @@ jobs:
           category: integration
 
   release:
-    needs: [lint, test, hassfest, hacs]
+    needs: [lint, test, e2e, hassfest, hacs]
     runs-on: ubuntu-latest
     permissions:
       contents: write
