@@ -48,6 +48,9 @@ class FoxESSControlData(SmartBatteryDomainData):
     # Debug log handlers
     debug_log_handlers: list[Any] = field(default_factory=list)
 
+    # BMS battery compound ID (batteryId@batSn from WS or discovery)
+    battery_compound_id: str | None = None
+
     # Work mode (cleared on session cancel for immediate UI update)
     work_mode: str | None = None
 
@@ -94,6 +97,7 @@ class FoxESSControlData(SmartBatteryDomainData):
             "_session_log_filter": "session_log_filter",
             "_debug_log_handlers": "debug_log_handlers",
             "_work_mode": "work_mode",
+            "_battery_compound_id": "battery_compound_id",
         }
 
     def _resolve_key(self, key: str) -> str | None:
