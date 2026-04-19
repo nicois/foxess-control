@@ -6,6 +6,7 @@ This session provides the token needed for the WebSocket real-time stream.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hashlib
 import logging
@@ -87,7 +88,11 @@ class FoxESSWebSession:
         return self._session
 
     def _make_headers(self, path: str) -> dict[str, str]:
-        """Build the required headers including the WASM signature."""
+        """Build the required headers including the WASM signature.
+
+        Contains a CPU-bound WASM call — use :meth:`_async_make_headers`
+        from async code to avoid blocking the event loop.
+        """
         ts_ms = str(int(time.time() * 1000))
         token = self._token or ""
         sig = generate_signature(path, token, self.LANG, ts_ms)
@@ -105,11 +110,16 @@ class FoxESSWebSession:
             "platform": "web",
         }
 
+    async def _async_make_headers(self, path: str) -> dict[str, str]:
+        """Build headers off the event loop (executor-wrapped)."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._make_headers, path)
+
     async def async_login(self) -> str:
         """Authenticate with the web portal and return a session token."""
         session = self._get_session()
         url = f"{self.BASE_URL}{self.LOGIN_PATH}"
-        headers = self._make_headers(self.LOGIN_PATH)
+        headers = await self._async_make_headers(self.LOGIN_PATH)
         body = {
             "user": self._username,
             "password": self._password_md5,
@@ -264,7 +274,7 @@ class FoxESSWebSession:
         """Perform an authenticated GET request to the web portal API."""
         await self.async_ensure_token()
         session = self._get_session()
-        headers = self._make_headers(path)
+        headers = await self._async_make_headers(path)
         url = f"{self.BASE_URL}{path}"
         async with session.get(
             url,
@@ -290,7 +300,7 @@ class FoxESSWebSession:
         """
         await self.async_ensure_token()
         session = self._get_session()
-        headers = self._make_headers(path)
+        headers = await self._async_make_headers(path)
         url = f"{self.BASE_URL}{path}"
         async with session.post(
             url,

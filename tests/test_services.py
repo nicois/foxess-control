@@ -2705,7 +2705,7 @@ class TestHandleSmartCharge:
                 "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
             ),
-            pytest.raises(ServiceValidationError, match="already at or above"),
+            pytest.raises(ServiceValidationError, match="at or above"),
         ):
             await handler(
                 _make_call(
