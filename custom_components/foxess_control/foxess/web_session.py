@@ -160,6 +160,48 @@ class FoxESSWebSession:
             return self._token
         return await self.async_login()
 
+    async def async_discover_battery_id(self, plant_id: str) -> str | None:
+        """Discover the battery compound ID via a single WebSocket message.
+
+        Connects to the real-time WebSocket, reads the first non-stale
+        message, extracts ``batteryId@batSn`` from the ``bat`` node,
+        and disconnects.  Returns ``None`` if discovery fails.
+        """
+        from urllib.parse import quote
+
+        try:
+            token = await self.async_ensure_token()
+            session = self._get_session()
+            ws_base = self.BASE_URL.replace("http://", "ws://").replace(
+                "https://", "wss://"
+            )
+            url = (
+                f"{ws_base}/dew/v0/wsmaitian"
+                f"?plantId={plant_id}&token={quote(token, safe='')}"
+                f"&platform=web&lang=en"
+            )
+            async with session.ws_connect(
+                url, timeout=aiohttp.ClientWSTimeout(ws_close=15.0)
+            ) as ws:
+                await ws.send_str("getdata")
+                for _ in range(5):
+                    msg = await asyncio.wait_for(ws.receive(), timeout=15)
+                    if msg.type != aiohttp.WSMsgType.TEXT:
+                        continue
+                    data = msg.json()
+                    bat = data.get("result", {}).get("node", {}).get("bat", {})
+                    bid = bat.get("batteryId")
+                    sn_list = bat.get("multipleBatterySoc", [])
+                    if bid and sn_list:
+                        first_sn = sn_list[0].get("batSn", "")
+                        if first_sn:
+                            compound = f"{bid}@{first_sn}"
+                            _LOGGER.info("Discovered battery compound ID: %s", compound)
+                            return compound
+        except Exception as exc:
+            _LOGGER.warning("Battery ID discovery via WebSocket failed: %s", exc)
+        return None
+
     async def async_get_battery_temperature(
         self,
         battery_compound_id: str,

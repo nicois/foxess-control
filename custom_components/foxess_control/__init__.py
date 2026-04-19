@@ -1595,13 +1595,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         from .foxess.web_session import FoxESSWebSession
 
         _sim = os.environ.get("FOXESS_SIMULATOR_URL")
-        ws = FoxESSWebSession(
+        web_session = FoxESSWebSession(
             entry.data[CONF_WEB_USERNAME],
             entry.data[CONF_WEB_PASSWORD],
             base_url=_sim,
             session=async_get_clientsession(hass),
         )
-        hass.data[DOMAIN]["_web_session"] = ws
+        hass.data[DOMAIN]["_web_session"] = web_session
+
+        # Discover battery compound ID for BMS temperature polling.
+        # The ID comes from the WebSocket bat node; during active WS
+        # sessions it's captured automatically, but in REST-only mode
+        # we need a one-shot WS connection at startup.
+        if not hass.data[DOMAIN].get("_battery_compound_id"):
+            plant_id: str | None = hass.data[DOMAIN].get("_plant_id")
+            if plant_id is None and inverter is not None:
+                try:
+                    plant_id = await hass.async_add_executor_job(inverter.get_plant_id)
+                    hass.data[DOMAIN]["_plant_id"] = plant_id
+                except Exception:
+                    _LOGGER.debug("Could not discover plantId for battery ID")
+            if plant_id:
+                compound_id = await web_session.async_discover_battery_id(plant_id)
+                if compound_id:
+                    hass.data[DOMAIN]["_battery_compound_id"] = compound_id
 
     # Register frontend card and WS API once (first real entry).
     # Services are registered in async_setup (before any entry loads).
