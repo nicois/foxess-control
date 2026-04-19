@@ -140,9 +140,15 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         web_session = domain_data.get("_web_session")
         if web_session is None:
             return
+        compound_id = domain_data.get("_battery_compound_id")
+        if not compound_id:
+            _LOGGER.debug(
+                "BMS temperature: no battery compound ID yet (waiting for WS)"
+            )
+            return
         try:
             temp = await web_session.async_get_battery_temperature(
-                device_sn=self.inverter.sn,
+                battery_compound_id=compound_id,
             )
             if temp is not None:
                 data["bmsBatteryTemperature"] = temp
@@ -323,6 +329,12 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if self.data is None:
             return
+
+        compound_id = ws_data.pop("_battery_compound_id", None)
+        if compound_id:
+            domain_data = self.hass.data.get(DOMAIN)
+            if domain_data is not None:
+                domain_data["_battery_compound_id"] = compound_id
 
         # WS provides its own frequent updates — stop REST extrapolation
         if self._soc_interp_cancel is not None:

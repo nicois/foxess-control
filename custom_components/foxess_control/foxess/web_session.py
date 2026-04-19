@@ -162,23 +162,20 @@ class FoxESSWebSession:
 
     async def async_get_battery_temperature(
         self,
-        device_sn: str,
+        battery_compound_id: str,
     ) -> float | None:
         """Fetch BMS battery temperature from the web portal.
 
-        Uses ``POST /dew/v0/device/detail`` with the device serial number
-        and ``category=battery``.  The ``/dew/v0/`` namespace accepts the
-        web session token from ``/basic/v0/user/login``.
-
-        Previous attempts used ``/generic/v0/`` endpoints which reject
-        the web session token with errno=41808 (observed in production).
+        Uses ``GET /dew/v0/device/detail?id=<compound_id>&category=battery``
+        where *battery_compound_id* is ``{batteryId}@{batSn}`` from the
+        WebSocket ``bat`` node.
 
         Returns the temperature value, or ``None`` if unavailable.
         """
         try:
-            result = await self.async_post(
+            result = await self.async_get(
                 "/dew/v0/device/detail",
-                {"sn": device_sn, "category": "battery"},
+                {"id": battery_compound_id, "category": "battery"},
             )
             return self._extract_battery_temperature(result)
         except (FoxESSWebAuthError, ValueError, TypeError, KeyError) as exc:

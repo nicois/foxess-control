@@ -1,12 +1,11 @@
 """Tests for FoxESSWebSession — BMS battery temperature fetching.
 
 Verifies that the web session correctly fetches BMS battery temperature
-via ``POST /dew/v0/device/detail`` with the device serial number.
+via ``GET /dew/v0/device/detail?id={batteryId}@{batSn}&category=battery``.
 
-The ``/dew/v0/`` namespace accepts the web session token from
-``/basic/v0/user/login``.  Previous attempts using ``/generic/v0/``
-endpoints failed because that namespace rejects the web session token
-with errno=41808 ("Token has expired. Please log in again").
+The compound ID (``batteryId@batSn``) comes from the WebSocket ``bat``
+node.  The ``/dew/v0/`` namespace accepts the web session token from
+``/basic/v0/user/login``.
 """
 
 from __future__ import annotations
@@ -21,6 +20,8 @@ import pytest
 # Helpers — tiny aiohttp test server simulating the FoxESS web portal
 # ---------------------------------------------------------------------------
 
+COMPOUND_ID = "2d35cd73-c9a7-40f2-82e6-2f97e712126f@60E5M4805BLF116"
+
 
 def _create_web_portal_app(
     device_detail_response: dict[str, Any] | None = None,
@@ -28,8 +29,8 @@ def _create_web_portal_app(
     """Build a minimal aiohttp app simulating the FoxESS web portal.
 
     Registers:
-    - /basic/v0/user/login (auth — returns a session token)
-    - /dew/v0/device/detail (battery detail with temperature)
+    - POST /basic/v0/user/login (auth — returns a session token)
+    - GET  /dew/v0/device/detail (battery detail with temperature)
     """
     app = aiohttp.web.Application()
 
@@ -38,7 +39,7 @@ def _create_web_portal_app(
             {"errno": 0, "result": {"token": "test-token-123"}}
         )
 
-    async def handle_device_detail_post(
+    async def handle_device_detail_get(
         request: aiohttp.web.Request,
     ) -> aiohttp.web.Response:
         if device_detail_response is not None:
@@ -48,7 +49,7 @@ def _create_web_portal_app(
         )
 
     app.router.add_post("/basic/v0/user/login", handle_login)
-    app.router.add_post("/dew/v0/device/detail", handle_device_detail_post)
+    app.router.add_get("/dew/v0/device/detail", handle_device_detail_get)
 
     return app
 
@@ -72,7 +73,7 @@ async def _start_test_server(
 
 
 class TestBMSBatteryTemperature:
-    """BMS temperature fetch via POST /dew/v0/device/detail."""
+    """BMS temperature fetch via GET /dew/v0/device/detail."""
 
     @pytest.mark.asyncio
     async def test_temperature_returned_from_device_detail(self) -> None:
@@ -85,8 +86,8 @@ class TestBMSBatteryTemperature:
             "errno": 0,
             "result": {
                 "battery": {
-                    "temperature": {"value": 18.5, "unit": "\u00b0C"},
-                    "soc": {"value": 75, "unit": "%"},
+                    "temperature": {"value": "18.5", "unit": "\u00b0C"},
+                    "soc": "75",
                 },
             },
         }
@@ -102,7 +103,9 @@ class TestBMSBatteryTemperature:
                     base_url=base_url,
                     session=session,
                 )
-                temp = await ws.async_get_battery_temperature(device_sn="INV-SN-001")
+                temp = await ws.async_get_battery_temperature(
+                    battery_compound_id=COMPOUND_ID,
+                )
                 assert temp == 18.5
         finally:
             await runner.cleanup()
@@ -134,8 +137,44 @@ class TestBMSBatteryTemperature:
                     base_url=base_url,
                     session=session,
                 )
-                temp = await ws.async_get_battery_temperature(device_sn="INV-SN-001")
+                temp = await ws.async_get_battery_temperature(
+                    battery_compound_id=COMPOUND_ID,
+                )
                 assert temp == 22.3
+        finally:
+            await runner.cleanup()
+
+    @pytest.mark.asyncio
+    async def test_temperature_as_string_value(self) -> None:
+        """Temperature value is a string (as returned by real FoxESS API)."""
+        from custom_components.foxess_control.foxess.web_session import (
+            FoxESSWebSession,
+        )
+
+        detail_resp = {
+            "errno": 0,
+            "result": {
+                "battery": {
+                    "temperature": {"value": "19", "unit": "\u00b0C"},
+                },
+            },
+        }
+
+        app = _create_web_portal_app(device_detail_response=detail_resp)
+        runner, base_url = await _start_test_server(app)
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                ws = FoxESSWebSession(
+                    "testuser",
+                    "d41d8cd98f00b204e9800998ecf8427e",
+                    base_url=base_url,
+                    session=session,
+                )
+                temp = await ws.async_get_battery_temperature(
+                    battery_compound_id=COMPOUND_ID,
+                )
+                assert temp == 19.0
         finally:
             await runner.cleanup()
 
@@ -162,7 +201,9 @@ class TestBMSBatteryTemperature:
                     base_url=base_url,
                     session=session,
                 )
-                temp = await ws.async_get_battery_temperature(device_sn="INV-SN-001")
+                temp = await ws.async_get_battery_temperature(
+                    battery_compound_id=COMPOUND_ID,
+                )
                 assert temp is None
         finally:
             await runner.cleanup()
@@ -178,7 +219,7 @@ class TestBMSBatteryTemperature:
             "errno": 0,
             "result": {
                 "battery": {
-                    "soc": {"value": 75},
+                    "soc": "75",
                 },
             },
         }
@@ -194,7 +235,9 @@ class TestBMSBatteryTemperature:
                     base_url=base_url,
                     session=session,
                 )
-                temp = await ws.async_get_battery_temperature(device_sn="INV-SN-001")
+                temp = await ws.async_get_battery_temperature(
+                    battery_compound_id=COMPOUND_ID,
+                )
                 assert temp is None
         finally:
             await runner.cleanup()
@@ -223,108 +266,53 @@ class TestBMSBatteryTemperature:
                     base_url=base_url,
                     session=session,
                 )
-                temp = await ws.async_get_battery_temperature(device_sn="INV-SN-001")
+                temp = await ws.async_get_battery_temperature(
+                    battery_compound_id=COMPOUND_ID,
+                )
                 assert temp is None
         finally:
             await runner.cleanup()
 
 
-class TestGenericV0TokenRejection:
-    """Reproduce production bug: /generic/v0/ rejects the web session token.
-
-    Production evidence (2026-04-19):
-      1. FoxESS web login successful
-      2. Internal device ID discovery failed: Web API POST
-         /generic/v0/device/list failed: errno=41808,
-         msg=Token has expired. Please log in again
-      3. BMS temperature: no value returned
-
-    The /generic/v0/ API namespace on the FoxESS cloud server rejects the
-    token obtained from /basic/v0/user/login with errno=41808 (Token has
-    expired), even though the token was issued seconds earlier.  The /dew/v0/
-    endpoints DO accept the same token.
-
-    The test simulates this by having the /generic/v0/ handler reject the
-    token (matching production behaviour) while the /dew/v0/ handler accepts
-    it and returns battery data.  The session should still return a valid
-    temperature by using /dew/v0/ instead of /generic/v0/.
-    """
+class TestBatteryDetailEndpoint:
+    """Verify the endpoint is called correctly: GET with query params."""
 
     @pytest.mark.asyncio
-    async def test_temperature_returned_despite_generic_v0_rejection(self) -> None:
-        """After login, the token must reach an endpoint that accepts it.
-
-        The /generic/v0/ endpoints reject the web session token with
-        errno=41808 (observed in production).  The code should use an
-        alternative endpoint path (/dew/v0/) that accepts the token.
-
-        If this test FAILS with temp == None, it means the code is still
-        trying /generic/v0/ which rejects the token.
-        """
+    async def test_uses_get_with_compound_id_and_category(self) -> None:
+        """The request must be GET with id=<compound> and category=battery."""
         from custom_components.foxess_control.foxess.web_session import (
             FoxESSWebSession,
         )
 
-        token_issued = "valid-session-token-xyz"
+        captured: dict[str, Any] = {}
 
         app = aiohttp.web.Application()
 
         async def handle_login(req: aiohttp.web.Request) -> aiohttp.web.Response:
             return aiohttp.web.json_response(
-                {"errno": 0, "result": {"token": token_issued}}
+                {"errno": 0, "result": {"token": "test-token"}}
             )
 
-        # /generic/v0/ rejects ANY token with errno=41808
-        # (matches real FoxESS cloud behaviour observed 2026-04-19)
-        async def handle_generic_device_list(
+        async def handle_detail_get(
             req: aiohttp.web.Request,
         ) -> aiohttp.web.Response:
-            return aiohttp.web.json_response(
-                {
-                    "errno": 41808,
-                    "result": None,
-                    "msg": "Token has expired. Please log in again",
-                }
-            )
-
-        async def handle_generic_battery_info(
-            req: aiohttp.web.Request,
-        ) -> aiohttp.web.Response:
-            return aiohttp.web.json_response(
-                {
-                    "errno": 41808,
-                    "result": None,
-                    "msg": "Token has expired. Please log in again",
-                }
-            )
-
-        # /dew/v0/ accepts the token and returns battery data
-        async def handle_dew_device_detail(
-            req: aiohttp.web.Request,
-        ) -> aiohttp.web.Response:
-            token_hdr = req.headers.get("token", "")
-            if not token_hdr or token_hdr != token_issued:
-                return aiohttp.web.json_response(
-                    {"errno": 41808, "result": None, "msg": "Token has expired"}
-                )
+            captured["method"] = req.method
+            captured["id"] = req.query.get("id")
+            captured["category"] = req.query.get("category")
+            captured["token"] = req.headers.get("token", "")
             return aiohttp.web.json_response(
                 {
                     "errno": 0,
                     "result": {
                         "battery": {
-                            "temperature": {"value": 18.5, "unit": "°C"},
-                            "soc": {"value": 75, "unit": "%"},
+                            "temperature": {"value": "20", "unit": "°C"},
                         },
                     },
                 }
             )
 
         app.router.add_post("/basic/v0/user/login", handle_login)
-        app.router.add_post("/generic/v0/device/list", handle_generic_device_list)
-        app.router.add_post(
-            "/generic/v0/device/battery/info", handle_generic_battery_info
-        )
-        app.router.add_post("/dew/v0/device/detail", handle_dew_device_detail)
+        app.router.add_get("/dew/v0/device/detail", handle_detail_get)
 
         runner, base_url = await _start_test_server(app)
 
@@ -336,21 +324,20 @@ class TestGenericV0TokenRejection:
                     base_url=base_url,
                     session=session,
                 )
-                temp = await ws.async_get_battery_temperature(device_sn="INV-SN-001")
-                assert temp is not None, (
-                    "BMS temperature is None — the code is still trying /generic/v0/ "
-                    "which rejects the token with errno=41808"
+                temp = await ws.async_get_battery_temperature(
+                    battery_compound_id=COMPOUND_ID,
                 )
-                assert temp == 18.5
+                assert temp == 20.0
+                assert captured["method"] == "GET"
+                assert captured["id"] == COMPOUND_ID
+                assert captured["category"] == "battery"
+                assert captured["token"] == "test-token"
         finally:
             await runner.cleanup()
 
     @pytest.mark.asyncio
-    async def test_token_passed_through_to_data_endpoint(self) -> None:
-        """The token from login must be sent in the request headers
-        to the data endpoint.  This verifies the token plumbing works
-        end-to-end: login -> store token -> send token with data request.
-        """
+    async def test_token_plumbing_end_to_end(self) -> None:
+        """Token from login is passed to the GET request headers."""
         from custom_components.foxess_control.foxess.web_session import (
             FoxESSWebSession,
         )
@@ -365,8 +352,7 @@ class TestGenericV0TokenRejection:
                 {"errno": 0, "result": {"token": token_issued}}
             )
 
-        # Capture the token from every /dew/v0/ request
-        async def handle_dew_device_detail(
+        async def handle_detail_get(
             req: aiohttp.web.Request,
         ) -> aiohttp.web.Response:
             received_tokens.append(req.headers.get("token", ""))
@@ -380,28 +366,14 @@ class TestGenericV0TokenRejection:
                     "errno": 0,
                     "result": {
                         "battery": {
-                            "temperature": {"value": 22.0, "unit": "°C"},
+                            "temperature": {"value": "22", "unit": "°C"},
                         },
                     },
                 }
             )
 
-        # /generic/v0/ rejects token (production behaviour)
-        async def handle_generic_reject(
-            req: aiohttp.web.Request,
-        ) -> aiohttp.web.Response:
-            return aiohttp.web.json_response(
-                {
-                    "errno": 41808,
-                    "result": None,
-                    "msg": "Token has expired. Please log in again",
-                }
-            )
-
         app.router.add_post("/basic/v0/user/login", handle_login)
-        app.router.add_post("/generic/v0/device/list", handle_generic_reject)
-        app.router.add_post("/generic/v0/device/battery/info", handle_generic_reject)
-        app.router.add_post("/dew/v0/device/detail", handle_dew_device_detail)
+        app.router.add_get("/dew/v0/device/detail", handle_detail_get)
 
         runner, base_url = await _start_test_server(app)
 
@@ -413,27 +385,18 @@ class TestGenericV0TokenRejection:
                     base_url=base_url,
                     session=session,
                 )
-                temp = await ws.async_get_battery_temperature(device_sn="INV-SN-001")
-                assert temp == 22.0, (
-                    f"Expected 22.0 but got {temp}. Token plumbing may be broken."
+                temp = await ws.async_get_battery_temperature(
+                    battery_compound_id=COMPOUND_ID,
                 )
-                # Verify the token was actually sent
-                assert len(received_tokens) > 0, "No requests reached /dew/v0/"
-                assert received_tokens[-1] == token_issued, (
-                    f"Wrong token sent: expected {token_issued!r}, "
-                    f"got {received_tokens[-1]!r}"
-                )
+                assert temp == 22.0
+                assert len(received_tokens) > 0
+                assert received_tokens[-1] == token_issued
         finally:
             await runner.cleanup()
 
     @pytest.mark.asyncio
     async def test_login_failure_returns_none(self) -> None:
-        """When login itself fails, temperature returns None gracefully.
-
-        This is a baseline sanity check — not the bug under investigation.
-        The async_get_battery_temperature method should handle auth
-        failures internally and return None (not raise).
-        """
+        """When login itself fails, temperature returns None gracefully."""
         from custom_components.foxess_control.foxess.web_session import (
             FoxESSWebSession,
         )
@@ -457,7 +420,93 @@ class TestGenericV0TokenRejection:
                     base_url=base_url,
                     session=session,
                 )
-                temp = await ws.async_get_battery_temperature(device_sn="INV-SN-001")
+                temp = await ws.async_get_battery_temperature(
+                    battery_compound_id=COMPOUND_ID,
+                )
                 assert temp is None
         finally:
             await runner.cleanup()
+
+
+class TestCompoundIdFromWebSocket:
+    """Verify that map_ws_to_coordinator extracts the battery compound ID."""
+
+    def test_compound_id_extracted_from_ws_message(self) -> None:
+        """batteryId + first multipleBatterySoc.batSn → _battery_compound_id."""
+        from custom_components.foxess_control.foxess.realtime_ws import (
+            map_ws_to_coordinator,
+        )
+
+        ws_msg = {
+            "result": {
+                "node": {
+                    "bat": {
+                        "power": {"value": "373", "unit": "W"},
+                        "soc": 68,
+                        "charge": 2,
+                        "batteryId": "2d35cd73-c9a7-40f2-82e6-2f97e712126f",
+                        "multipleBatterySoc": [
+                            {
+                                "soc": 68,
+                                "charge": 2,
+                                "productType": "EQ4800",
+                                "batSn": "60E5M4805BLF116",
+                            },
+                        ],
+                    },
+                    "solar": {"power": {"value": "0", "unit": "W"}},
+                    "grid": {"power": {"value": "21", "unit": "W"}, "gridStatus": 3},
+                    "load": {"power": {"value": "352", "unit": "W"}},
+                },
+            },
+        }
+        mapped = map_ws_to_coordinator(ws_msg)
+        assert mapped["_battery_compound_id"] == COMPOUND_ID
+
+    def test_no_compound_id_without_battery_id(self) -> None:
+        """No _battery_compound_id when batteryId is missing from WS."""
+        from custom_components.foxess_control.foxess.realtime_ws import (
+            map_ws_to_coordinator,
+        )
+
+        ws_msg = {
+            "result": {
+                "node": {
+                    "bat": {
+                        "power": {"value": "100", "unit": "W"},
+                        "soc": 50,
+                        "charge": 1,
+                    },
+                    "solar": {"power": {"value": "0", "unit": "W"}},
+                    "grid": {"power": {"value": "0", "unit": "W"}, "gridStatus": 3},
+                    "load": {"power": {"value": "100", "unit": "W"}},
+                },
+            },
+        }
+        mapped = map_ws_to_coordinator(ws_msg)
+        assert "_battery_compound_id" not in mapped
+
+    def test_no_compound_id_without_bat_sn(self) -> None:
+        """No _battery_compound_id when multipleBatterySoc is empty."""
+        from custom_components.foxess_control.foxess.realtime_ws import (
+            map_ws_to_coordinator,
+        )
+
+        ws_msg = {
+            "result": {
+                "node": {
+                    "bat": {
+                        "power": {"value": "100", "unit": "W"},
+                        "soc": 50,
+                        "charge": 1,
+                        "batteryId": "some-id",
+                        "multipleBatterySoc": [],
+                    },
+                    "solar": {"power": {"value": "0", "unit": "W"}},
+                    "grid": {"power": {"value": "0", "unit": "W"}, "gridStatus": 3},
+                    "load": {"power": {"value": "100", "unit": "W"}},
+                },
+            },
+        }
+        mapped = map_ws_to_coordinator(ws_msg)
+        assert "_battery_compound_id" not in mapped

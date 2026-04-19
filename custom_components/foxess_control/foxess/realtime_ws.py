@@ -123,6 +123,13 @@ def map_ws_to_coordinator(ws_msg: dict[str, Any]) -> dict[str, Any]:
             data["gridConsumptionPower"] = 0.0
             data["feedinPower"] = grid_kw
 
+    battery_id = bat.get("batteryId")
+    bat_sn_list = bat.get("multipleBatterySoc", [])
+    if battery_id and bat_sn_list:
+        first_sn = bat_sn_list[0].get("batSn", "")
+        if first_sn:
+            data["_battery_compound_id"] = f"{battery_id}@{first_sn}"
+
     if data:
         _LOGGER.debug(
             "WS mapped data: %s (gridStatus=%s)",
