@@ -166,7 +166,7 @@ class FoxESSWebSession:
         if not self._battery_device_id:
             return None
         try:
-            result = await self.async_get(
+            result = await self.async_post(
                 "/dew/v0/device/detail",
                 {"id": self._battery_device_id, "category": "battery"},
             )
@@ -181,7 +181,7 @@ class FoxESSWebSession:
     async def _discover_battery_device_id(self, plant_id: str, battery_sn: str) -> None:
         """Discover the web portal device ID for the BCU battery module."""
         try:
-            result = await self.async_get(
+            result = await self.async_post(
                 "/dew/v0/plant/device/list",
                 {"plantId": plant_id},
             )
@@ -231,6 +231,32 @@ class FoxESSWebSession:
         if errno != 0:
             raise FoxESSWebAuthError(
                 f"Web API GET {path} failed: errno={errno}, msg={data.get('msg', '?')}"
+            )
+        return data.get("result")
+
+    async def async_post(self, path: str, body: dict[str, Any] | None = None) -> Any:
+        """Perform an authenticated POST request to the web portal API.
+
+        The FoxESS web portal uses POST with JSON bodies for data
+        endpoints (``/dew/v0/...``).  GET requests to these endpoints
+        return 405 Method Not Allowed.
+        """
+        await self.async_ensure_token()
+        session = self._get_session()
+        headers = self._make_headers(path)
+        url = f"{self.BASE_URL}{path}"
+        async with session.post(
+            url,
+            headers=headers,
+            json=body or {},
+            timeout=aiohttp.ClientTimeout(total=30),
+        ) as resp:
+            resp.raise_for_status()
+            data: dict[str, Any] = await resp.json()
+        errno = data.get("errno", -1)
+        if errno != 0:
+            raise FoxESSWebAuthError(
+                f"Web API POST {path} failed: errno={errno}, msg={data.get('msg', '?')}"
             )
         return data.get("result")
 
