@@ -314,6 +314,16 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         display_precision=1,
     ),
     _PolledSensorDescription(
+        "bmsBatteryTemperature",
+        "BMS Battery Temperature",
+        "bms_battery_temperature",
+        SensorDeviceClass.TEMPERATURE,
+        "°C",
+        SensorStateClass.MEASUREMENT,
+        "mdi:thermometer-low",
+        display_precision=1,
+    ),
+    _PolledSensorDescription(
         "gridConsumptionPower",
         "Grid Consumption",
         "grid_consumption",

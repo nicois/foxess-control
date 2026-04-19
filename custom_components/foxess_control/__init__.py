@@ -1554,6 +1554,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "coordinator": coordinator,
     }
 
+    # Eagerly create the web session so BMS temperature polling works
+    # from the first coordinator refresh (not just when WebSocket starts).
+    if entry.data.get(CONF_WEB_USERNAME) and not hass.data[DOMAIN].get("_web_session"):
+        from .foxess.web_session import FoxESSWebSession
+
+        _sim = os.environ.get("FOXESS_SIMULATOR_URL")
+        ws = FoxESSWebSession(
+            entry.data[CONF_WEB_USERNAME],
+            entry.data[CONF_WEB_PASSWORD],
+            base_url=_sim,
+        )
+        hass.data[DOMAIN]["_web_session"] = ws
+        if not hass.data[DOMAIN].get("_plant_id") and inverter is not None:
+            try:
+                plant_id = await hass.async_add_executor_job(inverter.get_plant_id)
+                hass.data[DOMAIN]["_plant_id"] = plant_id
+            except Exception:
+                _LOGGER.debug("Could not discover plantId for BMS temperature")
+
     # Register services, frontend card, and WS API once (first real entry)
     real_entries = {k for k in hass.data[DOMAIN] if not k.startswith("_")}
     if len(real_entries) == 1:

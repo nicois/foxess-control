@@ -1049,6 +1049,7 @@ class TestFoxESSPolledSensor:
                 "RCurrent": 22.1,
                 "RFreq": 50.02,
                 "epsPower": 0.158,
+                "bmsBatteryTemperature": 15.2,
             }
         )
         entry = _make_entry()
@@ -1056,7 +1057,7 @@ class TestFoxESSPolledSensor:
             FoxESSPolledSensor(coordinator, entry, desc)
             for desc in POLLED_SENSOR_DESCRIPTIONS
         ]
-        assert len(sensors) == 27
+        assert len(sensors) == 28
         # All should have a non-None value
         for s in sensors:
             assert s.native_value is not None
@@ -1146,8 +1147,8 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(hass, entry, mock_add)  # type: ignore[arg-type]
 
-        # 9 base + 27 polled + 1 work mode + 1 freshness = 38
-        assert len(added) == 38
+        # 9 base + 28 polled + 1 work mode + 1 freshness = 39
+        assert len(added) == 39
         assert isinstance(added[0], InverterOverrideStatusSensor)
         assert isinstance(added[1], SmartOperationsOverviewSensor)
         assert isinstance(added[2], ChargePowerSensor)
@@ -1170,9 +1171,9 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(hass, entry, mock_add)  # type: ignore[arg-type]
 
-        assert len(added) == 38  # 9 existing + 27 polled + 1 work mode + 1 freshness
+        assert len(added) == 39  # 9 existing + 28 polled + 1 work mode + 1 freshness
         polled = [e for e in added if isinstance(e, FoxESSPolledSensor)]
-        assert len(polled) == 27
+        assert len(polled) == 28
         work_mode = [e for e in added if isinstance(e, FoxESSWorkModeSensor)]
         assert len(work_mode) == 1
 
@@ -1267,7 +1268,7 @@ class TestDebugLog:
 
         await async_setup_entry(hass, entry, mock_add)  # type: ignore[arg-type]
 
-        # 38 base + 1 debug log sensor = 39
-        assert len(added) == 39
+        # 39 base + 1 debug log sensor = 40
+        assert len(added) == 40
         debug_sensors = [e for e in added if isinstance(e, DebugLogSensor)]
         assert len(debug_sensors) == 1

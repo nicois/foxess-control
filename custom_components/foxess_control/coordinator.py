@@ -48,6 +48,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             update_interval=datetime.timedelta(seconds=update_interval_seconds),
         )
         self.inverter = inverter
+        self._bms_battery_sn: str | None = None
         # WebSocket feed-in energy integration state
         self._ws_last_time: float | None = None
         self._ws_feedin_power_kw: float = 0.0
@@ -132,6 +133,40 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 mode.value,
             )
 
+    async def _fetch_bms_temperature(self, data: dict[str, Any]) -> None:
+        """Fetch BMS min cell temperature from the web portal and merge into data."""
+        domain_data = self.hass.data.get(DOMAIN)
+        if domain_data is None:
+            return
+        web_session = domain_data.get("_web_session")
+        if web_session is None:
+            return
+        plant_id: str | None = domain_data.get("_plant_id")
+        if not plant_id:
+            return
+        if not self._bms_battery_sn:
+            try:
+                detail = await self.hass.async_add_executor_job(
+                    self.inverter.get_detail
+                )
+                for bat in detail.get("batteryList", []):
+                    if bat.get("type") == "bcu":
+                        self._bms_battery_sn = bat["batterySN"]
+                        break
+            except Exception:
+                _LOGGER.debug("Could not discover battery SN for BMS temp")
+                return
+        if not self._bms_battery_sn:
+            return
+        try:
+            temp = await web_session.async_get_battery_temperature(
+                plant_id, self._bms_battery_sn
+            )
+            if temp is not None:
+                data["bmsBatteryTemperature"] = temp
+        except Exception:
+            _LOGGER.debug("BMS temperature fetch failed", exc_info=True)
+
     async def _async_update_data(self) -> dict[str, Any]:
         from .foxess.client import FoxESSApiError
 
@@ -158,6 +193,11 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Stored by listeners when adapter.remove_override() fails (e.g. DNS
         # outage).  On each successful REST poll, attempt the cleanup again.
         await self._retry_pending_cleanup()
+
+        # Fetch BMS battery temperature from the web portal (if configured).
+        # This is the min cell temperature from the BMS — more operationally
+        # relevant than the Open API's batTemperature (inverter sensor).
+        await self._fetch_bms_temperature(data)
 
         # REST poll is authoritative — reset WebSocket feed-in integration
         self._ws_feedin_power_kw = 0.0

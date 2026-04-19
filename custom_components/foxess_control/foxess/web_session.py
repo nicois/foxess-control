@@ -72,6 +72,7 @@ class FoxESSWebSession:
         self._token: str | None = None
         self._last_login: float = 0.0
         self._session: aiohttp.ClientSession | None = None
+        self._battery_device_id: str | None = None
 
     def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -143,6 +144,89 @@ class FoxESSWebSession:
         ):
             return self._token
         return await self.async_login()
+
+    async def async_get_battery_temperature(
+        self, plant_id: str, battery_sn: str
+    ) -> float | None:
+        """Fetch BMS battery temperature from the web portal.
+
+        The web portal's battery detail endpoint returns the min cell
+        temperature reported by the BMS — a different (and operationally
+        more relevant) value than the Open API's ``batTemperature``.
+        Low BMS temperatures limit charge rate.
+        """
+        if not self._battery_device_id:
+            await self._discover_battery_device_id(plant_id, battery_sn)
+        if not self._battery_device_id:
+            return None
+        try:
+            result = await self.async_get(
+                "/dew/v0/device/detail",
+                {"id": self._battery_device_id, "category": "battery"},
+            )
+            battery = result.get("battery", {})
+            temp = battery.get("temperature", {})
+            val = temp.get("value")
+            return float(val) if val is not None else None
+        except (FoxESSWebAuthError, ValueError, TypeError, KeyError) as exc:
+            _LOGGER.debug("BMS temperature fetch failed: %s", exc)
+            return None
+
+    async def _discover_battery_device_id(self, plant_id: str, battery_sn: str) -> None:
+        """Discover the web portal device ID for the BCU battery module."""
+        try:
+            result = await self.async_get(
+                "/dew/v0/plant/device/list",
+                {"plantId": plant_id},
+            )
+            devices: list[dict[str, Any]] = result if isinstance(result, list) else []
+            for dev in devices:
+                sn = dev.get("sn", "") or dev.get("deviceSN", "")
+                if sn == battery_sn:
+                    dev_id = dev.get("id") or dev.get("deviceId")
+                    if dev_id:
+                        self._battery_device_id = str(dev_id)
+                        _LOGGER.debug(
+                            "Discovered battery device ID: %s",
+                            self._battery_device_id,
+                        )
+                        return
+                # Check nested battery lists
+                for child in dev.get("children", []):
+                    child_sn = child.get("sn", "") or child.get("deviceSN", "")
+                    if child_sn == battery_sn:
+                        child_id = child.get("id") or child.get("deviceId")
+                        if child_id:
+                            self._battery_device_id = str(child_id)
+                            _LOGGER.debug(
+                                "Discovered battery device ID (child): %s",
+                                self._battery_device_id,
+                            )
+                            return
+            _LOGGER.warning("Battery SN %s not found in plant device list", battery_sn)
+        except (FoxESSWebAuthError, Exception) as exc:
+            _LOGGER.warning("Battery device discovery failed: %s", exc)
+
+    async def async_get(self, path: str, params: dict[str, str] | None = None) -> Any:
+        """Perform an authenticated GET request to the web portal API."""
+        await self.async_ensure_token()
+        session = self._get_session()
+        headers = self._make_headers(path)
+        url = f"{self.BASE_URL}{path}"
+        async with session.get(
+            url,
+            headers=headers,
+            params=params,
+            timeout=aiohttp.ClientTimeout(total=30),
+        ) as resp:
+            resp.raise_for_status()
+            data: dict[str, Any] = await resp.json()
+        errno = data.get("errno", -1)
+        if errno != 0:
+            raise FoxESSWebAuthError(
+                f"Web API GET {path} failed: errno={errno}, msg={data.get('msg', '?')}"
+            )
+        return data.get("result")
 
     @property
     def token(self) -> str | None:

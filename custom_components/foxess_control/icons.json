@@ -19,6 +19,9 @@
       "bat_temperature": {
         "default": "mdi:thermometer"
       },
+      "bms_battery_temperature": {
+        "default": "mdi:thermometer-low"
+      },
       "grid_consumption": {
         "default": "mdi:transmission-tower-import"
       },

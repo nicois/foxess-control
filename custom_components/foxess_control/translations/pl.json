@@ -19,6 +19,9 @@
       "bat_temperature": {
         "name": "Temperatura baterii"
       },
+      "bms_battery_temperature": {
+        "name": "BMS Battery Temperature"
+      },
       "grid_consumption": {
         "name": "Pobór z sieci"
       },

@@ -19,6 +19,9 @@
       "bat_temperature": {
         "name": "电池温度"
       },
+      "bms_battery_temperature": {
+        "name": "BMS Battery Temperature"
+      },
       "grid_consumption": {
         "name": "电网用电"
       },

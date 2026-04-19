@@ -7,6 +7,7 @@
       "loads_power": { "name": "House Load" },
       "pv_power": { "name": "Solar Power" },
       "bat_temperature": { "name": "Battery Temperature" },
+      "bms_battery_temperature": { "name": "BMS Battery Temperature" },
       "grid_consumption": { "name": "Grid Consumption" },
       "feedin_power": { "name": "Grid Feed-in" },
       "generation_power": { "name": "Generation" },
