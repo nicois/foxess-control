@@ -273,7 +273,11 @@ def _first_entry_id(hass: HomeAssistant) -> str:
     if dd is not None:
         for eid in _dd(hass).entries:
             return eid
-    raise ServiceValidationError("No FoxESS Control integration configured")
+    raise ServiceValidationError(
+        "No FoxESS Control integration configured",
+        translation_domain=DOMAIN,
+        translation_key="no_integration",
+    )
 
 
 def _get_inverter(hass: HomeAssistant) -> Inverter:
@@ -298,7 +302,11 @@ def _get_first_entry(hass: HomeAssistant) -> ConfigEntry:
     entry_id = _first_entry_id(hass)
     entry = hass.config_entries.async_get_entry(entry_id)
     if entry is None:
-        raise ServiceValidationError("No FoxESS Control integration configured")
+        raise ServiceValidationError(
+            "No FoxESS Control integration configured",
+            translation_domain=DOMAIN,
+            translation_key="no_integration",
+        )
     return entry
 
 
@@ -1551,8 +1559,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             raise ConfigEntryNotReady(f"FoxESS Cloud unreachable: {err}") from err
     elif not entity_mode:
         raise ServiceValidationError(
-            "No API key configured and entity mode is not active. "
-            "Provide a FoxESS Cloud API key or configure foxess_modbus entities."
+            "No API key configured and entity mode is not active",
+            translation_domain=DOMAIN,
+            translation_key="no_api_key",
         )
 
     # Choose coordinator and polling interval
@@ -1728,10 +1737,17 @@ def _api_error_handler(
         except (ServiceValidationError, HomeAssistantError):
             raise
         except FoxESSApiError as err:
-            raise HomeAssistantError(f"FoxESS API error: {err}") from err
+            raise HomeAssistantError(
+                f"FoxESS API error: {err}",
+                translation_domain=DOMAIN,
+                translation_key="api_error",
+                translation_placeholders={"error": str(err)},
+            ) from err
         except requests.RequestException as err:
             raise HomeAssistantError(
-                "Could not reach FoxESS Cloud API. Check your network connection."
+                "Could not reach FoxESS Cloud API",
+                translation_domain=DOMAIN,
+                translation_key="api_unreachable",
             ) from err
         except Exception:
             _LOGGER.exception("Unhandled error in service %s", func.__name__)
@@ -1971,7 +1987,9 @@ def _register_services(hass: HomeAssistant) -> None:
 
         if _get_current_soc(hass) is None:
             raise ServiceValidationError(
-                "Battery SoC is not available. Wait for the API poll to complete."
+                "Battery SoC is not available",
+                translation_domain=DOMAIN,
+                translation_key="soc_unavailable",
             )
 
         api_min_soc = _get_api_min_soc(hass)
@@ -2169,14 +2187,17 @@ def _register_services(hass: HomeAssistant) -> None:
 
         if _get_current_soc(hass) is None:
             raise ServiceValidationError(
-                "Battery SoC is not available. Wait for the API poll to complete."
+                "Battery SoC is not available",
+                translation_domain=DOMAIN,
+                translation_key="soc_unavailable",
             )
 
         battery_capacity_kwh = _get_battery_capacity_kwh(hass)
         if battery_capacity_kwh <= 0:
             raise ServiceValidationError(
-                "Battery capacity (kWh) not configured. Set it in the "
-                "integration options before using smart charge."
+                "Battery capacity (kWh) not configured",
+                translation_domain=DOMAIN,
+                translation_key="battery_capacity_not_configured",
             )
 
         min_soc_on_grid = _get_min_soc_on_grid(hass)
@@ -2189,8 +2210,13 @@ def _register_services(hass: HomeAssistant) -> None:
         current_soc = _get_current_soc(hass)
         if current_soc is not None and current_soc >= target_soc:
             raise ServiceValidationError(
-                f"Current SoC ({current_soc}%) already at or above "
-                f"target ({target_soc}%)"
+                f"Current SoC ({current_soc}%) at or above target ({target_soc}%)",
+                translation_domain=DOMAIN,
+                translation_key="soc_above_target",
+                translation_placeholders={
+                    "current_soc": str(current_soc),
+                    "target_soc": str(target_soc),
+                },
             )
 
         entity_mode = _is_entity_mode(hass)

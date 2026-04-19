@@ -262,6 +262,35 @@
       }
     }
   },
+  "exceptions": {
+    "no_integration": {
+      "message": "No FoxESS Control integration configured."
+    },
+    "no_api_key": {
+      "message": "No API key configured and entity mode is not active. Provide a FoxESS Cloud API key or configure foxess_modbus entities."
+    },
+    "api_error": {
+      "message": "FoxESS API error: {error}"
+    },
+    "api_unreachable": {
+      "message": "Could not reach FoxESS Cloud API. Check your network connection."
+    },
+    "soc_unavailable": {
+      "message": "Battery SoC is not available. Wait for the API poll to complete."
+    },
+    "battery_capacity_not_configured": {
+      "message": "Battery capacity (kWh) not configured. Set it in the integration options before using smart charge."
+    },
+    "soc_above_target": {
+      "message": "Current SoC ({current_soc}%) already at or above target ({target_soc}%)."
+    },
+    "unmanaged_work_mode": {
+      "message": "The inverter schedule contains a {work_mode} group ({time_range}) not managed by this integration. Remove it via the FoxESS app, then retry."
+    },
+    "schedule_conflict": {
+      "message": "New {new_mode} window conflicts with an existing {existing_mode} override ({time_range})."
+    }
+  },
   "issues": {
     "unmanaged_work_mode": {
       "title": "Unmanaged work mode detected",

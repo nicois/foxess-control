@@ -152,7 +152,15 @@ def _check_schedule_safe(
                         "time_range": time_range,
                     },
                 )
-            raise ServiceValidationError(message)
+            raise ServiceValidationError(
+                message,
+                translation_domain=DOMAIN,
+                translation_key="unmanaged_work_mode",
+                translation_placeholders={
+                    "work_mode": mode,
+                    "time_range": time_range,
+                },
+            )
     if hass is not None:
         async_delete_issue(hass, DOMAIN, "unmanaged_work_mode")
 
@@ -195,11 +203,23 @@ def _merge_with_existing(
                     "Force-removing conflicting %s group", group.get("workMode")
                 )
                 continue
+            conflict_range = (
+                f"{group['startHour']:02d}:{group['startMinute']:02d}"
+                f"-{group['endHour']:02d}:{group['endMinute']:02d}"
+            )
             raise ServiceValidationError(
-                f"New {work_mode.value} window conflicts with an existing "
-                f"{group.get('workMode')} override "
-                f"({group['startHour']:02d}:{group['startMinute']:02d}"
-                f"-{group['endHour']:02d}:{group['endMinute']:02d})"
+                f"New {work_mode.value} window conflicts with existing "
+                f"{group.get('workMode')} override ({conflict_range})",
+                translation_domain=DOMAIN,
+                translation_key="schedule_conflict",
+                translation_placeholders={
+                    "new_mode": work_mode.value,
+                    "existing_mode": group.get("workMode", "?"),
+                    "time_range": (
+                        f"{group['startHour']:02d}:{group['startMinute']:02d}"
+                        f"-{group['endHour']:02d}:{group['endMinute']:02d}"
+                    ),
+                },
             )
         kept.append(group)
 
