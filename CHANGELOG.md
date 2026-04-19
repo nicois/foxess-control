@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.7-beta.21
+
+### Fixed
+- **BMS temperature early returns log at WARNING** (C-020, C-026): `_fetch_bms_temperature` silently returned `None` when `web_session` was missing or `battery_compound_id` hadn't been discovered — no log line at all. Both paths now emit WARNING-level messages with actionable diagnostics.
+
 ## 1.0.7-beta.20
 
 ### Fixed
