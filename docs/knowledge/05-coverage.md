@@ -114,5 +114,52 @@ C-023 (solar-aware charge reduction) excluded — proposed, under investigation.
 - **Unjustified design decisions**: 1 (D-015 — no C-NNN)
 - **Active regression**: none
 - **Orphan tests**: 80+ unit (test_services.py largely unmapped)
-- **Unit tests**: 597
+- **Unit tests**: 598
 - **E2E tests**: 88 (46 `test_e2e.py` + 42 `test_ui.py`) across cloud and entity modes
+
+## HA Integration Quality Scale
+
+Status of compliance with the Home Assistant Integration Quality Scale.
+This is a HACS custom integration so the scale is not formally enforced,
+but targeting these standards improves quality.
+
+### Bronze (18/18)
+
+All Bronze requirements met:
+- action-setup: services in `async_setup` (0121f9c)
+- appropriate-polling, brands, common-modules, config-flow,
+  config-flow-test-coverage, dependency-transparency, docs-actions,
+  docs-high-level-description, docs-installation-instructions,
+  docs-removal-instructions, entity-event-setup, entity-unique-id,
+  has-entity-name, runtime-data, test-before-configure,
+  test-before-setup, unique-config-entry
+
+### Silver (10/10)
+
+All Silver requirements met:
+- action-exceptions, config-entry-unloading, docs-configuration-parameters,
+  docs-installation-parameters, entity-unavailable, integration-owner,
+  log-when-unavailable, parallel-updates, reauthentication-flow,
+  test-coverage (598 unit + 88 E2E)
+
+### Gold (19/21)
+
+| Rule | Status |
+|------|--------|
+| devices, diagnostics, entity-category, entity-device-class | Done |
+| entity-disabled-by-default, entity-translations, icon-translations | Done |
+| exception-translations | Done (e2137d4) |
+| reconfiguration-flow, repair-issues | Done |
+| docs-data-update through docs-use-cases | Done |
+| discovery | Exempt — cloud API, no local discovery |
+| discovery-update-info | Exempt — cloud API |
+| stale-devices | Exempt — single device per entry |
+| dynamic-devices | Exempt — single inverter per entry |
+
+### Platinum (3/3)
+
+| Rule | Status |
+|------|--------|
+| async-dependency | Done — WASM executor-wrapped (2802465) |
+| inject-websession | Done — `async_get_clientsession()` |
+| strict-typing | Done — `py.typed` marker (10c3d1f) |
