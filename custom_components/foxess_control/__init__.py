@@ -1065,6 +1065,7 @@ _ENTITY_ROLES: dict[str, str] = {
     "grid_voltage": "grid_voltage",
     "grid_frequency": "grid_frequency",
     "battery_temperature": "bat_temperature",
+    "bms_battery_temperature": "bms_battery_temperature",
     "smart_operations": "smart_operations",
     "battery_forecast": "battery_forecast",
     "data_freshness": "data_freshness",

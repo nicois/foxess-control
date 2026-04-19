@@ -16,7 +16,7 @@
  *   # etc.
  */
 
-const OVERVIEW_VERSION = "2.4.0";
+const OVERVIEW_VERSION = "2.5.0";
 
 // -- i18n --------------------------------------------------------------------
 
@@ -174,6 +174,7 @@ const _ROLE_MAP = {
   grid_voltage_entity:      "grid_voltage",
   grid_frequency_entity:    "grid_frequency",
   bat_temp_entity:          "battery_temperature",
+  bms_temp_entity:          "bms_battery_temperature",
   residual_entity:          "residual_energy",
   data_freshness_entity:    "data_freshness",
 };
@@ -339,6 +340,7 @@ class FoxESSOverviewCard extends HTMLElement {
     const gridV = this._num(eid.grid_voltage_entity);
     const gridHz = this._num(eid.grid_frequency_entity);
     const batTemp = this._num(eid.bat_temp_entity);
+    const bmsTemp = this._num(eid.bms_temp_entity);
     const residual = this._num(eid.residual_entity);
 
     const solarFound = this._exists(eid.solar_entity);
@@ -378,7 +380,7 @@ class FoxESSOverviewCard extends HTMLElement {
           ${this._renderNode("solar", "☀️", this._t("solar"), solarFound, this._formatKw(solar), solarActive, dataSource !== "ws" && (pv1 != null || pv2 != null) ? this._pvDetail(pv1, pv2) : "", eid.solar_entity)}
           ${this._renderNode("house", "🏠", this._t("house"), houseFound, this._formatKw(house), houseActive, "", eid.house_entity)}
           ${this._renderGridNode(gridFound, gridNet, gridImporting, gridExporting, dataSource !== "ws" ? gridV : null, dataSource !== "ws" ? gridHz : null, eid.grid_import_entity)}
-          ${this._renderBatteryNode(soc, socPct, socColor, batNet, batCharging, batDischarging, dataSource !== "ws" ? batTemp : null, dataSource !== "ws" ? residual : null, batFound)}
+          ${this._renderBatteryNode(soc, socPct, socColor, batNet, batCharging, batDischarging, dataSource !== "ws" ? batTemp : null, bmsTemp, dataSource !== "ws" ? residual : null, batFound)}
         </div>
       </ha-card>
     `;
@@ -445,7 +447,7 @@ class FoxESSOverviewCard extends HTMLElement {
     `;
   }
 
-  _renderBatteryNode(soc, socPct, socColor, batNet, charging, discharging, temp, residual, found) {
+  _renderBatteryNode(soc, socPct, socColor, batNet, charging, discharging, temp, bmsTemp, residual, found) {
     if (!found) {
       return `
         <div class="node battery not-found">
@@ -460,7 +462,13 @@ class FoxESSOverviewCard extends HTMLElement {
     const active = charging || discharging;
     const direction = charging ? this._t("charging") : discharging ? this._t("discharging") : "";
     const sub = [];
-    if (temp != null) sub.push(`${temp.toFixed(1)}°C`);
+    if (bmsTemp != null && temp != null) {
+      sub.push(`Cell ${bmsTemp.toFixed(1)}°C · Inv ${temp.toFixed(1)}°C`);
+    } else if (bmsTemp != null) {
+      sub.push(`Cell ${bmsTemp.toFixed(1)}°C`);
+    } else if (temp != null) {
+      sub.push(`${temp.toFixed(1)}°C`);
+    }
     if (residual != null) sub.push(`${residual.toFixed(1)} kWh`);
 
     return `
