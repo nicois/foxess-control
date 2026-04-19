@@ -35,6 +35,11 @@ def get_coordinator_soc(hass: HomeAssistant) -> float | None:
 class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Fetch real-time variables from the FoxESS Cloud API."""
 
+    # BMS temperature is fetched from the web portal on a separate
+    # schedule because WS injections (async_set_updated_data) continuously
+    # reset the REST poll timer, starving _async_update_data.
+    _BMS_FETCH_INTERVAL = 300.0  # seconds between BMS temperature polls
+
     def __init__(
         self,
         hass: HomeAssistant,
@@ -51,6 +56,9 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # WebSocket feed-in energy integration state
         self._ws_last_time: float | None = None
         self._ws_feedin_power_kw: float = 0.0
+        # BMS temperature polling state (separate from REST poll timer)
+        self._bms_last_fetch: float = 0.0
+        self._bms_fetch_in_flight: bool = False
         # SoC interpolation state — integrates power between integer ticks
         self._soc_interpolated: float | None = None
         self._soc_last_reported: float | None = None
@@ -136,9 +144,11 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Fetch BMS min cell temperature from the web portal and merge into data."""
         domain_data = self.hass.data.get(DOMAIN)
         if domain_data is None:
+            _LOGGER.debug("BMS temperature: domain data not available")
             return
         web_session = domain_data.get("_web_session")
         if web_session is None:
+            _LOGGER.debug("BMS temperature: no web session configured")
             return
         compound_id = domain_data.get("_battery_compound_id")
         if not compound_id:
@@ -152,6 +162,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             if temp is not None:
                 data["bmsBatteryTemperature"] = temp
+                self._bms_last_fetch = time.monotonic()
             else:
                 _LOGGER.debug("BMS temperature: no value returned")
         except Exception:
@@ -442,6 +453,42 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         merged = dict(self.data)
         merged.update(ws_data)
         self.async_set_updated_data(merged)
+
+        # BMS temperature polling.  _fetch_bms_temperature normally runs
+        # during _async_update_data (REST poll), but WS injections calling
+        # async_set_updated_data continuously reset the poll timer so REST
+        # polls are starved.  Schedule BMS fetch as a background task here.
+        self._maybe_schedule_bms_fetch()
+
+    def _maybe_schedule_bms_fetch(self) -> None:
+        """Schedule a BMS temperature fetch if the interval has elapsed."""
+        if self._bms_fetch_in_flight:
+            return
+        # Quick pre-check: skip if no web session is configured (avoids
+        # creating a coroutine that would immediately return).
+        domain_data = self.hass.data.get(DOMAIN)
+        if domain_data is None or domain_data.get("_web_session") is None:
+            return
+        now = time.monotonic()
+        if now - self._bms_last_fetch < self._BMS_FETCH_INTERVAL:
+            return
+        self._bms_fetch_in_flight = True
+
+        async def _do_fetch() -> None:
+            try:
+                if self.data is None:
+                    return
+                data = dict(self.data)
+                await self._fetch_bms_temperature(data)
+                temp = data.get("bmsBatteryTemperature")
+                if temp is not None and self.data is not None:
+                    merged = dict(self.data)
+                    merged["bmsBatteryTemperature"] = temp
+                    self.async_set_updated_data(merged)
+            finally:
+                self._bms_fetch_in_flight = False
+
+        self.hass.async_create_task(_do_fetch(), name="foxess_bms_temp_fetch")
 
 
 class FoxESSEntityCoordinator(_EntityCoordinator):

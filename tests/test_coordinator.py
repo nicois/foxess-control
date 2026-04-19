@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -13,6 +13,9 @@ from custom_components.foxess_control.const import POLLED_VARIABLES
 from custom_components.foxess_control.coordinator import FoxESSDataCoordinator
 from custom_components.foxess_control.foxess.inverter import Inverter, WorkMode
 
+if TYPE_CHECKING:
+    from custom_components.foxess_control.domain_data import FoxESSControlData
+
 
 def _make_coordinator(
     inverter: Inverter | None = None,
@@ -20,6 +23,11 @@ def _make_coordinator(
 ) -> FoxESSDataCoordinator:
     hass = MagicMock()
     hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
+    # Use a real dict for hass.data so domain data lookups behave
+    # like production (MagicMock would make every .get() truthy,
+    # triggering BMS fetch scheduling in tests that don't set up a
+    # web session).
+    hass.data = {}
     if inverter is None:
         inverter = MagicMock(spec=Inverter)
     with patch("homeassistant.helpers.frame.report_usage"):
@@ -564,4 +572,156 @@ class TestSocExtrapolationDoesNotStarvePoll:
             "Extrapolation tick must NOT call async_set_updated_data "
             "(it starves the REST poll timer). "
             f"Called {len(set_updated_calls)} time(s)."
+        )
+
+
+class TestBmsTemperatureFetch:
+    """Verify BMS temperature is fetched even when WS injections are active.
+
+    Production symptom: sensor.foxess_bms_battery_temperature is always
+    'unknown'.  Root cause: _fetch_bms_temperature runs only during REST
+    polls (_async_update_data), but inject_realtime_data → async_set_updated_data
+    continuously resets the poll timer.  With WS messages every ~5 s and a
+    300 s poll interval, the REST poll is starved and _fetch_bms_temperature
+    never fires after the first refresh (which runs before the web session
+    is stored).
+    """
+
+    @staticmethod
+    def _make_coord_with_domain_data() -> tuple[
+        FoxESSDataCoordinator, FoxESSControlData
+    ]:
+        """Create a coordinator wired to a real FoxESSControlData instance."""
+        from custom_components.foxess_control.const import DOMAIN
+        from custom_components.foxess_control.domain_data import (
+            FoxESSControlData,
+            FoxESSEntryData,
+        )
+
+        inv = MagicMock(spec=Inverter)
+        inv.get_real_time.return_value = {"SoC": 50.0}
+        inv.get_current_mode.return_value = WorkMode.SELF_USE
+        coord = _make_coordinator(inverter=inv)
+
+        dd = FoxESSControlData()
+        dd.entries["test-entry"] = FoxESSEntryData()
+        coord.hass.data = {DOMAIN: dd}  # type: ignore[assignment]
+
+        entry = MagicMock()
+        entry.options = {"battery_capacity_kwh": 10.0}
+        coord.hass.config_entries.async_get_entry = MagicMock(  # type: ignore[method-assign]
+            return_value=entry
+        )
+        return coord, dd
+
+    @pytest.mark.asyncio
+    async def test_fetch_bms_reads_web_session_from_domain_data(self) -> None:
+        """_fetch_bms_temperature reads web_session through FoxESSControlData bridge."""
+        coord, dd = self._make_coord_with_domain_data()
+
+        web_session = AsyncMock()
+        web_session.async_get_battery_temperature = AsyncMock(return_value=23.5)
+        dd["_web_session"] = web_session
+        dd["_battery_compound_id"] = "abc@SN123"
+
+        data: dict[str, Any] = {"SoC": 50.0}
+        await coord._fetch_bms_temperature(data)
+
+        assert data.get("bmsBatteryTemperature") == 23.5
+        web_session.async_get_battery_temperature.assert_awaited_once_with(
+            battery_compound_id="abc@SN123",
+        )
+
+    @pytest.mark.asyncio
+    async def test_fetch_bms_skips_when_web_session_missing(self) -> None:
+        """Without web_session, _fetch_bms_temperature returns early."""
+        coord, dd = self._make_coord_with_domain_data()
+        dd["_battery_compound_id"] = "abc@SN123"
+        # web_session is None (default)
+
+        data: dict[str, Any] = {"SoC": 50.0}
+        await coord._fetch_bms_temperature(data)
+
+        assert "bmsBatteryTemperature" not in data
+
+    @pytest.mark.asyncio
+    async def test_fetch_bms_logs_when_compound_id_missing(self) -> None:
+        """With web_session but no compound_id, logs a debug message."""
+        coord, dd = self._make_coord_with_domain_data()
+
+        web_session = AsyncMock()
+        dd["_web_session"] = web_session
+        # compound_id is None (default)
+
+        data: dict[str, Any] = {"SoC": 50.0}
+        await coord._fetch_bms_temperature(data)
+
+        assert "bmsBatteryTemperature" not in data
+
+    @pytest.mark.asyncio
+    async def test_bms_temperature_available_during_ws_active_polling(self) -> None:
+        """BMS temperature must be fetched even when WS is the primary data source.
+
+        This is the core regression test.  Production flow:
+        1. First REST poll runs BEFORE web_session is stored → no BMS temp
+        2. Web session is stored in FoxESSControlData
+        3. WS starts, inject_realtime_data fires every ~5 s
+        4. Each injection calls async_set_updated_data which resets the
+           REST poll timer → REST poll (and _fetch_bms_temperature) is starved
+
+        The fix must ensure _fetch_bms_temperature runs periodically even
+        when WS injections are the primary data path.
+        """
+        import asyncio
+
+        coord, dd = self._make_coord_with_domain_data()
+
+        # --- Step 1: First REST poll (before web_session) ---
+        data = await coord._async_update_data()
+        coord.data = data
+        assert "bmsBatteryTemperature" not in data, (
+            "First poll should not have BMS temp (web_session not yet stored)"
+        )
+
+        # --- Step 2: Store web_session and compound_id (simulating __init__.py) ---
+        web_session = AsyncMock()
+        web_session.async_get_battery_temperature = AsyncMock(return_value=31.5)
+        dd["_web_session"] = web_session
+        dd["_battery_compound_id"] = "bat-id@SN001"
+
+        # Wire hass.async_create_task to actually schedule coroutines so
+        # the background BMS fetch runs within our event loop.
+        pending_tasks: list[asyncio.Task[None]] = []
+
+        def _create_task(coro: Any, **kwargs: Any) -> asyncio.Task[None]:
+            task = asyncio.get_event_loop().create_task(coro)
+            pending_tasks.append(task)
+            return task
+
+        coord.hass.async_create_task = _create_task  # type: ignore[assignment]
+
+        # --- Step 3: Simulate sustained WS injection (replaces REST polls) ---
+        # Inject several WS messages; each calls async_set_updated_data which
+        # resets the REST poll timer.  After these injections, BMS temperature
+        # should be present in coordinator data.
+        bms_temp_seen = False
+        base = time.monotonic()
+        for i in range(20):
+            with patch("time.monotonic", return_value=base + i * 5):
+                coord.inject_realtime_data(
+                    {"SoC": 50.0, "batChargePower": 0.0, "batDischargePower": 0.0}
+                )
+            # Drain pending background tasks (the BMS fetch)
+            while pending_tasks:
+                task = pending_tasks.pop(0)
+                await task
+            if coord.data and coord.data.get("bmsBatteryTemperature") is not None:
+                bms_temp_seen = True
+                break
+
+        assert bms_temp_seen, (
+            "BMS temperature must appear in coordinator data during WS-active "
+            "period.  With the bug, inject_realtime_data → async_set_updated_data "
+            "starves the REST poll so _fetch_bms_temperature never runs after "
+            "the first refresh."
         )
