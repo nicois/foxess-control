@@ -1143,3 +1143,227 @@ class TestReloadRecovery:
         )
         mode = ha_e2e.get_state("input_select.foxess_work_mode")
         assert mode == "Force Discharge"
+
+
+# ---------------------------------------------------------------------------
+# Fault recovery (cloud only) — circuit breaker + transient fault survival
+# ---------------------------------------------------------------------------
+
+
+class TestFaultRecovery:
+    def test_api_down_during_discharge_opens_circuit_breaker(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+        event_stream: HAEventStream,
+    ) -> None:
+        """api_down → circuit breaker opens → session holds position."""
+        if connection_mode != "cloud":
+            pytest.skip("Fault injection requires cloud mode")
+        assert foxess_sim is not None
+        foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
+
+        start, end = _tight_window(30)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        foxess_sim.fault("api_down")
+
+        # Discharge ticks every 60s — after 3 consecutive errors (~3 min)
+        # the circuit breaker opens. Poll for the attribute.
+        deadline = time.monotonic() + 300
+        breaker_active = False
+        while time.monotonic() < deadline:
+            attrs = ha_e2e.get_attributes("sensor.foxess_smart_operations")
+            if attrs.get("circuit_breaker_active") is True:
+                breaker_active = True
+                break
+            time.sleep(5)
+        assert breaker_active, (
+            "Circuit breaker should activate after consecutive errors"
+        )
+
+        state = ha_e2e.get_state("sensor.foxess_smart_operations")
+        assert state == "discharging", (
+            "Session must hold position while breaker is open"
+        )
+
+        foxess_sim.clear_fault()
+
+    def test_rate_limit_transient_discharge_survives(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+        event_stream: HAEventStream,
+    ) -> None:
+        """Transient rate_limit (count=2) does not abort discharge."""
+        if connection_mode != "cloud":
+            pytest.skip("Fault injection requires cloud mode")
+        assert foxess_sim is not None
+        foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
+
+        start, end = _tight_window(15)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        foxess_sim.fault("rate_limit", count=2)
+
+        # Wait enough time for the 2 faulty requests to be consumed
+        # and at least one successful tick after. Discharge ticks every
+        # 60s, so ~3 min should suffice for 2 failures + 1 success.
+        time.sleep(200)
+
+        state = ha_e2e.get_state("sensor.foxess_smart_operations")
+        assert state == "discharging", (
+            "Session should survive transient rate-limit errors"
+        )
+
+    def test_ws_refuse_falls_back_to_api_during_session(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+        event_stream: HAEventStream,
+    ) -> None:
+        """WS refused during active session → data_source falls back to api."""
+        if connection_mode != "cloud":
+            pytest.skip("WS fault injection requires cloud mode")
+        assert foxess_sim is not None
+        ha_e2e.set_options(ws_mode="smart_sessions")
+        foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
+
+        start, end = _tight_window(15)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        foxess_sim.fault("ws_refuse")
+
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_battery_soc",
+            "data_source",
+            "api",
+            timeout_s=60,
+        )
+
+        state = ha_e2e.get_state("sensor.foxess_smart_operations")
+        assert state == "discharging", "Session must continue on API fallback"
+
+        foxess_sim.clear_fault()
+
+    def test_ws_disconnect_recovers(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+        event_stream: HAEventStream,
+    ) -> None:
+        """WS disconnect → data_source drops → clear fault → WS recovers."""
+        if connection_mode != "cloud":
+            pytest.skip("WS fault injection requires cloud mode")
+        assert foxess_sim is not None
+        ha_e2e.set_options(ws_mode="smart_sessions")
+        foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
+
+        start, end = _tight_window(15)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_battery_soc",
+            "data_source",
+            "ws",
+            timeout_s=60,
+        )
+
+        foxess_sim.fault("ws_disconnect")
+
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_battery_soc",
+            "data_source",
+            "api",
+            timeout_s=60,
+        )
+
+        foxess_sim.clear_fault()
+
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_battery_soc",
+            "data_source",
+            "ws",
+            timeout_s=120,
+        )
+
+        state = ha_e2e.get_state("sensor.foxess_smart_operations")
+        assert state == "discharging", "Session must survive WS reconnection"
+
+    def test_api_500_transient_recovery(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+        event_stream: HAEventStream,
+    ) -> None:
+        """Transient API 500 (count=2) does not kill the discharge session."""
+        if connection_mode != "cloud":
+            pytest.skip("Fault injection requires cloud mode")
+        assert foxess_sim is not None
+        foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
+
+        start, end = _tight_window(15)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        foxess_sim.fault("api_500", count=2)
+
+        # Wait for the 2 faulty requests to clear + 1 successful tick
+        time.sleep(200)
+
+        state = ha_e2e.get_state("sensor.foxess_smart_operations")
+        assert state == "discharging", "Session should survive transient API 500 errors"
