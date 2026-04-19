@@ -361,7 +361,7 @@ def ha_e2e(
             try:
                 ha.get_state("sensor.foxess_battery_soc")
                 break
-            except Exception:
+            except requests.RequestException:
                 time.sleep(2)
         else:
             if proc.stdout:
@@ -372,7 +372,7 @@ def ha_e2e(
             wid,
             time.monotonic() - t0,
         )
-    except:
+    except BaseException:
         _stop_container(name)
         _kill_process(proc)
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -389,8 +389,8 @@ def ha_e2e(
         )
         if logs.stdout:
             print(f"\n=== HA container logs (tail) ===\n{logs.stdout[-5000:]}")
-    except Exception:
-        pass
+    except (subprocess.SubprocessError, OSError) as exc:
+        _log.debug("Failed to capture container logs: %s", exc)
     _stop_container(name)
     _kill_process(proc)
     shutil.rmtree(tmpdir, ignore_errors=True)
@@ -469,7 +469,24 @@ def set_inverter_state(
                     poll_interval=1.0,
                 )
         elif kwargs:
-            time.sleep(6)
+            if "solar_kw" in kwargs:
+                ha_e2e.wait_for_numeric_state(
+                    "sensor.foxess_solar_power",
+                    "ge",
+                    float(kwargs["solar_kw"]) - 0.1,
+                    timeout_s=30,
+                    poll_interval=1.0,
+                )
+            elif "load_kw" in kwargs:
+                ha_e2e.wait_for_numeric_state(
+                    "sensor.foxess_house_load",
+                    "ge",
+                    float(kwargs["load_kw"]) - 0.1,
+                    timeout_s=30,
+                    poll_interval=1.0,
+                )
+            else:
+                time.sleep(2)
 
 
 @pytest.fixture(params=["api", "ws", "entity"])

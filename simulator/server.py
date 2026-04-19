@@ -41,7 +41,7 @@ async def _broadcast_ws(app: web.Application, msg: dict[str, Any]) -> None:
             continue
         try:
             await ws.send_str(payload)
-        except Exception:
+        except (ConnectionResetError, ConnectionError, OSError):
             dead.append(ws)
     for ws in dead:
         ws_clients.remove(ws)
@@ -249,7 +249,7 @@ async def _ws_push_loop(app: web.Application) -> None:
                         await ws.send_str(msg)
                     else:
                         await ws.send_str(stale_msg)
-                except Exception:
+                except (ConnectionResetError, ConnectionError, OSError):
                     pass
     except asyncio.CancelledError:
         pass

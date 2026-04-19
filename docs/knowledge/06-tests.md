@@ -252,6 +252,20 @@ Tests are parametrized across `[cloud, entity]` connection modes and
 `[api, ws, entity]` data sources. The `ws_refuse` simulator fault blocks
 WS connections for API-only mode. Total E2E count is 74 (32 + 42).
 
+## Test Quality Rules
+
+Enforced by ruff (`S110`, `BLE001`) and CLAUDE.md constraints:
+
+| Rule | Enforced by | Rationale |
+|---|---|---|
+| No `except Exception: pass` in tests/simulator | ruff `S110` + `BLE001` | Swallows real failures, makes flakes undiagnosable |
+| No `time.sleep()` / `wait_for_timeout()` in tests | CLAUDE.md | Use `wait_for_state`, `wait_for_attribute`, `expect()` |
+| No bare `page.reload()` in Playwright tests | CLAUDE.md | Use `_robust_reload()` — `goto` + `networkidle` avoids `net::ERR_ABORTED` |
+| Prefer element waits over sleeps after state changes | CLAUDE.md | Fixed delays are fragile under load |
+
+Production code (`custom_components/`, `smart_battery/`) is exempt from `BLE001`
+because broad catches there are intentional graceful degradation.
+
 ## Unmapped Tests
 
 Tests not yet traced to a specific constraint. ~80+ tests across multiple

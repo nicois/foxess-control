@@ -107,7 +107,7 @@ class HAClient:
         )
         if not r.ok:
             raise RuntimeError(f"Reload failed: {r.status_code} {r.text[:500]}")
-        time.sleep(5)
+        self._wait_for_integration_ready()
 
     def set_input_number(self, entity_id: str, value: float) -> None:
         """Set an input_number helper value."""
@@ -263,6 +263,19 @@ class HAClient:
         finally:
             ws.close()
 
+    def _wait_for_integration_ready(self, timeout_s: float = 15) -> None:
+        """Poll until the integration's entities are available after reload."""
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            try:
+                state = self.get_state("sensor.foxess_battery_soc")
+                if state != "unavailable":
+                    return
+            except requests.RequestException:
+                pass
+            time.sleep(1)
+        _log.warning("Integration not ready after %.0fs, continuing", timeout_s)
+
     def reload_integration(self, domain: str = "foxess_control") -> None:
         """Reload a config entry so entity registry changes take effect."""
         entries = self._session.get(
@@ -276,7 +289,7 @@ class HAClient:
         )
         if not r.ok:
             raise RuntimeError(f"Reload failed: {r.status_code} {r.text[:200]}")
-        time.sleep(5)
+        self._wait_for_integration_ready()
 
     def is_ready(self) -> bool:
         """Check if HA is responding."""
@@ -291,8 +304,6 @@ class HAClient:
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             if self.is_ready():
-                # Give integration time to load
-                time.sleep(5)
                 return
             time.sleep(2)
         raise TimeoutError(f"HA did not become ready within {timeout_s}s")
@@ -355,7 +366,8 @@ class HAEventStream:
                         self._events.append(msg["event"]["data"])
             except websocket.WebSocketTimeoutException:
                 continue
-            except Exception:
+            except (websocket.WebSocketException, json.JSONDecodeError) as exc:
+                _log.debug("WS recv loop ending: %s", exc)
                 break
 
     def wait_for_state(
@@ -397,8 +409,8 @@ class HAEventStream:
                         f"{entity_id} already in fatal state "
                         f"'{current}' while waiting for '{expected}'"
                     )
-            except Exception:
-                pass  # REST unavailable, fall through to event wait
+            except requests.RequestException as exc:
+                _log.debug("REST baseline check unavailable: %s", exc)
 
         while time.monotonic() < deadline:
             with self._lock:
@@ -471,3 +483,5 @@ class HAEventStream:
         self._stop.set()
         self._ws.close()
         self._thread.join(timeout=3)
+        if self._thread.is_alive():
+            _log.warning("HAEventStream recv thread did not stop within 3s")

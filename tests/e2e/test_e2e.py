@@ -16,7 +16,6 @@ import time
 from typing import TYPE_CHECKING
 
 import pytest
-import requests as _requests
 
 from .conftest import set_inverter_state
 from .ha_client import FATAL_FOR_ACTIVE, HAEventStream
@@ -190,8 +189,6 @@ class TestFeedinPacing:
             pytest.skip("requires simulator fast_forward")
         assert foxess_sim is not None
 
-        import time as _time
-
         foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
         ha_e2e.wait_for_numeric_state(
             "sensor.foxess_battery_soc",
@@ -218,9 +215,14 @@ class TestFeedinPacing:
             fatal_states=FATAL_FOR_ACTIVE,
         )
 
-        _time.sleep(10)
-        attrs = ha_e2e.get_attributes("sensor.foxess_smart_operations")
-        initial_power = attrs.get("discharge_power_w", 0)
+        deadline = time.monotonic() + 30
+        initial_power = 0
+        while time.monotonic() < deadline:
+            attrs = ha_e2e.get_attributes("sensor.foxess_smart_operations")
+            initial_power = attrs.get("discharge_power_w", 0)
+            if initial_power > 0:
+                break
+            time.sleep(2)
         assert initial_power > 0, "Discharge should be active"
         max_power = 10500
         assert initial_power < max_power * 0.5, (
@@ -229,8 +231,15 @@ class TestFeedinPacing:
         )
 
         for _ in range(3):
+            soc_before = float(ha_e2e.get_state("sensor.foxess_battery_soc"))
             foxess_sim.fast_forward(120, step=5)
-            _time.sleep(65)
+            ha_e2e.wait_for_numeric_state(
+                "sensor.foxess_battery_soc",
+                "ne",
+                soc_before,
+                timeout_s=90,
+                poll_interval=2.0,
+            )
 
         attrs = ha_e2e.get_attributes("sensor.foxess_smart_operations")
         later_power = attrs.get("discharge_power_w", 0)
@@ -391,10 +400,6 @@ class TestDataSource:
         #
         # Wait for data_source to return to "ws" — proving the
         # integration recovered from the stolen stream.
-        import time as _time
-
-        _time.sleep(5)  # let the steal take effect
-
         # Verify data_source drops to "api" (stream is dead)
         ha_e2e.wait_for_attribute(
             "sensor.foxess_battery_soc",
@@ -633,7 +638,7 @@ class TestDataSource:
             timeout_s=90,
         )
 
-        _reload_integration(ha_e2e)
+        ha_e2e.reload_integration()
 
         # Wait for session to resume after reload
         ha_e2e.wait_for_state(
@@ -873,25 +878,6 @@ class TestEntityMode:
 # ---------------------------------------------------------------------------
 
 
-def _reload_integration(ha_e2e: HAClient) -> None:
-    """Reload the foxess_control config entry (simulates HA restart)."""
-    session = _requests.Session()
-    session.headers.update(
-        {
-            "Authorization": ha_e2e._session.headers["Authorization"],
-            "Content-Type": "application/json",
-        }
-    )
-    entries = session.get(f"{ha_e2e.base_url}/api/config/config_entries/entry").json()
-    foxess_entry = next(e for e in entries if e["domain"] == "foxess_control")
-    r = session.post(
-        f"{ha_e2e.base_url}/api/config/config_entries/entry/"
-        f"{foxess_entry['entry_id']}/reload"
-    )
-    assert r.ok, f"Reload failed: {r.status_code}"
-    time.sleep(5)
-
-
 class TestReloadRecovery:
     """Session recovery after integration reload (simulated HA restart)."""
 
@@ -922,7 +908,7 @@ class TestReloadRecovery:
         power_before = attrs_before.get("discharge_power_w", 0)
         assert power_before > 0, "Should be discharging before reload"
 
-        _reload_integration(ha_e2e)
+        ha_e2e.reload_integration()
 
         ha_e2e.wait_for_state(
             "sensor.foxess_smart_operations",
@@ -956,7 +942,7 @@ class TestReloadRecovery:
             fatal_states=FATAL_FOR_ACTIVE,
         )
 
-        _reload_integration(ha_e2e)
+        ha_e2e.reload_integration()
 
         ha_e2e.wait_for_state(
             "sensor.foxess_smart_operations",
@@ -998,7 +984,7 @@ class TestReloadRecovery:
             timeout_s=90,
         )
 
-        _reload_integration(ha_e2e)
+        ha_e2e.reload_integration()
 
         ha_e2e.wait_for_state(
             "sensor.foxess_smart_operations",
@@ -1046,7 +1032,7 @@ class TestReloadRecovery:
             timeout_s=90,
         )
 
-        _reload_integration(ha_e2e)
+        ha_e2e.reload_integration()
 
         ha_e2e.wait_for_state(
             "sensor.foxess_smart_operations",
@@ -1074,7 +1060,7 @@ class TestReloadRecovery:
         state = ha_e2e.get_state("sensor.foxess_smart_operations")
         assert state == "idle"
 
-        _reload_integration(ha_e2e)
+        ha_e2e.reload_integration()
 
         state = ha_e2e.wait_for_state(
             "sensor.foxess_smart_operations",
@@ -1113,7 +1099,7 @@ class TestReloadRecovery:
             timeout_s=300,
         )
 
-        _reload_integration(ha_e2e)
+        ha_e2e.reload_integration()
 
         state = ha_e2e.wait_for_state(
             "sensor.foxess_smart_operations",
@@ -1147,7 +1133,7 @@ class TestReloadRecovery:
             fatal_states=FATAL_FOR_ACTIVE,
         )
 
-        _reload_integration(ha_e2e)
+        ha_e2e.reload_integration()
 
         ha_e2e.wait_for_state(
             "sensor.foxess_smart_operations",

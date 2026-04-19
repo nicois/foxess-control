@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from playwright.sync_api import Error as PlaywrightError
 
 from .conftest import set_inverter_state
 from .ha_client import FATAL_FOR_ACTIVE
@@ -40,8 +41,6 @@ def _robust_reload(page: Page, settle_ms: int = 1000) -> None:
     one.  We also wait for ``networkidle`` so HA's WebSocket
     connection is re-established before tests interact with the DOM.
     """
-    from playwright.sync_api import Error as PlaywrightError
-
     url = page.url
     try:
         page.goto(url, wait_until="networkidle", timeout=30000)
@@ -95,7 +94,7 @@ def _find_card(page: Page, tag: str, timeout: int = 30000) -> bool:
             timeout=timeout,
         )
         return True
-    except Exception:
+    except (TimeoutError, PlaywrightError):
         return False
 
 
@@ -257,7 +256,8 @@ class TestOverviewCard:
             timeout_s=60,
         )
         _robust_reload(page)
-        # Wait 32s for API data to become stale (>10s age threshold)
+        # Genuinely time-dependent: card JS compares Date.now() to
+        # last_updated — data must physically age past the 10s threshold.
         page.wait_for_timeout(32000)
         _robust_reload(page)
 

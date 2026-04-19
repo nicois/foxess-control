@@ -24,6 +24,13 @@ pre-commit run --all-files                  # ruff + mypy
 - **C-019**: Discharge SoC unavailability aborts session after 3 checks (matching charge C-012)
 - **C-027**: Schedule end time set to safe horizon (SoC/rate/safety_factor), not full window
 
+## Test Quality
+
+- **No hardcoded sleeps in tests.** Use `wait_for_state()`, `wait_for_attribute()`, `wait_for_numeric_state()`, or Playwright's `expect()` instead of `time.sleep()` or `page.wait_for_timeout()`. If a deterministic wait is impossible, document why.
+- **No blind exception swallowing in tests.** `except Exception: pass` hides real failures and makes flakes undiagnosable. Catch specific types, or at minimum log the exception.
+- **No bare `page.reload()` in Playwright tests.** Use `_robust_reload()` (goto + networkidle) to avoid `net::ERR_ABORTED` races.
+- **Prefer element waits over sleeps.** After reload or state change, wait for the specific DOM element or HA entity to update — not a fixed number of seconds.
+
 ## Process
 
 - **Bug fixes**: invoke `/regression-test` BEFORE writing any fix. The test must fail against the current code before the fix is applied.
