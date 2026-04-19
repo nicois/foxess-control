@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.7-beta.20
+
+### Fixed
+- **BMS temperature fetch fails with expired token (errno 41809)**: the web session token can be invalidated server-side between login and the first BMS fetch (5 min later on REST poll). `async_get` and `async_post` now detect auth errors (errno 41808/41809) and retry once after re-authenticating, instead of silently returning None.
+
 ## 1.0.7-beta.19
 
 ### Fixed

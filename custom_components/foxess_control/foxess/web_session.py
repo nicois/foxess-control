@@ -248,26 +248,36 @@ class FoxESSWebSession:
         except (ValueError, TypeError):
             return None
 
+    _AUTH_ERRNOS = {41808, 41809}
+
     async def async_get(self, path: str, params: dict[str, str] | None = None) -> Any:
         """Perform an authenticated GET request to the web portal API."""
-        await self.async_ensure_token()
-        session = self._get_session()
-        headers = await self._async_make_headers(path)
-        url = f"{self.BASE_URL}{path}"
-        async with session.get(
-            url,
-            headers=headers,
-            params=params,
-            timeout=aiohttp.ClientTimeout(total=30),
-        ) as resp:
-            resp.raise_for_status()
-            data: dict[str, Any] = await resp.json()
-        errno = data.get("errno", -1)
-        if errno != 0:
+        for attempt in range(2):
+            await self.async_ensure_token()
+            session = self._get_session()
+            headers = await self._async_make_headers(path)
+            url = f"{self.BASE_URL}{path}"
+            async with session.get(
+                url,
+                headers=headers,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                resp.raise_for_status()
+                data: dict[str, Any] = await resp.json()
+            errno = data.get("errno", -1)
+            if errno == 0:
+                return data.get("result")
+            if errno in self._AUTH_ERRNOS and attempt == 0:
+                _LOGGER.debug(
+                    "Web API GET %s returned errno=%d, re-authenticating", path, errno
+                )
+                self._token = None
+                continue
             raise FoxESSWebAuthError(
                 f"Web API GET {path} failed: errno={errno}, msg={data.get('msg', '?')}"
             )
-        return data.get("result")
+        return None
 
     async def async_post(self, path: str, body: dict[str, Any] | None = None) -> Any:
         """Perform an authenticated POST request to the web portal API.
@@ -276,24 +286,34 @@ class FoxESSWebSession:
         endpoints (``/dew/v0/...``).  GET requests to these endpoints
         return 405 Method Not Allowed.
         """
-        await self.async_ensure_token()
-        session = self._get_session()
-        headers = await self._async_make_headers(path)
-        url = f"{self.BASE_URL}{path}"
-        async with session.post(
-            url,
-            headers=headers,
-            json=body or {},
-            timeout=aiohttp.ClientTimeout(total=30),
-        ) as resp:
-            resp.raise_for_status()
-            data: dict[str, Any] = await resp.json()
-        errno = data.get("errno", -1)
-        if errno != 0:
+        for attempt in range(2):
+            await self.async_ensure_token()
+            session = self._get_session()
+            headers = await self._async_make_headers(path)
+            url = f"{self.BASE_URL}{path}"
+            async with session.post(
+                url,
+                headers=headers,
+                json=body or {},
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                resp.raise_for_status()
+                data: dict[str, Any] = await resp.json()
+            errno = data.get("errno", -1)
+            if errno == 0:
+                return data.get("result")
+            if errno in self._AUTH_ERRNOS and attempt == 0:
+                _LOGGER.debug(
+                    "Web API POST %s returned errno=%d, re-authenticating",
+                    path,
+                    errno,
+                )
+                self._token = None
+                continue
             raise FoxESSWebAuthError(
                 f"Web API POST {path} failed: errno={errno}, msg={data.get('msg', '?')}"
             )
-        return data.get("result")
+        return None
 
     @property
     def token(self) -> str | None:
