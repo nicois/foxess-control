@@ -95,6 +95,16 @@ class SmartOperationsOverviewSensor(_SmartOperationsOverviewSensor):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(hass, entry, DOMAIN, _device_info(entry))
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        attrs = super().extra_state_attributes
+        from .domain_data import FoxESSControlData
+
+        dd = self.hass.data.get(DOMAIN)
+        if isinstance(dd, FoxESSControlData) and dd.upcoming_conflicts:
+            attrs["upcoming_conflicts"] = dd.upcoming_conflicts
+        return attrs
+
 
 class ChargePowerSensor(_ChargePowerSensor):
     """FoxESS charge power sensor."""

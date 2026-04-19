@@ -116,6 +116,24 @@ def _sanitize_group(raw: dict[str, Any]) -> ScheduleGroup:
     return group
 
 
+def check_schedule_conflicts(
+    groups: list[dict[str, Any]],
+) -> list[str]:
+    """Return descriptions of unmanaged schedule groups (non-raising)."""
+    conflicts: list[str] = []
+    for group in groups:
+        if _is_placeholder(group):
+            continue
+        mode = group.get("workMode", "")
+        if mode and mode not in _MANAGED_WORK_MODES:
+            time_range = (
+                f"{group.get('startHour', 0):02d}:{group.get('startMinute', 0):02d}"
+                f"–{group.get('endHour', 0):02d}:{group.get('endMinute', 0):02d}"
+            )
+            conflicts.append(f"{mode} ({time_range})")
+    return conflicts
+
+
 def _check_schedule_safe(
     groups: list[dict[str, Any]],
     hass: HomeAssistant | None = None,

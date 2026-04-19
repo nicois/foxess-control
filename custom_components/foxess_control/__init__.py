@@ -1642,6 +1642,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
         )
 
+    # Proactive schedule conflict detection (cloud mode only).
+    # Periodically reads the inverter schedule and warns via persistent
+    # notification if unmanaged work modes are found.
+    if inverter is not None and not entity_mode:
+        from .foxess_adapter import check_schedule_conflicts
+
+        async def _check_conflicts(_now: datetime.datetime) -> None:
+            try:
+                inv = _get_inverter(hass)
+                schedule = await hass.async_add_executor_job(inv.get_schedule)
+                conflicts = check_schedule_conflicts(schedule.get("groups", []))
+            except Exception:
+                return
+            dd_inner: FoxESSControlData = hass.data[DOMAIN]
+            if conflicts:
+                dd_inner.upcoming_conflicts = conflicts
+                _LOGGER.warning("Schedule conflict detected: %s", ", ".join(conflicts))
+            elif dd_inner.upcoming_conflicts:
+                dd_inner.upcoming_conflicts = []
+                _LOGGER.info("Schedule conflict resolved")
+
+        entry.async_on_unload(
+            async_track_time_interval(
+                hass,
+                _check_conflicts,
+                datetime.timedelta(minutes=30),
+            )
+        )
+
     # Persist session state on HA shutdown so recovery has fresh data
     # (including cached adapter groups). async_unload_entry runs too but
     # EVENT_HOMEASSISTANT_STOP fires first and guarantees a clean save.

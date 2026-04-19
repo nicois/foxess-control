@@ -51,6 +51,9 @@ class FoxESSControlData(SmartBatteryDomainData):
     # Work mode (cleared on session cancel for immediate UI update)
     work_mode: str | None = None
 
+    # Proactive schedule conflict detection
+    upcoming_conflicts: list[str] = field(default_factory=list)
+
     # Session cancel hook return type (brand-specific)
     on_session_cancel: Callable[[], Coroutine[Any, Any, None] | None] | None = None
 
