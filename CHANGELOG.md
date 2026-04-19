@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.7-beta.12
+
+### Fixed
+- **BMS battery temperature always unknown**: the `/generic/v0/` API namespace rejects the web session token with errno=41808 ("Token has expired"), even immediately after login. Switched to `POST /dew/v0/device/detail` which accepts the web session token and returns battery temperature.
+
 ## 1.0.7-beta.11
 
 ### Fixed

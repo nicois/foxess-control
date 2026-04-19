@@ -6,7 +6,7 @@ traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-598 unit + 88 E2E = 686 total.
+599 unit + 88 E2E = 687 total.
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
@@ -185,17 +185,18 @@ Key tests:
 ## BMS Temperature (Web Portal)
 
 **Constraints**: C-020
-**Source**: `tests/test_web_session.py` (7 tests)
+**Source**: `tests/test_web_session.py` (8 tests)
 
 | Test | Verifies | Constraint |
 |---|---|---|
-| `TestBMSBatteryTemperature::test_temperature_via_generic_battery_info_endpoint` | Correct web portal endpoint used | C-020 |
-| `TestBMSBatteryTemperature::test_temperature_min_of_multiple_batteries` | Min across modules | C-020 |
-| `TestBMSBatteryTemperature::test_internal_device_id_cached` | Avoid repeated discovery | -- |
-| `TestBMSBatteryTemperature::test_temperature_none_when_no_batteries` | Graceful degradation | -- |
-| `TestBMSBatteryTemperature::test_temperature_none_when_batteries_have_no_temp` | Graceful degradation | -- |
-| `TestBMSBatteryTemperature::test_graceful_when_device_list_errors` | Graceful degradation | -- |
-| `TestBMSBatteryTemperature::test_temperature_none_when_device_not_found` | Graceful degradation | -- |
+| `TestBMSBatteryTemperature::test_temperature_returned_from_device_detail` | Temperature from /dew/v0/device/detail | C-020 |
+| `TestBMSBatteryTemperature::test_temperature_as_plain_number` | Plain numeric temperature format | C-020 |
+| `TestBMSBatteryTemperature::test_temperature_none_when_no_battery_data` | Graceful degradation (missing battery) | -- |
+| `TestBMSBatteryTemperature::test_temperature_none_when_temp_field_missing` | Graceful degradation (missing temp) | -- |
+| `TestBMSBatteryTemperature::test_temperature_none_when_endpoint_errors` | Graceful degradation (API error) | -- |
+| `TestGenericV0TokenRejection::test_temperature_returned_despite_generic_v0_rejection` | /dew/v0/ used when /generic/v0/ rejects token | C-020 |
+| `TestGenericV0TokenRejection::test_token_passed_through_to_data_endpoint` | Token plumbing: login → data request | C-020 |
+| `TestGenericV0TokenRejection::test_login_failure_returns_none` | Graceful degradation (login failure) | -- |
 
 ## API Client
 
