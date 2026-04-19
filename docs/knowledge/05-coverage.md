@@ -114,5 +114,5 @@ C-023 (solar-aware charge reduction) excluded — proposed, under investigation.
 - **Unjustified design decisions**: 1 (D-015 — no C-NNN)
 - **Active regression**: none
 - **Orphan tests**: 80+ unit (test_services.py largely unmapped)
-- **Unit tests**: 589
+- **Unit tests**: 596
 - **E2E tests**: 88 (46 `test_e2e.py` + 42 `test_ui.py`) across cloud and entity modes

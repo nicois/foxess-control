@@ -144,6 +144,19 @@ notifies listeners.
 via `async_set_updated_data()`, giving sensors immediate updates.
 **Implemented by**: `FoxESSDataCoordinator`, `EntityCoordinator`.
 
+### `FoxESSWebSession` — Web portal API client
+**Path**: `custom_components/foxess_control/foxess/web_session.py`
+**Responsibility**: Web portal authentication (username/password), device
+discovery via `/generic/v0/device/list`, BMS battery temperature retrieval
+via `/generic/v0/device/battery/info` (D-033), WASM signature generation.
+**Lifecycle**: Accepts an optional HA-managed `aiohttp.ClientSession` from
+`async_get_clientsession()` for SSL/proxy/cleanup integration (D-034). When
+HA provides the session, `_owns_session=False` — the session is not closed
+on teardown, ensuring HA manages the connection pool lifecycle.
+**Why separate from FoxESSClient**: Web portal credentials (username/password)
+differ from the Open API key. The web portal exposes data (BMS temperature)
+not available through the Open API.
+
 ## External Dependencies
 
 | Dependency | Role | Why chosen |
