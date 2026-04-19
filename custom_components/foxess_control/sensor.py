@@ -183,10 +183,12 @@ async def async_setup_entry(
         BatteryForecastSensor(hass, entry),
     ]
 
-    entry_data = hass.data[DOMAIN].get(entry.entry_id, {})
-    coordinator: FoxESSDataCoordinator | None = entry_data.get("coordinator")
+    entry_data = entry.runtime_data
+    coordinator: FoxESSDataCoordinator | None = (
+        entry_data.coordinator if entry_data else None
+    )
     if coordinator is not None:
-        inverter = entry_data.get("inverter")
+        inverter = entry_data.inverter
         model: str | None = inverter.device_type if inverter else None
         entities.extend(
             FoxESSPolledSensor(coordinator, entry, desc, model=model)

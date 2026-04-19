@@ -71,14 +71,14 @@ def _make_hass(
     mock_coordinator.data = coordinator_data
     mock_coordinator.update_interval = datetime.timedelta(seconds=300)
 
-    hass.data = {
-        DOMAIN: {
-            entry_id: {"inverter": inverter, "coordinator": mock_coordinator},
-            "_smart_discharge_unsubs": [],
-            "_smart_charge_unsubs": [],
-            "_store": mock_store,
-        }
-    }
+    dd = FoxESSControlData()
+    dd.entries[entry_id] = FoxESSEntryData(
+        coordinator=mock_coordinator, inverter=inverter
+    )
+    dd.smart_discharge_unsubs = []
+    dd.smart_charge_unsubs = []
+    dd.store = mock_store
+    hass.data = {DOMAIN: dd}
 
     # Mock config entry for options lookup
     mock_entry = MagicMock()
@@ -106,13 +106,15 @@ class TestGetInverter:
 
     def test_returns_inverter(self) -> None:
         inv = MagicMock(spec=Inverter)
+        dd = FoxESSControlData()
+        dd.entries["entry1"] = FoxESSEntryData(inverter=inv)
         hass = MagicMock()
-        hass.data = {DOMAIN: {"entry1": {"inverter": inv}}}
+        hass.data = {DOMAIN: dd}
         assert _get_inverter(hass) is inv
 
     def test_raises_when_no_entries(self) -> None:
         hass = MagicMock()
-        hass.data = {DOMAIN: {}}
+        hass.data = {DOMAIN: FoxESSControlData()}
         with pytest.raises(ServiceValidationError, match="No FoxESS"):
             _get_inverter(hass)
 
@@ -227,7 +229,9 @@ class TestUnloadEntry:
     async def test_unload_last_entry_removes_services(self) -> None:
         hass = MagicMock()
         hass.config_entries.async_unload_platforms = AsyncMock()
-        hass.data = {DOMAIN: {"entry1": {"inverter": MagicMock()}}}
+        dd = FoxESSControlData()
+        dd.entries["entry1"] = FoxESSEntryData(inverter=MagicMock())
+        hass.data = {DOMAIN: dd}
 
         entry = MagicMock()
         entry.entry_id = "entry1"
@@ -243,12 +247,10 @@ class TestUnloadEntry:
     async def test_unload_non_last_entry_keeps_services(self) -> None:
         hass = MagicMock()
         hass.config_entries.async_unload_platforms = AsyncMock()
-        hass.data = {
-            DOMAIN: {
-                "entry1": {"inverter": MagicMock()},
-                "entry2": {"inverter": MagicMock()},
-            }
-        }
+        dd = FoxESSControlData()
+        dd.entries["entry1"] = FoxESSEntryData(inverter=MagicMock())
+        dd.entries["entry2"] = FoxESSEntryData(inverter=MagicMock())
+        hass.data = {DOMAIN: dd}
 
         entry = MagicMock()
         entry.entry_id = "entry1"
@@ -419,7 +421,7 @@ class TestHandleClearOverrides:
         unsub1.assert_called_once()
         unsub2.assert_called_once()
         assert hass.data[DOMAIN]["_smart_charge_unsubs"] == []
-        assert "_smart_charge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_charge_state") is None
 
     @pytest.mark.asyncio
     async def test_clear_all_cancels_smart_discharge_listeners(self) -> None:
@@ -439,7 +441,7 @@ class TestHandleClearOverrides:
 
         unsub.assert_called_once()
         assert hass.data[DOMAIN]["_smart_discharge_unsubs"] == []
-        assert "_smart_discharge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_discharge_state") is None
 
     @pytest.mark.asyncio
     async def test_clear_force_charge_cancels_smart_charge_only(self) -> None:
@@ -753,7 +755,7 @@ class TestHandleForceCharge:
 
         unsub.assert_called_once()
         assert hass.data[DOMAIN]["_smart_charge_unsubs"] == []
-        assert "_smart_charge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_charge_state") is None
 
     @pytest.mark.asyncio
     async def test_force_charge_cancels_smart_discharge(self) -> None:
@@ -780,7 +782,7 @@ class TestHandleForceCharge:
 
         unsub.assert_called_once()
         assert hass.data[DOMAIN]["_smart_discharge_unsubs"] == []
-        assert "_smart_discharge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_discharge_state") is None
 
 
 class TestHandleForceDischarge:
@@ -973,7 +975,7 @@ class TestHandleForceDischarge:
 
         unsub.assert_called_once()
         assert hass.data[DOMAIN]["_smart_discharge_unsubs"] == []
-        assert "_smart_discharge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_discharge_state") is None
 
     @pytest.mark.asyncio
     async def test_force_discharge_uses_custom_api_min_soc(self) -> None:
@@ -1022,7 +1024,7 @@ class TestHandleForceDischarge:
 
         unsub.assert_called_once()
         assert hass.data[DOMAIN]["_smart_charge_unsubs"] == []
-        assert "_smart_charge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_charge_state") is None
 
 
 class TestSmartChargeCoordinatorFallback:
@@ -1963,7 +1965,7 @@ class TestDischargeSocUnavailability:
                 )
 
         # Session should be cancelled
-        assert "_smart_discharge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_discharge_state") is None
         assert hass.data[DOMAIN]["_smart_discharge_unsubs"] == []
 
     @pytest.mark.asyncio
@@ -2092,7 +2094,7 @@ class TestCallbackExceptionSafety:
             )
 
         assert captured is not None
-        assert "_smart_charge_state" in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_charge_state") is not None
 
         from custom_components.foxess_control.smart_battery.const import (
             MAX_CONSECUTIVE_ADAPTER_ERRORS,
@@ -2113,7 +2115,7 @@ class TestCallbackExceptionSafety:
                 await captured(datetime.datetime(2026, 4, 7, 2, 5 + i, 0))
 
         # Session should be cancelled after repeated errors
-        assert "_smart_charge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_charge_state") is None
 
     @pytest.mark.asyncio
     async def test_discharge_callback_exception_cancels(self) -> None:
@@ -2163,7 +2165,7 @@ class TestCallbackExceptionSafety:
             )
 
         assert captured is not None
-        assert "_smart_discharge_state" in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_discharge_state") is not None
 
         from custom_components.foxess_control.smart_battery.const import (
             MAX_CONSECUTIVE_ADAPTER_ERRORS,
@@ -2184,7 +2186,7 @@ class TestCallbackExceptionSafety:
                 await captured(datetime.datetime(2026, 4, 7, 17, 1 + i, 0))
 
         # Session should be cancelled after repeated errors
-        assert "_smart_discharge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_discharge_state") is None
 
 
 class TestErrorSurfacing:
@@ -2242,7 +2244,7 @@ class TestErrorSurfacing:
             )
 
         assert captured is not None
-        assert "_smart_error_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_error_state") is None
 
         # Make SoC unavailable and fire until abort
         hass.data[DOMAIN]["entry1"]["coordinator"].data = None
@@ -2308,7 +2310,7 @@ class TestErrorSurfacing:
             )
 
         # Error should be cleared
-        assert "_smart_error_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_error_state") is None
 
 
 class TestSessionBoundaryCleanness:
@@ -2368,7 +2370,7 @@ class TestSessionBoundaryCleanness:
 
         # Cancel session 1
         _cancel_smart_discharge(hass)
-        assert "_smart_discharge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_discharge_state") is None
 
         # Session 2: start fresh
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
@@ -2442,7 +2444,7 @@ class TestSessionBoundaryCleanness:
 
         # Cancel session 1
         _cancel_smart_charge(hass)
-        assert "_smart_charge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_charge_state") is None
 
         # Session 2: start fresh
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
@@ -3154,7 +3156,7 @@ class TestHandleSmartCharge:
 
         inv.set_schedule.assert_not_called()
         # Session should still be active (not yet at threshold)
-        assert "_smart_charge_state" in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_charge_state") is not None
 
     @pytest.mark.asyncio
     async def test_soc_unavailable_aborts_after_threshold(self) -> None:
@@ -3224,7 +3226,7 @@ class TestHandleSmartCharge:
                 )
 
         # Session should be cancelled and override removed
-        assert "_smart_charge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_charge_state") is None
         assert hass.data[DOMAIN]["_smart_charge_unsubs"] == []
 
     @pytest.mark.asyncio
@@ -3390,7 +3392,7 @@ class TestHandleSmartCharge:
                 )
 
         # Should abort — conflict persisted across retries
-        assert "_smart_charge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_charge_state") is None
         assert hass.data[DOMAIN]["_smart_charge_unsubs"] == []
         # Should NOT have set a schedule
         inv.set_schedule.assert_not_called()
@@ -3565,7 +3567,7 @@ class TestRecoverSessions:
             await _recover_sessions(hass, inv)
 
         # Session should be cleared
-        assert "_smart_charge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_charge_state") is None
         store.async_save.assert_called()
         saved = store.async_save.call_args.args[0]
         assert "smart_charge" not in saved
@@ -3607,7 +3609,7 @@ class TestRecoverSessions:
             await _recover_sessions(hass, inv)
 
         # Should clean up the ForceCharge from schedule
-        assert "_smart_charge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_charge_state") is None
         store.async_save.assert_called()
 
     @pytest.mark.asyncio
@@ -3892,7 +3894,7 @@ class TestRecoverSessions:
         ):
             await _recover_sessions(hass, inv)
 
-        assert "_smart_charge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_charge_state") is None
         store.async_save.assert_called()
 
     @pytest.mark.asyncio
@@ -4075,7 +4077,7 @@ class TestRecoverSessions:
         ):
             await _recover_sessions(hass, inv)
 
-        assert "_smart_discharge_state" in hass.data[DOMAIN], (
+        assert hass.data[DOMAIN].get("_smart_discharge_state") is not None, (
             "Discharge session should be recovered when inverter schedule "
             "uses horizon end time different from session window end"
         )
@@ -4141,7 +4143,7 @@ class TestRecoverSessions:
         ):
             await _recover_sessions(hass, inv)
 
-        assert "_smart_charge_state" in hass.data[DOMAIN], (
+        assert hass.data[DOMAIN].get("_smart_charge_state") is not None, (
             "Charge session should be recovered when inverter schedule "
             "uses horizon end time different from session window end"
         )
@@ -4158,8 +4160,8 @@ class TestRecoverSessions:
 
         await _recover_sessions(hass, inv)
 
-        assert "_smart_charge_state" not in hass.data[DOMAIN]
-        assert "_smart_discharge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_charge_state") is None
+        assert hass.data[DOMAIN].get("_smart_discharge_state") is None
         store.async_save.assert_not_called()
 
     @pytest.mark.asyncio
@@ -4182,7 +4184,7 @@ class TestRecoverSessions:
         ):
             await _recover_sessions(hass, inv)
 
-        assert "_smart_charge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_charge_state") is None
         store.async_save.assert_called_once()
 
     @pytest.mark.asyncio
@@ -4204,7 +4206,7 @@ class TestRecoverSessions:
         ):
             await _recover_sessions(hass, inv)
 
-        assert "_smart_discharge_state" not in hass.data[DOMAIN]
+        assert hass.data[DOMAIN].get("_smart_discharge_state") is None
         store.async_save.assert_called_once()
 
 

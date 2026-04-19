@@ -142,6 +142,7 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant, ServiceCall
 
+    from .domain_data import FoxESSControlData
     from .foxess.inverter import ScheduleGroup
 
 _LOGGER = logging.getLogger(__name__)
@@ -159,6 +160,18 @@ SMART_DISCHARGE_CHECK_INTERVAL = datetime.timedelta(seconds=60)
 # Cancel a smart session if the SoC entity is unavailable for this many
 # consecutive periodic checks (3 × 5 min = 15 minutes).
 MAX_SOC_UNAVAILABLE_COUNT = 3
+
+
+def _dd(hass: HomeAssistant) -> FoxESSControlData:
+    """Return the typed domain data."""
+    from .domain_data import FoxESSControlData
+
+    data = hass.data[DOMAIN]
+    if isinstance(data, FoxESSControlData):
+        return data
+    from .smart_battery.domain_data import _convert_legacy_dict
+
+    return _convert_legacy_dict(data)  # type: ignore[return-value]
 
 
 def _record_error(hass: HomeAssistant, message: str) -> None:
@@ -256,17 +269,18 @@ def _first_entry_id(hass: HomeAssistant) -> str:
     NOTE: Services currently operate on a single inverter only.
     If multiple config entries exist, only the first is used.
     """
-    for key in hass.data[DOMAIN]:
-        if not str(key).startswith("_"):
-            return str(key)
+    dd = hass.data.get(DOMAIN)
+    if dd is not None:
+        for eid in _dd(hass).entries:
+            return eid
     raise ServiceValidationError("No FoxESS Control integration configured")
 
 
 def _get_inverter(hass: HomeAssistant) -> Inverter:
     """Get the first configured Inverter instance."""
     entry_id = _first_entry_id(hass)
-    inverter: Inverter = hass.data[DOMAIN][entry_id]["inverter"]
-    return inverter
+    inv: Inverter = _dd(hass).entries[entry_id].inverter
+    return inv
 
 
 def _get_min_soc_on_grid(hass: HomeAssistant) -> int:
@@ -310,7 +324,7 @@ def _get_smart_headroom(hass: HomeAssistant) -> float:
 def _get_polling_interval_seconds(hass: HomeAssistant) -> int:
     """Return the coordinator's polling interval in seconds."""
     entry_id = _first_entry_id(hass)
-    coordinator = hass.data[DOMAIN][entry_id].get("coordinator")
+    coordinator = _dd(hass).entries[entry_id].coordinator
     if coordinator is not None and coordinator.update_interval is not None:
         return int(coordinator.update_interval.total_seconds())
     return DEFAULT_POLLING_INTERVAL
@@ -571,7 +585,7 @@ def _build_foxess_adapter(
         )
     inv = inverter or _get_inverter(hass)
     entry_id = _first_entry_id(hass)
-    coordinator = hass.data[DOMAIN][entry_id]["coordinator"]
+    coordinator = _dd(hass).entries[entry_id].coordinator
     adapter = FoxESSCloudAdapter(
         hass=hass,
         inverter=inv,
@@ -1441,7 +1455,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.options.get(CONF_MIN_POWER_CHANGE, DEFAULT_MIN_POWER_CHANGE),
         entry.options.get(CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL),
     )
-    from .domain_data import FoxESSControlData
+    from .domain_data import FoxESSControlData, FoxESSEntryData
 
     if not isinstance(hass.data.get(DOMAIN), FoxESSControlData):
         hass.data[DOMAIN] = FoxESSControlData()
@@ -1467,11 +1481,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except ServiceValidationError:
             _LOGGER.debug("Session cancel hook: no entry (unloading)")
             return ws_stop
-        entry_data = hass.data[DOMAIN].get(entry_id)
+        entry_data = _dd(hass).entries.get(entry_id)
         if entry_data is None:
             _LOGGER.debug("Session cancel hook: entry data gone (unloading)")
             return ws_stop
-        coordinator = entry_data.get("coordinator")
+        coordinator = entry_data.coordinator
         if coordinator is not None and coordinator.data is not None:
             old = coordinator.data.get("_work_mode")
             coordinator.data["_work_mode"] = None
@@ -1554,10 +1568,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator = FoxESSDataCoordinator(hass, inverter, polling_interval)
     await coordinator.async_config_entry_first_refresh()
 
-    hass.data[DOMAIN][entry.entry_id] = {
-        "inverter": inverter,
-        "coordinator": coordinator,
-    }
+    entry_data = FoxESSEntryData(coordinator=coordinator, inverter=inverter)
+    dd.entries[entry.entry_id] = entry_data
+    entry.runtime_data = entry_data
 
     # Eagerly create the web session so BMS temperature polling works
     # from the first coordinator refresh (not just when WebSocket starts).
@@ -1580,12 +1593,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.debug("Could not discover plantId for BMS temperature")
 
     # Register services, frontend card, and WS API once (first real entry)
-    real_entries = {k for k in hass.data[DOMAIN] if not k.startswith("_")}
-    if len(real_entries) == 1:
+    if len(dd.entries) == 1:
         _register_services(hass)
         _register_websocket_api(hass)
         await _register_card_frontend(hass)
-    elif len(real_entries) > 1:
+    elif len(dd.entries) > 1:
         _LOGGER.warning(
             "Multiple FoxESS Control entries detected. Services and smart "
             "sessions operate on the first configured inverter only."
@@ -1598,7 +1610,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Notify coordinator so sensors reflect recovered session state immediately
     # (otherwise RestoreSensor shows stale text until the first poll).
-    coord = hass.data[DOMAIN].get(entry.entry_id, {}).get("coordinator")
+    coord = entry_data.coordinator
     if coord is not None and coord.data is not None:
         coord.async_set_updated_data(dict(coord.data))
 
@@ -1643,10 +1655,10 @@ async def _async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    hass.data[DOMAIN].pop(entry.entry_id)
+    dd = _dd(hass)
+    dd.entries.pop(entry.entry_id, None)
 
-    # Only internal "_*" keys remain → last real entry was removed
-    remaining = {k for k in hass.data[DOMAIN] if not k.startswith("_")}
+    remaining = dd.entries
     if not remaining:
         _LOGGER.info("Unloading last entry %s — cleaning up domain", entry.entry_id)
         # Flush active sessions to disk before teardown.  save_session uses

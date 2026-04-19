@@ -669,8 +669,8 @@ class SmartOperationsOverviewSensor(RestoreSensor):
         last_data = await self.async_get_last_sensor_data()
         if last_data and last_data.native_value:
             self._restored_state = str(last_data.native_value)
-        entry_data = self.hass.data.get(self._domain, {}).get(self._entry.entry_id, {})
-        coordinator = entry_data.get("coordinator")
+        entry_data = getattr(self._entry, "runtime_data", None)
+        coordinator = getattr(entry_data, "coordinator", None) if entry_data else None
         if coordinator is not None:
 
             def _on_coordinator_update() -> None:
