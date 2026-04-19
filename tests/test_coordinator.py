@@ -672,8 +672,6 @@ class TestBmsTemperatureFetch:
         The fix must ensure _fetch_bms_temperature runs periodically even
         when WS injections are the primary data path.
         """
-        import asyncio
-
         coord, dd = self._make_coord_with_domain_data()
 
         # --- Step 1: First REST poll (before web_session) ---
@@ -689,37 +687,31 @@ class TestBmsTemperatureFetch:
         dd["_web_session"] = web_session
         dd["_battery_compound_id"] = "bat-id@SN001"
 
-        # Wire hass.async_create_task to actually schedule coroutines so
-        # the background BMS fetch runs within our event loop.
+        # Wire hass.async_create_task to schedule real tasks on the
+        # running loop (not get_event_loop() which is unreliable under
+        # xdist and deprecated in Python 3.12+).
+        import asyncio
+
         pending_tasks: list[asyncio.Task[None]] = []
 
         def _create_task(coro: Any, **kwargs: Any) -> asyncio.Task[None]:
-            task = asyncio.get_event_loop().create_task(coro)
+            task = asyncio.get_running_loop().create_task(coro)
             pending_tasks.append(task)
             return task
 
         coord.hass.async_create_task = _create_task  # type: ignore[assignment]
 
         # --- Step 3: Simulate sustained WS injection (replaces REST polls) ---
-        # Inject several WS messages; each calls async_set_updated_data which
-        # resets the REST poll timer.  After these injections, BMS temperature
-        # should be present in coordinator data.
-        bms_temp_seen = False
-        base = time.monotonic()
-        for i in range(20):
-            with patch("time.monotonic", return_value=base + i * 5):
-                coord.inject_realtime_data(
-                    {"SoC": 50.0, "batChargePower": 0.0, "batDischargePower": 0.0}
-                )
-            # Drain pending background tasks (the BMS fetch)
-            while pending_tasks:
-                task = pending_tasks.pop(0)
-                await task
-            if coord.data and coord.data.get("bmsBatteryTemperature") is not None:
-                bms_temp_seen = True
-                break
+        coord.inject_realtime_data(
+            {"SoC": 50.0, "batChargePower": 0.0, "batDischargePower": 0.0}
+        )
 
-        assert bms_temp_seen, (
+        # Drain the background BMS fetch task(s)
+        for task in pending_tasks:
+            await task
+
+        assert coord.data is not None
+        assert coord.data.get("bmsBatteryTemperature") == 31.5, (
             "BMS temperature must appear in coordinator data during WS-active "
             "period.  With the bug, inject_realtime_data → async_set_updated_data "
             "starves the REST poll so _fetch_bms_temperature never runs after "
