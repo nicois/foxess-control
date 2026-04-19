@@ -22,4 +22,4 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install -e '.[dev]'
-      - run: pytest --tb=short
+      - run: pytest -m "not slow" --tb=short

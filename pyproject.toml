@@ -32,7 +32,7 @@ where = ["."]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-n auto"
+addopts = "-n auto -m 'not slow'"
 markers = [
     "slow: end-to-end tests requiring podman and HA container (run with pytest tests/e2e/ -m slow)",
 ]

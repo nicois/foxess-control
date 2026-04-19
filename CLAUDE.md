@@ -3,8 +3,9 @@
 ## Build / Test / Lint
 
 ```bash
-pytest tests/ --tb=short
-pre-commit run --all-files      # ruff + mypy
+pytest tests/ --tb=short                    # unit tests (E2E excluded by default)
+pytest tests/e2e/ -m slow -n auto           # E2E tests (podman + playwright)
+pre-commit run --all-files                  # ruff + mypy
 ```
 
 ## Key Constraints
