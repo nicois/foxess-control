@@ -669,6 +669,10 @@ The cleanest migration path is to **remove foxess-ha first**, then install FoxES
 
 > **Note:** If you prefer to run both integrations side-by-side temporarily, keep the polling interval at 300 seconds (the default) on both to avoid exceeding the FoxESS API quota (~1440 requests/day).
 
+## Troubleshooting
+
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for decision-tree guides to common issues: sessions not starting, grid import during discharge, WebSocket problems, early session aborts, and stale data.
+
 ## Support
 
 If you find this integration useful, consider buying me a coffee:
