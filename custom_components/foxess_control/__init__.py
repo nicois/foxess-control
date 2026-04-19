@@ -1121,6 +1121,7 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
 _CARD_URLS = [
     f"/{DOMAIN}/foxess-control-card.js",
     f"/{DOMAIN}/foxess-overview-card.js",
+    f"/{DOMAIN}/foxess-forecast-card.js",
 ]
 
 
