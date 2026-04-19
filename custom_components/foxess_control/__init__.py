@@ -1122,6 +1122,7 @@ _CARD_URLS = [
     f"/{DOMAIN}/foxess-control-card.js",
     f"/{DOMAIN}/foxess-overview-card.js",
     f"/{DOMAIN}/foxess-forecast-card.js",
+    f"/{DOMAIN}/foxess-history-card.js",
 ]
 
 
