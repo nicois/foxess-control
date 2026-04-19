@@ -25,6 +25,7 @@ class EntryData:
 
     coordinator: Any = None
     inverter: Any = None
+    entry: Any = None
 
 
 @dataclass
@@ -81,6 +82,7 @@ def _convert_legacy_dict(data: dict[str, Any]) -> SmartBatteryDomainData:
             if isinstance(val, dict):
                 ed.coordinator = val.get("coordinator")
                 ed.inverter = val.get("inverter")
+                ed.entry = val.get("entry")
             dd.entries[key] = ed
     return dd
 
