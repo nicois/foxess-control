@@ -1394,7 +1394,9 @@ async def _start_force_op_ws(
         domain_data.pop("_force_op_end", None)
         domain_data.pop("_force_op_timer", None)
         if not _should_start_realtime_ws(hass):
-            hass.async_create_task(_stop_realtime_ws(hass))
+            hass.async_create_task(
+                _stop_realtime_ws(hass), name="foxess_stop_ws_force_op"
+            )
 
     handle = hass.loop.call_later(delay, _on_force_op_expired)
     domain_data["_force_op_timer"] = handle
@@ -1409,7 +1411,7 @@ def _trigger_discharge_listener(hass: HomeAssistant) -> None:
     domain_data["_ws_last_trigger"] = now
     cb = domain_data.get("_ws_discharge_callback")
     if cb is not None:
-        hass.async_create_task(cb(dt_util.now()))
+        hass.async_create_task(cb(dt_util.now()), name="foxess_ws_discharge_callback")
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -1654,10 +1656,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Preserve persisted sessions so recovery works after options reload
         ws_stop = _cancel_smart_discharge(hass, clear_storage=False)
         if ws_stop is not None:
-            hass.async_create_task(ws_stop)
+            hass.async_create_task(ws_stop, name="foxess_stop_ws_unload_discharge")
         ws_stop = _cancel_smart_charge(hass, clear_storage=False)
         if ws_stop is not None:
-            hass.async_create_task(ws_stop)
+            hass.async_create_task(ws_stop, name="foxess_stop_ws_unload_charge")
         # Stop WebSocket unconditionally — _on_session_cancel skips this
         # for "always" mode since _should_start_realtime_ws returns True.
         ws: FoxESSRealtimeWS | None = hass.data[DOMAIN].pop("_realtime_ws", None)
@@ -1863,10 +1865,10 @@ def _register_services(hass: HomeAssistant) -> None:
         # from racing with the schedule change.
         ws_stop = _cancel_smart_charge(hass)
         if ws_stop is not None:
-            hass.async_create_task(ws_stop)
+            hass.async_create_task(ws_stop, name="foxess_stop_ws_force_discharge")
         ws_stop = _cancel_smart_discharge(hass)
         if ws_stop is not None:
-            hass.async_create_task(ws_stop)
+            hass.async_create_task(ws_stop, name="foxess_stop_ws_force_discharge")
 
         if _is_entity_mode(hass):
             api_min_soc = _get_api_min_soc(hass)
@@ -1983,14 +1985,14 @@ def _register_services(hass: HomeAssistant) -> None:
         # Cancel any previous smart discharge listeners
         ws_stop = _cancel_smart_discharge(hass)
         if ws_stop is not None:
-            hass.async_create_task(ws_stop)
+            hass.async_create_task(ws_stop, name="foxess_stop_ws_smart_discharge")
 
         # Cancel any active smart charge — the two sessions would conflict
         if hass.data[DOMAIN].get("_smart_charge_state") is not None:
             _LOGGER.info("Smart discharge: cancelling active smart charge session")
             ws_stop = _cancel_smart_charge(hass)
             if ws_stop is not None:
-                hass.async_create_task(ws_stop)
+                hass.async_create_task(ws_stop, name="foxess_stop_ws_smart_discharge")
 
         max_power_w = power if power is not None else _get_max_power_w(hass)
         battery_capacity_kwh = _get_battery_capacity_kwh(hass)
@@ -2208,12 +2210,12 @@ def _register_services(hass: HomeAssistant) -> None:
         # old callbacks from racing with the new session's setup.
         ws_stop = _cancel_smart_charge(hass)
         if ws_stop is not None:
-            hass.async_create_task(ws_stop)
+            hass.async_create_task(ws_stop, name="foxess_stop_ws_smart_charge")
         if hass.data[DOMAIN].get("_smart_discharge_state") is not None:
             _LOGGER.info("Smart charge: cancelling active smart discharge session")
             ws_stop = _cancel_smart_discharge(hass)
             if ws_stop is not None:
-                hass.async_create_task(ws_stop)
+                hass.async_create_task(ws_stop, name="foxess_stop_ws_smart_charge")
 
         # Decide whether to start charging now or defer
         now = dt_util.now()

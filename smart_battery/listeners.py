@@ -212,7 +212,9 @@ def _record_taper_observation(
     getattr(taper, record_fn_name)(soc, cur_state["last_power_w"], actual_kw * 1000)
     cur_state["taper_tick"] = cur_state.get("taper_tick", 0) + 1
     if cur_state["taper_tick"] % save_every == 0:
-        hass.async_create_task(_save_taper_profile(hass, domain, taper))
+        hass.async_create_task(
+            _save_taper_profile(hass, domain, taper), name=f"{domain}_save_taper"
+        )
 
 
 def cancel_smart_charge(
@@ -772,7 +774,8 @@ def setup_smart_discharge_listeners(
                             _get_store(hass, domain),
                             "smart_discharge",
                             session_data_from_discharge_state(cur_state),
-                        )
+                        ),
+                        name=f"{domain}_save_discharge_session",
                     )
                 else:
                     exported = feedin_now - feedin_start

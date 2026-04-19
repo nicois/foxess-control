@@ -153,7 +153,10 @@ def cancel_smart_session(
     domain_data[unsubs_key] = []
     domain_data.pop(state_key, None)
     if clear_storage and store is not None:
-        hass.async_create_task(clear_stored_session(store, storage_key))
+        hass.async_create_task(
+            clear_stored_session(store, storage_key),
+            name=f"smart_battery_clear_{storage_key}",
+        )
     # Brand-specific post-cancel hook (e.g., stop WebSocket)
     hook = domain_data.get("_on_session_cancel")
     if hook is not None:

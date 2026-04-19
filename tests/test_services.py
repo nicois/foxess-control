@@ -56,7 +56,7 @@ def _make_hass(
     hass = MagicMock()
     hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
     hass.async_create_task = MagicMock(
-        side_effect=lambda coro: asyncio.ensure_future(coro)
+        side_effect=lambda coro, **kwargs: asyncio.ensure_future(coro)
     )
 
     if inverter is None:
