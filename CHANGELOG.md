@@ -1,11 +1,15 @@
 # Changelog
 
-## 1.0.7-beta.17
+## 1.0.7-beta.18
+
+### Fixed
+- **BMS temperature always unknown when WebSocket active**: `_fetch_bms_temperature` only ran during REST polls, but every WebSocket injection reset the HA coordinator's poll timer (300s), starving the REST path indefinitely. BMS temperature fetch now runs as a rate-limited background task triggered by WS injections, independent of the REST poll cycle.
 
 ### Added
 - **BMS temperature on overview card**: shows "Cell 15.5°C · Inv 25.3°C" in the battery node when BMS cell temperature is available, clearly distinguishing it from the inverter sensor temperature. Falls back gracefully when only one source is present.
 - **E2E test for BMS battery temperature after reload**: verifies the sensor reads a valid temperature, survives integration reload, and recovers with the re-discovered compound ID. Simulator now serves `batteryId`/`multipleBatterySoc` in WS messages and the `/dew/v0/device/detail` endpoint.
 - **`entry` field on `EntryData`**: allows shared helpers to access the config entry directly.
+- **Debug logging on silent early returns**: `_fetch_bms_temperature` now logs why it bails (no domain data, no web session) instead of returning silently (C-020, C-026).
 
 ## 1.0.7-beta.15
 
