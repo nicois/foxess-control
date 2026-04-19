@@ -18,6 +18,7 @@ import wasmtime
 _LOGGER = logging.getLogger(__name__)
 
 _WASM_PATH = Path(__file__).with_name("signature.wasm")
+_WASM_BYTES = _WASM_PATH.read_bytes()
 
 
 class _SignatureEngine:
@@ -25,7 +26,7 @@ class _SignatureEngine:
 
     def __init__(self) -> None:
         self._store = wasmtime.Store()
-        module = wasmtime.Module.from_file(self._store.engine, str(_WASM_PATH))
+        module = wasmtime.Module(self._store.engine, _WASM_BYTES)
 
         linker = wasmtime.Linker(self._store.engine)
         self._memory: wasmtime.Memory | None = None
