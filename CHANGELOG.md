@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.7-beta.15
+
+### Fixed
+- **BMS battery temperature still always unknown**: the `_battery_compound_id` key was missing from `FoxESSControlData`'s bridge layer (`_KEY_MAP` and dataclass fields), so the compound ID discovery succeeded but the value was silently lost on write (`KeyError` in background task) and read (`get()` returned `None`). Added the field and mapping so the compound ID persists across coordinator polls.
+
 ## 1.0.7-beta.14
 
 ### Added
