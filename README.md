@@ -658,14 +658,16 @@ automation:
 
 ## Migrating from foxess-ha
 
-FoxESS Control now includes all the polled sensors that foxess-ha provides (SoC, charge/discharge power, solar generation, house load, grid power, temperatures, cumulative energy counters, and more), so running both integrations doubles your API usage for no benefit. If you currently use foxess-ha, we recommend migrating:
+FoxESS Control includes all the polled sensors that foxess-ha provides (SoC, charge/discharge power, solar generation, house load, grid power, temperatures, cumulative energy counters, and more), plus smart battery management. The legacy foxess-ha integration is read-only, so it is unlikely to be deeply wired into automations or dashboards.
 
-1. **Check your automations and dashboards** for references to `sensor.foxess_*` entities from foxess-ha. The equivalent FoxESS Control sensors are listed in the [Sensors](#sensors) section.
-2. **Update entity references** to point to the FoxESS Control equivalents. Entity names are similar but may not be identical — check the table above.
-3. **Remove the foxess-ha integration** from Settings > Devices & Services once everything is migrated.
-4. **Lower the polling interval** if desired — without foxess-ha competing for quota, you can safely reduce it from the default 300 seconds.
+The cleanest migration path is to **remove foxess-ha first**, then install FoxESS Control:
 
-If you need to run both temporarily during migration, keep the polling interval at 300 seconds (the default) to avoid exceeding the FoxESS API quota.
+1. **Remove the foxess-ha integration** from Settings > Devices & Services. This avoids entity name collisions and gives FoxESS Control the cleanest possible entity IDs.
+2. **Clean up orphaned entities** (if any remain after removal): go to Settings > Devices & Services > Entities, filter by "unavailable" or search for `foxess`, and delete any leftover entities from the old integration.
+3. **Install FoxESS Control** via HACS and configure it. Sensor entity IDs will follow the `sensor.foxess_*` pattern — see the [Sensors](#sensors) section above for the full list.
+4. **Update any automations or dashboards** that referenced foxess-ha entities to use the new entity IDs. Since foxess-ha was read-only, these are typically just sensor references on dashboard cards.
+
+> **Note:** If you prefer to run both integrations side-by-side temporarily, keep the polling interval at 300 seconds (the default) on both to avoid exceeding the FoxESS API quota (~1440 requests/day).
 
 ## Support
 
