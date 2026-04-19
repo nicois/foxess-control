@@ -22,5 +22,5 @@ def pytest_xdist_auto_num_workers(config: object) -> int:
     """Select worker count: 1 core and 6 GB RAM per worker."""
     cpus = os.cpu_count() or 1
     mem_gb = _get_memory_gb()
-    by_memory = int(mem_gb / 6)
+    by_memory = int(mem_gb / 4)
     return max(1, min(cpus, by_memory))
