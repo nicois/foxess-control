@@ -7,7 +7,6 @@ This session provides the token needed for the WebSocket real-time stream.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import hashlib
 import logging
 import re
@@ -79,7 +78,6 @@ class FoxESSWebSession:
         self._last_login: float = 0.0
         self._session: aiohttp.ClientSession | None = session
         self._owns_session = session is None
-        self._battery_device_id: str | None = None
 
     def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -168,106 +166,47 @@ class FoxESSWebSession:
     ) -> float | None:
         """Fetch BMS battery temperature from the web portal.
 
-        Uses the ``/generic/v0/device/battery/info`` endpoint — the same
-        one the FoxESS web portal JavaScript calls for battery data.
-        The internal device ID is discovered from ``/generic/v0/device/list``
-        (matching *device_sn*) and cached for subsequent calls.
+        Uses ``POST /dew/v0/device/detail`` with the device serial number
+        and ``category=battery``.  The ``/dew/v0/`` namespace accepts the
+        web session token from ``/basic/v0/user/login``.
 
-        Returns the minimum temperature across all battery modules,
-        which is the operationally relevant value for charge rate limiting.
+        Previous attempts used ``/generic/v0/`` endpoints which reject
+        the web session token with errno=41808 (observed in production).
+
+        Returns the temperature value, or ``None`` if unavailable.
         """
-        if not self._battery_device_id:
-            await self._discover_internal_device_id(device_sn)
-        if not self._battery_device_id:
+        try:
+            result = await self.async_post(
+                "/dew/v0/device/detail",
+                {"sn": device_sn, "category": "battery"},
+            )
+            return self._extract_battery_temperature(result)
+        except (FoxESSWebAuthError, ValueError, TypeError, KeyError) as exc:
+            _LOGGER.debug("BMS temperature fetch failed: %s", exc)
             return None
-        return await self._fetch_battery_temp_from_info(self._battery_device_id)
-
-    async def _discover_internal_device_id(self, device_sn: str) -> None:
-        """Discover the internal device ID from the web portal device list.
-
-        The FoxESS web portal uses ``/generic/v0/device/list`` which
-        returns devices with an opaque ``id`` field (distinct from the
-        device serial number used by the Open API).  This ``id`` is
-        required by battery info and other ``/generic/v0/`` endpoints.
-        """
-        try:
-            result = await self.async_post(
-                "/generic/v0/device/list",
-                {"currentPage": 1, "pageSize": 50},
-            )
-            if result is None:
-                _LOGGER.warning(
-                    "Device list returned null result — cannot discover device ID"
-                )
-                return
-            devices: list[dict[str, Any]] = result.get("devices", [])
-            for dev in devices:
-                sn = dev.get("deviceSN", "") or dev.get("sn", "")
-                if sn == device_sn:
-                    dev_id = dev.get("id")
-                    if dev_id:
-                        self._battery_device_id = str(dev_id)
-                        _LOGGER.debug(
-                            "Discovered internal device ID: %s (for SN %s)",
-                            self._battery_device_id,
-                            device_sn,
-                        )
-                        return
-            _LOGGER.warning(
-                "Device SN %s not found in /generic/v0/device/list (got %d devices)",
-                device_sn,
-                len(devices),
-            )
         except Exception as exc:
-            _LOGGER.warning("Internal device ID discovery failed: %s", exc)
+            _LOGGER.warning("BMS temperature fetch failed: %s", exc)
+            return None
 
-    async def _fetch_battery_temp_from_info(self, device_id: str) -> float | None:
-        """Fetch battery temperature from /generic/v0/device/battery/info.
+    @staticmethod
+    def _extract_battery_temperature(result: Any) -> float | None:
+        """Extract battery temperature from device detail result.
 
-        This is the endpoint the FoxESS web portal JavaScript calls
-        (``getBaterryInfo`` in ``bus-device-inverterDetail.*.js``).
-        The response ``result.batterys`` is a list of battery modules,
-        each with ``temperature``, ``soc``, ``power``, ``volt``, etc.
-
-        Returns the minimum temperature across all modules (the value
-        most relevant for charge rate limiting), or ``None`` if no
-        temperature data is available.
+        Handles the /dew/v0/device/detail response format where
+        temperature is at result.battery.temperature.value.
         """
+        if result is None:
+            return None
+        battery = result.get("battery", {})
+        if not battery:
+            return None
+        temp = battery.get("temperature", {})
+        val = temp.get("value") if isinstance(temp, dict) else temp
+        if val is None:
+            return None
         try:
-            result = await self.async_post(
-                "/generic/v0/device/battery/info",
-                {"id": device_id},
-            )
-            if result is None:
-                _LOGGER.debug("Battery info returned null for device %s", device_id)
-                return None
-            batteries: list[dict[str, Any]] = result.get("batterys", [])
-            if not batteries:
-                _LOGGER.debug("Battery info has no batteries for device %s", device_id)
-                return None
-            temps: list[float] = []
-            for bat in batteries:
-                t = bat.get("temperature")
-                if t is not None:
-                    with contextlib.suppress(ValueError, TypeError):
-                        temps.append(float(t))
-            if not temps:
-                _LOGGER.debug(
-                    "No temperature values in battery info for device %s "
-                    "(battery keys: %s)",
-                    device_id,
-                    list(batteries[0].keys()) if batteries else "[]",
-                )
-                return None
-            min_temp = min(temps)
-            _LOGGER.debug(
-                "BMS battery temperature: %.1f°C (min of %d modules)",
-                min_temp,
-                len(temps),
-            )
-            return min_temp
-        except Exception as exc:
-            _LOGGER.warning("Battery temperature fetch failed: %s", exc)
+            return float(val)
+        except (ValueError, TypeError):
             return None
 
     async def async_get(self, path: str, params: dict[str, str] | None = None) -> Any:
