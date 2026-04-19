@@ -12,7 +12,6 @@ Fixture scoping:
 from __future__ import annotations
 
 import datetime
-import logging
 import time
 from typing import TYPE_CHECKING
 
@@ -20,8 +19,6 @@ import pytest
 
 from .conftest import set_inverter_state
 from .ha_client import FATAL_FOR_ACTIVE, HAEventStream
-
-logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .conftest import SimulatorHandle
@@ -1302,30 +1299,15 @@ class TestFaultRecovery:
         # the 60s interval.  Budget 600s to cover worst case.
         deadline = time.monotonic() + 600
         breaker_active = False
-        last_log = 0.0
         while time.monotonic() < deadline:
             attrs = ha_e2e.get_attributes("sensor.foxess_smart_operations")
             if attrs.get("circuit_breaker_active") is True:
                 breaker_active = True
                 break
-            now = time.monotonic()
-            if now - last_log >= 30:
-                state = ha_e2e.get_state("sensor.foxess_smart_operations")
-                logger.info(
-                    "CB poll: state=%s cb=%s keys=%s",
-                    state,
-                    attrs.get("circuit_breaker_active"),
-                    sorted(attrs.keys()) if attrs else "none",
-                )
-                last_log = now
             time.sleep(5)
-        if not breaker_active:
-            final_attrs = ha_e2e.get_attributes("sensor.foxess_smart_operations")
-            final_state = ha_e2e.get_state("sensor.foxess_smart_operations")
-            pytest.fail(
-                f"Circuit breaker should activate after consecutive errors. "
-                f"Final state={final_state}, attrs={final_attrs}"
-            )
+        assert breaker_active, (
+            "Circuit breaker should activate after consecutive errors"
+        )
 
         state = ha_e2e.get_state("sensor.foxess_smart_operations")
         assert state == "discharging", (

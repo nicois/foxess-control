@@ -779,6 +779,9 @@ class SmartOperationsOverviewSensor(RestoreSensor):
                     "charge_target_reachable": self._is_charge_reachable(cs, soc),
                 }
             )
+            if cs.get("circuit_open"):
+                attrs["circuit_breaker_active"] = True
+                attrs["circuit_breaker_since"] = cs.get("circuit_open_since")
 
         if ds is not None:
             soc = get_interpolated_soc(self.hass, self._domain)
@@ -837,6 +840,9 @@ class SmartOperationsOverviewSensor(RestoreSensor):
                     "discharge_feedin_projected_kwh": feedin_projected,
                 }
             )
+            if ds.get("circuit_open"):
+                attrs["circuit_breaker_active"] = True
+                attrs["circuit_breaker_since"] = ds.get("circuit_open_since")
 
         return attrs
 
