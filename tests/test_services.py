@@ -13,6 +13,7 @@ from homeassistant.exceptions import ServiceValidationError
 from custom_components.foxess_control import (
     _get_inverter,
     _get_min_soc_on_grid,
+    async_setup,
     async_setup_entry,
     async_unload_entry,
 )
@@ -136,7 +137,15 @@ class TestSetupEntry:
     """Tests for async_setup_entry."""
 
     @pytest.mark.asyncio
-    async def test_setup_registers_services(self) -> None:
+    async def test_async_setup_registers_services(self) -> None:
+        """Services are registered in async_setup (before any entry loads)."""
+        hass = MagicMock()
+        assert await async_setup(hass, {}) is True
+        assert hass.services.async_register.call_count == 6
+
+    @pytest.mark.asyncio
+    async def test_setup_entry_does_not_register_services(self) -> None:
+        """async_setup_entry should NOT register services (async_setup does)."""
         hass = MagicMock()
         hass.async_add_executor_job = AsyncMock(return_value=10500)
         hass.config_entries.async_forward_entry_setups = AsyncMock()
@@ -177,7 +186,7 @@ class TestSetupEntry:
             assert await async_setup_entry(hass, entry) is True
 
         assert DOMAIN in hass.data
-        assert hass.services.async_register.call_count == 6
+        hass.services.async_register.assert_not_called()
         hass.config_entries.async_forward_entry_setups.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -226,7 +235,10 @@ class TestUnloadEntry:
     """Tests for async_unload_entry."""
 
     @pytest.mark.asyncio
-    async def test_unload_last_entry_removes_services(self) -> None:
+    async def test_unload_last_entry_cleans_domain_data(self) -> None:
+        """Unloading the last entry cleans domain data but leaves services
+        (services are registered in async_setup and managed by HA core).
+        """
         hass = MagicMock()
         hass.config_entries.async_unload_platforms = AsyncMock()
         dd = FoxESSControlData()
@@ -240,7 +252,7 @@ class TestUnloadEntry:
 
         assert result is True
         assert DOMAIN not in hass.data
-        assert hass.services.async_remove.call_count == 6
+        hass.services.async_remove.assert_not_called()
         hass.config_entries.async_unload_platforms.assert_awaited_once()
 
     @pytest.mark.asyncio

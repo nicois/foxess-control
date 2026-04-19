@@ -1431,6 +1431,12 @@ def _trigger_discharge_listener(hass: HomeAssistant) -> None:
         hass.async_create_task(cb(dt_util.now()), name="foxess_ws_discharge_callback")
 
 
+async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+    """Register domain services (called once before any config entry loads)."""
+    _register_services(hass)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up FoxESS Control from a config entry."""
     try:
@@ -1586,9 +1592,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         hass.data[DOMAIN]["_web_session"] = ws
 
-    # Register services, frontend card, and WS API once (first real entry)
+    # Register frontend card and WS API once (first real entry).
+    # Services are registered in async_setup (before any entry loads).
     if len(dd.entries) == 1:
-        _register_services(hass)
         _register_websocket_api(hass)
         await _register_card_frontend(hass)
     elif len(dd.entries) > 1:
@@ -1695,12 +1701,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             original = getattr(handler, "original_level", logging.NOTSET)
             fox_logger.setLevel(original)
         hass.data.pop(DOMAIN)
-        hass.services.async_remove(DOMAIN, SERVICE_CLEAR_OVERRIDES)
-        hass.services.async_remove(DOMAIN, SERVICE_FEEDIN)
-        hass.services.async_remove(DOMAIN, SERVICE_FORCE_CHARGE)
-        hass.services.async_remove(DOMAIN, SERVICE_FORCE_DISCHARGE)
-        hass.services.async_remove(DOMAIN, SERVICE_SMART_CHARGE)
-        hass.services.async_remove(DOMAIN, SERVICE_SMART_DISCHARGE)
 
     return True
 
