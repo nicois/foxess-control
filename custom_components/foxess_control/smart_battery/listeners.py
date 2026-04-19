@@ -1066,7 +1066,7 @@ def setup_smart_discharge_listeners(
                         "smart_discharge",
                         session_data_from_discharge_state(cur_state),
                     )
-                elif new_power != cur_state.get("last_power_w", 0):
+                else:
                     power_delta = abs(new_power - cur_state.get("last_power_w", 0))
                     should_update = (
                         power_delta >= min_change
@@ -1076,7 +1076,7 @@ def setup_smart_discharge_listeners(
                     if was_suspended and not cur_state.get("suspended"):
                         should_update = True
 
-                    if should_update:
+                    if should_update and new_power != cur_state.get("last_power_w", 0):
                         _LOGGER.info(
                             "Smart discharge: adjusting power %dW -> %dW "
                             "(SoC=%.1f%%, remaining=%.2fh)",
@@ -1086,27 +1086,39 @@ def setup_smart_discharge_listeners(
                             remaining_h,
                         )
                         cur_state["last_power_w"] = new_power
-                        await adapter.apply_mode(
-                            hass,
-                            WorkMode.FORCE_DISCHARGE,
-                            new_power,
-                            fd_soc=cur_state.get("min_soc", 11),
-                        )
-                        if not _is_my_session():
-                            return
-                        cur_state = hass.data[domain]["_smart_discharge_state"]
-                        await save_session(
-                            _get_store(hass, domain),
-                            "smart_discharge",
-                            session_data_from_discharge_state(cur_state),
-                        )
-                    else:
+                    elif not should_update and new_power != cur_state.get(
+                        "last_power_w", 0
+                    ):
                         _LOGGER.debug(
                             "Smart discharge: power change %dW -> %dW "
                             "below threshold %dW, skipping",
                             cur_state["last_power_w"],
                             new_power,
                             min_change,
+                        )
+                    else:
+                        _LOGGER.debug(
+                            "Smart discharge: holding at %dW "
+                            "(SoC=%.1f%%, remaining=%.2fh)",
+                            new_power,
+                            soc_value,
+                            remaining_h,
+                        )
+
+                    await adapter.apply_mode(
+                        hass,
+                        WorkMode.FORCE_DISCHARGE,
+                        cur_state["last_power_w"],
+                        fd_soc=cur_state.get("min_soc", 11),
+                    )
+                    if not _is_my_session():
+                        return
+                    cur_state = hass.data[domain]["_smart_discharge_state"]
+                    if should_update:
+                        await save_session(
+                            _get_store(hass, domain),
+                            "smart_discharge",
+                            session_data_from_discharge_state(cur_state),
                         )
 
         # --- SoC threshold check ---
