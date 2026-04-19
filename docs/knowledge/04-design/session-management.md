@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: Session Management
-last_verified: 2026-04-18
+last_verified: 2026-04-19
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -202,6 +202,55 @@ retried silently per D-025.
   dashboard card can't read the current error
 **Traces**: C-026, C-020;
 `tests/test_services.py::TestErrorSurfacing`
+
+### D-031: Typed runtime data via entry.runtime_data
+**Decision**: Store `FoxESSEntryData` (coordinator, inverter, adapter)
+on each config entry's `runtime_data` attribute. Domain-wide state
+(session dicts, store, unsub lists) lives in `FoxESSControlData` at
+`hass.data[DOMAIN]`. A `_dd()` helper in `__init__.py` provides typed
+access with legacy dict conversion fallback.
+**Context**: HA 2024.x+ introduced `entry.runtime_data` as the
+standard pattern for per-entry typed data, replacing untyped
+`hass.data[DOMAIN][entry_id]` dicts.
+**Rationale**: Typed access catches key errors at lint time, provides
+IDE autocomplete, and aligns with HA's direction. The bridge layer
+(`__getitem__`, `__contains__`, `get`) on `FoxESSControlData`
+preserves backward compatibility during incremental migration.
+**Alternatives considered**:
+- Big-bang migration (remove all dict access at once): rejected
+  because the integration has ~30 dict access sites; incremental is
+  safer
+- No bridge layer: rejected because test code still uses dict-style
+  access patterns during transition
+**Traces**: C-024 (safe state — typed access prevents silent KeyError
+on missing entries);
+`tests/test_services.py::test_returns_inverter`,
+`tests/test_services.py::test_raises_when_no_entries`
+
+### D-032: Session recovery robustness (restart persistence)
+**Decision**: Persist full session state (including cached adapter
+schedule groups) at `EVENT_HOMEASSISTANT_STOP`. On restart, validate
+recovered sessions against three criteria: (a) window not expired,
+(b) matching schedule group exists on inverter, (c) session date is
+today. Adapter group persistence avoids a slow API round-trip on
+recovery. Store writes coalesced to avoid I/O during active sessions.
+**Context**: Production incidents showed HA restarts during active
+sessions losing state and leaving inverter in forced mode with no
+management. After the C-027 horizon fix (beta.1), session recovery
+also needed to match on work mode only (not exact window end) because
+the horizon adjusts the schedule end dynamically.
+**Rationale**: Persisting at shutdown (not continuously) avoids I/O
+overhead. Three-layer validation prevents stale or corrupted sessions
+from crashing the integration. Work-mode-only matching accommodates
+dynamic schedule horizons.
+**Alternatives considered**:
+- Continuous state writes: rejected for I/O overhead during active
+  sessions
+- No recovery (require manual restart): rejected because unmanaged
+  forced-mode inverter violates C-024
+**Traces**: C-024, C-025;
+`tests/e2e/test_e2e.py::test_session_recovery_after_restart` (cloud
+and entity modes)
 
 ## Async Flow Diagrams
 

@@ -1,8 +1,8 @@
 ---
 project: FoxESS Control
 created: 2026-04-14
-last_updated: 2026-04-18
-last_reflection: 2026-04-17T15:00:00+10:00
+last_updated: 2026-04-19
+last_reflection: 2026-04-19T15:47:00+10:00
 ---
 # Knowledge Tree Meta
 
@@ -175,3 +175,52 @@ last_reflection: 2026-04-17T15:00:00+10:00
   skill's staleness detection (monitoring `conftest.py` and test
   infrastructure) would have flagged this if it checked for module-level
   state in simulator code.
+
+### 2026-04-19 — Automated reflection (149 interactions, 2026-04-17 to 2026-04-19)
+- **HA best practices audit**: 16 items implemented across 3 sessions,
+  covering HA 2024.x+ patterns: `ConfigEntryNotReady`, `PARALLEL_UPDATES`,
+  repair issues, unrecorded attributes, clean removal, diagnostics, entity
+  categories, display precision, enriched DeviceInfo, reauthentication, error
+  handling, `icons.json`, HA-managed aiohttp session, named `async_create_task`,
+  `serial_number` in DeviceInfo, `Platform` enum, and `entry.runtime_data`.
+  The `entry.runtime_data` migration introduced `FoxESSControlData` and
+  `FoxESSEntryData` typed dataclasses with a bridge layer for backward
+  compatibility. Architecture doc updated to reflect the new data flow.
+- **BMS battery temperature sensor**: User identified that the Open API's
+  `batTemperature` reports the inverter's sensor, not the BMS cell
+  temperature. Low BMS temps (e.g. 14.9°C) inhibit charge rate despite
+  the API reporting ~22°C. New sensor added via web portal scraping.
+  This is operationally critical context that pacing algorithms don't yet
+  account for. Memory saved in `project_bms_temperature.md`.
+- **CI workflow restructuring**: E2E tests moved under `tests/`, default
+  pytest now runs all tests (workflows opt out via `-m "not slow"`), release
+  workflow depends on E2E `results` job. Duplicate CI runs on develop+main
+  discussed — workflows now trigger only on develop; main uses branch
+  protection requiring status checks from the develop run.
+- **Session recovery E2E**: HA restart identified as an under-tested area.
+  E2E tests added for session recovery (adapter group persistence, store
+  flush on unload, overview sensor restore).
+- **Test counts updated**: 589 unit + 88 E2E = 677 total (was 587 + 74
+  = 661). Growth from E2E parametrisation (cloud/entity) and new
+  restart recovery tests.
+- **Knowledge tree updates applied**:
+  - `03-architecture.md`: Added `FoxESSControlData`/`FoxESSEntryData`
+    typed domain data section, updated data flow diagram.
+  - `06-tests.md`: Test counts updated to 589 + 88 = 677.
+- **Stale areas not yet updated** (recommend `/project-overview update`):
+  - `02-constraints.md`: No new C-NNN for HA best practices patterns
+    (e.g. "use `entry.runtime_data` for typed per-entry data", "surface
+    errors via HA Repairs panel"). These may warrant constraints if the
+    project mandates these patterns going forward.
+  - `04-design/`: No D-NNN for the runtime_data migration, HA session
+    management, or BMS temperature sensor. These are significant design
+    decisions that should be documented.
+  - `05-coverage.md`: Matrix stale — new tests and design decisions not
+    cross-referenced.
+- **Process observation**: The user emphasised running E2E tests after
+  each incremental change ("these failing tests would be much easier to
+  fix if you had checked e2e tests as each item was done"). This is
+  already captured in memory (`feedback_e2e_coverage.md`) but the
+  knowledge tree doesn't have a constraint for it. C-029 says "E2E for
+  HA-dependent behaviour" but doesn't capture the incremental testing
+  discipline.

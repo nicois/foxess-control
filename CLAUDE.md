@@ -24,6 +24,11 @@ pre-commit run --all-files                  # ruff + mypy
 - **C-019**: Discharge SoC unavailability aborts session after 3 checks (matching charge C-012)
 - **C-027**: Schedule end time set to safe horizon (SoC/rate/safety_factor), not full window
 
+## Process
+
+- **Bug fixes**: invoke `/regression-test` BEFORE writing any fix. The test must fail against the current code before the fix is applied.
+- **smart_battery/ edits**: ONLY edit the canonical root `smart_battery/`. Never edit the vendored copy under `custom_components/foxess_control/smart_battery/` directly — the pre-commit hook syncs it automatically.
+
 ## Architecture
 
 Two-layer design: brand-agnostic `smart_battery/` core (pure pacing algorithms,

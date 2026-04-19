@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 3
-last_verified: 2026-04-18
+last_verified: 2026-04-19
 traces_up: [02-constraints.md]
 traces_down: [04-design/]
 ---
@@ -92,8 +92,9 @@ FoxESS Cloud API (REST, 5-min polls)
 FoxESSDataCoordinator.data  <--- FoxESSRealtimeWS (WS, 5-sec pushes)
         |                          (merges via inject_realtime_data)
         v
-   hass.data["foxess_control"]
+   FoxESSControlData (hass.data["foxess_control"])
         |
+        +---> entry.runtime_data -> FoxESSEntryData (coordinator, inverter)
         +---> Sensors (read coordinator.data for display)
         +---> Smart Session Listeners (read SoC, load, PV for pacing)
                     |
@@ -124,6 +125,17 @@ ratios with EMA smoothing.
 Without taper awareness, time estimates are wrong, causing premature
 max-power bursts or sessions finishing early.
 **Implemented by**: `smart_battery/taper.py`.
+
+### Typed Domain Data (`domain_data.py`)
+**What**: `FoxESSControlData` (domain-level) and `FoxESSEntryData`
+(per-config-entry) dataclasses that replace the untyped
+`hass.data[DOMAIN]` dict.
+**Why**: HA 2024.x+ best practice. Typed `entry.runtime_data` gives
+IDE autocomplete, catches key typos at lint time, and enables
+`_dd()` helper for consistent typed access throughout `__init__.py`.
+A bridge layer (`__getitem__`, `__contains__`, `get`) preserves
+backward compatibility during incremental migration.
+**Implemented by**: `domain_data.py`, `smart_battery/domain_data.py`.
 
 ### DataUpdateCoordinator
 **What**: HA polling coordinator that fetches data on an interval and

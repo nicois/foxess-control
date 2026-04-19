@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: FoxESS Cloud API Integration
-last_verified: 2026-04-18
+last_verified: 2026-04-19
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -59,7 +59,47 @@ home unprotected during an outage.
 - Force-overwrite with warning: rejected because the consequence
   (no backup during outage) is too severe
 - Manage all modes: rejected as scope creep
-**Traces**: `tests/test_init.py::TestMergeWithExisting::test_rejects_schedule_with_backup_mode`
+**Traces**: C-018;
+`tests/test_init.py::TestMergeWithExisting::test_rejects_schedule_with_backup_mode`
+
+### D-033: BMS battery temperature via web portal API
+**Decision**: Expose the BMS min cell temperature as a separate sensor
+(`sensor.foxess_bms_battery_temperature`) by querying the web portal
+device detail endpoint (`/dew/v0/device/detail?category=battery`).
+The web session is eagerly initialised at setup so BMS temperature is
+available from the first coordinator poll.
+**Context**: The Open API's `batTemperature` reports the inverter's
+own temperature sensor, not the BMS cell temperature. Low BMS cell
+temperatures (e.g. 14.9°C in winter) inhibit charge rate — the BMS
+limits current to protect cell health — but this is invisible when
+only the inverter sensor (~22°C) is displayed.
+**Rationale**: The BMS temperature is operationally critical for
+understanding why charge rates are lower than expected. It's only
+available via the web portal, not the Open API.
+**Alternatives considered**:
+- Use the Open API `batTemperature` as an approximation: rejected
+  because the 7°C discrepancy observed in production makes it
+  misleading
+- Wait for Modbus BMS register: rejected because not all users have
+  Modbus hardware
+**Traces**: C-020 (operational transparency);
+`tests/test_client.py::test_get_battery_temperature`
+
+### D-034: HA-managed aiohttp session for web operations
+**Decision**: `FoxESSWebSession` accepts an optional
+`aiohttp.ClientSession` from HA's `async_get_clientsession()`.
+When provided, the session is shared with HA for proper SSL, proxy,
+and lifecycle management. Tracks `_owns_session` to avoid closing a
+shared session.
+**Context**: The web session was previously creating its own
+`aiohttp.ClientSession`, bypassing HA's SSL certificate handling,
+proxy configuration, and lifecycle tracking.
+**Rationale**: HA best practice — shared sessions respect system-wide
+configuration and are properly cleaned up on shutdown.
+**Alternatives considered**:
+- Always create own session: rejected because it bypasses HA's SSL
+  and proxy settings, causing failures in some environments
+**Traces**: C-024 (safe state — proper cleanup on unload)
 
 ## Key Behaviours
 

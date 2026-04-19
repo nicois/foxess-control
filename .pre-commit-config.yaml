@@ -10,6 +10,15 @@ repos:
       - id: check-added-large-files
       - id: debug-statements
 
+  - repo: local
+    hooks:
+      - id: sync-smart-battery
+        name: sync vendored smart_battery
+        language: system
+        entry: bash -c 'rsync -a --delete --exclude="__pycache__" smart_battery/ custom_components/foxess_control/smart_battery/ && git add custom_components/foxess_control/smart_battery/'
+        pass_filenames: false
+        files: ^smart_battery/
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.11.6
     hooks:

@@ -1,12 +1,12 @@
 ---
 project: FoxESS Control
 level: 6
-last_verified: 2026-04-18
+last_verified: 2026-04-19
 traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-587 unit tests + 74 E2E tests = 661 total.
+589 unit tests + 88 E2E tests = 677 total.
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
@@ -214,7 +214,7 @@ Key tests:
 
 ## E2E Tests (Containerised HA + Simulator + Playwright)
 
-**Source**: `tests/e2e/test_e2e.py` (32 tests), `tests/e2e/test_ui.py` (42 tests)
+**Source**: `tests/e2e/test_e2e.py` (46 tests), `tests/e2e/test_ui.py` (42 tests)
 **Infrastructure**: Podman HA container, FoxESS simulator, Playwright Chromium
 
 | Test | Verifies | Constraint |

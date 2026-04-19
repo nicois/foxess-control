@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 2
-last_verified: 2026-04-18
+last_verified: 2026-04-19
 traces_up: [01-vision.md]
 traces_down: [03-architecture.md, 04-design/]
 ---
@@ -30,7 +30,7 @@ the issue themselves. Opacity creates support burden and erodes trust.
 **Violation consequence**: Users cannot distinguish normal operation
 (e.g. deferred start waiting) from a fault, leading to unnecessary
 manual intervention or missed issues.
-**Traces**: D-021, D-027;
+**Traces**: D-021, D-027, D-030, D-033;
 C-022 (unreachable target surfaced), C-026 (error surfacing)
 
 ### C-021: Brand-agnostic code belongs in the common package
@@ -67,7 +67,7 @@ would self-resolve on the next tick.
 **Violation consequence**: Inverter stuck in forced charge
 (overcharging, wasted grid import) or forced discharge
 (over-discharge, grid import) with no active session monitoring it.
-**Traces**: C-012 (specific case);
+**Traces**: C-012 (specific case); D-025, D-026, D-031, D-032, D-034;
 `tests/test_services.py::TestCallbackExceptionSafety`,
 `tests/test_services.py::TestTransientApiErrorResilience`,
 `tests/test_services.py::TestStaleWorkModeAfterCleanupFailure`
