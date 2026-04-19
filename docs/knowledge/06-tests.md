@@ -6,7 +6,7 @@ traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-597 unit tests + 88 E2E tests = 685 total.
+598 unit + 88 E2E = 686 total.
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
@@ -111,7 +111,7 @@ simulator and Playwright browser automation.
 ## Session Management & Service Handlers
 
 **Constraints**: C-003, C-012, C-013, C-016, C-024, C-025
-**Source**: `tests/test_init.py`, `tests/test_services.py` (84 tests)
+**Source**: `tests/test_init.py`, `tests/test_services.py` (108 tests)
 
 | Test | Verifies | Constraint |
 |---|---|---|
@@ -120,7 +120,7 @@ simulator and Playwright browser automation.
 | `TestHandleSmartCharge::test_soc_unavailable_aborts_after_threshold` | SoC unavailable cancels charge | C-012 |
 | `TestHandleSmartCharge::test_soc_available_resets_unavailable_count` | Available SoC resets counter | C-012 |
 | `TestSessionPersistence::*` (3 tests) | Session survives restarts | C-003 |
-| `TestRecoverSessions::*` (10 tests) | Session recovery on startup | C-003 |
+| `TestRecoverSessions::*` (13 tests) | Session recovery on startup | C-003, C-024, C-027 |
 | `TestSocStabilityCounters::*` (4 tests) | Below-min confirmation counter | C-002 |
 | `TestCheckScheduleSafe::*` (7 tests) | Unmanaged mode rejection | C-018 |
 | `TestTransientApiErrorResilience::test_charge_survives_transient_api_error` | Single API error retried | C-024 |
@@ -153,7 +153,7 @@ simulator and Playwright browser automation.
 ## Sensor Display
 
 **Constraints**: --
-**Source**: `tests/test_sensor.py` (85 tests)
+**Source**: `tests/test_sensor.py` (86 tests)
 
 Key tests:
 - Override status formatting (charge/discharge/deferred/idle)
@@ -164,7 +164,7 @@ Key tests:
 ## Entity Mode (Modbus Interop)
 
 **Constraints**: --
-**Source**: `tests/test_entity_mode.py` (18 tests)
+**Source**: `tests/test_entity_mode.py` (21 tests)
 
 Key tests:
 - Work mode mapping (SelfUse/ForceCharge/ForceDischarge)
@@ -181,6 +181,21 @@ Key tests:
 - Web credential hashing on save
 - foxess_modbus entity auto-detection
 - Reconfigure flow for web credentials
+
+## BMS Temperature (Web Portal)
+
+**Constraints**: C-020
+**Source**: `tests/test_web_session.py` (7 tests)
+
+| Test | Verifies | Constraint |
+|---|---|---|
+| `TestBMSBatteryTemperature::test_temperature_via_generic_battery_info_endpoint` | Correct web portal endpoint used | C-020 |
+| `TestBMSBatteryTemperature::test_temperature_min_of_multiple_batteries` | Min across modules | C-020 |
+| `TestBMSBatteryTemperature::test_internal_device_id_cached` | Avoid repeated discovery | -- |
+| `TestBMSBatteryTemperature::test_temperature_none_when_no_batteries` | Graceful degradation | -- |
+| `TestBMSBatteryTemperature::test_temperature_none_when_batteries_have_no_temp` | Graceful degradation | -- |
+| `TestBMSBatteryTemperature::test_graceful_when_device_list_errors` | Graceful degradation | -- |
+| `TestBMSBatteryTemperature::test_temperature_none_when_device_not_found` | Graceful degradation | -- |
 
 ## API Client
 
@@ -235,11 +250,19 @@ Key tests:
 | `TestDataSource::test_ws_mode_persists_via_options_flow` | ws_mode saved in options | C-020 |
 | `TestDataSource::test_ws_linger_captures_post_discharge_data` | Linger captures post-session data after override removal | C-007, C-020 |
 | `TestFeedinPacing::test_feedin_power_adjusts_over_time` | Feed-in pacing E2E | C-001 |
+| `TestReloadRecovery::test_discharge_resumes_after_reload` | Discharge survives HA restart | C-024, C-025 |
+| `TestReloadRecovery::test_charge_resumes_after_reload` | Charge survives HA restart | C-024, C-025 |
+| `TestReloadRecovery::test_ws_reconnects_after_discharge_reload` | WS reconnects after restart | C-024 |
+| `TestReloadRecovery::test_ws_reconnects_after_charge_reload` | WS reconnects after restart | C-024 |
+| `TestReloadRecovery::test_idle_after_reload_with_no_session` | Clean state after no-session restart | C-025 |
+| `TestReloadRecovery::test_entity_mode_discharge_resumes_after_reload` | Entity mode restart recovery | C-024 |
+| `TestReloadRecovery::test_session_clears_after_window_expires_during_reload` | Expired session cleaned on restart | C-025 |
 | `TestOverviewCard::test_card_renders` | Overview card in shadow DOM | -- |
 | `TestOverviewCard::test_shows_soc` | SoC displayed on card | -- |
 | `TestOverviewCard::test_house_load_never_greyed` | House node active at low load | C-020 |
 | `TestOverviewCard::test_data_source_badge_matches_mode[api/ws/entity]` | Badge reflects active data path + staleness suffix | C-020 |
 | `TestOverviewCard::test_pv_values_consistent_with_solar_total[api/ws/entity]` | PV1+PV2 ≈ total solar | C-020 |
+| `TestOverviewCard::test_stale_badge_shown_for_old_api_data[api/ws/entity]` | Staleness indicator on old data | C-020 |
 | `TestControlCard::test_card_renders` | Control card in shadow DOM | -- |
 | `TestControlCard::test_soc_displayed` | SoC percentage in header | -- |
 | `TestControlCard::test_progress_hidden_when_idle` | No progress section when idle | C-020 |
@@ -250,7 +273,7 @@ Key tests:
 
 Tests are parametrized across `[cloud, entity]` connection modes and
 `[api, ws, entity]` data sources. The `ws_refuse` simulator fault blocks
-WS connections for API-only mode. Total E2E count is 74 (32 + 42).
+WS connections for API-only mode. Total E2E count is 88 (46 + 42).
 
 ## Test Quality Rules
 
@@ -268,7 +291,7 @@ because broad catches there are intentional graceful degradation.
 
 ## Unmapped Tests
 
-Tests not yet traced to a specific constraint. ~80+ tests across multiple
+Tests not yet traced to a specific constraint. ~140 tests across multiple
 files verify operational correctness, display logic, and setup plumbing.
 
 | Test | Appears to verify |
@@ -278,13 +301,19 @@ files verify operational correctness, display logic, and setup plumbing.
 | `test_sensor.py::TestFoxESSPolledSensor` (5 tests) | Sensor plumbing |
 | `test_sensor.py::TestFoxESSWorkModeSensor` (5 tests) | Work mode sensor |
 | `test_sensor.py` display tests (~25 tests) | Charge/discharge remaining, power, window formatting |
-| `test_inverter.py` (11 tests) | Inverter API interactions |
-| `test_entity_mode.py` (18 tests) | Entity-mode interop |
+| `test_inverter.py` (10 tests) | Inverter API interactions |
+| `test_entity_mode.py` (21 tests) | Entity-mode interop |
 | `test_services.py::TestHandleClearOverrides` (9 tests) | Override clearing |
+| `test_services.py::TestHandleForceDischarge` (8 tests) | Force discharge service |
+| `test_services.py::TestHandleForceCharge` (7 tests) | Force charge service |
+| `test_services.py::TestSmartChargeCoordinatorFallback` (2 tests) | Coordinator SoC fallback |
+| `test_services.py::TestRemainingZeroCancels` (1 test) | Expired window cleanup |
+| `test_services.py::TestSetupEntry` (3 tests) | Service registration lifecycle |
+| `test_services.py::TestUnloadEntry` (2 tests) | Unload cleanup |
+| `test_services.py::TestGetMinSocOnGrid` (2 tests) | MinSocOnGrid config |
 | `test_services.py::TestHandleFeedin` (2 tests) | Feed-in service |
-| `test_services.py::TestHandleForceCharge` (3 tests) | Force charge service |
-| `test_services.py::TestHandleForceDischarge` (4 tests) | Force discharge service |
-| `test_services.py::TestHandleSmartDischarge` (11 tests) | Smart discharge lifecycle |
+| `test_services.py::TestFeedinBaselineDeferred` (1 test) | Feed-in baseline capture timing |
+| `test_services.py::TestHandleSmartDischarge` (14 tests) | Smart discharge lifecycle |
 | `test_services.py::TestFeedinEnergyLimit` (6 tests) | Feed-in energy tracking |
 | `test_init.py::TestRemoveModeFromSchedule` (7 tests) | Schedule mode removal |
 | `test_init.py::TestGetNetConsumption` (6 tests) | Consumption calculation |

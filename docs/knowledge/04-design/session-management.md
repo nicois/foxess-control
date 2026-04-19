@@ -255,22 +255,6 @@ dynamic schedule horizons.
 `tests/e2e/test_e2e.py::test_session_recovery_after_restart` (cloud
 and entity modes)
 
-### D-034: HA-managed aiohttp session for web operations
-**Decision**: `FoxESSWebSession` accepts an optional
-`aiohttp.ClientSession` from HA's `async_get_clientsession()`.
-When provided, the session is shared with HA for proper SSL, proxy,
-and lifecycle management. Tracks `_owns_session` to avoid closing a
-shared session.
-**Context**: The web session was previously creating its own
-`aiohttp.ClientSession`, bypassing HA's SSL certificate handling,
-proxy configuration, and lifecycle tracking.
-**Rationale**: HA best practice — shared sessions respect system-wide
-configuration and are properly cleaned up on shutdown.
-**Alternatives considered**:
-- Always create own session: rejected because it bypasses HA's SSL
-  and proxy settings, causing failures in some environments
-**Traces**: C-024 (safe state — proper cleanup on unload)
-
 ## Async Flow Diagrams
 
 These diagrams trace the concurrent async operations during the
