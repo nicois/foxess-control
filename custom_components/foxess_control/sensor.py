@@ -758,6 +758,38 @@ class DebugLogSensor(SensorEntity):
         return {"entries": list(self._buffer)}
 
 
+class InfoLogSensor(SensorEntity):
+    """Sensor exposing recent INFO+ log entries as attributes.
+
+    Same rolling buffer as DebugLogSensor but captures only INFO and
+    above, so operational messages (session events, BMS fetches, mode
+    changes) are retained much longer than in the DEBUG buffer.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:information-outline"
+    _attr_entity_registry_enabled_default = True
+    _unrecorded_attributes = frozenset({"entries"})
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        buffer: collections.deque[dict[str, Any]],
+    ) -> None:
+        self._buffer = buffer
+        self._attr_unique_id = f"{entry.entry_id}_info_log"
+        self._attr_translation_key = "info_log"
+        self._attr_device_info = _device_info(entry)
+
+    @property
+    def native_value(self) -> int:
+        return len(self._buffer)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"entries": list(self._buffer)}
+
+
 class _InitDebugLogHandler(logging.Handler):
     """Logging handler that captures the first N records, then stops."""
 
@@ -843,6 +875,16 @@ def setup_debug_log(
     logger.addHandler(handler)
     sensors.append(DebugLogSensor(entry, buf))
     handlers.append(handler)
+
+    info_buf: collections.deque[dict[str, Any]] = collections.deque(
+        maxlen=_DEBUG_LOG_BUFFER_SIZE
+    )
+    info_handler = _DebugLogHandler(info_buf, original_level=original_level)
+    info_handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+    info_handler.setLevel(logging.INFO)
+    logger.addHandler(info_handler)
+    sensors.append(InfoLogSensor(entry, info_buf))
+    handlers.append(info_handler)
 
     init_buf: list[dict[str, Any]] = []
     init_handler = _InitDebugLogHandler(

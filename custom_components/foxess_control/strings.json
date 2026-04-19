@@ -31,6 +31,8 @@
       "eps_power": { "name": "EPS Power" },
       "work_mode": { "name": "Work Mode" },
       "debug_log": { "name": "Debug Log" },
+      "info_log": { "name": "Info Log" },
+      "init_debug_log": { "name": "Init Debug Log" },
       "override_status": { "name": "Status" },
       "smart_operations": {
         "name": "Smart Operations",

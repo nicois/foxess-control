@@ -21,6 +21,7 @@ from custom_components.foxess_control.sensor import (
     DischargeWindowSensor,
     FoxESSPolledSensor,
     FoxESSWorkModeSensor,
+    InfoLogSensor,
     InitDebugLogSensor,
     InverterOverrideStatusSensor,
     SmartOperationsOverviewSensor,
@@ -1209,7 +1210,7 @@ class TestDebugLog:
         sensors, handlers = result
         assert any(isinstance(s, DebugLogSensor) for s in sensors)
         assert any(isinstance(s, InitDebugLogSensor) for s in sensors)
-        assert len(handlers) == 2
+        assert len(handlers) == 3
 
     def test_handler_captures_log_messages(self) -> None:
         import logging
@@ -1228,6 +1229,34 @@ class TestDebugLog:
             entries = sensor.extra_state_attributes["entries"]
             assert any("test message 42" in e["msg"] for e in entries)
             assert entries[-1]["level"] == "INFO"
+        finally:
+            for h in handlers:
+                logger.removeHandler(h)
+
+    def test_info_log_captures_only_info_and_above(self) -> None:
+        import logging
+
+        hass = MagicMock()
+        state = MagicMock()
+        state.state = "on"
+        hass.states.get.return_value = state
+        sensors, handlers = setup_debug_log(hass, _make_entry())  # type: ignore[misc]
+        info_sensor = next(s for s in sensors if isinstance(s, InfoLogSensor))
+        debug_sensor = next(s for s in sensors if isinstance(s, DebugLogSensor))
+
+        logger = logging.getLogger("custom_components.foxess_control")
+        try:
+            logger.debug("debug only")
+            logger.info("info msg")
+            logger.warning("warn msg")
+
+            info_entries = info_sensor.extra_state_attributes["entries"]
+            debug_entries = debug_sensor.extra_state_attributes["entries"]
+
+            assert not any("debug only" in e["msg"] for e in info_entries)
+            assert any("info msg" in e["msg"] for e in info_entries)
+            assert any("warn msg" in e["msg"] for e in info_entries)
+            assert any("debug only" in e["msg"] for e in debug_entries)
         finally:
             for h in handlers:
                 logger.removeHandler(h)
@@ -1297,9 +1326,11 @@ class TestDebugLog:
 
         await async_setup_entry(hass, entry, mock_add)  # type: ignore[arg-type]
 
-        # 39 base + 2 debug log sensors = 41
-        assert len(added) == 41
+        # 39 base + 3 log sensors = 42
+        assert len(added) == 42
         debug_sensors = [e for e in added if isinstance(e, DebugLogSensor)]
         assert len(debug_sensors) == 1
+        info_sensors = [e for e in added if isinstance(e, InfoLogSensor)]
+        assert len(info_sensors) == 1
         init_sensors = [e for e in added if isinstance(e, InitDebugLogSensor)]
         assert len(init_sensors) == 1
