@@ -918,10 +918,12 @@ class TestEntityMode:
 
         ha_e2e.set_input_number("input_number.foxess_soc", 50.0)
 
+        # Charge ticks every 5 min — need enough time for the tick
+        # to see SoC >= target and complete the session.
         event_stream.wait_for_state(
             "sensor.foxess_smart_operations",
             "idle",
-            timeout_s=120,
+            timeout_s=360,
             rest_client=ha_e2e,
         )
 
@@ -962,15 +964,12 @@ class TestEntityMode:
 
         ha_e2e.set_input_number("input_number.foxess_soc", 30.0)
 
-        deadline = time.monotonic() + 180
-        suspended = False
-        while time.monotonic() < deadline:
-            attrs = ha_e2e.get_attributes("sensor.foxess_smart_operations")
-            if attrs.get("suspended") is True:
-                suspended = True
-                break
-            time.sleep(2)
-        assert suspended, "Discharge should suspend at min SoC"
+        state = ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharge_suspended",
+            timeout_s=180,
+        )
+        assert state == "discharge_suspended"
 
 
 # ---------------------------------------------------------------------------
