@@ -188,6 +188,22 @@ async def handle_login(request: web.Request) -> web.Response:
 
 
 # ---------------------------------------------------------------------------
+# Web Portal — /dew/v0/
+# ---------------------------------------------------------------------------
+
+
+async def handle_web_device_detail(request: web.Request) -> web.Response:
+    model = _model(request)
+    return _api_response(
+        {
+            "battery": {
+                "temperature": {"value": model.battery_temperature, "unit": "℃"},
+            },
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
 # WebSocket — /dew/v0/wsmaitian
 # ---------------------------------------------------------------------------
 
@@ -373,6 +389,9 @@ def create_app() -> web.Application:
 
     # Web portal auth
     app.router.add_post("/basic/v0/user/login", handle_login)
+
+    # Web portal data
+    app.router.add_get("/dew/v0/device/detail", handle_web_device_detail)
 
     # WebSocket
     app.router.add_get("/dew/v0/wsmaitian", handle_ws)

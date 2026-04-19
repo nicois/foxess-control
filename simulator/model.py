@@ -80,9 +80,12 @@ class InverterModel:
     # Identity
     device_sn: str = "SIM0001"
     plant_id: str = "sim-plant-001"
+    battery_id: str = "sim-battery-id-001"
+    battery_sn: str = "SIM0001BAT001"
 
     # Battery
     soc: float = 50.0
+    battery_temperature: float = 25.0
     battery_capacity_kwh: float = 10.0
     max_power_w: int = 10500
 
@@ -370,6 +373,10 @@ class InverterModel:
                         "soc": int(self.soc),
                         "charge": "1" if is_charging else "0",
                         "power": {"value": bat_val, "unit": self.ws_unit},
+                        "batteryId": self.battery_id,
+                        "multipleBatterySoc": [
+                            {"batSn": self.battery_sn, "soc": int(self.soc)},
+                        ],
                     },
                     "solar": {
                         "power": {"value": solar_val, "unit": self.ws_unit},

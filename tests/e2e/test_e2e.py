@@ -1221,6 +1221,50 @@ class TestReloadRecovery:
         )
         assert state == "idle"
 
+    def test_bms_temperature_recovers_after_reload(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+        event_stream: HAEventStream,
+    ) -> None:
+        """BMS battery temperature sensor recovers after reload.
+
+        Requires cloud mode: the simulator serves the WS compound ID
+        (for discovery) and /dew/v0/device/detail (for temperature).
+        """
+        if connection_mode != "cloud":
+            pytest.skip("BMS temperature requires cloud mode (web session)")
+        assert foxess_sim is not None
+        foxess_sim.set(soc=50, battery_temperature=32.5)
+
+        ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_bms_battery_temperature",
+            "ge",
+            20.0,
+            timeout_s=120,
+        )
+
+        temp_before = float(ha_e2e.get_state("sensor.foxess_bms_battery_temperature"))
+        assert 25.0 <= temp_before <= 40.0, (
+            f"Expected temperature near 32.5°C, got {temp_before}"
+        )
+
+        foxess_sim.set(battery_temperature=28.0)
+        ha_e2e.reload_integration()
+
+        ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_bms_battery_temperature",
+            "ge",
+            20.0,
+            timeout_s=120,
+        )
+
+        temp_after = float(ha_e2e.get_state("sensor.foxess_bms_battery_temperature"))
+        assert 20.0 <= temp_after <= 35.0, (
+            f"Expected temperature near 28.0°C after reload, got {temp_after}"
+        )
+
     def test_entity_mode_discharge_resumes_after_reload(
         self,
         ha_e2e: HAClient,
