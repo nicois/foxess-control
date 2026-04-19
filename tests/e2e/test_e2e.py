@@ -918,26 +918,30 @@ class TestEntityMode:
 
         ha_e2e.set_input_number("input_number.foxess_soc", 50.0)
 
-        # Charge ticks every 5 min — need enough time for the tick
-        # to see SoC >= target and complete the session.
+        # Charge ticks every 5 min (300s).  Worst case: SoC update lands
+        # just after a tick, so we need almost two full intervals.
         event_stream.wait_for_state(
             "sensor.foxess_smart_operations",
             "idle",
-            timeout_s=360,
+            timeout_s=660,
             rest_client=ha_e2e,
         )
 
         mode = ha_e2e.get_state("input_select.foxess_work_mode")
         assert mode == "Self Use"
 
-    def test_entity_mode_discharge_suspends_at_min_soc(
+    def test_entity_mode_discharge_ends_at_min_soc(
         self,
         ha_e2e: HAClient,
         foxess_sim: SimulatorHandle | None,
         connection_mode: str,
         event_stream: HAEventStream,
     ) -> None:
-        """Entity-mode discharge suspends when SoC drops to min_soc."""
+        """Entity-mode discharge ends session when SoC reaches min_soc.
+
+        When SoC drops to min_soc the discharge listener confirms
+        over two ticks then removes the override → session ends (idle).
+        """
         if connection_mode != "entity":
             pytest.skip("entity-mode only")
         set_inverter_state(
@@ -964,12 +968,16 @@ class TestEntityMode:
 
         ha_e2e.set_input_number("input_number.foxess_soc", 30.0)
 
-        state = ha_e2e.wait_for_state(
+        # SoC at min_soc ends the session after two confirmation ticks
+        # (each 60s).  Session transitions to idle, not suspended.
+        ha_e2e.wait_for_state(
             "sensor.foxess_smart_operations",
-            "discharge_suspended",
+            "idle",
             timeout_s=180,
         )
-        assert state == "discharge_suspended"
+
+        mode = ha_e2e.get_state("input_select.foxess_work_mode")
+        assert mode == "Self Use"
 
 
 # ---------------------------------------------------------------------------
@@ -1278,9 +1286,12 @@ class TestFaultRecovery:
 
         foxess_sim.fault("api_down")
 
-        # Discharge ticks every 60s — after 3 consecutive errors (~3 min)
-        # the circuit breaker opens. Poll for the attribute.
-        deadline = time.monotonic() + 300
+        # Discharge ticks every 60s — after 3 consecutive errors the
+        # circuit breaker opens.  The FoxESS client retries 503 errors
+        # internally (TRANSIENT_RETRIES=3 with exponential backoff),
+        # so each failed tick may take ~30-45s of retry time on top of
+        # the 60s interval.  Budget 600s to cover worst case.
+        deadline = time.monotonic() + 600
         breaker_active = False
         while time.monotonic() < deadline:
             attrs = ha_e2e.get_attributes("sensor.foxess_smart_operations")
