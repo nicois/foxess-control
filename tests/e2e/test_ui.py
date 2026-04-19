@@ -19,7 +19,7 @@ from .ha_client import FATAL_FOR_ACTIVE
 from .selectors import ControlCard, OverviewCard
 
 if TYPE_CHECKING:
-    from playwright.sync_api import Page
+    from playwright.sync_api import Locator, Page
 
     from .conftest import SimulatorHandle
     from .ha_client import HAClient
@@ -28,6 +28,46 @@ pytestmark = pytest.mark.slow
 
 _WORKER = os.environ.get("PYTEST_XDIST_WORKER", "main")
 SCREENSHOT_DIR = Path(__file__).parent / "screenshots" / _WORKER
+
+
+def _robust_reload(page: Page, settle_ms: int = 1000) -> None:
+    """Reload the page without the ``net::ERR_ABORTED`` race.
+
+    ``page.reload()`` can throw when a previous navigation or frame
+    detach is still in flight.  Using ``page.goto(page.url, ...)``
+    is safer because it starts a *fresh* navigation and Playwright
+    waits for the load event rather than racing against an existing
+    one.  We also wait for ``networkidle`` so HA's WebSocket
+    connection is re-established before tests interact with the DOM.
+    """
+    from playwright.sync_api import Error as PlaywrightError
+
+    url = page.url
+    try:
+        page.goto(url, wait_until="networkidle", timeout=30000)
+    except PlaywrightError:
+        # Retry once — the first attempt can fail if a prior
+        # navigation was still tearing down.
+        page.goto(url, wait_until="networkidle", timeout=30000)
+    if settle_ms > 0:
+        page.wait_for_timeout(settle_ms)
+
+
+def _wait_for_card_text(
+    page: Page,
+    locator: Locator,
+    predicate: str,
+    *,
+    timeout: int = 15000,
+) -> str:
+    """Wait until *locator* has text matching *predicate* (substring).
+
+    Returns the matched text content.  Raises on timeout.
+    """
+    from playwright.sync_api import expect
+
+    expect(locator.first).to_contain_text(predicate, timeout=timeout)
+    return locator.first.text_content() or ""
 
 
 def _find_card(page: Page, tag: str, timeout: int = 30000) -> bool:
@@ -110,13 +150,11 @@ class TestOverviewCard:
     ) -> None:
         """Battery SoC is displayed."""
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=75)
-        page.reload()
-        page.wait_for_load_state("networkidle")
-        # Wait for card to re-render with updated data
-        page.wait_for_timeout(3000)
+        _robust_reload(page)
         soc = page.locator(OverviewCard.BATTERY_SOC)
         if soc.count() > 0:
-            text = soc.text_content() or ""
+            _wait_for_card_text(page, soc, "75")
+            text = soc.first.text_content() or ""
             assert "75" in text or "%" in text
 
     def test_house_load_never_greyed(
@@ -128,9 +166,7 @@ class TestOverviewCard:
     ) -> None:
         """House node should not be greyed out even at very low load."""
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, load_kw=0.003)
-        page.reload()
-        page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(3000)
+        _robust_reload(page, settle_ms=2000)
         house = page.locator(OverviewCard.HOUSE_NODE)
         if house.count() > 0:
             classes = house.get_attribute("class") or ""
@@ -169,9 +205,7 @@ class TestOverviewCard:
             data_source,
             timeout_s=90,
         )
-        page.reload()
-        page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(2000)
+        _robust_reload(page)
 
         badge_text = page.evaluate(
             """() => {
@@ -222,12 +256,10 @@ class TestOverviewCard:
             "api",
             timeout_s=60,
         )
-        page.reload()
-        page.wait_for_load_state("networkidle")
+        _robust_reload(page)
+        # Wait 32s for API data to become stale (>10s age threshold)
         page.wait_for_timeout(32000)
-        page.reload()
-        page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(2000)
+        _robust_reload(page)
 
         badge_info = page.evaluate(
             """() => {
@@ -289,9 +321,7 @@ class TestOverviewCard:
             timeout_s=120,
             fatal_states=FATAL_FOR_ACTIVE,
         )
-        page.reload()
-        page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(5000)
+        _robust_reload(page, settle_ms=3000)
 
         # Extract solar node text from deep shadow DOM
         solar_texts = page.evaluate(
@@ -384,9 +414,7 @@ class TestControlCard:
             timeout_s=120,
             fatal_states=FATAL_FOR_ACTIVE,
         )
-        page.reload()
-        page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(5000)
+        _robust_reload(page, settle_ms=3000)
 
         SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(SCREENSHOT_DIR / "discharge-progress.png"))
@@ -481,9 +509,7 @@ class TestControlCard:
         )
 
         # Verify the marker renders on the card
-        page.reload()
-        page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(2000)
+        _robust_reload(page)
 
         has_marker = page.evaluate(
             """() => {
@@ -533,9 +559,7 @@ class TestScreenshots:
         set_inverter_state(
             connection_mode, foxess_sim, ha_e2e, soc=60, solar_kw=2.0, load_kw=0.5
         )
-        page.reload()
-        page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(3000)
+        _robust_reload(page, settle_ms=2000)
         SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(SCREENSHOT_DIR / "idle.png"))
 
@@ -562,8 +586,6 @@ class TestScreenshots:
             timeout_s=120,
             fatal_states=FATAL_FOR_ACTIVE,
         )
-        page.reload()
-        page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(3000)
+        _robust_reload(page, settle_ms=2000)
         SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(SCREENSHOT_DIR / "discharging.png"))
