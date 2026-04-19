@@ -522,7 +522,7 @@ class FoxESSOverviewCard extends HTMLElement {
       }
       .data-source.stale {
         background: rgba(var(--rgb-warning-color, 255, 152, 0), 0.15);
-        color: var(--warning-color, #ff9800);
+        color: var(--primary-text-color);
       }
 
       .flow-grid {
