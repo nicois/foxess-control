@@ -87,6 +87,20 @@ def _run_server(
         loop.close()
 
 
+@pytest.fixture(autouse=True)
+def _mock_issue_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prevent unit tests from hitting the real HA issue registry."""
+    from unittest.mock import MagicMock
+
+    noop = MagicMock()
+    for mod in (
+        "smart_battery.listeners",
+        "custom_components.foxess_control.smart_battery.listeners",
+    ):
+        monkeypatch.setattr(f"{mod}._create_session_issue", noop, raising=False)
+        monkeypatch.setattr(f"{mod}._clear_session_issue", noop, raising=False)
+
+
 @pytest.fixture
 def foxess_sim() -> Generator[SimulatorHandle, None, None]:
     """Start a FoxESS simulator in a background thread.

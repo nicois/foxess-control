@@ -14,7 +14,7 @@ pre-commit run --all-files                  # ruff + mypy
 - **C-001**: Discharge power floored at peak_consumption x 1.5 to prevent grid import
 - **C-002**: Discharge suspends at or below min SoC
 - **C-017**: End-of-discharge guard: suspend when energy can't sustain safety floor for 10 min
-- **C-024**: Safe state on failure: 3 consecutive adapter errors abort session → self-use
+- **C-024**: Safe state on failure: 3 consecutive adapter errors open circuit breaker (hold position). 5 more ticks without recovery → abort session → self-use
 - **C-025**: Session boundary cleanliness: all overrides removed before new session starts
 - **C-027**: Schedule end time set to safe horizon (SoC/rate/safety_factor), not full window
 

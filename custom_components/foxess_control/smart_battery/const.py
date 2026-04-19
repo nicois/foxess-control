@@ -58,4 +58,9 @@ MAX_SOC_UNAVAILABLE_COUNT = 3
 # gives ~15 min of tolerance; with 1-min discharge ticks, ~3 min.
 MAX_CONSECUTIVE_ADAPTER_ERRORS = 3
 
+# After the circuit breaker opens (MAX_CONSECUTIVE_ADAPTER_ERRORS reached),
+# hold position for this many additional ticks before aborting.  With 5-min
+# charge ticks this gives ~25 min; with 1-min discharge ticks, ~5 min.
+CIRCUIT_BREAKER_TICKS_BEFORE_ABORT = 5
+
 STORAGE_VERSION = 1

@@ -579,7 +579,7 @@ class OverrideStatusSensor(SensorEntity):
                 if is_effectively_charging(self.hass, self._domain, cs)
                 else "deferred"
             )
-            return {
+            attrs: dict[str, Any] = {
                 "mode": "smart_charge",
                 "phase": phase,
                 "power_w": cs.get("last_power_w", 0),
@@ -587,6 +587,10 @@ class OverrideStatusSensor(SensorEntity):
                 "target_soc": cs.get("target_soc"),
                 "end_time": cs["end"].isoformat(),
             }
+            if cs.get("circuit_open"):
+                attrs["circuit_breaker_active"] = True
+                attrs["circuit_breaker_since"] = cs.get("circuit_open_since")
+            return attrs
 
         ds = get_discharge_state(self.hass, self._domain)
         if ds is not None:
@@ -596,7 +600,7 @@ class OverrideStatusSensor(SensorEntity):
             peak = ds.get("consumption_peak_kw", 0.0)
             from .algorithms import safety_floor_w
 
-            return {
+            ds_attrs: dict[str, Any] = {
                 "mode": "smart_discharge",
                 "phase": phase,
                 "power_w": ds.get("last_power_w", 0),
@@ -605,6 +609,10 @@ class OverrideStatusSensor(SensorEntity):
                 "consumption_peak_kw": round(peak, 2),
                 "safety_floor_w": safety_floor_w(peak),
             }
+            if ds.get("circuit_open"):
+                ds_attrs["circuit_breaker_active"] = True
+                ds_attrs["circuit_breaker_since"] = ds.get("circuit_open_since")
+            return ds_attrs
 
         return None
 

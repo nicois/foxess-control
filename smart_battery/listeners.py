@@ -28,6 +28,7 @@ from .algorithms import (
     should_suspend_discharge,
 )
 from .const import (
+    CIRCUIT_BREAKER_TICKS_BEFORE_ABORT,
     DEFAULT_MIN_POWER_CHANGE,
     MAX_CONSECUTIVE_ADAPTER_ERRORS,
     MAX_SOC_UNAVAILABLE_COUNT,
@@ -317,9 +318,51 @@ def setup_smart_charge_listeners(
         if cur_state is None or cur_state.get("session_id") != my_session_id:
             return
 
+        if cur_state.get("circuit_open"):
+            ticks = cur_state.get("circuit_open_ticks", 0) + 1
+            cur_state["circuit_open_ticks"] = ticks
+            if ticks >= CIRCUIT_BREAKER_TICKS_BEFORE_ABORT:
+                try:
+                    _soc = _get_current_soc(hass, domain)
+                except Exception:
+                    _soc = None
+                _LOGGER.error(
+                    "Smart charge: circuit breaker open for %d ticks, "
+                    "aborting session (SoC=%s)",
+                    ticks,
+                    _soc,
+                )
+                _record_error(
+                    hass,
+                    domain,
+                    "Charge session aborted: adapter unreachable",
+                )
+                try:
+                    charging_started = cur_state.get("charging_started", False)
+                    if _is_my_session():
+                        ws_stop = cancel_smart_charge(hass, domain)
+                        if charging_started:
+                            await _remove_charge_override()
+                        if ws_stop is not None:
+                            await ws_stop
+                except Exception:
+                    _LOGGER.exception("Smart charge: cleanup also failed")
+                return
+            _LOGGER.warning(
+                "Smart charge: circuit breaker open, holding position (tick %d/%d)",
+                ticks,
+                CIRCUIT_BREAKER_TICKS_BEFORE_ABORT,
+            )
+            return
+
         try:
             await _adjust_charge_power_inner(cur_state)
             cur_state["consecutive_error_count"] = 0
+            if cur_state.get("circuit_open"):
+                _LOGGER.info("Smart charge: adapter recovered, circuit breaker reset")
+                cur_state["circuit_open"] = False
+                cur_state["circuit_open_ticks"] = 0
+                cur_state.pop("circuit_open_since", None)
         except Exception:
             count = cur_state.get("consecutive_error_count", 0) + 1
             cur_state["consecutive_error_count"] = count
@@ -331,28 +374,20 @@ def setup_smart_charge_listeners(
                     _exc_summary(),
                 )
                 return
-            try:
-                _soc = _get_current_soc(hass, domain)
-            except Exception:
-                _soc = None
-            _LOGGER.exception(
-                "Smart charge: %d consecutive errors, aborting session "
-                "(SoC=%s, charging_started=%s)",
+            cur_state["circuit_open"] = True
+            cur_state["circuit_open_ticks"] = 0
+            cur_state["circuit_open_since"] = dt_util.now().isoformat()
+            _LOGGER.warning(
+                "Smart charge: %d consecutive errors, circuit breaker open "
+                "(holding position for up to %d ticks)",
                 count,
-                _soc,
-                cur_state.get("charging_started", False),
+                CIRCUIT_BREAKER_TICKS_BEFORE_ABORT,
             )
-            _record_error(hass, domain, "Charge session aborted: repeated errors")
-            try:
-                charging_started = cur_state.get("charging_started", False)
-                if _is_my_session():
-                    ws_stop = cancel_smart_charge(hass, domain)
-                    if charging_started:
-                        await _remove_charge_override()
-                    if ws_stop is not None:
-                        await ws_stop
-            except Exception:
-                _LOGGER.exception("Smart charge: cleanup also failed")
+            _record_error(
+                hass,
+                domain,
+                "Charge: adapter errors, holding position (circuit breaker)",
+            )
 
     async def _adjust_charge_power_inner(
         cur_state: dict[str, Any],
@@ -636,9 +671,53 @@ def setup_smart_discharge_listeners(
         if cur_state is None or cur_state.get("session_id") != my_session_id:
             return
 
+        if cur_state.get("circuit_open"):
+            ticks = cur_state.get("circuit_open_ticks", 0) + 1
+            cur_state["circuit_open_ticks"] = ticks
+            if ticks >= CIRCUIT_BREAKER_TICKS_BEFORE_ABORT:
+                try:
+                    _soc = _get_current_soc(hass, domain)
+                except Exception:
+                    _soc = None
+                _LOGGER.error(
+                    "Smart discharge: circuit breaker open for %d ticks, "
+                    "aborting session (SoC=%s)",
+                    ticks,
+                    _soc,
+                )
+                _record_error(
+                    hass,
+                    domain,
+                    "Discharge session aborted: adapter unreachable",
+                )
+                try:
+                    discharging_started = cur_state.get("discharging_started", False)
+                    if _is_my_session():
+                        ws_stop = cancel_smart_discharge(hass, domain)
+                        if discharging_started:
+                            await _remove_discharge_override()
+                        if ws_stop is not None:
+                            await ws_stop
+                except Exception:
+                    _LOGGER.exception("Smart discharge: cleanup also failed")
+                return
+            _LOGGER.warning(
+                "Smart discharge: circuit breaker open, holding position (tick %d/%d)",
+                ticks,
+                CIRCUIT_BREAKER_TICKS_BEFORE_ABORT,
+            )
+            return
+
         try:
             await _check_discharge_soc_inner(cur_state)
             cur_state["consecutive_error_count"] = 0
+            if cur_state.get("circuit_open"):
+                _LOGGER.info(
+                    "Smart discharge: adapter recovered, circuit breaker reset"
+                )
+                cur_state["circuit_open"] = False
+                cur_state["circuit_open_ticks"] = 0
+                cur_state.pop("circuit_open_since", None)
         except Exception:
             count = cur_state.get("consecutive_error_count", 0) + 1
             cur_state["consecutive_error_count"] = count
@@ -650,29 +729,20 @@ def setup_smart_discharge_listeners(
                     _exc_summary(),
                 )
                 return
-            try:
-                _soc = _get_current_soc(hass, domain)
-            except Exception:
-                _soc = None
-            _LOGGER.exception(
-                "Smart discharge: %d consecutive errors, aborting session "
-                "(SoC=%s, discharging_started=%s, suspended=%s)",
+            cur_state["circuit_open"] = True
+            cur_state["circuit_open_ticks"] = 0
+            cur_state["circuit_open_since"] = dt_util.now().isoformat()
+            _LOGGER.warning(
+                "Smart discharge: %d consecutive errors, circuit breaker open "
+                "(holding position for up to %d ticks)",
                 count,
-                _soc,
-                cur_state.get("discharging_started", False),
-                cur_state.get("suspended", False),
+                CIRCUIT_BREAKER_TICKS_BEFORE_ABORT,
             )
-            _record_error(hass, domain, "Discharge session aborted: repeated errors")
-            try:
-                discharging_started = cur_state.get("discharging_started", False)
-                if _is_my_session():
-                    ws_stop = cancel_smart_discharge(hass, domain)
-                    if discharging_started:
-                        await _remove_discharge_override()
-                    if ws_stop is not None:
-                        await ws_stop
-            except Exception:
-                _LOGGER.exception("Smart discharge: cleanup also failed")
+            _record_error(
+                hass,
+                domain,
+                "Discharge: adapter errors, holding position (circuit breaker)",
+            )
 
     async def _check_discharge_soc_inner(
         cur_state: dict[str, Any],

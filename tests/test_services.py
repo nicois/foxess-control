@@ -2109,11 +2109,15 @@ class TestCallbackExceptionSafety:
         assert hass.data[DOMAIN].get("_smart_charge_state") is not None
 
         from custom_components.foxess_control.smart_battery.const import (
+            CIRCUIT_BREAKER_TICKS_BEFORE_ABORT,
             MAX_CONSECUTIVE_ADAPTER_ERRORS,
         )
 
-        # Fire enough errors to exceed the retry threshold
-        for i in range(MAX_CONSECUTIVE_ADAPTER_ERRORS):
+        # Fire errors: 3 to open circuit breaker + 5 to exhaust hold window
+        total_ticks = (
+            MAX_CONSECUTIVE_ADAPTER_ERRORS + CIRCUIT_BREAKER_TICKS_BEFORE_ABORT
+        )
+        for i in range(total_ticks):
             with (
                 patch(
                     "custom_components.foxess_control.smart_battery.listeners._get_current_soc",
@@ -2126,7 +2130,7 @@ class TestCallbackExceptionSafety:
             ):
                 await captured(datetime.datetime(2026, 4, 7, 2, 5 + i, 0))
 
-        # Session should be cancelled after repeated errors
+        # Session should be cancelled after circuit breaker exhausted
         assert hass.data[DOMAIN].get("_smart_charge_state") is None
 
     @pytest.mark.asyncio
@@ -2180,11 +2184,15 @@ class TestCallbackExceptionSafety:
         assert hass.data[DOMAIN].get("_smart_discharge_state") is not None
 
         from custom_components.foxess_control.smart_battery.const import (
+            CIRCUIT_BREAKER_TICKS_BEFORE_ABORT,
             MAX_CONSECUTIVE_ADAPTER_ERRORS,
         )
 
-        # Fire enough errors to exceed the retry threshold
-        for i in range(MAX_CONSECUTIVE_ADAPTER_ERRORS):
+        # Fire errors: 3 to open circuit breaker + 5 to exhaust hold window
+        total_ticks = (
+            MAX_CONSECUTIVE_ADAPTER_ERRORS + CIRCUIT_BREAKER_TICKS_BEFORE_ABORT
+        )
+        for i in range(total_ticks):
             with (
                 patch(
                     "custom_components.foxess_control.smart_battery.listeners._get_net_consumption",
@@ -2197,7 +2205,7 @@ class TestCallbackExceptionSafety:
             ):
                 await captured(datetime.datetime(2026, 4, 7, 17, 1 + i, 0))
 
-        # Session should be cancelled after repeated errors
+        # Session should be cancelled after circuit breaker exhausted
         assert hass.data[DOMAIN].get("_smart_discharge_state") is None
 
 
@@ -3389,12 +3397,16 @@ class TestHandleSmartCharge:
         }
 
         # At 05:50, deferred start has passed → tries to start charging.
-        # Conflict persists across retries, so session aborts after threshold.
+        # Conflict persists across retries → circuit breaker opens → abort.
         from custom_components.foxess_control.smart_battery.const import (
+            CIRCUIT_BREAKER_TICKS_BEFORE_ABORT,
             MAX_CONSECUTIVE_ADAPTER_ERRORS,
         )
 
-        for i in range(MAX_CONSECUTIVE_ADAPTER_ERRORS):
+        total_ticks = (
+            MAX_CONSECUTIVE_ADAPTER_ERRORS + CIRCUIT_BREAKER_TICKS_BEFORE_ABORT
+        )
+        for i in range(total_ticks):
             with patch(
                 "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 5, 50 + i, 0),
@@ -3403,7 +3415,7 @@ class TestHandleSmartCharge:
                     datetime.datetime(2026, 4, 7, 5, 50 + i, 0)
                 )
 
-        # Should abort — conflict persisted across retries
+        # Should abort — conflict persisted, circuit breaker exhausted
         assert hass.data[DOMAIN].get("_smart_charge_state") is None
         assert hass.data[DOMAIN]["_smart_charge_unsubs"] == []
         # Should NOT have set a schedule
@@ -5304,10 +5316,11 @@ class TestTransientApiErrorResilience:
 
     @pytest.mark.asyncio
     async def test_charge_aborts_after_repeated_errors(self) -> None:
-        """Persistent API errors (>= MAX_CONSECUTIVE_ADAPTER_ERRORS) must abort."""
+        """Persistent API errors open circuit breaker, then abort after hold window."""
         from custom_components.foxess_control import _register_services
         from custom_components.foxess_control.foxess.client import FoxESSApiError
         from custom_components.foxess_control.smart_battery.const import (
+            CIRCUIT_BREAKER_TICKS_BEFORE_ABORT,
             MAX_CONSECUTIVE_ADAPTER_ERRORS,
         )
 
@@ -5361,12 +5374,25 @@ class TestTransientApiErrorResilience:
         assert captured_callback is not None
         inv.set_schedule.side_effect = FoxESSApiError(41935, "Device offline")
 
+        # Phase 1: trigger errors to open circuit breaker
         for i in range(MAX_CONSECUTIVE_ADAPTER_ERRORS):
             with patch(
                 "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 3, i, 0),
             ):
                 await captured_callback(datetime.datetime(2026, 4, 7, 3, i, 0))
+
+        assert hass.data[DOMAIN].get("_smart_charge_state") is not None, (
+            "Session must survive — circuit breaker is open, not aborted"
+        )
+
+        # Phase 2: exhaust hold window → session aborts
+        for tick in range(CIRCUIT_BREAKER_TICKS_BEFORE_ABORT):
+            with patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 3, 10 + tick, 0),
+            ):
+                await captured_callback(datetime.datetime(2026, 4, 7, 3, 10 + tick, 0))
 
         assert hass.data[DOMAIN].get("_smart_charge_state") is None
 
@@ -5434,6 +5460,7 @@ class TestStaleWorkModeAfterCleanupFailure:
         """When override removal fails during abort, a retry must be pending."""
         from custom_components.foxess_control.foxess.client import FoxESSApiError
         from custom_components.foxess_control.smart_battery.const import (
+            CIRCUIT_BREAKER_TICKS_BEFORE_ABORT,
             MAX_CONSECUTIVE_ADAPTER_ERRORS,
         )
 
@@ -5494,8 +5521,11 @@ class TestStaleWorkModeAfterCleanupFailure:
         inv.set_schedule.side_effect = FoxESSApiError(41935, "Device offline")
         inv.self_use.side_effect = FoxESSApiError(41935, "Device offline")
 
-        # Fire enough errors to abort the session — cleanup also fails
-        for i in range(MAX_CONSECUTIVE_ADAPTER_ERRORS):
+        # Fire errors: 3 to open circuit breaker + 5 to exhaust hold → abort
+        total_ticks = (
+            MAX_CONSECUTIVE_ADAPTER_ERRORS + CIRCUIT_BREAKER_TICKS_BEFORE_ABORT
+        )
+        for i in range(total_ticks):
             with patch(
                 "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
                 return_value=datetime.datetime(2026, 4, 7, 3, i, 0),

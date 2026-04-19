@@ -54,16 +54,22 @@ in a session callback, API becoming unresponsive, or integration
 unload — the system must ensure that forced charge/discharge
 overrides do not persist long enough to cause serious inconvenience
 to the user. Transient errors (single API timeout, brief DNS outage)
-must be tolerated and retried on the next timer tick; only
-`MAX_CONSECUTIVE_ADAPTER_ERRORS` (3) consecutive failures trigger
-session abort.
+must be tolerated and retried on the next timer tick. After
+`MAX_CONSECUTIVE_ADAPTER_ERRORS` (3) consecutive failures, a circuit
+breaker opens: the session holds its current position (no adapter
+calls) for up to `CIRCUIT_BREAKER_TICKS_BEFORE_ABORT` (5) additional
+ticks. If the adapter recovers during this window the circuit breaker
+resets and normal operation resumes. If it does not recover, the
+session aborts to self-use.
 **Rationale**: Self-use is the only mode where the inverter manages
 itself safely without external control. A forced mode left active
 after the controlling session has failed will run unchecked —
 charging indefinitely or discharging past min SoC with no pacing.
 However, aborting on a single transient error (e.g. a few seconds of
 DNS instability) kills multi-hour sessions unnecessarily — the error
-would self-resolve on the next tick.
+would self-resolve on the next tick. The two-tier circuit breaker
+adds further tolerance: a brief API outage (< 25 min for charge,
+< 5 min for discharge) is survived without losing the session.
 **Violation consequence**: Inverter stuck in forced charge
 (overcharging, wasted grid import) or forced discharge
 (over-discharge, grid import) with no active session monitoring it.
