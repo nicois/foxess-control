@@ -35,6 +35,7 @@ pre-commit run --all-files                  # ruff + mypy
 
 - **Bug fixes**: invoke `/regression-test` BEFORE writing any fix. The test must fail against the current code before the fix is applied.
 - **smart_battery/ edits**: ONLY edit the canonical root `smart_battery/`. Never edit the vendored copy under `custom_components/foxess_control/smart_battery/` directly — the pre-commit hook syncs it automatically.
+- **Releases**: update `CHANGELOG.md` BEFORE bumping the version. The release workflow uses the changelog for release notes — an empty changelog means empty release notes.
 
 ## Architecture
 

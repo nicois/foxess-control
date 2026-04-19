@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.7-beta.10
+
+### Fixed
+- **BMS battery temperature always unknown**: previous fixes called wrong endpoints (`/dew/v0/device/detail`, `/dew/v0/plant/device/list`). Now uses the correct web portal endpoints reverse-engineered from the FoxESS JavaScript: `/generic/v0/device/list` for device ID discovery + `/generic/v0/device/battery/info` for temperature. Returns minimum temperature across all battery modules.
+
+### Improved
+- **E2E test infrastructure hardened**: replaced all hardcoded `time.sleep()` calls with deterministic waits (`wait_for_state`, `wait_for_numeric_state`, `wait_for_attribute`). Narrowed blind `except Exception` to specific types. Deleted duplicate `_reload_integration`. Added `_wait_for_integration_ready` helper.
+- **Playwright reload flakiness fixed**: replaced bare `page.reload()` with `_robust_reload()` (`page.goto` + `networkidle`) to avoid `net::ERR_ABORTED` races in CI.
+- **Ruff lint rules expanded**: enabled `S110` (try-except-pass), `S112` (try-except-continue), `BLE001` (blind except), `B904` (raise-without-from) for tests and simulator.
+- **Test quality constraints**: added CLAUDE.md rules banning hardcoded sleeps, blind exception swallowing, and bare `page.reload()` in tests.
+- **Pre-commit vendor sync hook**: automatically syncs `smart_battery/` to `custom_components/foxess_control/smart_battery/` on commit.
+
 ## 1.0.7-beta.7
 
 ### Added
