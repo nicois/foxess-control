@@ -17,9 +17,15 @@
 - **Fault recovery E2E tests**: 5 cloud-mode tests covering circuit breaker, transient error survival, WS fallback, and WS reconnection.
 - **Entity-mode E2E parity**: discharge-drains-battery, charge lifecycle, and min_soc suspension tests now run in entity mode.
 
+### Fixed
+- **Discharge circuit breaker unreliable**: the discharge pacing loop skipped `adapter.apply_mode()` when power was unchanged between ticks, so the circuit breaker could never detect failures during steady-state discharge. Now calls the adapter every tick, matching the charge path.
+- **Circuit breaker not visible on dashboard**: `circuit_breaker_active` was only surfaced on the override status sensor, not the primary smart_operations sensor that the dashboard uses.
+- **Entity-mode discharge test incorrect**: expected `discharge_suspended` but discharge at min_soc ends the session (→ idle), not suspends it.
+- **Entity-mode charge lifecycle timeout**: charge listener monitors until window expires after reaching target; test now uses a 5-min window to avoid timeout.
+
 ### Improved
 - **Migration guide rewritten**: recommends clean install over side-by-side migration, with guidance for cleaning up orphaned entities.
-- **Circuit breaker attributes surfaced**: `circuit_breaker_active` and `circuit_breaker_since` on the smart_operations sensor for UI observability.
+- **Circuit breaker attributes surfaced**: `circuit_breaker_active` and `circuit_breaker_since` on both the override status and smart_operations sensors for UI observability.
 - **Replay attributes surfaced**: `replay_pending`, `replay_type`, `replay_attempts` on the smart_operations sensor.
 
 ## 1.0.7-beta.13
