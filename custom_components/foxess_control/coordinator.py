@@ -148,12 +148,16 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         web_session = domain_data.get("_web_session")
         if web_session is None:
-            _LOGGER.debug("BMS temperature: no web session configured")
+            _LOGGER.warning(
+                "BMS temperature: no web session configured — check web "
+                "credentials in the integration options"
+            )
             return
         compound_id = domain_data.get("_battery_compound_id")
         if not compound_id:
-            _LOGGER.debug(
-                "BMS temperature: no battery compound ID yet (waiting for WS)"
+            _LOGGER.warning(
+                "BMS temperature: no battery compound ID yet — WebSocket "
+                "connection may not have delivered battery identity"
             )
             return
         try:

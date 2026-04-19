@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -716,4 +717,162 @@ class TestBmsTemperatureFetch:
             "period.  With the bug, inject_realtime_data → async_set_updated_data "
             "starves the REST poll so _fetch_bms_temperature never runs after "
             "the first refresh."
+        )
+
+
+class TestBmsTemperatureEarlyReturnLogging:
+    """Verify that _fetch_bms_temperature logs at WARNING level on early returns.
+
+    Production symptom: sensor.foxess_bms_battery_temperature shows 'unknown'
+    with no diagnostic information.  The early-return paths when web_session
+    is None or battery_compound_id is missing logged only at DEBUG level,
+    making the failure completely invisible in production (C-020, C-026).
+    """
+
+    @staticmethod
+    def _make_coord_with_domain_data() -> tuple[
+        FoxESSDataCoordinator, FoxESSControlData
+    ]:
+        from custom_components.foxess_control.const import DOMAIN
+        from custom_components.foxess_control.domain_data import (
+            FoxESSControlData,
+            FoxESSEntryData,
+        )
+
+        inv = MagicMock(spec=Inverter)
+        coord = _make_coordinator(inverter=inv)
+
+        dd = FoxESSControlData()
+        dd.entries["test-entry"] = FoxESSEntryData()
+        coord.hass.data = {DOMAIN: dd}  # type: ignore[assignment]
+        return coord, dd
+
+    @pytest.mark.asyncio
+    async def test_warning_logged_when_web_session_missing(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When web_session is None, a WARNING-level log must be emitted.
+
+        This makes the failure visible in production logs without requiring
+        DEBUG-level logging to be enabled (C-020, C-026).
+        """
+        coord, dd = self._make_coord_with_domain_data()
+        dd["_battery_compound_id"] = "abc@SN123"
+        # web_session remains None (default)
+
+        data: dict[str, Any] = {}
+        with caplog.at_level(
+            logging.WARNING, logger="custom_components.foxess_control.coordinator"
+        ):
+            await coord._fetch_bms_temperature(data)
+
+        assert "bmsBatteryTemperature" not in data
+        warning_messages = [
+            r.message for r in caplog.records if r.levelno >= logging.WARNING
+        ]
+        assert any("web session" in msg.lower() for msg in warning_messages), (
+            f"Expected a WARNING-level log mentioning 'web session' when "
+            f"web_session is None, but got: {warning_messages}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_warning_logged_when_compound_id_missing(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When battery_compound_id is None, a WARNING-level log must be emitted."""
+        coord, dd = self._make_coord_with_domain_data()
+
+        web_session = AsyncMock()
+        dd["_web_session"] = web_session
+        # compound_id remains None (default)
+
+        data: dict[str, Any] = {}
+        with caplog.at_level(
+            logging.WARNING, logger="custom_components.foxess_control.coordinator"
+        ):
+            await coord._fetch_bms_temperature(data)
+
+        assert "bmsBatteryTemperature" not in data
+        warning_messages = [
+            r.message for r in caplog.records if r.levelno >= logging.WARNING
+        ]
+        assert any("compound" in msg.lower() for msg in warning_messages), (
+            f"Expected a WARNING-level log mentioning 'compound' when "
+            f"battery_compound_id is missing, but got: {warning_messages}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_warning_logged_when_both_missing(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When both web_session and compound_id are missing, at least one WARNING."""
+        coord, dd = self._make_coord_with_domain_data()
+        # Both remain None (default)
+
+        data: dict[str, Any] = {}
+        with caplog.at_level(
+            logging.WARNING, logger="custom_components.foxess_control.coordinator"
+        ):
+            await coord._fetch_bms_temperature(data)
+
+        assert "bmsBatteryTemperature" not in data
+        warning_messages = [
+            r.message for r in caplog.records if r.levelno >= logging.WARNING
+        ]
+        assert len(warning_messages) >= 1, (
+            "Expected at least one WARNING-level log when both web_session and "
+            "compound_id are missing, but got none"
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_fetch_succeeds(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Happy path: no warnings when web_session and compound_id are present."""
+        coord, dd = self._make_coord_with_domain_data()
+
+        web_session = AsyncMock()
+        web_session.async_get_battery_temperature = AsyncMock(return_value=22.0)
+        dd["_web_session"] = web_session
+        dd["_battery_compound_id"] = "bat@SN001"
+
+        data: dict[str, Any] = {}
+        with caplog.at_level(
+            logging.WARNING, logger="custom_components.foxess_control.coordinator"
+        ):
+            await coord._fetch_bms_temperature(data)
+
+        assert data.get("bmsBatteryTemperature") == 22.0
+        warning_messages = [
+            r.message for r in caplog.records if r.levelno >= logging.WARNING
+        ]
+        assert not warning_messages, (
+            f"No warnings expected on successful BMS fetch, but got: {warning_messages}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_domain_data_missing(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When domain data itself is not available, DEBUG is acceptable.
+
+        This is a transient startup condition, not a persistent failure.
+        """
+        coord = _make_coordinator()
+        coord.hass.data = {}  # type: ignore[assignment]
+
+        data: dict[str, Any] = {}
+        with caplog.at_level(
+            logging.DEBUG, logger="custom_components.foxess_control.coordinator"
+        ):
+            await coord._fetch_bms_temperature(data)
+
+        assert "bmsBatteryTemperature" not in data
+        # Domain data missing is a startup race — DEBUG is fine
+        warning_messages = [
+            r.message for r in caplog.records if r.levelno >= logging.WARNING
+        ]
+        assert not warning_messages, (
+            f"Domain data missing is transient — no WARNING expected, "
+            f"but got: {warning_messages}"
         )
