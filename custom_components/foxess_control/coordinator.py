@@ -470,7 +470,10 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if domain_data is None or domain_data.get("_web_session") is None:
             return
         now = time.monotonic()
-        if now - self._bms_last_fetch < self._BMS_FETCH_INTERVAL:
+        if (
+            self._bms_last_fetch > 0
+            and now - self._bms_last_fetch < self._BMS_FETCH_INTERVAL
+        ):
             return
         self._bms_fetch_in_flight = True
 
