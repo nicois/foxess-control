@@ -64,7 +64,6 @@ jobs:
       - name: "Run E2E (worker ${{ matrix.worker }})"
         run: |
           python -m pytest ${{ matrix.tests }} \
-            -m slow \
             --randomly-seed=${{ needs.collect.outputs.seed }} \
             -n auto \
             --tb=long \

@@ -3,8 +3,8 @@
 ## Build / Test / Lint
 
 ```bash
-pytest tests/ --tb=short                    # unit tests (E2E excluded by default)
-pytest tests/e2e/ -m slow -n auto           # E2E tests (podman + playwright)
+pytest tests/ --tb=short                    # all tests (unit + E2E)
+pytest tests/ -m "not slow" --tb=short      # unit tests only (skip E2E)
 pre-commit run --all-files                  # ruff + mypy
 ```
 
