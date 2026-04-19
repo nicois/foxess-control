@@ -52,6 +52,10 @@ const TRANSLATIONS = {
     tip_power_suspended: "Suspended — protecting min SoC",
     tip_power_charge_deferred: "Deferred — waiting for optimal time",
     self_use: "Self-use",
+    btn_cancel: "Cancel",
+    btn_confirm_cancel: "Confirm cancel?",
+    btn_charge: "Charge",
+    btn_discharge: "Discharge",
   },
   de: {
     title: "FoxESS Steuerung",
@@ -89,6 +93,10 @@ const TRANSLATIONS = {
     tip_power_suspended: "Pausiert — min. SoC schützen",
     tip_power_charge_deferred: "Verzögert — optimale Zeit abwarten",
     self_use: "Eigenverbr.",
+    btn_cancel: "Abbrechen",
+    btn_confirm_cancel: "Abbrechen bestätigen?",
+    btn_charge: "Laden",
+    btn_discharge: "Entladen",
   },
   fr: {
     title: "FoxESS Contrôle",
@@ -126,6 +134,10 @@ const TRANSLATIONS = {
     tip_power_suspended: "Suspendu — protection SoC min.",
     tip_power_charge_deferred: "Différée — en attente du moment optimal",
     self_use: "Auto-conso.",
+    btn_cancel: "Annuler",
+    btn_confirm_cancel: "Confirmer l'annulation ?",
+    btn_charge: "Charger",
+    btn_discharge: "Décharger",
   },
   nl: {
     title: "FoxESS Besturing",
@@ -163,6 +175,10 @@ const TRANSLATIONS = {
     tip_power_suspended: "Onderbroken — min. SoC beschermen",
     tip_power_charge_deferred: "Uitgesteld — wachten op optimaal moment",
     self_use: "Eigenverbr.",
+    btn_cancel: "Annuleren",
+    btn_confirm_cancel: "Annulering bevestigen?",
+    btn_charge: "Laden",
+    btn_discharge: "Ontladen",
   },
   es: {
     title: "FoxESS Control",
@@ -200,6 +216,10 @@ const TRANSLATIONS = {
     tip_power_suspended: "Suspendido — protegiendo SoC mín.",
     tip_power_charge_deferred: "Diferida — esperando momento óptimo",
     self_use: "Autocons.",
+    btn_cancel: "Cancelar",
+    btn_confirm_cancel: "¿Confirmar cancelación?",
+    btn_charge: "Cargar",
+    btn_discharge: "Descargar",
   },
   it: {
     title: "FoxESS Controllo",
@@ -237,6 +257,10 @@ const TRANSLATIONS = {
     tip_power_suspended: "Sospeso — protezione SoC min.",
     tip_power_charge_deferred: "Differita — in attesa del momento ottimale",
     self_use: "Autocons.",
+    btn_cancel: "Annulla",
+    btn_confirm_cancel: "Confermare annullamento?",
+    btn_charge: "Carica",
+    btn_discharge: "Scarica",
   },
   pl: {
     title: "FoxESS Sterowanie",
@@ -274,6 +298,10 @@ const TRANSLATIONS = {
     tip_power_suspended: "Wstrzymany — ochrona min. SoC",
     tip_power_charge_deferred: "Odroczone — oczekiwanie na optymalny czas",
     self_use: "Autokons.",
+    btn_cancel: "Anuluj",
+    btn_confirm_cancel: "Potwierdzić anulowanie?",
+    btn_charge: "Ładuj",
+    btn_discharge: "Rozładuj",
   },
   pt: {
     title: "FoxESS Controlo",
@@ -311,6 +339,10 @@ const TRANSLATIONS = {
     tip_power_suspended: "Suspenso — protegendo SoC mín.",
     tip_power_charge_deferred: "Adiado — aguardando momento ideal",
     self_use: "Autocons.",
+    btn_cancel: "Cancelar",
+    btn_confirm_cancel: "Confirmar cancelamento?",
+    btn_charge: "Carregar",
+    btn_discharge: "Descarregar",
   },
   "zh-hans": {
     title: "FoxESS 控制",
@@ -348,6 +380,10 @@ const TRANSLATIONS = {
     tip_power_suspended: "暂停 — 保护最低电量",
     tip_power_charge_deferred: "延迟 — 等待最佳时间",
     self_use: "自用",
+    btn_cancel: "取消",
+    btn_confirm_cancel: "确认取消？",
+    btn_charge: "充电",
+    btn_discharge: "放电",
   },
   ja: {
     title: "FoxESS コントロール",
@@ -385,6 +421,10 @@ const TRANSLATIONS = {
     tip_power_suspended: "一時停止 — 最低SoC保護中",
     tip_power_charge_deferred: "遅延中 — 最適なタイミングを待機",
     self_use: "自家消費",
+    btn_cancel: "キャンセル",
+    btn_confirm_cancel: "キャンセルしますか？",
+    btn_charge: "充電",
+    btn_discharge: "放電",
   },
 };
 
@@ -402,20 +442,76 @@ class FoxESSControlCard extends HTMLElement {
     this._config = {};
     this._hass = null;
     this._expandedTips = new Set();
+    this._cancelConfirm = false;
+    this._cancelTimer = null;
     this.shadowRoot.addEventListener("click", (e) => {
       const row = e.target.closest(".progress-row.has-tip");
-      if (!row) return;
-      const key = row.dataset.tipKey;
-      if (key) {
-        if (this._expandedTips.has(key)) {
-          this._expandedTips.delete(key);
-          row.classList.remove("expanded");
-        } else {
-          this._expandedTips.add(key);
-          row.classList.add("expanded");
+      if (row) {
+        const key = row.dataset.tipKey;
+        if (key) {
+          if (this._expandedTips.has(key)) {
+            this._expandedTips.delete(key);
+            row.classList.remove("expanded");
+          } else {
+            this._expandedTips.add(key);
+            row.classList.add("expanded");
+          }
         }
+        return;
       }
+      const btn = e.target.closest(".action-btn");
+      if (btn) this._handleAction(btn.dataset.action);
     });
+  }
+
+  _handleAction(action) {
+    if (!this._hass || !action) return;
+    if (action === "cancel") {
+      if (!this._cancelConfirm) {
+        this._cancelConfirm = true;
+        this._render();
+        clearTimeout(this._cancelTimer);
+        this._cancelTimer = setTimeout(() => {
+          this._cancelConfirm = false;
+          this._render();
+        }, 3000);
+        return;
+      }
+      this._cancelConfirm = false;
+      clearTimeout(this._cancelTimer);
+      this._hass.callService("foxess_control", "clear_overrides", {});
+      this._render();
+      return;
+    }
+    if (action === "charge" || action === "discharge") {
+      this._showForm = action;
+      this._render();
+    }
+    if (action === "submit-form") {
+      this._submitForm();
+    }
+    if (action === "close-form") {
+      this._showForm = null;
+      this._render();
+    }
+  }
+
+  _submitForm() {
+    if (!this._hass || !this._showForm) return;
+    const root = this.shadowRoot;
+    const start = root.getElementById("form-start")?.value;
+    const end = root.getElementById("form-end")?.value;
+    const soc = root.getElementById("form-soc")?.value;
+    if (!start || !end || !soc) return;
+    const service =
+      this._showForm === "charge" ? "smart_charge" : "smart_discharge";
+    const data =
+      this._showForm === "charge"
+        ? { start_time: start, end_time: end, target_soc: parseInt(soc, 10) }
+        : { start_time: start, end_time: end, min_soc: parseInt(soc, 10) };
+    this._hass.callService("foxess_control", service, data);
+    this._showForm = null;
+    this._render();
   }
 
   // -- Lovelace lifecycle ----------------------------------------------------
@@ -578,6 +674,8 @@ class FoxESSControlCard extends HTMLElement {
     const chargeActive = a.charge_active === true;
     const dischargeActive = a.discharge_active === true;
 
+    const isActive = chargeActive || dischargeActive;
+
     this.shadowRoot.innerHTML = `
       <style>${FoxESSControlCard._styles()}</style>
       <ha-card>
@@ -585,10 +683,47 @@ class FoxESSControlCard extends HTMLElement {
         <div class="content">
           ${chargeActive ? this._renderCharge(a) : ""}
           ${dischargeActive ? this._renderDischarge(a) : ""}
-          ${!chargeActive && !dischargeActive ? this._renderIdle() : ""}
+          ${!isActive ? this._renderIdle() : ""}
           ${this._renderProgress(a)}
         </div>
+        ${this._showForm ? this._renderForm() : ""}
+        <div class="action-row">
+          ${
+            isActive
+              ? `<button class="action-btn cancel${this._cancelConfirm ? " confirming" : ""}" data-action="cancel">
+                   ${this._cancelConfirm ? this._t("btn_confirm_cancel") : this._t("btn_cancel")}
+                 </button>`
+              : `<button class="action-btn" data-action="charge">${this._t("btn_charge")}</button>
+                 <button class="action-btn" data-action="discharge">${this._t("btn_discharge")}</button>`
+          }
+        </div>
       </ha-card>
+    `;
+  }
+
+  _renderForm() {
+    const isCharge = this._showForm === "charge";
+    const socLabel = isCharge ? this._t("target") : this._t("min_soc");
+    const socDefault = isCharge ? 100 : 10;
+    return `
+      <div class="form-overlay">
+        <div class="form-row">
+          <label>Start</label>
+          <input type="time" id="form-start">
+        </div>
+        <div class="form-row">
+          <label>End</label>
+          <input type="time" id="form-end">
+        </div>
+        <div class="form-row">
+          <label>${socLabel} (%)</label>
+          <input type="number" id="form-soc" min="0" max="100" value="${socDefault}">
+        </div>
+        <div class="form-buttons">
+          <button class="action-btn" data-action="submit-form">${isCharge ? this._t("btn_charge") : this._t("btn_discharge")}</button>
+          <button class="action-btn cancel" data-action="close-form">${this._t("btn_cancel")}</button>
+        </div>
+      </div>
     `;
   }
 
@@ -1247,6 +1382,68 @@ class FoxESSControlCard extends HTMLElement {
         font-size: 12px;
         color: var(--secondary-text-color);
         margin-top: 4px;
+      }
+
+      /* Action buttons */
+      .action-row {
+        display: flex;
+        gap: 8px;
+        padding: 8px 16px 12px;
+      }
+      .action-btn {
+        flex: 1;
+        padding: 8px 12px;
+        border: 1px solid var(--divider-color, #e0e0e0);
+        border-radius: 8px;
+        background: var(--card-background-color, #fff);
+        color: var(--primary-text-color);
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.2s, border-color 0.2s;
+      }
+      .action-btn:hover {
+        background: var(--secondary-background-color, #f5f5f5);
+      }
+      .action-btn.cancel {
+        border-color: var(--error-color, #f44336);
+        color: var(--error-color, #f44336);
+      }
+      .action-btn.confirming {
+        background: var(--error-color, #f44336);
+        color: #fff;
+        border-color: var(--error-color, #f44336);
+      }
+
+      /* Inline form */
+      .form-overlay {
+        padding: 8px 16px;
+        border-top: 1px solid var(--divider-color, #e0e0e0);
+      }
+      .form-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      .form-row label {
+        font-size: 12px;
+        min-width: 60px;
+        color: var(--secondary-text-color);
+      }
+      .form-row input {
+        flex: 1;
+        padding: 6px 8px;
+        border: 1px solid var(--divider-color, #e0e0e0);
+        border-radius: 4px;
+        font-size: 13px;
+        background: var(--card-background-color, #fff);
+        color: var(--primary-text-color);
+      }
+      .form-buttons {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
       }
     `;
   }
