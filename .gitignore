@@ -6,5 +6,5 @@ build/
 .mypy_cache/
 .pytest_cache/
 *.pyc
-e2e/screenshots/
+tests/e2e/screenshots/
 .e2e-build.lock

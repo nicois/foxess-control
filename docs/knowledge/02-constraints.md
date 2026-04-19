@@ -382,12 +382,12 @@ internals are insufficient for these code paths.
 **Rationale**: HA's internal APIs (config entries, entity platforms,
 service calls, frontend WebSocket) have undocumented behaviours and
 version-specific quirks that mocks cannot reproduce. The E2E suite
-(`e2e/`) uses a Podman HA container with pre-seeded config to test
+(`tests/e2e/`) uses a Podman HA container with pre-seeded config to test
 the actual integration lifecycle.
 **Violation consequence**: Code works in unit tests but fails in a
 real HA installation due to auth, entity discovery, shadow DOM, or
 service registration differences.
-**Traces**: `e2e/test_e2e.py`, `e2e/test_ui.py`
+**Traces**: `tests/e2e/test_e2e.py`, `tests/e2e/test_ui.py`
 
 ### C-030: E2E tests run in parallel before tagging
 **Statement**: E2E tests must run with `pytest -n auto` (xdist
@@ -418,7 +418,7 @@ assumption holds deterministically.
 manifesting as intermittent user-facing bugs that are hard to
 reproduce and diagnose.
 **Traces**: C-028 (simulator over mocks), C-029 (E2E for
-HA-dependent behaviour); `e2e/ha_client.py::HAEventStream`
+HA-dependent behaviour); `tests/e2e/ha_client.py::HAEventStream`
 (drain-before-wait pattern eliminates event ordering races)
 
 ### C-032: Reproduce failure before fixing

@@ -25,7 +25,7 @@ jobs:
           seed=$RANDOM
           echo "seed=$seed" >> "$GITHUB_OUTPUT"
 
-          python -m pytest e2e/ -m slow --co -q --randomly-seed=$seed 2>/dev/null \
+          python -m pytest tests/e2e/ -m slow --co -q --randomly-seed=$seed 2>/dev/null \
             | grep '::' > all_tests.txt
 
           python3 -c "
@@ -59,7 +59,7 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: playwright install chromium
       - name: Build E2E container
-        run: podman build -t ha-foxess-e2e e2e/
+        run: podman build -t ha-foxess-e2e tests/e2e/
 
       - name: "Run E2E (worker ${{ matrix.worker }})"
         run: |
@@ -76,7 +76,7 @@ jobs:
           name: e2e-results-w${{ matrix.worker }}
           path: |
             e2e-w${{ matrix.worker }}.xml
-            e2e/screenshots/
+            tests/e2e/screenshots/
           retention-days: 14
 
   results:

@@ -1,6 +1,6 @@
 """Playwright browser tests for FoxESS Lovelace cards.
 
-Run with: pytest e2e/test_ui.py -m slow
+Run with: pytest tests/e2e/test_ui.py -m slow
 Requires: podman, playwright (chromium), PyJWT
 """
 

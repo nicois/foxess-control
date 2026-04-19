@@ -103,7 +103,7 @@ last_reflection: 2026-04-17T15:00:00+10:00
 - **Changes detected**: 7 commits since last update (6d5443d..bd0b44a) plus
   uncommitted `ws_mode` feature. Source files: `__init__.py`, `const.py`,
   `config_flow.py`, `smart_battery/logging.py`, `smart_battery/listeners.py`,
-  `smart_battery/sensor_base.py`, `e2e/test_e2e.py`.
+  `smart_battery/sensor_base.py`, `tests/e2e/test_e2e.py`.
 - **D-NNN ID collision fixed**: D-023 was assigned to both "Progressive
   schedule extension" (smart-discharge.md) and "Transient adapter error
   resilience" (session-management.md). Renumbered session-management entries

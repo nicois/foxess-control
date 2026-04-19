@@ -34,7 +34,7 @@ where = ["."]
 testpaths = ["tests"]
 addopts = "-n auto"
 markers = [
-    "slow: end-to-end tests requiring podman and HA container (run with pytest e2e/ -m slow)",
+    "slow: end-to-end tests requiring podman and HA container (run with pytest tests/e2e/ -m slow)",
 ]
 
 [tool.mypy]

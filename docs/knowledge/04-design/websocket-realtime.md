@@ -56,8 +56,8 @@ transient cloud outages without manual intervention.
 **Traces**: C-005, C-020;
 `tests/test_realtime_ws.py::TestStaleness`,
 `tests/test_services.py::TestHandleSmartDischarge::test_deferred_to_discharging_triggers_ws`,
-`e2e/test_e2e.py::TestDataSource::test_ws_always_connects_without_session`,
-`e2e/test_e2e.py::TestDataSource::test_ws_mode_persists_via_options_flow`
+`tests/e2e/test_e2e.py::TestDataSource::test_ws_always_connects_without_session`,
+`tests/e2e/test_e2e.py::TestDataSource::test_ws_mode_persists_via_options_flow`
 
 ### D-009: Post-session linger timeout
 **Decision**: After a smart session ends, keep the WebSocket open for
@@ -81,7 +81,7 @@ post-session values so the overview card immediately reflects reality.
   race analysis. The `always` ws_mode was unaffected because the WS
   stays connected and delivers fresh post-session data within ~5s.
 **Traces**: C-007, C-020;
-`e2e/test_e2e.py::TestDataSource::test_ws_linger_captures_post_discharge_data`
+`tests/e2e/test_e2e.py::TestDataSource::test_ws_linger_captures_post_discharge_data`
 
 ### D-010: Power balance for grid direction
 **Decision**: Derive grid import/export from power balance
@@ -150,7 +150,7 @@ without being disruptive.
 - Separate "last updated" text below the badge: rejected because it
   clutters the card for the common (non-stale) case
 **Traces**: C-020;
-`e2e/test_ui.py::TestOverviewCard::test_data_source_badge_matches_mode`
+`tests/e2e/test_ui.py::TestOverviewCard::test_data_source_badge_matches_mode`
 
 ## Key Behaviours
 

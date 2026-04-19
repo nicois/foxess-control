@@ -1,6 +1,6 @@
 """End-to-end tests: real HA container + FoxESS simulator / input helpers.
 
-Run with: pytest e2e/ -m slow
+Run with: pytest tests/e2e/ -m slow
 Requires: podman, PyJWT
 
 Fixture scoping:

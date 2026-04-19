@@ -95,8 +95,9 @@ def _generate_ha_token() -> str:
 
 
 E2E_TOKEN = _generate_ha_token()
-REPO_ROOT = Path(__file__).resolve().parent.parent
-HA_CONFIG_SEED = REPO_ROOT / "e2e" / "ha_config"
+E2E_DIR = Path(__file__).resolve().parent
+REPO_ROOT = E2E_DIR.parent.parent
+HA_CONFIG_SEED = E2E_DIR / "ha_config"
 CONTAINER_IMAGE = "ha-foxess-e2e"
 
 
@@ -169,7 +170,7 @@ def _build_container_once() -> None:
     lock = filelock.FileLock(str(REPO_ROOT / ".e2e-build.lock"), timeout=300)
     with lock:
         subprocess.run(
-            ["podman", "build", "-t", CONTAINER_IMAGE, str(REPO_ROOT / "e2e")],
+            ["podman", "build", "-t", CONTAINER_IMAGE, str(E2E_DIR)],
             check=True,
             capture_output=True,
         )

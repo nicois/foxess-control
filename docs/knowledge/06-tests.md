@@ -214,7 +214,7 @@ Key tests:
 
 ## E2E Tests (Containerised HA + Simulator + Playwright)
 
-**Source**: `e2e/test_e2e.py` (32 tests), `e2e/test_ui.py` (42 tests)
+**Source**: `tests/e2e/test_e2e.py` (32 tests), `tests/e2e/test_ui.py` (42 tests)
 **Infrastructure**: Podman HA container, FoxESS simulator, Playwright Chromium
 
 | Test | Verifies | Constraint |
