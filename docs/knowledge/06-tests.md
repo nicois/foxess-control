@@ -6,7 +6,7 @@ traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-599 unit + 88 E2E = 687 total.
+603 unit + 88 E2E = 691 total.
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
@@ -185,18 +185,22 @@ Key tests:
 ## BMS Temperature (Web Portal)
 
 **Constraints**: C-020
-**Source**: `tests/test_web_session.py` (8 tests)
+**Source**: `tests/test_web_session.py` (12 tests)
 
 | Test | Verifies | Constraint |
 |---|---|---|
-| `TestBMSBatteryTemperature::test_temperature_returned_from_device_detail` | Temperature from /dew/v0/device/detail | C-020 |
+| `TestBMSBatteryTemperature::test_temperature_returned_from_device_detail` | Temperature from GET /dew/v0/device/detail | C-020 |
 | `TestBMSBatteryTemperature::test_temperature_as_plain_number` | Plain numeric temperature format | C-020 |
+| `TestBMSBatteryTemperature::test_temperature_as_string_value` | String temperature value (real API format) | C-020 |
 | `TestBMSBatteryTemperature::test_temperature_none_when_no_battery_data` | Graceful degradation (missing battery) | -- |
 | `TestBMSBatteryTemperature::test_temperature_none_when_temp_field_missing` | Graceful degradation (missing temp) | -- |
 | `TestBMSBatteryTemperature::test_temperature_none_when_endpoint_errors` | Graceful degradation (API error) | -- |
-| `TestGenericV0TokenRejection::test_temperature_returned_despite_generic_v0_rejection` | /dew/v0/ used when /generic/v0/ rejects token | C-020 |
-| `TestGenericV0TokenRejection::test_token_passed_through_to_data_endpoint` | Token plumbing: login → data request | C-020 |
-| `TestGenericV0TokenRejection::test_login_failure_returns_none` | Graceful degradation (login failure) | -- |
+| `TestBatteryDetailEndpoint::test_uses_get_with_compound_id_and_category` | GET method, compound ID query param, category=battery | C-020 |
+| `TestBatteryDetailEndpoint::test_token_plumbing_end_to_end` | Token plumbing: login → GET request headers | C-020 |
+| `TestBatteryDetailEndpoint::test_login_failure_returns_none` | Graceful degradation (login failure) | -- |
+| `TestCompoundIdFromWebSocket::test_compound_id_extracted_from_ws_message` | batteryId@batSn extracted from WS bat node | C-020 |
+| `TestCompoundIdFromWebSocket::test_no_compound_id_without_battery_id` | No compound ID when batteryId missing | -- |
+| `TestCompoundIdFromWebSocket::test_no_compound_id_without_bat_sn` | No compound ID when multipleBatterySoc empty | -- |
 
 ## API Client
 

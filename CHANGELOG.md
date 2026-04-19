@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.7-beta.13
+
+### Fixed
+- **BMS battery temperature always unknown**: the endpoint requires `GET /dew/v0/device/detail?id={batteryId}@{batSn}&category=battery` — not POST, not the device serial, and the compound battery ID comes from the WebSocket `bat` node. Previous attempts failed because they used POST, used the wrong identifier, or hit `/generic/v0/` endpoints that reject the web session token.
+
 ## 1.0.7-beta.12
 
 ### Fixed
