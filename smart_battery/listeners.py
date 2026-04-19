@@ -61,6 +61,19 @@ def _exc_summary() -> str:
     return f"{type(exc).__name__}: {exc}" if exc else "unknown"
 
 
+def _notify_replay(
+    hass: HomeAssistant,
+    domain: str,
+    session_type: str,
+    state: dict[str, Any],
+) -> None:
+    """Notify the brand integration that a session is eligible for replay."""
+    dd = get_domain_data(hass, domain)
+    callback = getattr(dd, "on_circuit_breaker_abort", None)
+    if callback is not None:
+        callback(session_type, state)
+
+
 def _get_coordinator_value(
     hass: HomeAssistant,
     domain: str,
@@ -337,6 +350,7 @@ def setup_smart_charge_listeners(
                     domain,
                     "Charge session aborted: adapter unreachable",
                 )
+                _notify_replay(hass, domain, "charge", dict(cur_state))
                 try:
                     charging_started = cur_state.get("charging_started", False)
                     if _is_my_session():
@@ -690,6 +704,7 @@ def setup_smart_discharge_listeners(
                     domain,
                     "Discharge session aborted: adapter unreachable",
                 )
+                _notify_replay(hass, domain, "discharge", dict(cur_state))
                 try:
                     discharging_started = cur_state.get("discharging_started", False)
                     if _is_my_session():

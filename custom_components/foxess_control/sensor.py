@@ -101,8 +101,13 @@ class SmartOperationsOverviewSensor(_SmartOperationsOverviewSensor):
         from .domain_data import FoxESSControlData
 
         dd = self.hass.data.get(DOMAIN)
-        if isinstance(dd, FoxESSControlData) and dd.upcoming_conflicts:
-            attrs["upcoming_conflicts"] = dd.upcoming_conflicts
+        if isinstance(dd, FoxESSControlData):
+            if dd.upcoming_conflicts:
+                attrs["upcoming_conflicts"] = dd.upcoming_conflicts
+            if dd.replay_pending is not None:
+                attrs["replay_pending"] = True
+                attrs["replay_type"] = dd.replay_pending.get("type")
+                attrs["replay_attempts"] = dd.replay_attempts
         return attrs
 
 

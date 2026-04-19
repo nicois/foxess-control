@@ -54,6 +54,12 @@ class FoxESSControlData(SmartBatteryDomainData):
     # Proactive schedule conflict detection
     upcoming_conflicts: list[str] = field(default_factory=list)
 
+    # Session replay after circuit breaker abort
+    replay_pending: dict[str, Any] | None = None
+    replay_unsub: Any = None
+    replay_attempts: int = 0
+    on_circuit_breaker_abort: Callable[..., Any] | None = None
+
     # Session cancel hook return type (brand-specific)
     on_session_cancel: Callable[[], Coroutine[Any, Any, None] | None] | None = None
 

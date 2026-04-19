@@ -1,9 +1,9 @@
-"""Tests for the two-tier circuit breaker (C-024).
+"""Tests for the two-tier circuit breaker (C-024) and replay notification.
 
 After MAX_CONSECUTIVE_ADAPTER_ERRORS (3), the circuit breaker opens and
 holds position.  After CIRCUIT_BREAKER_TICKS_BEFORE_ABORT (5) more ticks,
-the session aborts.  A successful adapter call during the hold window
-resets the breaker.
+the session aborts and _notify_replay() fires so the brand layer can
+attempt session replay.
 """
 
 from __future__ import annotations
@@ -550,3 +550,141 @@ class TestCircuitBreakerDischarge:
         assert inv.set_schedule.call_count == call_count_before, (
             "Adapter must not be called while discharge circuit breaker is open"
         )
+
+
+class TestReplayNotification:
+    """Circuit breaker abort triggers _notify_replay for session replay."""
+
+    @pytest.mark.asyncio
+    async def test_charge_abort_notifies_replay(self) -> None:
+        """Charge circuit breaker abort must call on_circuit_breaker_abort."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 20.0, "loadsPower": 3.0, "pvPower": 0.0},
+        )
+        replay_calls: list[tuple[str, dict[str, Any]]] = []
+        dd: FoxESSControlData = hass.data[DOMAIN]
+        dd.on_circuit_breaker_abort = lambda st, state: replay_calls.append((st, state))
+
+        handler, _ = _start_charge_session(hass, inv)
+        captured_cb = None
+
+        def capture(h: Any, cb: Any, i: Any) -> MagicMock:
+            nonlocal captured_cb
+            captured_cb = cb
+            return MagicMock()
+
+        with (
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 2, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
+                side_effect=capture,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(2, 0),
+                        "end_time": datetime.time(6, 0),
+                        "target_soc": 80,
+                    }
+                )
+            )
+
+        assert captured_cb is not None
+        inv.set_schedule.side_effect = FoxESSApiError(41935, "Device offline")
+
+        total_ticks = (
+            MAX_CONSECUTIVE_ADAPTER_ERRORS + CIRCUIT_BREAKER_TICKS_BEFORE_ABORT
+        )
+        for i in range(total_ticks):
+            with patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 3, i, 0),
+            ):
+                await captured_cb(datetime.datetime(2026, 4, 7, 3, i, 0))
+
+        assert len(replay_calls) == 1
+        assert replay_calls[0][0] == "charge"
+        assert isinstance(replay_calls[0][1], dict)
+
+    @pytest.mark.asyncio
+    async def test_discharge_abort_notifies_replay(self) -> None:
+        """Discharge circuit breaker abort must call on_circuit_breaker_abort."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 80.0},
+        )
+        replay_calls: list[tuple[str, dict[str, Any]]] = []
+        dd: FoxESSControlData = hass.data[DOMAIN]
+        dd.on_circuit_breaker_abort = lambda st, state: replay_calls.append((st, state))
+
+        handler, _ = _start_discharge_session(hass, inv)
+        captured_cb = None
+
+        def capture(h: Any, cb: Any, i: Any) -> MagicMock:
+            nonlocal captured_cb
+            captured_cb = cb
+            return MagicMock()
+
+        with (
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
+                side_effect=capture,
+            ),
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 30,
+                    }
+                )
+            )
+
+        assert captured_cb is not None
+
+        inner_target = (
+            "custom_components.foxess_control.smart_battery.listeners._get_current_soc"
+        )
+
+        def _raise_soc(*_a: Any, **_kw: Any) -> None:
+            raise FoxESSApiError(41935, "Device offline")
+
+        total_ticks = (
+            MAX_CONSECUTIVE_ADAPTER_ERRORS + CIRCUIT_BREAKER_TICKS_BEFORE_ABORT
+        )
+        for i in range(total_ticks):
+            with (
+                patch(
+                    "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                    return_value=datetime.datetime(2026, 4, 7, 18, i, 0),
+                ),
+                patch(inner_target, side_effect=_raise_soc),
+            ):
+                await captured_cb(datetime.datetime(2026, 4, 7, 18, i, 0))
+
+        assert len(replay_calls) == 1
+        assert replay_calls[0][0] == "discharge"
+        assert isinstance(replay_calls[0][1], dict)

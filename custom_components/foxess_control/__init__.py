@@ -1671,6 +1671,113 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
         )
 
+    # Session replay after circuit breaker abort.
+    # When a session is aborted by the circuit breaker and the time window
+    # is still open, we probe the API every 5 minutes. If it recovers,
+    # restart the session from current state.
+    _REPLAY_INTERVAL = datetime.timedelta(minutes=5)
+    _MAX_REPLAY_ATTEMPTS = 6
+
+    def _on_circuit_breaker_abort(session_type: str, state: dict[str, Any]) -> None:
+        end = state.get("end")
+        if end is None or dt_util.now() >= end:
+            return
+        dd_inner: FoxESSControlData = hass.data[DOMAIN]
+        dd_inner.replay_pending = {
+            "type": session_type,
+            "state": state,
+        }
+        dd_inner.replay_attempts = 0
+        _LOGGER.info(
+            "Session replay eligible: %s (window ends %s)",
+            session_type,
+            end.strftime("%H:%M"),
+        )
+        if dd_inner.replay_unsub is None:
+            dd_inner.replay_unsub = async_track_time_interval(
+                hass, _attempt_replay, _REPLAY_INTERVAL
+            )
+
+    async def _attempt_replay(_now: datetime.datetime) -> None:
+        dd_inner: FoxESSControlData = hass.data[DOMAIN]
+        pending = dd_inner.replay_pending
+        if pending is None:
+            _cancel_replay(dd_inner)
+            return
+
+        state = pending["state"]
+        end = state.get("end")
+        if end is not None and dt_util.now() >= end:
+            _LOGGER.info("Session replay: window expired, cancelling")
+            _cancel_replay(dd_inner)
+            return
+
+        dd_inner.replay_attempts += 1
+        if dd_inner.replay_attempts > _MAX_REPLAY_ATTEMPTS:
+            _LOGGER.info("Session replay: max attempts reached, cancelling")
+            _cancel_replay(dd_inner)
+            return
+
+        try:
+            inv = _get_inverter(hass)
+            await hass.async_add_executor_job(inv.get_schedule)
+        except Exception:
+            _LOGGER.debug(
+                "Session replay: adapter still unreachable (attempt %d/%d)",
+                dd_inner.replay_attempts,
+                _MAX_REPLAY_ATTEMPTS,
+            )
+            return
+
+        session_type = pending["type"]
+        _LOGGER.info(
+            "Session replay: adapter recovered, restarting %s session (attempt %d)",
+            session_type,
+            dd_inner.replay_attempts,
+        )
+        _cancel_replay(dd_inner)
+
+        now_time = dt_util.now().time().replace(second=0, microsecond=0)
+        end_dt = state["end"]
+        end_time = datetime.time(end_dt.hour, end_dt.minute)
+
+        try:
+            if session_type == "charge":
+                service_data: dict[str, Any] = {
+                    "start_time": now_time.isoformat(),
+                    "end_time": end_time.isoformat(),
+                    "target_soc": state.get("target_soc", 100),
+                }
+                if state.get("force"):
+                    service_data["replace_conflicts"] = True
+                await hass.services.async_call(
+                    DOMAIN, SERVICE_SMART_CHARGE, service_data
+                )
+            elif session_type == "discharge":
+                service_data = {
+                    "start_time": now_time.isoformat(),
+                    "end_time": end_time.isoformat(),
+                    "min_soc": state.get("min_soc", 10),
+                }
+                if state.get("feedin_energy_limit_kwh") is not None:
+                    service_data["feedin_energy_limit_kwh"] = state[
+                        "feedin_energy_limit_kwh"
+                    ]
+                await hass.services.async_call(
+                    DOMAIN, SERVICE_SMART_DISCHARGE, service_data
+                )
+        except Exception:
+            _LOGGER.exception("Session replay: failed to restart %s", session_type)
+
+    def _cancel_replay(dd_inner: FoxESSControlData) -> None:
+        dd_inner.replay_pending = None
+        dd_inner.replay_attempts = 0
+        if dd_inner.replay_unsub is not None:
+            dd_inner.replay_unsub()
+            dd_inner.replay_unsub = None
+
+    dd.on_circuit_breaker_abort = _on_circuit_breaker_abort
+
     # Persist session state on HA shutdown so recovery has fresh data
     # (including cached adapter groups). async_unload_entry runs too but
     # EVENT_HOMEASSISTANT_STOP fires first and guarantees a clean save.
