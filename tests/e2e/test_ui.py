@@ -275,7 +275,7 @@ class TestOverviewCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
         _robust_reload(page, settle_ms=2000)
 
-        node_types = page.evaluate(
+        node_types = page.wait_for_function(
             """() => {
                 function findAllCards(root) {
                     const cards = [];
@@ -300,9 +300,10 @@ class TestOverviewCard:
                     else if (node.classList.contains('house')) types.push('house');
                     else if (node.classList.contains('grid')) types.push('grid');
                 }
-                return types;
-            }"""
-        )
+                return types.length > 0 ? types : null;
+            }""",
+            timeout=10000,
+        ).json_value()
         assert node_types is not None, "Second overview card not found"
         assert "battery" in node_types, "Battery node should be present"
         assert "solar" in node_types, "Solar node should be present"
@@ -320,7 +321,7 @@ class TestOverviewCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, solar_kw=1.0)
         _robust_reload(page, settle_ms=2000)
 
-        label_text = page.evaluate(
+        label_text = page.wait_for_function(
             """() => {
                 function findAllCards(root) {
                     const cards = [];
@@ -339,8 +340,9 @@ class TestOverviewCard:
                 if (!card || !card.shadowRoot) return null;
                 const solar = card.shadowRoot.querySelector('.node.solar .node-label');
                 return solar ? solar.textContent : null;
-            }"""
-        )
+            }""",
+            timeout=10000,
+        ).json_value()
         assert label_text is not None, "Solar node label not found"
         assert "PV" in label_text, f"Expected 'PV' in label, got '{label_text}'"
 
@@ -355,7 +357,7 @@ class TestOverviewCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
         _robust_reload(page, settle_ms=2000)
 
-        order = page.evaluate(
+        order = page.wait_for_function(
             """() => {
                 function findAllCards(root) {
                     const cards = [];
@@ -380,9 +382,10 @@ class TestOverviewCard:
                     else if (node.classList.contains('house')) types.push('house');
                     else if (node.classList.contains('grid')) types.push('grid');
                 }
-                return types;
-            }"""
-        )
+                return types.length > 0 ? types : null;
+            }""",
+            timeout=10000,
+        ).json_value()
         assert order is not None, "Second overview card not found"
         assert order == ["battery", "solar"], (
             f"Expected order ['battery', 'solar'], got {order}"
