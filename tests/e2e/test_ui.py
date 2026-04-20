@@ -6,6 +6,7 @@ Requires: podman, playwright (chromium), PyJWT
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import os
 import re
@@ -40,13 +41,19 @@ def _robust_reload(page: Page, settle_ms: int = 1000) -> None:
     waits for the load event rather than racing against an existing
     one.  We also wait for ``networkidle`` so HA's WebSocket
     connection is re-established before tests interact with the DOM.
+
+    If the first ``goto`` fails (e.g. ``net::ERR_ABORTED``), we let
+    the browser settle via ``wait_for_load_state("load")`` before
+    retrying.  This prevents the retry from racing with the first
+    navigation's teardown — which causes "interrupted by another
+    navigation" errors under CI load.
     """
     url = page.url
     try:
         page.goto(url, wait_until="networkidle", timeout=30000)
     except PlaywrightError:
-        # Retry once — the first attempt can fail if a prior
-        # navigation was still tearing down.
+        with contextlib.suppress(PlaywrightError):
+            page.wait_for_load_state("load", timeout=5000)
         page.goto(url, wait_until="networkidle", timeout=30000)
     if settle_ms > 0:
         page.wait_for_timeout(settle_ms)
