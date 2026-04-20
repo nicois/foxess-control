@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.7-beta.25
+
+### Fixed
+- **Control card time selector resets on state update**: the beta.22 fix (`_saveFormValues`) read `.value` synchronously before `innerHTML` replacement, which fails when native time pickers haven't flushed their value (mobile HA companion, mid-selection). Replaced with a real-time `input` event listener that captures values as the user types, plus post-render DOM restore. Also affects SoC and end-time fields.
+
 ## 1.0.7-beta.24
 
 ### Fixed
