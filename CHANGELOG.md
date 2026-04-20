@@ -4,6 +4,7 @@
 
 ### Fixed
 - **BMS temperature early returns log at WARNING** (C-020, C-026): `_fetch_bms_temperature` silently returned `None` when `web_session` was missing or `battery_compound_id` hadn't been discovered — no log line at all. Both paths now emit WARNING-level messages with actionable diagnostics.
+- **BMS fetch success/failure now logged at INFO**: successful temperature reads, "no value returned", and fetch exceptions were all logged at DEBUG, making them invisible in the info log sensor. All three paths now log at INFO so BMS activity appears in the rolling info log.
 
 ## 1.0.7-beta.20
 
