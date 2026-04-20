@@ -832,9 +832,79 @@ function findCard(root) {
 class TestFormInputPersistence:
     """Verify form inputs survive card re-renders (hass property updates)."""
 
+    # Track which form type is expected, so _safe_evaluate can re-open
+    # the form after a page navigation destroys the execution context.
+    _current_form_action: str | None = None
+
+    def _recover_form(self, page: Page, *, _depth: int = 0) -> None:
+        """Wait for the page and card to be ready, then re-open the form.
+
+        If a second navigation destroys the execution context during
+        recovery (e.g. HA rapid-fire WebSocket reconnections), this
+        method retries up to ``_MAX_RECOVER_DEPTH`` times.  Each retry
+        waits for the *new* navigation to finish (``networkidle``)
+        before attempting to find the card and re-open the form.
+        """
+        _MAX_RECOVER_DEPTH = 3
+        try:
+            page.wait_for_load_state("networkidle", timeout=30000)
+            _find_card(page, "foxess-control-card")
+            if self._current_form_action:
+                page.evaluate(
+                    f"""() => {{
+                        {_JS_FIND_CONTROL_CARD}
+                        const card = findCard(document);
+                        if (!card || !card.shadowRoot) return;
+                        const btn = card.shadowRoot.querySelector(
+                            '[data-action="{self._current_form_action}"]'
+                        );
+                        if (btn) btn.click();
+                    }}"""
+                )
+        except PlaywrightError as exc:
+            if (
+                "Execution context was destroyed" not in str(exc)
+                or _depth >= _MAX_RECOVER_DEPTH
+            ):
+                raise
+            # Another navigation hit during recovery — recurse with
+            # incremented depth to wait for the new page to settle.
+            self._recover_form(page, _depth=_depth + 1)
+
+    def _safe_evaluate(  # type: ignore[return]
+        self, page: Page, expression: str, *, retries: int = 2
+    ) -> object:
+        """Run page.evaluate with retry on navigation-induced context destruction.
+
+        HA can trigger a full page navigation (WebSocket reconnect, dashboard
+        auto-refresh) between Playwright calls, destroying the JS execution
+        context.  When that happens, wait for the page to settle, re-open
+        the form if one was expected, and retry.
+        """
+        for attempt in range(retries + 1):
+            try:
+                return page.evaluate(expression)
+            except PlaywrightError as exc:
+                if "Execution context was destroyed" not in str(exc):
+                    raise
+                if attempt == retries:
+                    raise
+                # Page navigated — wait for it to settle, then
+                # re-open the form (navigation resets card state).
+                self._recover_form(page)
+                self._wait_for_form(page)
+
     def _open_form(self, page: Page, action: str) -> None:
-        """Click a button on the control card to open the form overlay."""
-        page.evaluate(
+        """Click a button on the control card to open the form overlay.
+
+        Waits for the form element to appear after clicking, so callers
+        do not need a separate ``_wait_for_form`` call.  If a navigation
+        destroys the context between the click and the form appearing,
+        the retry in ``_wait_for_form`` handles it.
+        """
+        self._current_form_action = action
+        self._safe_evaluate(
+            page,
             f"""() => {{
                 {_JS_FIND_CONTROL_CARD}
                 const card = findCard(document);
@@ -843,12 +913,14 @@ class TestFormInputPersistence:
                     '[data-action="{action}"]'
                 );
                 if (btn) btn.click();
-            }}"""
+            }}""",
         )
+        self._wait_for_form(page)
 
     def _get_form_values(self, page: Page) -> dict[str, str]:
         """Read form-start, form-end, form-soc values from the control card."""
-        result: dict[str, str] = page.evaluate(
+        result: dict[str, str] = self._safe_evaluate(  # type: ignore[assignment]
+            page,
             f"""() => {{
                 {_JS_FIND_CONTROL_CARD}
                 const card = findCard(document);
@@ -862,51 +934,95 @@ class TestFormInputPersistence:
                     end: end ? end.value : null,
                     soc: soc ? soc.value : null,
                 }};
-            }}"""
+            }}""",
         )
         return result
 
     def _set_form_value(self, page: Page, input_id: str, value: str) -> None:
-        """Set the value of a form input inside the control card shadow DOM."""
-        page.evaluate(
+        """Set the value of a form input inside the control card shadow DOM.
+
+        Returns after the value is confirmed set.  If the form is not
+        open (e.g. after a page navigation closed it), re-opens the form
+        and retries.
+        """
+        found = self._safe_evaluate(
+            page,
             f"""() => {{
                 {_JS_FIND_CONTROL_CARD}
                 const card = findCard(document);
-                if (!card || !card.shadowRoot) return;
+                if (!card || !card.shadowRoot) return false;
                 const input = card.shadowRoot.getElementById('{input_id}');
-                if (input) {{
+                if (!input) return false;
+                const nativeSetter = Object.getOwnPropertyDescriptor(
+                    window.HTMLInputElement.prototype, 'value'
+                ).set;
+                nativeSetter.call(input, '{value}');
+                input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                return true;
+            }}""",
+        )
+        if not found and self._current_form_action:
+            # Form was closed (e.g. by a navigation that completed
+            # without triggering a context error).  Re-open and retry.
+            self._recover_form(page)
+            self._wait_for_form(page)
+            self._safe_evaluate(
+                page,
+                f"""() => {{
+                    {_JS_FIND_CONTROL_CARD}
+                    const card = findCard(document);
+                    if (!card || !card.shadowRoot) return;
+                    const input = card.shadowRoot.getElementById(
+                        '{input_id}'
+                    );
+                    if (!input) return;
                     const nativeSetter = Object.getOwnPropertyDescriptor(
                         window.HTMLInputElement.prototype, 'value'
                     ).set;
                     nativeSetter.call(input, '{value}');
-                    input.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                    input.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                }}
-            }}"""
-        )
+                    input.dispatchEvent(
+                        new Event('input', {{ bubbles: true }})
+                    );
+                    input.dispatchEvent(
+                        new Event('change', {{ bubbles: true }})
+                    );
+                }}""",
+            )
 
     def _trigger_hass_update(self, page: Page) -> None:
         """Simulate HA pushing a state update by re-setting the hass property."""
-        page.evaluate(
+        self._safe_evaluate(
+            page,
             f"""() => {{
                 {_JS_FIND_CONTROL_CARD}
                 const card = findCard(document);
                 if (card && card._hass) {{
                     card.hass = card._hass;
                 }}
-            }}"""
+            }}""",
         )
 
     def _wait_for_form(self, page: Page) -> None:
-        page.wait_for_function(
-            f"""() => {{
-                {_JS_FIND_CONTROL_CARD}
-                const card = findCard(document);
-                if (!card || !card.shadowRoot) return false;
-                return !!card.shadowRoot.getElementById('form-start');
-            }}""",
-            timeout=10000,
-        )
+        for attempt in range(3):
+            try:
+                page.wait_for_function(
+                    f"""() => {{
+                        {_JS_FIND_CONTROL_CARD}
+                        const card = findCard(document);
+                        if (!card || !card.shadowRoot) return false;
+                        return !!card.shadowRoot.getElementById('form-start');
+                    }}""",
+                    timeout=10000,
+                )
+                return
+            except PlaywrightError as exc:
+                if "Execution context was destroyed" not in str(exc):
+                    raise
+                if attempt == 2:
+                    raise
+                # Page navigated — recover card + form
+                self._recover_form(page)
 
     def test_time_input_survives_rerender(
         self,
@@ -923,7 +1039,6 @@ class TestFormInputPersistence:
         assert _find_card(page, "foxess-control-card")
 
         self._open_form(page, "charge")
-        self._wait_for_form(page)
 
         self._set_form_value(page, "form-start", "02:30")
         self._set_form_value(page, "form-end", "06:45")
@@ -964,7 +1079,6 @@ class TestFormInputPersistence:
         assert _find_card(page, "foxess-control-card")
 
         self._open_form(page, "discharge")
-        self._wait_for_form(page)
 
         self._set_form_value(page, "form-start", "14:00")
         self._set_form_value(page, "form-end", "18:30")
@@ -999,7 +1113,6 @@ class TestFormInputPersistence:
         assert _find_card(page, "foxess-control-card")
 
         self._open_form(page, "charge")
-        self._wait_for_form(page)
 
         # Set only start time
         self._set_form_value(page, "form-start", "03:15")
@@ -1021,6 +1134,49 @@ class TestFormInputPersistence:
         )
         assert vals["end"] == "07:00", (
             f"End time lost after interleaved re-render: '{vals['end']}'"
+        )
+
+    def test_form_recovers_from_page_navigation(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """Form interaction recovers after a page navigation closes the form.
+
+        Regression: HA can navigate the page (WebSocket reconnect, dashboard
+        auto-refresh) between _open_form and _set_form_value, destroying the
+        JS execution context.  The recovery infrastructure (_safe_evaluate,
+        _recover_form, _set_form_value's ``if not found`` path) must detect
+        the closed form, re-open it, and set values.
+
+        This test opens the form, reloads the page (simulating HA
+        navigation), then verifies _set_form_value recovers.  Without
+        recovery, values silently fail to be set.
+        """
+        assert _find_card(page, "foxess-control-card")
+
+        self._open_form(page, "discharge")
+
+        # Simulate HA navigating: reload destroys the form overlay.
+        _robust_reload(page)
+
+        # _set_form_value must detect the form is closed, re-open it
+        # via _recover_form, and set the value.
+        self._set_form_value(page, "form-start", "14:00")
+        self._set_form_value(page, "form-end", "18:30")
+        self._set_form_value(page, "form-soc", "20")
+
+        vals = self._get_form_values(page)
+        assert vals["start"] == "14:00", (
+            f"Start time not set after navigation recovery: '{vals['start']}'"
+        )
+        assert vals["end"] == "18:30", (
+            f"End time not set after navigation recovery: '{vals['end']}'"
+        )
+        assert vals["soc"] == "20", (
+            f"SoC not set after navigation recovery: '{vals['soc']}'"
         )
 
 
