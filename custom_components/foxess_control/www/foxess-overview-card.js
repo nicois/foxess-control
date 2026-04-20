@@ -691,6 +691,16 @@ class FoxESSOverviewCardEditor extends HTMLElement {
   }
 
   _render() {
+    const boxes = this._config.boxes || null;
+    const boxTypes = ["solar", "house", "grid", "battery"];
+    const defaultIcons = { solar: "☀️", house: "🏠", grid: "⚡", battery: "🔋" };
+    const activeBoxes = boxes
+      ? boxTypes.map(t => {
+          const b = boxes.find(x => (typeof x === "string" ? x : x?.type) === t);
+          return { type: t, enabled: !!b, icon: b?.icon || "", label: b?.label || "" };
+        })
+      : boxTypes.map(t => ({ type: t, enabled: true, icon: "", label: "" }));
+
     const fields = [
       { id: "solar_entity", label: "Solar Power Entity", placeholder: "sensor.foxess_solar_power" },
       { id: "house_entity", label: "House Load Entity", placeholder: "sensor.foxess_house_load" },
@@ -701,25 +711,50 @@ class FoxESSOverviewCardEditor extends HTMLElement {
       { id: "soc_entity", label: "SoC Entity", placeholder: "sensor.foxess_battery_soc" },
       { id: "work_mode_entity", label: "Work Mode Entity", placeholder: "sensor.foxess_work_mode" },
     ];
+
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; padding: 8px 0; }
+        .section-title { font-size: 13px; font-weight: 600; margin: 8px 0 6px;
+                         color: var(--primary-text-color); }
+        .box-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+                   padding: 6px 8px; border-radius: 6px;
+                   background: var(--secondary-background-color, rgba(0,0,0,0.04)); }
+        .box-row input[type="checkbox"] { margin: 0; }
+        .box-row .box-type { font-size: 13px; font-weight: 500; min-width: 60px; }
+        .box-row input[type="text"] { flex: 1; padding: 4px 6px; border: 1px solid var(--divider-color);
+                                       border-radius: 4px; font-size: 12px;
+                                       background: var(--card-background-color);
+                                       color: var(--primary-text-color); }
+        .box-row input[type="text"]::placeholder { color: var(--secondary-text-color); opacity: 0.6; }
         .row { display: flex; flex-direction: column; margin-bottom: 12px; }
         label { font-size: 12px; font-weight: 500; margin-bottom: 4px;
                 color: var(--secondary-text-color); }
-        input { padding: 8px; border: 1px solid var(--divider-color);
+        input.entity-input { padding: 8px; border: 1px solid var(--divider-color);
                 border-radius: 4px; font-size: 14px;
                 background: var(--card-background-color);
                 color: var(--primary-text-color); }
         .hint { font-size: 11px; color: var(--secondary-text-color);
                 margin-top: 2px; }
       </style>
+
+      <div class="section-title">Visible Boxes</div>
+      ${activeBoxes.map(box => `
+        <div class="box-row">
+          <input type="checkbox" data-box-type="${box.type}" ${box.enabled ? "checked" : ""}>
+          <span class="box-type">${defaultIcons[box.type]} ${box.type.charAt(0).toUpperCase() + box.type.slice(1)}</span>
+          <input type="text" data-box-icon="${box.type}" value="${box.icon}" placeholder="Icon">
+          <input type="text" data-box-label="${box.type}" value="${box.label}" placeholder="Label">
+        </div>
+      `).join("")}
+
+      <div class="section-title">Entity Overrides</div>
       ${fields
         .map(
           (f) => `
         <div class="row">
           <label>${f.label}</label>
-          <input type="text" id="${f.id}"
+          <input class="entity-input" type="text" id="${f.id}"
                  value="${this._config[f.id] || ""}"
                  placeholder="${f.placeholder}">
           <span class="hint">Auto-discovered if left blank</span>
@@ -727,7 +762,11 @@ class FoxESSOverviewCardEditor extends HTMLElement {
         )
         .join("")}
     `;
-    this.shadowRoot.querySelectorAll("input").forEach((input) => {
+
+    this.shadowRoot.querySelectorAll(".entity-input").forEach((input) => {
+      input.addEventListener("input", () => this._valueChanged());
+    });
+    this.shadowRoot.querySelectorAll(".box-row input").forEach((input) => {
       input.addEventListener("input", () => this._valueChanged());
     });
   }
@@ -743,6 +782,32 @@ class FoxESSOverviewCardEditor extends HTMLElement {
       if (val) cfg[id] = val;
       else delete cfg[id];
     }
+
+    const boxTypes = ["solar", "house", "grid", "battery"];
+    const boxes = [];
+    let allDefault = true;
+    for (const t of boxTypes) {
+      const cb = this.shadowRoot.querySelector(`[data-box-type="${t}"]`);
+      const iconInput = this.shadowRoot.querySelector(`[data-box-icon="${t}"]`);
+      const labelInput = this.shadowRoot.querySelector(`[data-box-label="${t}"]`);
+      const enabled = cb?.checked ?? true;
+      const icon = iconInput?.value?.trim() || "";
+      const label = labelInput?.value?.trim() || "";
+      if (!enabled || icon || label) allDefault = false;
+      if (enabled) {
+        const entry = { type: t };
+        if (icon) entry.icon = icon;
+        if (label) entry.label = label;
+        boxes.push(entry);
+      }
+    }
+
+    if (allDefault) {
+      delete cfg.boxes;
+    } else {
+      cfg.boxes = boxes;
+    }
+
     this._config = cfg;
     this.dispatchEvent(
       new CustomEvent("config-changed", { detail: { config: cfg } })
