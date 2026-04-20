@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.8-beta.1
+## 1.0.8-beta.2
 
 ### Added
 - **Configurable BMS polling interval**: BMS cell temperature fetch frequency is now adjustable (60–3600s, default 300s) in the integration options, replacing the hardcoded 5-minute interval.
@@ -8,6 +8,7 @@
 - **README gallery screenshots**: generated from E2E simulator for reproducible, up-to-date documentation images.
 
 ### Fixed
+- **BMS temperature freezes after HA restart**: the battery compound ID (needed for BMS temperature fetch) was only held in memory and lost on restart. The one-shot discovery task had no retry, so the sensor froze at its last value. Now retries discovery with 300s backoff on every poll cycle until the ID is recovered.
 - **Control card form inputs reset during typing**: state updates triggered full card re-renders, clearing user input mid-edit. Now preserves form DOM and restores values post-render using real-time `input` event listeners.
 - **E2E `_robust_reload` navigation race**: retry `page.goto()` could overlap with the browser's navigation teardown, causing "interrupted by another navigation" flakes. Added `wait_for_load_state("load")` between failed navigation and retry.
 
