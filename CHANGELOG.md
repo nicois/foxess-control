@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.7-beta.30
+## 1.0.8-beta.1
 
 ### Added
 - **Configurable BMS polling interval**: BMS cell temperature fetch frequency is now adjustable (60–3600s, default 300s) in the integration options, replacing the hardcoded 5-minute interval.
