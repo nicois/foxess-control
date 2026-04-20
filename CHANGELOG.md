@@ -1,152 +1,41 @@
 # Changelog
 
-## 1.0.7-beta.29
+## 1.0.7
 
 ### Added
-- **Overview card box customisation**: users can show/hide, reorder, relabel, and re-icon boxes (solar, house, grid, battery) via the card editor or YAML `boxes` config. Responsive grid adapts layout for 1, 3, or 4 visible boxes. Zero-config renders all four boxes in default order.
-- **Sub-detail click-to-history**: individual sub-details (cell temperature, inverter temperature, PV strings, grid voltage/frequency, residual energy) are clickable, opening the HA history dialog for that specific sensor.
-
-### Fixed
-- **E2E test race on second overview card**: custom box tests used a one-shot `page.evaluate()` that returned null if the second card's shadow DOM hadn't rendered. Replaced with `wait_for_function()` polling.
-- **Form input test flake on page navigation (C-031)**: `_set_form_value` and related helpers crashed with "Execution context was destroyed" when HA navigated mid-evaluate. Added `_safe_evaluate` retry wrapper with `_recover_form` to re-open the form after navigation.
-- **E2E races on overview card shadow DOM (C-031)**: cursor pointer, default boxes, badge, stale badge, PV consistency, and horizon marker tests all used one-shot `page.evaluate()` that returned null before shadow DOM rendered. Replaced with `wait_for_function()` polling.
-- **PV consistency test timeout under CI load (C-031)**: removed unnecessary discharge session — test only needs solar power values, not a full session. Moved simulator setup before `reload_integration()` so first coordinator poll picks up non-zero values.
-
-## 1.0.7-beta.26
-
-### Added
-- **Overview card nodes are clickable**: tapping solar, house, grid, or battery opens the HA entity detail/history dialog for the relevant sensor. Visual feedback via pointer cursor and press animation.
-
-## 1.0.7-beta.25
-
-### Fixed
-- **Control card time selector resets on state update**: the beta.22 fix (`_saveFormValues`) read `.value` synchronously before `innerHTML` replacement, which fails when native time pickers haven't flushed their value (mobile HA companion, mid-selection). Replaced with a real-time `input` event listener that captures values as the user types, plus post-render DOM restore. Also affects SoC and end-time fields.
-
-## 1.0.7-beta.24
-
-### Fixed
-- **BMS temperature goes unknown on transient fetch failures**: when the web portal returns no temperature value (server-side issue) or the fetch throws an exception, the last known reading is now carried forward instead of letting the sensor drop to "unknown".
-
-## 1.0.7-beta.23
-
-### Added
-- **Cold-temperature BMS charge curtailment**: when BMS battery temperature is below 16°C, the maximum charge power is capped at 80A × live battery voltage (~4kW at 50V). Uses `min(configured_max, cold_limit)` — the BMS physically limits charge current, so the system anticipates this to avoid over-requesting. Exposed via `charge_effective_max_power_w` sensor attribute.
-
-### Fixed
-- **Discharge target_power_w missing until first adjustment tick**: the `target_power_w` attribute wasn't initialized when a discharge session started (either immediate or deferred→active), so the sensor showed 0W for the target during the first ~30s. Now set at session creation and deferred start.
-- **E2E test race on discharge_target_power_w**: replaced immediate attribute assertion with a polling wait (`_wait_for_positive_attr`) to handle the coordinator tick delay between state transition and attribute population.
-
-## 1.0.7-beta.22
-
-### Fixed
-- **Discharge power sensor oscillates between actual and target power**: `get_actual_discharge_power_w` treated `batDischargePower == 0.0` (battery not discharging, solar > load) the same as `None` (no data), falling back to the requested target power (~4075W). Now returns 0 when the coordinator explicitly reports no discharge, and only falls back to target when data is unavailable.
-- **Log sensor entities unnamed** (`sensor.foxess_2`, `sensor.foxess_3`): Info Log, Init Debug Log, and Data Freshness sensors relied solely on `_attr_translation_key` for naming, which HA wasn't resolving. Added explicit `_attr_name` so entities register with correct names and entity_ids.
-- **BMS temperature early returns log at WARNING** (C-020, C-026): `_fetch_bms_temperature` silently returned `None` when `web_session` was missing or `battery_compound_id` hadn't been discovered — no log line at all. Both paths now emit WARNING-level messages with actionable diagnostics.
-- **BMS fetch success/failure now logged at INFO**: successful temperature reads, "no value returned", and fetch exceptions were all logged at DEBUG, making them invisible in the info log sensor. All three paths now log at INFO so BMS activity appears in the rolling info log.
-- **Lovelace card form inputs reset during typing** (C-020): State updates (~5s with WebSocket active) triggered full card re-renders, clearing user input in time/SoC fields. Form values are now persisted across re-renders via local state.
-- **E2E fixture pipe-buffer deadlock** (C-031): HA container started with `stdout=PIPE` but the pipe was never drained. Under CI load (12 xdist workers), HA's startup logs filled the 64 KiB pipe buffer, deadlocking the container process. Changed to `DEVNULL`; container logs captured via `podman logs` instead. Also hardened `is_ready()` to catch `OSError` during health checks.
-
-## 1.0.7-beta.20
-
-### Fixed
-- **BMS temperature fetch fails with expired token (errno 41809)**: the web session token can be invalidated server-side between login and the first BMS fetch (5 min later on REST poll). `async_get` and `async_post` now detect auth errors (errno 41808/41809) and retry once after re-authenticating, instead of silently returning None.
-
-## 1.0.7-beta.19
-
-### Fixed
-- **BMS temperature always unknown when WebSocket active**: `_fetch_bms_temperature` only ran during REST polls, but every WebSocket injection reset the HA coordinator's poll timer (300s), starving the REST path indefinitely. BMS temperature fetch now runs as a rate-limited background task triggered by WS injections, independent of the REST poll cycle.
-- **BMS fetch skipped on freshly booted systems**: `_bms_last_fetch` initialized to `0.0` caused the interval check (`now - 0.0 < 300`) to pass on any system with uptime under 5 minutes, silently skipping the first background BMS fetch.
-
-### Added
-- **BMS temperature on overview card**: shows "Cell 15.5°C · Inv 25.3°C" in the battery node when BMS cell temperature is available, clearly distinguishing it from the inverter sensor temperature. Falls back gracefully when only one source is present.
-- **INFO-level rolling log sensor**: new `sensor.foxess_info_log` captures only INFO+ messages (session events, BMS fetches, mode changes, circuit breaker) in a rolling buffer of 75 entries, retaining operational context much longer than the DEBUG log which fills in minutes during active sessions.
-- **E2E test for BMS battery temperature after reload**: verifies the sensor reads a valid temperature, survives integration reload, and recovers with the re-discovered compound ID. Simulator now serves `batteryId`/`multipleBatterySoc` in WS messages and the `/dew/v0/device/detail` endpoint.
-- **`entry` field on `EntryData`**: allows shared helpers to access the config entry directly.
-- **Debug logging on silent early returns**: `_fetch_bms_temperature` now logs why it bails (no domain data, no web session) instead of returning silently (C-020, C-026).
-
-## 1.0.7-beta.15
-
-### Fixed
-- **BMS battery temperature still always unknown**: the `_battery_compound_id` key was missing from `FoxESSControlData`'s bridge layer (`_KEY_MAP` and dataclass fields), so the compound ID discovery succeeded but the value was silently lost on write (`KeyError` in background task) and read (`get()` returned `None`). Added the field and mapping so the compound ID persists across coordinator polls.
-
-## 1.0.7-beta.14
-
-### Added
-- **Two-tier circuit breaker** (C-024): 3 consecutive adapter errors open the circuit breaker and hold position; 5 more ticks without recovery abort the session to self-use. Previously, 3 errors triggered immediate abort.
-- **Automatic session replay after outage**: when the circuit breaker aborts a session and the time window is still open, the integration probes the API every 5 minutes and restarts the session on recovery (up to 6 attempts).
-- **Proactive schedule conflict detection**: a 30-minute periodic check warns about unmanaged schedule modes (e.g. Backup) before they block a session start. Warnings surface via persistent notification and the `upcoming_conflicts` sensor attribute.
-- **Forecast chart card** (`foxess-forecast-card`): SVG-based Lovelace card showing projected SoC trajectory with actual history overlay, target/min SoC markers, and time axis.
-- **Session history timeline card** (`foxess-history-card`): 24h horizontal timeline with coloured session bars (charge/discharge/deferred/aborted) and SoC trace overlay.
+- **Overview card box customisation**: show/hide, reorder, relabel, and re-icon boxes (solar, house, grid, battery) via the card editor or YAML `boxes` config. Responsive grid adapts layout for 1, 3, or 4 visible boxes.
+- **Overview card click-to-history**: tapping any energy flow node opens the HA entity history dialog. Sub-details (cell temperature, PV strings, grid voltage/frequency, residual energy) are individually clickable for granular history access.
+- **Cold-temperature BMS charge curtailment**: when BMS battery temperature is below 16°C, the maximum charge power is capped at 80A × live battery voltage (~4kW at 50V). The BMS physically limits charge current — the system now anticipates this to avoid over-requesting. Exposed via `charge_effective_max_power_w` sensor attribute.
+- **BMS temperature on overview card**: shows "Cell 15.5°C · Inv 25.3°C" in the battery node, clearly distinguishing BMS cell temperature from the inverter sensor temperature.
+- **Two-tier circuit breaker** (C-024): 3 consecutive adapter errors open the circuit breaker and hold position; 5 more ticks without recovery abort the session to self-use.
+- **Automatic session replay after outage**: when the circuit breaker aborts a session and the time window is still open, the integration probes the API every 5 minutes and restarts on recovery (up to 6 attempts).
+- **Proactive schedule conflict detection**: periodic check warns about unmanaged schedule modes (e.g. Backup) before they block a session start.
+- **Forecast chart card** (`foxess-forecast-card`): SVG-based card showing projected SoC trajectory with actual history overlay, target/min SoC markers.
+- **Session history timeline card** (`foxess-history-card`): 24h horizontal timeline with coloured session bars and SoC trace overlay.
 - **Action buttons on control card**: cancel (with double-tap confirmation), charge, and discharge buttons with inline parameter forms.
-- **Visual card editors**: both the control card and overview card now support HA's visual card editor for entity configuration.
-- **Troubleshooting guide** (`TROUBLESHOOTING.md`): 5 decision trees for common issues.
-- **Contributing guide** (`CONTRIBUTING.md`): local dev setup, simulator architecture, E2E infrastructure, adapter protocol.
-- **FAQ** (`FAQ.md`): answers to 7 common user questions.
-- **Performance regression gate**: CI job testing algorithm calculation time, taper profile throughput, and AST scan for sync I/O in async functions.
-- **Fault recovery E2E tests**: 5 cloud-mode tests covering circuit breaker, transient error survival, WS fallback, and WS reconnection.
-- **Entity-mode E2E parity**: discharge-drains-battery, charge lifecycle, and min_soc suspension tests now run in entity mode.
+- **Visual card editors**: both control and overview cards support HA's visual card editor.
+- **Init debug log sensor** (`sensor.foxess_init_debug_log`): non-wrapping buffer preserving the first 75 log messages after startup, complementing the rolling debug log.
+- **INFO-level rolling log sensor** (`sensor.foxess_info_log`): captures only INFO+ messages in a rolling buffer of 75 entries, retaining operational context much longer than the DEBUG log.
+- **BMS battery temperature sensor** (`sensor.foxess_bms_battery_temperature`): exposes the min cell temperature from the BMS via the FoxESS web portal API.
+- **Troubleshooting guide**, **Contributing guide**, and **FAQ** documentation.
+- **Performance regression gate**: CI job testing algorithm calculation time and AST scan for sync I/O in async functions.
 
 ### Fixed
-- **Discharge circuit breaker unreliable**: the discharge pacing loop skipped `adapter.apply_mode()` when power was unchanged between ticks, so the circuit breaker could never detect failures during steady-state discharge. Now calls the adapter every tick, matching the charge path.
-- **Circuit breaker not visible on dashboard**: `circuit_breaker_active` was only surfaced on the override status sensor, not the primary smart_operations sensor that the dashboard uses.
-- **Entity-mode discharge test incorrect**: expected `discharge_suspended` but discharge at min_soc ends the session (→ idle), not suspends it.
-- **Entity-mode charge lifecycle timeout**: charge listener monitors until window expires after reaching target; test now uses a 5-min window to avoid timeout.
+- **BMS temperature reliability**: resolved multiple issues preventing BMS temperature from working — correct endpoint discovery (`GET /dew/v0/device/detail`), compound battery ID persistence, web session token handling, fetch timing during WebSocket operation, and value preservation on transient server failures.
+- **Discharge power sensor oscillates**: `get_actual_discharge_power_w` now correctly returns 0 when the battery isn't discharging (solar > load) instead of falling back to the target power.
+- **Discharge target_power_w missing until first tick**: attribute now set at session creation and deferred start.
+- **Control card form inputs reset during typing**: state updates triggered full card re-renders, clearing user input. Now uses real-time `input` event listeners with post-render DOM restore.
+- **Discharge circuit breaker unreliable**: pacing loop now calls the adapter every tick, matching the charge path, so the circuit breaker can detect steady-state failures.
+- **Log sensor entities unnamed**: added explicit `_attr_name` so entities register with correct names.
+- **Blocking I/O on event loop**: WASM bytes pre-read at module import time; Module constructed from memory.
+- **Web session token expiry**: `async_get` and `async_post` detect auth errors (errno 41808/41809) and retry once after re-authenticating.
 
 ### Improved
-- **Migration guide rewritten**: recommends clean install over side-by-side migration, with guidance for cleaning up orphaned entities.
-- **Circuit breaker attributes surfaced**: `circuit_breaker_active` and `circuit_breaker_since` on both the override status and smart_operations sensors for UI observability.
-- **Replay attributes surfaced**: `replay_pending`, `replay_type`, `replay_attempts` on the smart_operations sensor.
-
-## 1.0.7-beta.13
-
-### Fixed
-- **BMS battery temperature always unknown**: the endpoint requires `GET /dew/v0/device/detail?id={batteryId}@{batSn}&category=battery` — not POST, not the device serial, and the compound battery ID comes from the WebSocket `bat` node. Previous attempts failed because they used POST, used the wrong identifier, or hit `/generic/v0/` endpoints that reject the web session token.
-
-## 1.0.7-beta.12
-
-### Fixed
-- **BMS battery temperature always unknown**: the `/generic/v0/` API namespace rejects the web session token with errno=41808 ("Token has expired"), even immediately after login. Switched to `POST /dew/v0/device/detail` which accepts the web session token and returns battery temperature.
-
-## 1.0.7-beta.11
-
-### Fixed
-- **Blocking I/O on event loop**: `wasmtime.Module.from_file()` performed a synchronous file read during lazy signature engine init. WASM bytes are now pre-read at module import time (in HA's executor) and the Module constructed from memory.
-
-### Improved
-- **HA Integration Quality Scale compliance**:
-  - **Bronze — action-setup**: service registration moved from `async_setup_entry` to `async_setup`, so actions are available before any config entry loads.
-  - **Gold — exception-translations**: all `ServiceValidationError` and `HomeAssistantError` raises now include `translation_domain`/`translation_key` for HA's i18n framework.
-  - **Platinum — async-dependency**: WASM signature generation runs in the default executor via `_async_make_headers`, keeping the event loop unblocked.
-  - **Platinum — strict-typing**: added PEP-561 `py.typed` marker file.
-
-## 1.0.7-beta.10
-
-### Fixed
-- **BMS battery temperature always unknown**: removed unreliable Open API `get_detail` dependency for battery SN discovery (errno 40256). Now uses web portal `/generic/v0/device/list` for device discovery + `/generic/v0/device/battery/info` for temperature, bypassing the Open API entirely.
-
-### Added
-- **Init debug log sensor** (`sensor.foxess_init_debug_log`): non-wrapping buffer that preserves the first 75 log messages after HA startup, complementing the rolling `sensor.foxess_debug_log`. Captures startup exceptions and initialization flow that the rolling buffer would evict.
-
-### Improved
-- **E2E test infrastructure hardened**: replaced all hardcoded `time.sleep()` calls with deterministic waits (`wait_for_state`, `wait_for_numeric_state`, `wait_for_attribute`). Narrowed blind `except Exception` to specific types. Deleted duplicate `_reload_integration`. Added `_wait_for_integration_ready` helper.
-- **Playwright reload flakiness fixed**: replaced bare `page.reload()` with `_robust_reload()` (`page.goto` + `networkidle`) to avoid `net::ERR_ABORTED` races in CI.
-- **Ruff lint rules expanded**: enabled `S110` (try-except-pass), `S112` (try-except-continue), `BLE001` (blind except), `B904` (raise-without-from) for tests and simulator.
-- **Test quality constraints**: added CLAUDE.md rules banning hardcoded sleeps, blind exception swallowing, and bare `page.reload()` in tests.
-- **Pre-commit vendor sync hook**: automatically syncs `smart_battery/` to `custom_components/foxess_control/smart_battery/` on commit.
-
-## 1.0.7-beta.7
-
-### Added
-- **BMS battery temperature sensor**: new `sensor.foxess_bms_battery_temperature` exposes the min cell temperature from the BMS via the FoxESS web portal API. This is operationally critical — low BMS temperatures inhibit charge rate, unlike the Open API's `batTemperature` which reports the inverter's own sensor.
-- **E2E tests moved under `tests/`**: ensures they are discovered by default pytest collection; the `slow` marker allows skipping when desired.
-
-### Improved
-- **Typed runtime data**: `entry.runtime_data` stores `FoxESSEntryData` (coordinator, inverter, adapter) instead of untyped `hass.data[DOMAIN]` dict. `FoxESSControlData` bridge layer preserves backward compatibility during migration.
-- **HA-managed aiohttp session**: `FoxESSWebSession` uses HA's shared HTTP session (`async_get_clientsession`) for proper SSL, proxy, and lifecycle management instead of creating its own.
-- **Named background tasks**: all `async_create_task` calls include descriptive names for easier debugging and HA lifecycle tracking.
-- **Theme-aware stale data badge**: stale data indicator uses `--primary-text-color` instead of amber, ensuring readability on both light and dark themes.
-- **`serial_number` in DeviceInfo**: device serial from config entry is now included for better identification.
-- **Platform enum**: `PLATFORMS` uses `Platform.BINARY_SENSOR`/`Platform.SENSOR` instead of raw strings.
+- **HA Integration Quality Scale**: Bronze 18/18, Silver 10/10, Gold 19/21, Platinum 3/3. Includes `ConfigEntryNotReady`, repair issues, diagnostics, entity categories, display precision, reauthentication, `icons.json`, `entry.runtime_data`, and `py.typed`.
+- **Typed runtime data**: `entry.runtime_data` stores `FoxESSEntryData` instead of untyped dict. `FoxESSControlData` bridge layer preserves backward compatibility.
+- **HA-managed aiohttp session**: web portal operations use HA's shared HTTP session for proper SSL, proxy, and lifecycle management.
+- **E2E test infrastructure**: deterministic waits replace all sleeps, robust page reload, expanded cloud/entity parametrization, fault recovery tests, 796 total tests (670 unit + 126 E2E).
+- **Migration guide rewritten**: recommends clean install with guidance for cleaning up orphaned entities.
 
 ## 1.0.6-beta.2
 
