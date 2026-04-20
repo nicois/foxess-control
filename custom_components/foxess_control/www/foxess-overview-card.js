@@ -16,7 +16,7 @@
  *   # etc.
  */
 
-const OVERVIEW_VERSION = "2.6.0";
+const OVERVIEW_VERSION = "2.7.0";
 
 // -- i18n --------------------------------------------------------------------
 
@@ -179,6 +179,15 @@ const _ROLE_MAP = {
   data_freshness_entity:    "data_freshness",
 };
 
+const _DEFAULT_BOXES = [
+  { type: "solar" },
+  { type: "house" },
+  { type: "grid" },
+  { type: "battery" },
+];
+
+const _VALID_BOX_TYPES = new Set(["solar", "house", "grid", "battery"]);
+
 class FoxESSOverviewCard extends HTMLElement {
   constructor() {
     super();
@@ -187,10 +196,29 @@ class FoxESSOverviewCard extends HTMLElement {
     this._hass = null;
     this._entityMap = null;      // role → entity_id from WS
     this._fetchPending = false;
+    this._boxes = _DEFAULT_BOXES;
   }
 
   setConfig(config) {
     this._userConfig = config || {};
+    this._boxes = this._parseBoxes(this._userConfig.boxes);
+  }
+
+  _parseBoxes(raw) {
+    if (!Array.isArray(raw) || raw.length === 0) return _DEFAULT_BOXES;
+    const seen = new Set();
+    const result = [];
+    for (const entry of raw) {
+      const type = typeof entry === "string" ? entry : entry?.type;
+      if (!type || !_VALID_BOX_TYPES.has(type) || seen.has(type)) continue;
+      seen.add(type);
+      result.push({
+        type,
+        icon: entry?.icon || null,
+        label: entry?.label || null,
+      });
+    }
+    return result.length > 0 ? result : _DEFAULT_BOXES;
   }
 
   set hass(hass) {
@@ -316,6 +344,66 @@ class FoxESSOverviewCard extends HTMLElement {
     return `${h}h${m % 60}m`;
   }
 
+  _renderBox(box, eid, dataSource) {
+    const t = box.type;
+    if (t === "solar") {
+      const solar = this._num(eid.solar_entity);
+      const pv1 = this._num(eid.pv1_entity);
+      const pv2 = this._num(eid.pv2_entity);
+      const found = this._exists(eid.solar_entity);
+      const active = solar != null && solar > 0.01;
+      const sub = dataSource !== "ws" && (pv1 != null || pv2 != null)
+        ? this._pvDetail(pv1, pv2, eid.pv1_entity, eid.pv2_entity) : "";
+      return this._renderNode(
+        "solar", box.icon || "☀️", box.label || this._t("solar"),
+        found, this._formatKw(solar), active, sub, eid.solar_entity
+      );
+    }
+    if (t === "house") {
+      const house = this._num(eid.house_entity);
+      const found = this._exists(eid.house_entity);
+      return this._renderNode(
+        "house", box.icon || "🏠", box.label || this._t("house"),
+        found, this._formatKw(house), house != null, "", eid.house_entity
+      );
+    }
+    if (t === "grid") {
+      const gridImport = this._num(eid.grid_import_entity);
+      const gridExport = this._num(eid.grid_export_entity);
+      const gridNet = (gridImport || 0) - (gridExport || 0);
+      const found = this._exists(eid.grid_import_entity) || this._exists(eid.grid_export_entity);
+      const gridV = dataSource !== "ws" ? this._num(eid.grid_voltage_entity) : null;
+      const gridHz = dataSource !== "ws" ? this._num(eid.grid_frequency_entity) : null;
+      return this._renderGridNode(
+        found, gridNet, gridNet > 0.01, gridNet < -0.01,
+        gridV, gridHz, eid.grid_import_entity,
+        eid.grid_voltage_entity, eid.grid_frequency_entity,
+        box.icon, box.label
+      );
+    }
+    if (t === "battery") {
+      const batCharge = this._num(eid.battery_charge_entity);
+      const batDischarge = this._num(eid.battery_discharge_entity);
+      const soc = this._num(eid.soc_entity);
+      const batNet = (batCharge || 0) - (batDischarge || 0);
+      const found = this._exists(eid.battery_charge_entity) || this._exists(eid.battery_discharge_entity);
+      const socPct = soc != null ? Math.max(0, Math.min(100, Math.round(soc))) : 0;
+      let socColor = "var(--success-color, #4caf50)";
+      if (socPct <= 15) socColor = "var(--error-color, #f44336)";
+      else if (socPct <= 30) socColor = "var(--warning-color, #ff9800)";
+      const batTemp = dataSource !== "ws" ? this._num(eid.bat_temp_entity) : null;
+      const bmsTemp = this._num(eid.bms_temp_entity);
+      const residual = dataSource !== "ws" ? this._num(eid.residual_entity) : null;
+      return this._renderBatteryNode(
+        soc, socPct, socColor, batNet, batNet > 0.01, batNet < -0.01,
+        batTemp, bmsTemp, residual, found, eid.soc_entity,
+        eid.bat_temp_entity, eid.bms_temp_entity, eid.residual_entity,
+        box.icon, box.label
+      );
+    }
+    return "";
+  }
+
   // -- Rendering -------------------------------------------------------------
 
   _render() {
@@ -327,47 +415,17 @@ class FoxESSOverviewCard extends HTMLElement {
       eid[key] = this._resolve(key);
     }
 
-    const solar = this._num(eid.solar_entity);
-    const house = this._num(eid.house_entity);
-    const gridImport = this._num(eid.grid_import_entity);
-    const gridExport = this._num(eid.grid_export_entity);
-    const batCharge = this._num(eid.battery_charge_entity);
-    const batDischarge = this._num(eid.battery_discharge_entity);
-    const soc = this._num(eid.soc_entity);
     const workMode = this._str(eid.work_mode_entity);
-    const pv1 = this._num(eid.pv1_entity);
-    const pv2 = this._num(eid.pv2_entity);
-    const gridV = this._num(eid.grid_voltage_entity);
-    const gridHz = this._num(eid.grid_frequency_entity);
-    const batTemp = this._num(eid.bat_temp_entity);
-    const bmsTemp = this._num(eid.bms_temp_entity);
-    const residual = this._num(eid.residual_entity);
-
-    const solarFound = this._exists(eid.solar_entity);
-    const houseFound = this._exists(eid.house_entity);
-    const gridFound = this._exists(eid.grid_import_entity) || this._exists(eid.grid_export_entity);
-    const batFound = this._exists(eid.battery_charge_entity) || this._exists(eid.battery_discharge_entity);
-
-    const batNet = (batCharge || 0) - (batDischarge || 0);
-    const gridNet = (gridImport || 0) - (gridExport || 0);
-
-    const solarActive = solar != null && solar > 0.01;
-    const houseActive = house != null;
-    const gridImporting = gridNet > 0.01;
-    const gridExporting = gridNet < -0.01;
-    const batCharging = batNet > 0.01;
-    const batDischarging = batNet < -0.01;
-
-    const socPct = soc != null ? Math.max(0, Math.min(100, Math.round(soc))) : 0;
-    let socColor = "var(--success-color, #4caf50)";
-    if (socPct <= 15) socColor = "var(--error-color, #f44336)";
-    else if (socPct <= 30) socColor = "var(--warning-color, #ff9800)";
-
     const dataSource = this._getDataSource(eid);
     const freshnessId = eid.data_freshness_entity;
     const freshnessEntity = freshnessId && this._hass.states[freshnessId];
     const lastUpdate = freshnessEntity && freshnessEntity.attributes && freshnessEntity.attributes.last_update;
     const ageSeconds = lastUpdate ? Math.max(0, Math.round((Date.now() - new Date(lastUpdate).getTime()) / 1000)) : null;
+
+    const boxCount = this._boxes.length;
+    let gridCls = "flow-grid";
+    if (boxCount === 1) gridCls = "flow-grid cols-1";
+    else if (boxCount === 3) gridCls = "flow-grid cols-3";
 
     this.shadowRoot.innerHTML = `
       <style>${FoxESSOverviewCard._styles()}</style>
@@ -376,29 +434,33 @@ class FoxESSOverviewCard extends HTMLElement {
           <div class="title">${this._t("title")}${this._dataSourceBadge(dataSource, ageSeconds)}</div>
           ${workMode && workMode !== "SelfUse" ? `<span class="work-mode">${this._formatWorkMode(workMode)}</span>` : ""}
         </div>
-        <div class="flow-grid">
-          ${this._renderNode("solar", "☀️", this._t("solar"), solarFound, this._formatKw(solar), solarActive, dataSource !== "ws" && (pv1 != null || pv2 != null) ? this._pvDetail(pv1, pv2) : "", eid.solar_entity)}
-          ${this._renderNode("house", "🏠", this._t("house"), houseFound, this._formatKw(house), houseActive, "", eid.house_entity)}
-          ${this._renderGridNode(gridFound, gridNet, gridImporting, gridExporting, dataSource !== "ws" ? gridV : null, dataSource !== "ws" ? gridHz : null, eid.grid_import_entity)}
-          ${this._renderBatteryNode(soc, socPct, socColor, batNet, batCharging, batDischarging, dataSource !== "ws" ? batTemp : null, bmsTemp, dataSource !== "ws" ? residual : null, batFound, eid.soc_entity)}
+        <div class="${gridCls}">
+          ${this._boxes.map(b => this._renderBox(b, eid, dataSource)).join("")}
         </div>
       </ha-card>
     `;
 
+    this.shadowRoot.querySelectorAll(".sub-link[data-entity]").forEach((link) => {
+      link.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._fireMoreInfo(link.getAttribute("data-entity"));
+      });
+    });
     this.shadowRoot.querySelectorAll(".node[data-entity]").forEach((node) => {
       node.addEventListener("click", (e) => {
         e.stopPropagation();
-        const entityId = node.getAttribute("data-entity");
-        if (entityId) {
-          const event = new CustomEvent("hass-more-info", {
-            bubbles: true,
-            composed: true,
-            detail: { entityId },
-          });
-          this.dispatchEvent(event);
-        }
+        this._fireMoreInfo(node.getAttribute("data-entity"));
       });
     });
+  }
+
+  _fireMoreInfo(entityId) {
+    if (!entityId) return;
+    this.dispatchEvent(new CustomEvent("hass-more-info", {
+      bubbles: true,
+      composed: true,
+      detail: { entityId },
+    }));
   }
 
   _formatWorkMode(mode) {
@@ -408,20 +470,27 @@ class FoxESSOverviewCard extends HTMLElement {
                .replace(/\b\w/g, c => c.toUpperCase());
   }
 
-  _pvDetail(pv1, pv2) {
+  _pvDetail(pv1, pv2, pv1Id, pv2Id) {
     const parts = [];
-    if (pv1 != null) parts.push(`PV1 ${this._formatKw(pv1)}`);
-    if (pv2 != null) parts.push(`PV2 ${this._formatKw(pv2)}`);
+    if (pv1 != null) parts.push(this._subLink(`PV1 ${this._formatKw(pv1)}`, pv1Id));
+    if (pv2 != null) parts.push(this._subLink(`PV2 ${this._formatKw(pv2)}`, pv2Id));
     return parts.join(" · ");
   }
 
-  _renderGridNode(found, gridNet, importing, exporting, voltage, freq, entityId) {
+  _subLink(text, entityId) {
+    if (entityId) {
+      return `<span class="sub-link" data-entity="${entityId}">${text}</span>`;
+    }
+    return text;
+  }
+
+  _renderGridNode(found, gridNet, importing, exporting, voltage, freq, entityId, voltageId, freqId, iconOverride, labelOverride) {
     if (!found) {
       return `
         <div class="node grid not-found">
-          <div class="node-icon">⚡</div>
+          <div class="node-icon">${iconOverride || "⚡"}</div>
           <div class="node-value">—</div>
-          <div class="node-label">${this._t("grid")}</div>
+          <div class="node-label">${labelOverride || this._t("grid")}</div>
           <div class="node-sub">${entityId ? entityId + " " + this._t("not_found") : this._t("not_discovered")}</div>
         </div>
       `;
@@ -429,13 +498,13 @@ class FoxESSOverviewCard extends HTMLElement {
     const active = importing || exporting;
     const direction = importing ? this._t("importing") : exporting ? this._t("exporting") : "";
     const sub = [];
-    if (voltage != null) sub.push(`${voltage.toFixed(0)}V`);
-    if (freq != null) sub.push(`${freq.toFixed(1)}Hz`);
+    if (voltage != null) sub.push(this._subLink(`${voltage.toFixed(0)}V`, voltageId));
+    if (freq != null) sub.push(this._subLink(`${freq.toFixed(1)}Hz`, freqId));
     return `
       <div class="node grid ${active ? "active" : "inactive"}"${entityId ? ` data-entity="${entityId}"` : ""}>
-        <div class="node-icon">⚡</div>
+        <div class="node-icon">${iconOverride || "⚡"}</div>
         <div class="node-value">${active ? this._formatKw(Math.abs(gridNet)) : "—"}</div>
-        <div class="node-label">${this._t("grid")}${direction ? " · " + direction : ""}</div>
+        <div class="node-label">${labelOverride || this._t("grid")}${direction ? " · " + direction : ""}</div>
         ${sub.length ? `<div class="node-sub">${sub.join(" · ")}</div>` : ""}
       </div>
     `;
@@ -462,13 +531,13 @@ class FoxESSOverviewCard extends HTMLElement {
     `;
   }
 
-  _renderBatteryNode(soc, socPct, socColor, batNet, charging, discharging, temp, bmsTemp, residual, found, socEntityId) {
+  _renderBatteryNode(soc, socPct, socColor, batNet, charging, discharging, temp, bmsTemp, residual, found, socEntityId, tempId, bmsTempId, residualId, iconOverride, labelOverride) {
     if (!found) {
       return `
         <div class="node battery not-found">
-          <div class="node-icon">🔋</div>
+          <div class="node-icon">${iconOverride || "🔋"}</div>
           <div class="node-value">—</div>
-          <div class="node-label">${this._t("battery")}</div>
+          <div class="node-label">${labelOverride || this._t("battery")}</div>
           <div class="node-sub">${this._t("not_discovered")}</div>
         </div>
       `;
@@ -478,13 +547,13 @@ class FoxESSOverviewCard extends HTMLElement {
     const direction = charging ? this._t("charging") : discharging ? this._t("discharging") : "";
     const sub = [];
     if (bmsTemp != null && temp != null) {
-      sub.push(`Cell ${bmsTemp.toFixed(1)}°C · Inv ${temp.toFixed(1)}°C`);
+      sub.push(this._subLink(`Cell ${bmsTemp.toFixed(1)}°C`, bmsTempId) + " · " + this._subLink(`Inv ${temp.toFixed(1)}°C`, tempId));
     } else if (bmsTemp != null) {
-      sub.push(`Cell ${bmsTemp.toFixed(1)}°C`);
+      sub.push(this._subLink(`Cell ${bmsTemp.toFixed(1)}°C`, bmsTempId));
     } else if (temp != null) {
-      sub.push(`${temp.toFixed(1)}°C`);
+      sub.push(this._subLink(`${temp.toFixed(1)}°C`, tempId));
     }
-    if (residual != null) sub.push(`${residual.toFixed(1)} kWh`);
+    if (residual != null) sub.push(this._subLink(`${residual.toFixed(1)} kWh`, residualId));
 
     return `
       <div class="node battery ${active ? "active" : "inactive"}"${socEntityId ? ` data-entity="${socEntityId}"` : ""}>
@@ -500,7 +569,7 @@ class FoxESSOverviewCard extends HTMLElement {
           <span class="bat-soc">${soc != null ? Math.round(soc) + "%" : "—"}</span>
         </div>
         <div class="node-value">${active ? this._formatKw(batPower) : "—"}</div>
-        <div class="node-label">${this._t("battery")}${direction ? " · " + direction : ""}</div>
+        <div class="node-label">${labelOverride || this._t("battery")}${direction ? " · " + direction : ""}</div>
         ${sub.length ? `<div class="node-sub">${sub.join(" · ")}</div>` : ""}
       </div>
     `;
@@ -554,6 +623,12 @@ class FoxESSOverviewCard extends HTMLElement {
         gap: 10px;
         padding: 8px 16px 16px;
       }
+      .flow-grid.cols-1 {
+        grid-template-columns: 1fr;
+      }
+      .flow-grid.cols-3 .node:last-child {
+        grid-column: 1 / -1;
+      }
 
       .node {
         border-radius: 12px;
@@ -587,6 +662,8 @@ class FoxESSOverviewCard extends HTMLElement {
       .node-value { font-size: 16px; font-weight: 700; color: var(--primary-text-color); margin-bottom: 2px; }
       .node-label { font-size: 11px; font-weight: 600; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: 0.03em; }
       .node-sub { font-size: 10px; color: var(--secondary-text-color); margin-top: 3px; opacity: 0.8; }
+      .sub-link { cursor: pointer; border-radius: 3px; padding: 1px 3px; margin: -1px -3px; }
+      .sub-link:hover { background: rgba(var(--rgb-primary-color, 3, 169, 244), 0.12); }
 
       .bat-header { display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 4px; }
       .bat-svg { color: var(--primary-text-color); }
