@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.7-beta.27
+
+### Added
+- **Overview card box customisation**: users can show/hide, reorder, relabel, and re-icon boxes (solar, house, grid, battery) via the card editor or YAML `boxes` config. Responsive grid adapts layout for 1, 3, or 4 visible boxes. Zero-config renders all four boxes in default order.
+- **Sub-detail click-to-history**: individual sub-details (cell temperature, inverter temperature, PV strings, grid voltage/frequency, residual energy) are clickable, opening the HA history dialog for that specific sensor.
+
 ## 1.0.7-beta.26
 
 ### Added
