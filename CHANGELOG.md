@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.7-beta.30
+
+### Added
+- **Configurable BMS polling interval**: BMS cell temperature fetch frequency is now adjustable (60–3600s, default 300s) in the integration options, replacing the hardcoded 5-minute interval.
+- **Control card show_cancel option**: cancel button visibility is now configurable via the card editor.
+- **README gallery screenshots**: generated from E2E simulator for reproducible, up-to-date documentation images.
+
+### Fixed
+- **Control card form inputs reset during typing**: state updates triggered full card re-renders, clearing user input mid-edit. Now preserves form DOM and restores values post-render using real-time `input` event listeners.
+- **E2E `_robust_reload` navigation race**: retry `page.goto()` could overlap with the browser's navigation teardown, causing "interrupted by another navigation" flakes. Added `wait_for_load_state("load")` between failed navigation and retry.
+
 ## 1.0.7
 
 ### Added
