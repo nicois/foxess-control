@@ -1302,3 +1302,170 @@ class TestScreenshots:
         _robust_reload(page, settle_ms=2000)
         SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(SCREENSHOT_DIR / "discharging.png"))
+
+
+class TestGalleryScreenshots:
+    """Element-level card screenshots for the README gallery.
+
+    Captures cropped images of individual cards in representative states.
+    Run with: pytest tests/e2e/test_ui.py::TestGalleryScreenshots -m slow
+    Output: tests/e2e/screenshots/{worker}/gallery/
+    """
+
+    GALLERY_DIR = SCREENSHOT_DIR / "gallery"
+
+    def _screenshot_card(
+        self, page: Page, tag: str, filename: str, *, timeout: int = 30000
+    ) -> None:
+        self.GALLERY_DIR.mkdir(parents=True, exist_ok=True)
+        page.wait_for_function(
+            f"""() => {{
+                function find(root) {{
+                    const el = root.querySelector('{tag}');
+                    if (el && el.shadowRoot && el.shadowRoot.querySelector('ha-card'))
+                        return true;
+                    for (const c of root.querySelectorAll('*'))
+                        if (c.shadowRoot && find(c.shadowRoot)) return true;
+                    return false;
+                }}
+                return find(document);
+            }}""",
+            timeout=timeout,
+        )
+        card = page.locator(f"{tag} >>> ha-card").first
+        card.screenshot(path=str(self.GALLERY_DIR / filename))
+
+    def test_gallery_overview_idle(
+        self,
+        page: Page,
+        foxess_sim: SimulatorHandle | None,
+        ha_e2e: HAClient,
+        connection_mode: str,
+    ) -> None:
+        """Overview card: idle with solar generation and house load."""
+        set_inverter_state(
+            connection_mode, foxess_sim, ha_e2e, soc=72, solar_kw=3.2, load_kw=1.4
+        )
+        _robust_reload(page, settle_ms=3000)
+        self._screenshot_card(page, "foxess-overview-card", "overview-idle.png")
+
+    def test_gallery_overview_discharging(
+        self,
+        page: Page,
+        foxess_sim: SimulatorHandle | None,
+        ha_e2e: HAClient,
+        connection_mode: str,
+    ) -> None:
+        """Overview card: during active discharge with battery output visible."""
+        set_inverter_state(
+            connection_mode, foxess_sim, ha_e2e, soc=65, solar_kw=0.5, load_kw=1.8
+        )
+        start, end = _tight_window(30)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 20},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        _robust_reload(page, settle_ms=3000)
+        self._screenshot_card(page, "foxess-overview-card", "overview-discharging.png")
+
+    def test_gallery_control_idle(
+        self,
+        page: Page,
+        foxess_sim: SimulatorHandle | None,
+        ha_e2e: HAClient,
+        connection_mode: str,
+    ) -> None:
+        """Control card: idle state with charge/discharge buttons."""
+        set_inverter_state(
+            connection_mode, foxess_sim, ha_e2e, soc=72, solar_kw=3.2, load_kw=1.4
+        )
+        _robust_reload(page, settle_ms=3000)
+        self._screenshot_card(page, "foxess-control-card", "control-idle.png")
+
+    def test_gallery_control_charging(
+        self,
+        page: Page,
+        foxess_sim: SimulatorHandle | None,
+        ha_e2e: HAClient,
+        connection_mode: str,
+    ) -> None:
+        """Control card: active smart charge with progress bars."""
+        set_inverter_state(
+            connection_mode, foxess_sim, ha_e2e, soc=35, solar_kw=0, load_kw=0.5
+        )
+        start, end = _tight_window(30)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_charge",
+            {"start_time": start, "end_time": end, "target_soc": 90},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "charging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        _robust_reload(page, settle_ms=3000)
+        self._screenshot_card(page, "foxess-control-card", "control-charging.png")
+
+    def test_gallery_control_discharging(
+        self,
+        page: Page,
+        foxess_sim: SimulatorHandle | None,
+        ha_e2e: HAClient,
+        connection_mode: str,
+    ) -> None:
+        """Control card: active smart discharge with progress bars."""
+        set_inverter_state(
+            connection_mode, foxess_sim, ha_e2e, soc=80, solar_kw=0.5, load_kw=1.2
+        )
+        start, end = _tight_window(30)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 20},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        _robust_reload(page, settle_ms=3000)
+        self._screenshot_card(page, "foxess-control-card", "control-discharging.png")
+
+    def test_gallery_control_deferred(
+        self,
+        page: Page,
+        foxess_sim: SimulatorHandle | None,
+        ha_e2e: HAClient,
+        connection_mode: str,
+    ) -> None:
+        """Control card: deferred discharge showing countdown."""
+        if connection_mode != "cloud":
+            pytest.skip("deferred state requires simulator timing control")
+        assert foxess_sim is not None
+        foxess_sim.set(soc=25, solar_kw=0, load_kw=0.3)
+        ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_battery_soc", "le", 26, timeout_s=90
+        )
+        start, end = _tight_window(10)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 20},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharge_deferred",
+            timeout_s=60,
+        )
+        _robust_reload(page, settle_ms=3000)
+        self._screenshot_card(page, "foxess-control-card", "control-deferred.png")

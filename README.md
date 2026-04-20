@@ -5,24 +5,18 @@ A Home Assistant custom integration for monitoring and controlling FoxESS invert
 FoxESS Control polls real-time inverter data (battery SoC, charge/discharge power, solar generation, house load, temperature) and provides actions for force charge, force discharge, smart charge/discharge with SoC targets, and feed-in management. It supports two backends: the **FoxESS Cloud API** and **local entity mode** via [foxess_modbus](https://github.com/nathanmarlor/foxess_modbus). It includes comprehensive polled sensors and can fully replace the [foxess-ha](https://github.com/macxq/foxess-ha) integration — see [Migrating from foxess-ha](#migrating-from-foxess-ha).
 
 ## Gallery
-### A dashboard overview card
 
-| English | 简体中文 |
-| ------- | ------- |
-| <img width="512" height="332" alt="image" src="https://github.com/user-attachments/assets/d31eda08-ca11-49df-8163-989c6a8271f3" /> | <img width="517" height="335" alt="image" src="https://github.com/user-attachments/assets/cddc1941-bd21-44b5-ba33-c0dbd8c6cad8" /> |
+### Overview card
 
-### Smart charge: optimally ensure SoC is reached at a given time
-<img width="508" height="891" alt="image" src="https://github.com/user-attachments/assets/16f47ed2-2656-4ec8-92ec-40474f852d62" />
+| Idle | Discharging |
+| ---- | ----------- |
+| ![Overview card idle](docs/images/overview-idle.png) | ![Overview card discharging](docs/images/overview-discharging.png) |
 
-### Smart discharge: defer forced discharge as long as possible, then discharge to meet SoC and feed-in targets by the end of the window
-<img width="510" height="1038" alt="image" src="https://github.com/user-attachments/assets/471f6ce7-55dc-4a84-972d-83b8b58775ea" />
+### Control card
 
-
-### A dashboard card showing the state of the current smart operation
-| Before | During |
-| ------ | ------ |
-| Before a smart charge or discharge operations begins, a countdown is shown along with a few details | Despite the inverter being capable of 5kW export, the smart discharge operation lowers the export rate to spread out the 3kW discharge over the discharge period |
-| <img width="475" height="377" alt="image" src="https://github.com/user-attachments/assets/997135c5-cbcf-4a4f-b223-b102564a3c1f" /> | <img width="477" height="407" alt="image" src="https://github.com/user-attachments/assets/ab05c800-cace-48a8-993d-f57be56f6768" /> |
+| Idle | Deferred | Charging | Discharging |
+| ---- | -------- | -------- | ----------- |
+| ![Control card idle](docs/images/control-idle.png) | ![Control card deferred](docs/images/control-deferred.png) | ![Control card charging](docs/images/control-charging.png) | ![Control card discharging](docs/images/control-discharging.png) |
 
 
 
