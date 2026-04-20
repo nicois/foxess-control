@@ -825,10 +825,10 @@ class TestBmsTemperatureEarlyReturnLogging:
         )
 
     @pytest.mark.asyncio
-    async def test_no_warning_when_fetch_succeeds(
+    async def test_info_logged_on_successful_fetch(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Happy path: no warnings when web_session and compound_id are present."""
+        """Happy path: INFO log with temperature value, no warnings."""
         coord, dd = self._make_coord_with_domain_data()
 
         web_session = AsyncMock()
@@ -838,7 +838,7 @@ class TestBmsTemperatureEarlyReturnLogging:
 
         data: dict[str, Any] = {}
         with caplog.at_level(
-            logging.WARNING, logger="custom_components.foxess_control.coordinator"
+            logging.INFO, logger="custom_components.foxess_control.coordinator"
         ):
             await coord._fetch_bms_temperature(data)
 
@@ -848,6 +848,34 @@ class TestBmsTemperatureEarlyReturnLogging:
         ]
         assert not warning_messages, (
             f"No warnings expected on successful BMS fetch, but got: {warning_messages}"
+        )
+        info_messages = [r.message for r in caplog.records if r.levelno == logging.INFO]
+        assert any("22.0" in msg for msg in info_messages), (
+            f"Expected INFO log with temperature value, but got: {info_messages}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_info_logged_when_no_value_returned(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When web portal returns None, INFO log (not silent)."""
+        coord, dd = self._make_coord_with_domain_data()
+
+        web_session = AsyncMock()
+        web_session.async_get_battery_temperature = AsyncMock(return_value=None)
+        dd["_web_session"] = web_session
+        dd["_battery_compound_id"] = "bat@SN001"
+
+        data: dict[str, Any] = {}
+        with caplog.at_level(
+            logging.INFO, logger="custom_components.foxess_control.coordinator"
+        ):
+            await coord._fetch_bms_temperature(data)
+
+        assert "bmsBatteryTemperature" not in data
+        info_messages = [r.message for r in caplog.records if r.levelno == logging.INFO]
+        assert any("no value" in msg.lower() for msg in info_messages), (
+            f"Expected INFO log about no value returned, but got: {info_messages}"
         )
 
     @pytest.mark.asyncio

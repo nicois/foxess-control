@@ -167,10 +167,11 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if temp is not None:
                 data["bmsBatteryTemperature"] = temp
                 self._bms_last_fetch = time.monotonic()
+                _LOGGER.info("BMS temperature: %.1f°C", temp)
             else:
-                _LOGGER.debug("BMS temperature: no value returned")
+                _LOGGER.info("BMS temperature: no value returned from web portal")
         except Exception:
-            _LOGGER.debug("BMS temperature fetch failed", exc_info=True)
+            _LOGGER.info("BMS temperature fetch failed", exc_info=True)
 
     async def _async_update_data(self) -> dict[str, Any]:
         from .foxess.client import FoxESSApiError
