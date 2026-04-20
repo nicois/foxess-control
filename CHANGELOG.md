@@ -1,10 +1,14 @@
 # Changelog
 
-## 1.0.7-beta.27
+## 1.0.7-beta.28
 
 ### Added
 - **Overview card box customisation**: users can show/hide, reorder, relabel, and re-icon boxes (solar, house, grid, battery) via the card editor or YAML `boxes` config. Responsive grid adapts layout for 1, 3, or 4 visible boxes. Zero-config renders all four boxes in default order.
 - **Sub-detail click-to-history**: individual sub-details (cell temperature, inverter temperature, PV strings, grid voltage/frequency, residual energy) are clickable, opening the HA history dialog for that specific sensor.
+
+### Fixed
+- **E2E test race on second overview card**: custom box tests used a one-shot `page.evaluate()` that returned null if the second card's shadow DOM hadn't rendered. Replaced with `wait_for_function()` polling.
+- **Form input test flake on page navigation (C-031)**: `_set_form_value` and related helpers crashed with "Execution context was destroyed" when HA navigated mid-evaluate. Added `_safe_evaluate` retry wrapper with `_recover_form` to re-open the form after navigation.
 
 ## 1.0.7-beta.26
 
