@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.7-beta.26
+
+### Added
+- **Overview card nodes are clickable**: tapping solar, house, grid, or battery opens the HA entity detail/history dialog for the relevant sensor. Visual feedback via pointer cursor and press animation.
+
 ## 1.0.7-beta.25
 
 ### Fixed
