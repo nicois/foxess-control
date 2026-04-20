@@ -220,6 +220,206 @@ class TestOverviewCard:
         )
         assert cursor == "pointer", f"Expected pointer cursor, got '{cursor}'"
 
+    def test_sub_link_click_opens_more_info(
+        self,
+        page: Page,
+        foxess_sim: SimulatorHandle | None,
+        ha_e2e: HAClient,
+        connection_mode: str,
+    ) -> None:
+        """Clicking a sub-detail (e.g. cell temp) opens that entity's history."""
+        if connection_mode != "cloud":
+            pytest.skip("sub-detail entities only present in cloud mode")
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
+        _robust_reload(page, settle_ms=2000)
+
+        results = page.evaluate(
+            f"""() => {{
+                {_JS_FIND_OVERVIEW_CARD}
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return null;
+                const sr = card.shadowRoot;
+
+                const captured = [];
+                card.addEventListener('hass-more-info', (e) => {{
+                    captured.push(e.detail.entityId);
+                }});
+
+                const links = sr.querySelectorAll('.sub-link[data-entity]');
+                const clicked = [];
+                for (const link of links) {{
+                    const entity = link.getAttribute('data-entity');
+                    clicked.push(entity);
+                    link.click();
+                }}
+                return {{ clicked, captured }};
+            }}"""
+        )
+        assert results is not None, "Overview card not found"
+        assert len(results["clicked"]) >= 1, (
+            f"Expected at least 1 clickable sub-link, got {len(results['clicked'])}"
+        )
+        assert results["clicked"] == results["captured"], (
+            f"Sub-link events mismatch: clicked {results['clicked']}, "
+            f"captured {results['captured']}"
+        )
+
+    def test_custom_boxes_hides_unconfigured(
+        self,
+        page: Page,
+        foxess_sim: SimulatorHandle | None,
+        ha_e2e: HAClient,
+        connection_mode: str,
+    ) -> None:
+        """A card with boxes=[battery, solar] should not render grid or house."""
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
+        _robust_reload(page, settle_ms=2000)
+
+        node_types = page.evaluate(
+            """() => {
+                function findAllCards(root) {
+                    const cards = [];
+                    const c = root.querySelectorAll('foxess-overview-card');
+                    cards.push(...c);
+                    for (const el of root.querySelectorAll('*')) {
+                        if (el.shadowRoot) {
+                            cards.push(...findAllCards(el.shadowRoot));
+                        }
+                    }
+                    return cards;
+                }
+                const cards = findAllCards(document);
+                if (cards.length < 2) return null;
+                const card = cards[1];
+                if (!card || !card.shadowRoot) return null;
+                const nodes = card.shadowRoot.querySelectorAll('.node');
+                const types = [];
+                for (const node of nodes) {
+                    if (node.classList.contains('battery')) types.push('battery');
+                    else if (node.classList.contains('solar')) types.push('solar');
+                    else if (node.classList.contains('house')) types.push('house');
+                    else if (node.classList.contains('grid')) types.push('grid');
+                }
+                return types;
+            }"""
+        )
+        assert node_types is not None, "Second overview card not found"
+        assert "battery" in node_types, "Battery node should be present"
+        assert "solar" in node_types, "Solar node should be present"
+        assert "house" not in node_types, "House node should not be present"
+        assert "grid" not in node_types, "Grid node should not be present"
+
+    def test_custom_boxes_label_override(
+        self,
+        page: Page,
+        foxess_sim: SimulatorHandle | None,
+        ha_e2e: HAClient,
+        connection_mode: str,
+    ) -> None:
+        """A box with label override should display the custom label."""
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, solar_kw=1.0)
+        _robust_reload(page, settle_ms=2000)
+
+        label_text = page.evaluate(
+            """() => {
+                function findAllCards(root) {
+                    const cards = [];
+                    const c = root.querySelectorAll('foxess-overview-card');
+                    cards.push(...c);
+                    for (const el of root.querySelectorAll('*')) {
+                        if (el.shadowRoot) {
+                            cards.push(...findAllCards(el.shadowRoot));
+                        }
+                    }
+                    return cards;
+                }
+                const cards = findAllCards(document);
+                if (cards.length < 2) return null;
+                const card = cards[1];
+                if (!card || !card.shadowRoot) return null;
+                const solar = card.shadowRoot.querySelector('.node.solar .node-label');
+                return solar ? solar.textContent : null;
+            }"""
+        )
+        assert label_text is not None, "Solar node label not found"
+        assert "PV" in label_text, f"Expected 'PV' in label, got '{label_text}'"
+
+    def test_custom_boxes_order(
+        self,
+        page: Page,
+        foxess_sim: SimulatorHandle | None,
+        ha_e2e: HAClient,
+        connection_mode: str,
+    ) -> None:
+        """Boxes render in the order specified in config (battery, then solar)."""
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
+        _robust_reload(page, settle_ms=2000)
+
+        order = page.evaluate(
+            """() => {
+                function findAllCards(root) {
+                    const cards = [];
+                    const c = root.querySelectorAll('foxess-overview-card');
+                    cards.push(...c);
+                    for (const el of root.querySelectorAll('*')) {
+                        if (el.shadowRoot) {
+                            cards.push(...findAllCards(el.shadowRoot));
+                        }
+                    }
+                    return cards;
+                }
+                const cards = findAllCards(document);
+                if (cards.length < 2) return null;
+                const card = cards[1];
+                if (!card || !card.shadowRoot) return null;
+                const nodes = card.shadowRoot.querySelectorAll('.node');
+                const types = [];
+                for (const node of nodes) {
+                    if (node.classList.contains('battery')) types.push('battery');
+                    else if (node.classList.contains('solar')) types.push('solar');
+                    else if (node.classList.contains('house')) types.push('house');
+                    else if (node.classList.contains('grid')) types.push('grid');
+                }
+                return types;
+            }"""
+        )
+        assert order is not None, "Second overview card not found"
+        assert order == ["battery", "solar"], (
+            f"Expected order ['battery', 'solar'], got {order}"
+        )
+
+    def test_default_config_renders_all_four_boxes(
+        self,
+        page: Page,
+        foxess_sim: SimulatorHandle | None,
+        ha_e2e: HAClient,
+        connection_mode: str,
+    ) -> None:
+        """Card with no boxes config renders all four nodes in default order."""
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
+        _robust_reload(page, settle_ms=2000)
+
+        types = page.evaluate(
+            f"""() => {{
+                {_JS_FIND_OVERVIEW_CARD}
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return null;
+                const nodes = card.shadowRoot.querySelectorAll('.node');
+                const types = [];
+                for (const node of nodes) {{
+                    if (node.classList.contains('battery')) types.push('battery');
+                    else if (node.classList.contains('solar')) types.push('solar');
+                    else if (node.classList.contains('house')) types.push('house');
+                    else if (node.classList.contains('grid')) types.push('grid');
+                }}
+                return types;
+            }}"""
+        )
+        assert types is not None, "Overview card not found"
+        assert types == ["solar", "house", "grid", "battery"], (
+            f"Expected order ['solar', 'house', 'grid', 'battery'], got {types}"
+        )
+
     def test_shows_soc(
         self,
         page: Page,
