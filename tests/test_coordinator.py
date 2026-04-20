@@ -647,10 +647,11 @@ class TestBmsTemperatureFetch:
 
     @pytest.mark.asyncio
     async def test_fetch_bms_logs_when_compound_id_missing(self) -> None:
-        """With web_session but no compound_id, logs a debug message."""
+        """With web_session but no compound_id AND re-discovery fails, no temp."""
         coord, dd = self._make_coord_with_domain_data()
 
         web_session = AsyncMock()
+        web_session.async_discover_battery_id = AsyncMock(return_value=None)
         dd["_web_session"] = web_session
         # compound_id is None (default)
 
@@ -779,10 +780,11 @@ class TestBmsTemperatureEarlyReturnLogging:
     async def test_warning_logged_when_compound_id_missing(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """When battery_compound_id is None, a WARNING-level log must be emitted."""
+        """compound_id None + re-discovery fails => WARNING emitted."""
         coord, dd = self._make_coord_with_domain_data()
 
         web_session = AsyncMock()
+        web_session.async_discover_battery_id = AsyncMock(return_value=None)
         dd["_web_session"] = web_session
         # compound_id remains None (default)
 
@@ -953,4 +955,144 @@ class TestBmsTemperatureEarlyReturnLogging:
         assert not warning_messages, (
             f"Domain data missing is transient — no WARNING expected, "
             f"but got: {warning_messages}"
+        )
+
+
+class TestBmsCompoundIdRediscovery:
+    """After HA restart, battery_compound_id is lost (in-memory only).
+
+    Production symptom: sensor.foxess_bms_battery_temperature freezes at
+    its last-known value and never updates.  All other sensors update
+    normally via REST polling.  The one-shot _discover_battery_id() task
+    at startup may fail (network, WS timeout) and is never retried.
+    """
+
+    @staticmethod
+    def _make_coord_with_domain_data() -> tuple[
+        FoxESSDataCoordinator, FoxESSControlData
+    ]:
+        from custom_components.foxess_control.const import DOMAIN
+        from custom_components.foxess_control.domain_data import (
+            FoxESSControlData,
+            FoxESSEntryData,
+        )
+
+        inv = MagicMock(spec=Inverter)
+        inv.get_real_time.return_value = {"SoC": 50.0}
+        inv.get_current_mode.return_value = WorkMode.SELF_USE
+        inv.get_plant_id.return_value = "plant-123"
+        coord = _make_coordinator(inverter=inv)
+
+        dd = FoxESSControlData()
+        dd.entries["test-entry"] = FoxESSEntryData()
+        coord.hass.data = {DOMAIN: dd}  # type: ignore[assignment]
+
+        entry = MagicMock()
+        entry.options = {"battery_capacity_kwh": 10.0}
+        coord.hass.config_entries.async_get_entry = MagicMock(  # type: ignore[method-assign]
+            return_value=entry
+        )
+        return coord, dd
+
+    @pytest.mark.asyncio
+    async def test_rediscovery_attempted_when_compound_id_missing(self) -> None:
+        """When web_session exists but compound_id is None, discovery is retried."""
+        coord, dd = self._make_coord_with_domain_data()
+
+        web_session = AsyncMock()
+        web_session.async_get_battery_temperature = AsyncMock(return_value=23.5)
+        web_session.async_discover_battery_id = AsyncMock(return_value="bat-id@SN001")
+        dd["_web_session"] = web_session
+        dd.plant_id = "plant-123"
+
+        data: dict[str, Any] = {"SoC": 50.0}
+        await coord._fetch_bms_temperature(data)
+
+        assert dd.get("_battery_compound_id") == "bat-id@SN001"
+        assert data.get("bmsBatteryTemperature") == 23.5
+
+    @pytest.mark.asyncio
+    async def test_temperature_fetched_when_compound_id_available(self) -> None:
+        """Control case: BMS temp is fetched when compound_id IS available."""
+        coord, dd = self._make_coord_with_domain_data()
+
+        web_session = AsyncMock()
+        web_session.async_get_battery_temperature = AsyncMock(return_value=18.0)
+        dd["_web_session"] = web_session
+        dd["_battery_compound_id"] = "existing-bat@SN001"
+
+        data: dict[str, Any] = {"SoC": 50.0}
+        await coord._fetch_bms_temperature(data)
+
+        assert data.get("bmsBatteryTemperature") == 18.0
+        web_session.async_get_battery_temperature.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_rediscovery_failure_does_not_crash(self) -> None:
+        """When rediscovery fails, _fetch_bms_temperature degrades gracefully."""
+        coord, dd = self._make_coord_with_domain_data()
+
+        web_session = AsyncMock()
+        web_session.async_discover_battery_id = AsyncMock(return_value=None)
+        dd["_web_session"] = web_session
+        dd.plant_id = "plant-123"
+
+        data: dict[str, Any] = {"SoC": 50.0}
+        await coord._fetch_bms_temperature(data)
+
+        assert dd.get("_battery_compound_id") is None
+        assert "bmsBatteryTemperature" not in data
+
+    @pytest.mark.asyncio
+    async def test_rediscovery_uses_plant_id(self) -> None:
+        """Re-discovery passes the plant_id to async_discover_battery_id."""
+        coord, dd = self._make_coord_with_domain_data()
+
+        web_session = AsyncMock()
+        web_session.async_discover_battery_id = AsyncMock(return_value="new-bat@SN002")
+        web_session.async_get_battery_temperature = AsyncMock(return_value=20.0)
+        dd["_web_session"] = web_session
+        dd.plant_id = "my-plant-456"
+
+        data: dict[str, Any] = {"SoC": 50.0}
+        await coord._fetch_bms_temperature(data)
+
+        web_session.async_discover_battery_id.assert_awaited_once_with("my-plant-456")
+
+    @pytest.mark.asyncio
+    async def test_rediscovery_discovers_plant_id_if_missing(self) -> None:
+        """When plant_id is also missing, it's discovered via inverter first."""
+        coord, dd = self._make_coord_with_domain_data()
+
+        web_session = AsyncMock()
+        web_session.async_discover_battery_id = AsyncMock(return_value="bat@SN003")
+        web_session.async_get_battery_temperature = AsyncMock(return_value=21.0)
+        dd["_web_session"] = web_session
+        dd.plant_id = None
+
+        data: dict[str, Any] = {"SoC": 50.0}
+        await coord._fetch_bms_temperature(data)
+
+        assert dd.plant_id == "plant-123"
+        assert dd.get("_battery_compound_id") == "bat@SN003"
+
+    @pytest.mark.asyncio
+    async def test_rediscovery_has_backoff(self) -> None:
+        """Re-discovery attempts are throttled to avoid spamming."""
+        coord, dd = self._make_coord_with_domain_data()
+
+        web_session = AsyncMock()
+        web_session.async_discover_battery_id = AsyncMock(return_value=None)
+        dd["_web_session"] = web_session
+        dd.plant_id = "plant-123"
+
+        data1: dict[str, Any] = {"SoC": 50.0}
+        await coord._fetch_bms_temperature(data1)
+        assert web_session.async_discover_battery_id.await_count == 1
+
+        data2: dict[str, Any] = {"SoC": 50.0}
+        await coord._fetch_bms_temperature(data2)
+        assert web_session.async_discover_battery_id.await_count == 1, (
+            "Re-discovery should be throttled — second attempt within "
+            "backoff window should not call async_discover_battery_id again"
         )

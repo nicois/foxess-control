@@ -38,6 +38,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # BMS temperature is fetched from the web portal on a separate
     # schedule because WS injections (async_set_updated_data) continuously
     # reset the REST poll timer, starving _async_update_data.
+    _BMS_REDISCOVERY_BACKOFF = 300.0
 
     def __init__(
         self,
@@ -58,6 +59,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # BMS temperature polling state (separate from REST poll timer)
         self._bms_last_fetch: float = 0.0
         self._bms_fetch_in_flight: bool = False
+        self._bms_last_rediscovery_attempt: float = 0.0
         # SoC interpolation state — integrates power between integer ticks
         self._soc_interpolated: float | None = None
         self._soc_last_reported: float | None = None
@@ -159,6 +161,68 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.data and "bmsBatteryTemperature" in self.data:
             data["bmsBatteryTemperature"] = self.data["bmsBatteryTemperature"]
 
+    async def _rediscover_battery_compound_id(self, domain_data: Any) -> str | None:
+        """Attempt to rediscover the battery compound ID via the web session.
+
+        Called when compound_id is missing (e.g. after HA restart where
+        the in-memory value was lost and the one-shot startup discovery
+        failed).  Throttled by _BMS_REDISCOVERY_BACKOFF.
+        """
+        now = time.monotonic()
+        if (
+            self._bms_last_rediscovery_attempt > 0
+            and now - self._bms_last_rediscovery_attempt < self._BMS_REDISCOVERY_BACKOFF
+        ):
+            _LOGGER.debug(
+                "BMS temperature: compound ID re-discovery throttled "
+                "(%.0fs since last attempt)",
+                now - self._bms_last_rediscovery_attempt,
+            )
+            return None
+
+        self._bms_last_rediscovery_attempt = now
+        web_session = domain_data.get("_web_session")
+
+        plant_id = getattr(domain_data, "plant_id", None)
+        if not plant_id:
+            try:
+                plant_id = await self.hass.async_add_executor_job(
+                    self.inverter.get_plant_id
+                )
+                domain_data.plant_id = plant_id
+                _LOGGER.info("BMS re-discovery: discovered plant_id: %s", plant_id)
+            except Exception:
+                _LOGGER.warning(
+                    "BMS re-discovery: could not discover plant_id", exc_info=True
+                )
+                return None
+
+        if not plant_id:
+            return None
+
+        try:
+            compound_id: str | None = await web_session.async_discover_battery_id(
+                plant_id
+            )
+            if compound_id:
+                domain_data["_battery_compound_id"] = compound_id
+                _LOGGER.info(
+                    "BMS re-discovery: found battery compound ID: %s", compound_id
+                )
+            else:
+                _LOGGER.warning(
+                    "BMS re-discovery: battery compound ID not found — "
+                    "will retry in %.0fs",
+                    self._BMS_REDISCOVERY_BACKOFF,
+                )
+            return compound_id
+        except Exception:
+            _LOGGER.warning(
+                "BMS re-discovery: failed to discover battery compound ID",
+                exc_info=True,
+            )
+            return None
+
     async def _fetch_bms_temperature(self, data: dict[str, Any]) -> None:
         """Fetch BMS min cell temperature from the web portal and merge into data."""
         domain_data = self.hass.data.get(DOMAIN)
@@ -174,11 +238,10 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         compound_id = domain_data.get("_battery_compound_id")
         if not compound_id:
-            _LOGGER.warning(
-                "BMS temperature: no battery compound ID yet — WebSocket "
-                "connection may not have delivered battery identity"
-            )
-            return
+            compound_id = await self._rediscover_battery_compound_id(domain_data)
+            if not compound_id:
+                self._preserve_bms_temperature(data)
+                return
         try:
             temp = await web_session.async_get_battery_temperature(
                 battery_compound_id=compound_id,
