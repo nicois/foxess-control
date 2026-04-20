@@ -1018,8 +1018,8 @@ class TestReloadRecovery:
         )
 
         attrs_before = ha_e2e.get_attributes("sensor.foxess_smart_operations")
-        power_before = attrs_before.get("discharge_power_w", 0)
-        assert power_before > 0, "Should be discharging before reload"
+        target_before = attrs_before.get("discharge_target_power_w", 0)
+        assert target_before > 0, "Should have a discharge target before reload"
 
         ha_e2e.reload_integration()
 
@@ -1030,7 +1030,7 @@ class TestReloadRecovery:
             fatal_states=FATAL_FOR_ACTIVE,
         )
         attrs_after = ha_e2e.get_attributes("sensor.foxess_smart_operations")
-        assert attrs_after.get("discharge_power_w", 0) > 0
+        assert attrs_after.get("discharge_target_power_w", 0) > 0
 
     def test_charge_resumes_after_reload(
         self,
