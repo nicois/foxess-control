@@ -130,11 +130,20 @@ def get_coordinator_value(hass: HomeAssistant, domain: str, key: str) -> float |
 def get_actual_discharge_power_w(
     hass: HomeAssistant, domain: str, requested_w: int
 ) -> int:
-    """Return observed discharge power, falling back to the requested value."""
+    """Return observed discharge power, falling back to the requested value.
+
+    When ``polled_kw`` is ``None`` (no data from the coordinator), the
+    requested/target value is returned as a best-effort estimate.  When
+    ``polled_kw`` is 0 (battery not discharging — e.g. solar > load),
+    the function returns 0 so the sensor reflects reality rather than
+    showing the *target* power.
+    """
     polled_kw = get_coordinator_value(hass, domain, "batDischargePower")
-    if polled_kw is not None and polled_kw > 0:
-        return min(int(polled_kw * 1000), requested_w)
-    return requested_w
+    if polled_kw is None:
+        return requested_w
+    if polled_kw <= 0:
+        return 0
+    return min(int(polled_kw * 1000), requested_w)
 
 
 # ---------------------------------------------------------------------------

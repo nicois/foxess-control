@@ -35,13 +35,19 @@ def _make_hass(
     smart_charge_state: dict[str, Any] | None = None,
     smart_discharge_state: dict[str, Any] | None = None,
     coordinator_soc: float | None = None,
+    coordinator_extra: dict[str, Any] | None = None,
 ) -> MagicMock:
     """Create a mock hass with DOMAIN data."""
     hass = MagicMock()
     mock_coordinator = MagicMock()
-    mock_coordinator.data = (
-        {"SoC": coordinator_soc} if coordinator_soc is not None else None
-    )
+    coordinator_data: dict[str, Any] | None = None
+    if coordinator_soc is not None or coordinator_extra:
+        coordinator_data = {}
+        if coordinator_soc is not None:
+            coordinator_data["SoC"] = coordinator_soc
+        if coordinator_extra:
+            coordinator_data.update(coordinator_extra)
+    mock_coordinator.data = coordinator_data
     domain_data: dict[str, Any] = {
         "_smart_charge_unsubs": [],
         "_smart_discharge_unsubs": [],
@@ -601,6 +607,68 @@ class TestDischargePowerSensor:
     def test_unit(self) -> None:
         sensor = DischargePowerSensor(_make_hass(), _make_entry())
         assert sensor.native_unit_of_measurement == "W"
+
+    def test_bat_discharge_zero_returns_zero(self) -> None:
+        """When batDischargePower is 0.0 (solar > load, battery not discharging),
+        the sensor should report 0, not the requested/target power.
+
+        Regression: polled_kw == 0.0 was treated the same as None (no data),
+        falling back to requested_w and creating false 4075W spikes.
+        """
+        hass = _make_hass(
+            smart_discharge_state=_discharge_state(last_power_w=4075),
+            coordinator_extra={"batDischargePower": 0.0},
+        )
+        sensor = DischargePowerSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 18, 0, 0),
+        ):
+            assert sensor.native_value == 0
+
+    def test_bat_discharge_none_falls_back_to_requested(self) -> None:
+        """When batDischargePower is None (no data available),
+        the sensor should fall back to the requested power value.
+        """
+        hass = _make_hass(
+            smart_discharge_state=_discharge_state(last_power_w=4075),
+        )
+        sensor = DischargePowerSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 18, 0, 0),
+        ):
+            assert sensor.native_value == 4075
+
+    def test_bat_discharge_positive_returns_observed(self) -> None:
+        """When batDischargePower is positive (battery actively discharging),
+        the sensor should return the observed value in watts.
+        """
+        hass = _make_hass(
+            smart_discharge_state=_discharge_state(last_power_w=4075),
+            coordinator_extra={"batDischargePower": 0.5},
+        )
+        sensor = DischargePowerSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 18, 0, 0),
+        ):
+            # 0.5 kW = 500 W, min(500, 4075) = 500
+            assert sensor.native_value == 500
+
+    def test_bat_discharge_capped_at_requested(self) -> None:
+        """When observed discharge exceeds requested, cap at requested."""
+        hass = _make_hass(
+            smart_discharge_state=_discharge_state(last_power_w=3000),
+            coordinator_extra={"batDischargePower": 5.0},
+        )
+        sensor = DischargePowerSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 18, 0, 0),
+        ):
+            # 5.0 kW = 5000 W, min(5000, 3000) = 3000
+            assert sensor.native_value == 3000
 
 
 class TestDischargeWindowSensor:
