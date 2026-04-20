@@ -13,6 +13,9 @@ from .smart_battery.const import (
     CONF_BATTERY_CAPACITY_KWH as CONF_BATTERY_CAPACITY_KWH,
 )
 from .smart_battery.const import (
+    CONF_BMS_POLLING_INTERVAL as CONF_BMS_POLLING_INTERVAL,
+)
+from .smart_battery.const import (
     CONF_CHARGE_POWER_ENTITY as CONF_CHARGE_POWER_ENTITY,
 )
 from .smart_battery.const import (
@@ -53,6 +56,9 @@ from .smart_battery.const import (
 )
 from .smart_battery.const import (
     DEFAULT_API_MIN_SOC as DEFAULT_API_MIN_SOC,
+)
+from .smart_battery.const import (
+    DEFAULT_BMS_POLLING_INTERVAL as DEFAULT_BMS_POLLING_INTERVAL,
 )
 from .smart_battery.const import (
     DEFAULT_ENTITY_POLLING_INTERVAL as DEFAULT_ENTITY_POLLING_INTERVAL,

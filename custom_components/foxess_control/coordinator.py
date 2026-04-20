@@ -38,7 +38,6 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # BMS temperature is fetched from the web portal on a separate
     # schedule because WS injections (async_set_updated_data) continuously
     # reset the REST poll timer, starving _async_update_data.
-    _BMS_FETCH_INTERVAL = 300.0  # seconds between BMS temperature polls
 
     def __init__(
         self,
@@ -76,6 +75,21 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if entry is not None:
                     return float(entry.options.get(CONF_BATTERY_CAPACITY_KWH, 0))
         return 0.0
+
+    @property
+    def _bms_fetch_interval(self) -> float:
+        from .const import CONF_BMS_POLLING_INTERVAL, DEFAULT_BMS_POLLING_INTERVAL
+
+        for key in self.hass.data.get(DOMAIN, {}):
+            if not str(key).startswith("_"):
+                entry = self.hass.config_entries.async_get_entry(str(key))
+                if entry is not None:
+                    return float(
+                        entry.options.get(
+                            CONF_BMS_POLLING_INTERVAL, DEFAULT_BMS_POLLING_INTERVAL
+                        )
+                    )
+        return float(DEFAULT_BMS_POLLING_INTERVAL)
 
     def _fetch_all(self) -> dict[str, Any]:
         """Fetch real-time data and work mode in a single executor job."""
@@ -484,7 +498,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         now = time.monotonic()
         if (
             self._bms_last_fetch > 0
-            and now - self._bms_last_fetch < self._BMS_FETCH_INTERVAL
+            and now - self._bms_last_fetch < self._bms_fetch_interval
         ):
             return
         self._bms_fetch_in_flight = True

@@ -12,6 +12,7 @@ CONF_MIN_POWER_CHANGE = "min_power_change"
 CONF_MIN_SOC_ON_GRID = "min_soc_on_grid"
 CONF_SMART_HEADROOM = "charge_headroom"
 CONF_POLLING_INTERVAL = "polling_interval"
+CONF_BMS_POLLING_INTERVAL = "bms_polling_interval"
 CONF_API_MIN_SOC = "api_min_soc"
 CONF_INVERTER_POWER = "inverter_power"
 
@@ -19,6 +20,7 @@ DEFAULT_MIN_POWER_CHANGE = 500
 DEFAULT_MIN_SOC_ON_GRID = 15
 DEFAULT_SMART_HEADROOM = 10  # percent
 DEFAULT_POLLING_INTERVAL = 300  # seconds
+DEFAULT_BMS_POLLING_INTERVAL = 300  # seconds
 DEFAULT_ENTITY_POLLING_INTERVAL = 30  # seconds — entity mode updates are fast
 DEFAULT_API_MIN_SOC = 11
 DEFAULT_INVERTER_POWER = 12000  # watts

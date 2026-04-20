@@ -31,6 +31,7 @@ from homeassistant.helpers.selector import (
 from .const import (
     CONF_API_MIN_SOC,
     CONF_BATTERY_CAPACITY_KWH,
+    CONF_BMS_POLLING_INTERVAL,
     CONF_CHARGE_POWER_ENTITY,
     CONF_DISCHARGE_POWER_ENTITY,
     CONF_FEEDIN_ENERGY_ENTITY,
@@ -45,6 +46,7 @@ from .const import (
     CONF_SOC_ENTITY,
     CONF_WORK_MODE_ENTITY,
     DEFAULT_API_MIN_SOC,
+    DEFAULT_BMS_POLLING_INTERVAL,
     DEFAULT_INVERTER_POWER,
     DEFAULT_MIN_POWER_CHANGE,
     DEFAULT_MIN_SOC_ON_GRID,
@@ -135,6 +137,20 @@ def battery_options_schema(
                     min=60,
                     max=600,
                     step=10,
+                    unit_of_measurement="s",
+                    mode=NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Optional(
+                CONF_BMS_POLLING_INTERVAL,
+                default=opts.get(
+                    CONF_BMS_POLLING_INTERVAL, DEFAULT_BMS_POLLING_INTERVAL
+                ),
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=60,
+                    max=3600,
+                    step=30,
                     unit_of_measurement="s",
                     mode=NumberSelectorMode.BOX,
                 )
