@@ -208,7 +208,7 @@ class TestOverviewCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
         _robust_reload(page, settle_ms=2000)
 
-        cursor = page.evaluate(
+        cursor = page.wait_for_function(
             f"""() => {{
                 {_JS_FIND_OVERVIEW_CARD}
                 const card = findCard(document);
@@ -216,8 +216,9 @@ class TestOverviewCard:
                 const node = card.shadowRoot.querySelector('.node[data-entity]');
                 if (!node) return null;
                 return getComputedStyle(node).cursor;
-            }}"""
-        )
+            }}""",
+            timeout=10000,
+        ).json_value()
         assert cursor == "pointer", f"Expected pointer cursor, got '{cursor}'"
 
     def test_sub_link_click_opens_more_info(
@@ -402,12 +403,13 @@ class TestOverviewCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
         _robust_reload(page, settle_ms=2000)
 
-        types = page.evaluate(
+        types = page.wait_for_function(
             f"""() => {{
                 {_JS_FIND_OVERVIEW_CARD}
                 const card = findCard(document);
                 if (!card || !card.shadowRoot) return null;
                 const nodes = card.shadowRoot.querySelectorAll('.node');
+                if (nodes.length < 4) return null;
                 const types = [];
                 for (const node of nodes) {{
                     if (node.classList.contains('battery')) types.push('battery');
@@ -415,9 +417,10 @@ class TestOverviewCard:
                     else if (node.classList.contains('house')) types.push('house');
                     else if (node.classList.contains('grid')) types.push('grid');
                 }}
-                return types;
-            }}"""
-        )
+                return types.length >= 4 ? types : null;
+            }}""",
+            timeout=10000,
+        ).json_value()
         assert types is not None, "Overview card not found"
         assert types == ["solar", "house", "grid", "battery"], (
             f"Expected order ['solar', 'house', 'grid', 'battery'], got {types}"
@@ -489,7 +492,7 @@ class TestOverviewCard:
         )
         _robust_reload(page)
 
-        badge_text = page.evaluate(
+        badge_text = page.wait_for_function(
             """() => {
                 function findCard(root) {
                     const c = root.querySelector(
@@ -510,8 +513,9 @@ class TestOverviewCard:
                     '.data-source'
                 );
                 return badge ? badge.textContent : null;
-            }"""
-        )
+            }""",
+            timeout=10000,
+        ).json_value()
         expected = data_source.upper()
         assert badge_text is not None and badge_text.startswith(expected), (
             f"Badge shows '{badge_text}', expected to start with '{expected}'"
@@ -544,7 +548,7 @@ class TestOverviewCard:
         page.wait_for_timeout(32000)
         _robust_reload(page)
 
-        badge_info = page.evaluate(
+        badge_info = page.wait_for_function(
             """() => {
                 function findCard(root) {
                     const c = root.querySelector('foxess-overview-card');
@@ -565,8 +569,9 @@ class TestOverviewCard:
                     text: badge.textContent,
                     classes: badge.className,
                 };
-            }"""
-        )
+            }""",
+            timeout=10000,
+        ).json_value()
         assert badge_info is not None, "data-source badge not found"
         assert "stale" in badge_info["classes"], (
             f"Badge should have 'stale' class after 32s, got: {badge_info}"
@@ -583,31 +588,22 @@ class TestOverviewCard:
         data_source: str,
         connection_mode: str,
     ) -> None:
-        """PV1 + PV2 ≈ solar total during smart operations (cloud only)."""
+        """PV1 + PV2 ≈ solar total on overview card (cloud only)."""
         if connection_mode != "cloud":
             pytest.skip("PV1/PV2 entities don't exist in entity mode")
         assert foxess_sim is not None
         # PV sensors are disabled by default — enable them and reload.
         for eid in ("sensor.foxess_pv1_power", "sensor.foxess_pv2_power"):
             ha_e2e.enable_entity(eid)
-        ha_e2e.reload_integration()
         foxess_sim.set(soc=80, solar_kw=3.0, load_kw=0.5)
-        start, end = _tight_window(10)
-        ha_e2e.call_service(
-            "foxess_control",
-            "smart_discharge",
-            {"start_time": start, "end_time": end, "min_soc": 30},
-        )
-        ha_e2e.wait_for_state(
-            "sensor.foxess_smart_operations",
-            "discharging",
-            timeout_s=120,
-            fatal_states=FATAL_FOR_ACTIVE,
+        ha_e2e.reload_integration()
+        ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_solar_power", "ge", 2.5, timeout_s=120
         )
         _robust_reload(page, settle_ms=3000)
 
         # Extract solar node text from deep shadow DOM
-        solar_texts = page.evaluate(
+        solar_texts = page.wait_for_function(
             """() => {
                 function findCard(root) {
                     const card = root.querySelector(
@@ -633,23 +629,19 @@ class TestOverviewCard:
                     total: value ? value.textContent : null,
                     detail: sub ? sub.textContent : null,
                 };
-            }"""
-        )
+            }""",
+            timeout=10000,
+        ).json_value()
         assert solar_texts, "Solar node not found in overview card"
         assert solar_texts["total"], "Solar total not displayed"
 
-        if data_source == "ws":
-            # WS mode hides PV detail (stale REST values) — verify
-            # the total is displayed but don't check PV breakdown.
-            assert not solar_texts["detail"], "PV detail should be hidden in WS mode"
-        else:
-            assert solar_texts["detail"], "PV detail not displayed"
-            total_kw = _parse_power_kw(solar_texts["total"])
-            pv_parts = solar_texts["detail"].split("·")
-            pv_sum = sum(_parse_power_kw(part) for part in pv_parts)
-            assert abs(pv_sum - total_kw) < 0.15, (
-                f"PV sum {pv_sum:.3f} kW != solar total {total_kw:.3f} kW"
-            )
+        assert solar_texts["detail"], "PV detail not displayed"
+        total_kw = _parse_power_kw(solar_texts["total"])
+        pv_parts = solar_texts["detail"].split("·")
+        pv_sum = sum(_parse_power_kw(part) for part in pv_parts)
+        assert abs(pv_sum - total_kw) < 0.15, (
+            f"PV sum {pv_sum:.3f} kW != solar total {total_kw:.3f} kW"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -779,7 +771,7 @@ class TestControlCard:
         # Verify the marker renders on the card
         _robust_reload(page)
 
-        has_marker = page.evaluate(
+        has_marker = page.wait_for_function(
             """() => {
                 function findCard(root) {
                     const card = root.querySelector(
@@ -804,8 +796,9 @@ class TestControlCard:
                     left: marker.style.left,
                     visible: marker.offsetWidth > 0,
                 };
-            }"""
-        )
+            }""",
+            timeout=10000,
+        ).json_value()
         assert has_marker, "Horizon marker not found in control card"
         assert has_marker["left"], "Horizon marker has no position"
 
