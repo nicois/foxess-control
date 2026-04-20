@@ -292,11 +292,16 @@ class HAClient:
         self._wait_for_integration_ready()
 
     def is_ready(self) -> bool:
-        """Check if HA is responding."""
+        """Check if HA is responding.
+
+        Catches ``ConnectionError`` (container not listening yet) and
+        ``OSError`` (socket torn down mid-connect — "Bad file descriptor")
+        so that ``wait_ready`` keeps retrying instead of aborting.
+        """
         try:
             r = self._session.get(f"{self.base_url}/api/", timeout=5)
             return r.status_code == 200
-        except requests.ConnectionError:
+        except (requests.ConnectionError, OSError):
             return False
 
     def wait_ready(self, timeout_s: float = 120) -> None:

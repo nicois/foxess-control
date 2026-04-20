@@ -248,8 +248,8 @@ def foxess_sim(
     proc = subprocess.Popen(
         ["python", "-m", "simulator", "--port", str(port)],
         cwd=str(REPO_ROOT),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
 
     deadline = time.monotonic() + 10
@@ -329,6 +329,12 @@ def ha_e2e(
             os.chmod(os.path.join(root, d), 0o777)
 
     sim_port = foxess_sim.url.rsplit(":", 1)[1] if foxess_sim else "0"
+    # stdout/stderr → DEVNULL to avoid pipe-buffer deadlock.
+    # The default Linux pipe buffer is 64 KiB.  Under CI load (12 xdist
+    # workers), HA's startup logs can fill the buffer before wait_ready()
+    # succeeds, blocking the container process and preventing HA from
+    # ever listening on its HTTP port.  Container logs are captured via
+    # "podman logs" in teardown and error paths, so PIPE is unnecessary.
     proc = subprocess.Popen(
         [
             "podman",
@@ -348,8 +354,8 @@ def ha_e2e(
             f"FOXESS_SIMULATOR_URL=http://host.containers.internal:{sim_port}",
             CONTAINER_IMAGE,
         ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
 
     try:
@@ -364,8 +370,18 @@ def ha_e2e(
             except requests.RequestException:
                 time.sleep(2)
         else:
-            if proc.stdout:
-                print(proc.stdout.read().decode(errors="replace")[-3000:])
+            # Capture container logs for diagnosis (stdout is DEVNULL).
+            try:
+                logs = subprocess.run(
+                    ["podman", "logs", "--tail", "200", name],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if logs.stdout:
+                    print(logs.stdout[-3000:])
+            except (subprocess.SubprocessError, OSError):
+                pass
             raise TimeoutError("Integration entities not created within 120s")
         _log.warning(
             "[%s] container ready: %.1fs",
