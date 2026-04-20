@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.7-beta.23
+
+### Added
+- **Cold-temperature BMS charge curtailment**: when BMS battery temperature is below 16°C, the maximum charge power is capped at 80A × live battery voltage (~4kW at 50V). Uses `min(configured_max, cold_limit)` — the BMS physically limits charge current, so the system anticipates this to avoid over-requesting. Exposed via `charge_effective_max_power_w` sensor attribute.
+
+### Fixed
+- **Discharge target_power_w missing until first adjustment tick**: the `target_power_w` attribute wasn't initialized when a discharge session started (either immediate or deferred→active), so the sensor showed 0W for the target during the first ~30s. Now set at session creation and deferred start.
+- **E2E test race on discharge_target_power_w**: replaced immediate attribute assertion with a polling wait (`_wait_for_positive_attr`) to handle the coordinator tick delay between state transition and attribute population.
+
 ## 1.0.7-beta.22
 
 ### Fixed
