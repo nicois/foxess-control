@@ -694,10 +694,13 @@ class FoxESSControlCard extends HTMLElement {
       ${!isActive ? this._renderIdle() : ""}
       ${this._renderProgress(a)}
     `;
+    const showCancel = this._config.show_cancel !== false;
     const actionHtml = isActive
-      ? `<button class="action-btn cancel${this._cancelConfirm ? " confirming" : ""}" data-action="cancel">
-           ${this._cancelConfirm ? this._t("btn_confirm_cancel") : this._t("btn_cancel")}
-         </button>`
+      ? (showCancel
+          ? `<button class="action-btn cancel${this._cancelConfirm ? " confirming" : ""}" data-action="cancel">
+               ${this._cancelConfirm ? this._t("btn_confirm_cancel") : this._t("btn_cancel")}
+             </button>`
+          : "")
       : `<button class="action-btn" data-action="charge">${this._t("btn_charge")}</button>
          <button class="action-btn" data-action="discharge">${this._t("btn_discharge")}</button>`;
 
@@ -1504,6 +1507,9 @@ class FoxESSControlCardEditor extends HTMLElement {
                 color: var(--primary-text-color); }
         .hint { font-size: 11px; color: var(--secondary-text-color);
                 margin-top: 2px; }
+        .toggle-row { display: flex; align-items: center; gap: 8px;
+                      margin-bottom: 12px; }
+        .toggle-row label { margin-bottom: 0; }
       </style>
       <div class="row">
         <label>Operations Entity</label>
@@ -1526,6 +1532,11 @@ class FoxESSControlCardEditor extends HTMLElement {
                placeholder="sensor.foxess_data_freshness">
         <span class="hint">Auto-discovered if left blank</span>
       </div>
+      <div class="toggle-row">
+        <input type="checkbox" id="show_cancel"
+               ${this._config.show_cancel !== false ? "checked" : ""}>
+        <label for="show_cancel">Show cancel button during active sessions</label>
+      </div>
     `;
     this.shadowRoot.querySelectorAll("input").forEach((input) => {
       input.addEventListener("input", () => this._valueChanged());
@@ -1539,6 +1550,9 @@ class FoxESSControlCardEditor extends HTMLElement {
       if (val) cfg[id] = val;
       else delete cfg[id];
     }
+    const showCancel = this.shadowRoot.getElementById("show_cancel")?.checked;
+    if (showCancel === false) cfg.show_cancel = false;
+    else delete cfg.show_cancel;
     this._config = cfg;
     this.dispatchEvent(
       new CustomEvent("config-changed", { detail: { config: cfg } })

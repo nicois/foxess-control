@@ -236,6 +236,8 @@ Charges the battery within a time window, deferring grid charging as long as pos
 
 If the battery capacity is too large or the SoC too low to reach the target within the window (accounting for current consumption), charging starts immediately (no deferral).
 
+When the BMS battery temperature is below 16°C, the maximum charge power is automatically capped at 80A × live battery voltage (~4 kW at 50 V) to match the BMS's physical current limit. This prevents over-requesting, which causes the inverter to oscillate. The effective limit is exposed via the `charge_effective_max_power_w` sensor attribute.
+
 Only one smart charge session can be active at a time. Starting a new `smart_charge` cancels any previous session, and also cancels any active `smart_discharge` session to prevent schedule conflicts. A `force_charge` action also cancels any running smart charge, since it replaces the underlying `ForceCharge` schedule.
 
 **Stopping a running smart charge:** Call `foxess_control.clear_overrides` (with no mode, or with `mode: ForceCharge`). This removes the schedule **and** cancels the background listeners.
@@ -325,7 +327,8 @@ The integration polls inverter data at a configurable interval and creates the f
 | `sensor.foxess_house_load` | Current house load | kW |
 | `sensor.foxess_solar_power` | Current solar generation | kW |
 | `sensor.foxess_residual_energy` | Residual energy in battery | kWh |
-| `sensor.foxess_battery_temperature` | Battery temperature | °C |
+| `sensor.foxess_battery_temperature` | Battery temperature (inverter sensor) | °C |
+| `sensor.foxess_bms_battery_temperature` | BMS cell temperature (web portal) | °C |
 | `sensor.foxess_grid_consumption` | Power drawn from grid | kW |
 | `sensor.foxess_grid_feed_in` | Power fed to grid | kW |
 | `sensor.foxess_generation` | Total generation power | kW |
@@ -348,10 +351,21 @@ The integration polls inverter data at a configurable interval and creates the f
 | `sensor.foxess_grid_frequency` | Grid frequency | Hz |
 | `sensor.foxess_eps_power` | EPS / backup output power | kW |
 | `sensor.foxess_work_mode` | Current inverter work mode (SelfUse, ForceCharge, etc.) | — |
+| `sensor.foxess_data_freshness` | Current data source (`ws`, `api`, or `modbus`) with `last_update` and `age_seconds` attributes | — |
 
 The cumulative energy sensors use `SensorStateClass.TOTAL_INCREASING` and are compatible with Home Assistant's Energy Dashboard.
 
 These sensors update automatically and are always available (not dependent on an active smart operation). They are backed by Home Assistant's `DataUpdateCoordinator`, so all entities update atomically from a single poll. In cloud mode, the work mode sensor makes an additional API call per poll cycle to read the active schedule. In entity mode, work mode is read from the mapped select entity.
+
+> **Note:** Diagnostic-only sensors (temperatures, voltages, currents, grid frequency, EPS, throughput) are categorised as `DIAGNOSTIC` so they don't clutter default dashboards. Rarely-used sensors (PV1/PV2, battery voltage/current, ambient/inverter temp, grid current/frequency, EPS, throughput) are disabled by default — enable them in Settings > Devices > Entities as needed.
+
+### Debug log sensors
+
+| Entity | Description |
+|---|---|
+| `sensor.foxess_debug_log` | Rolling buffer of the last 75 debug log messages. Enabled via `input_boolean.foxess_debug_log`. |
+| `sensor.foxess_init_debug_log` | Non-wrapping buffer preserving the first 75 log messages after startup. |
+| `sensor.foxess_info_log` | Rolling buffer of the last 75 INFO+ messages, retaining operational context longer than the debug log. |
 
 ### Smart operation sensors
 
@@ -380,22 +394,35 @@ When `charge_active` is true:
 | `charge_phase` | string | `"charging"` or `"deferred"`. |
 | `charge_power_w` | int | Current charge power in watts. |
 | `charge_max_power_w` | int | Configured maximum charge power. |
+| `charge_effective_max_power_w` | int | Effective max power after cold-temperature curtailment. |
 | `charge_target_soc` | int | Target SoC percentage. |
 | `charge_current_soc` | float | Current battery SoC. |
 | `charge_window` | string | Time window (e.g. `"02:00 – 06:00"`). |
 | `charge_remaining` | string | Time remaining or deferred status (e.g. `"1h 30m"`, `"starts in 2h 15m"`). |
 | `charge_end_time` | string | End time in ISO format. |
+| `charge_target_reachable` | bool | `false` when even max power can't reach the target SoC in remaining time. |
 
 When `discharge_active` is true:
 
 | Attribute | Type | Description |
 |---|---|---|
+| `discharge_phase` | string | `"discharging"` or `"deferred"`. |
 | `discharge_power_w` | int | Current discharge power in watts. |
+| `discharge_target_power_w` | int | Target discharge power before feed-in pacing adjustments. |
 | `discharge_min_soc` | int | Minimum SoC threshold. |
 | `discharge_current_soc` | float | Current battery SoC. |
 | `discharge_window` | string | Time window (e.g. `"17:00 – 20:00"`). |
 | `discharge_remaining` | string | Time remaining or status (e.g. `"45m"`, `"1.0 kWh left"`). |
 | `discharge_end_time` | string | End time in ISO format. |
+
+When any session is active, error state attributes are also available:
+
+| Attribute | Type | Description |
+|---|---|---|
+| `has_error` | bool | `true` when the session has encountered errors. |
+| `last_error` | string | Most recent error message. |
+| `last_error_at` | string | Timestamp of the most recent error. |
+| `error_count` | int | Number of consecutive errors (circuit breaker opens at 3). |
 
 #### Smart charge sensors
 
@@ -485,9 +512,9 @@ series:
     stroke_dash: 4
 ```
 
-### Dashboard card
+### Control card
 
-The integration includes a custom Lovelace card that automatically displays the current smart operation status with a battery gauge, progress indicators, and a SoC forecast sparkline. When no smart operation is active, the card shows an idle state.
+The integration includes a custom Lovelace card that displays the current smart operation status with a battery gauge, progress indicators, and action buttons for starting/cancelling sessions. Both a visual editor and YAML configuration are supported.
 
 The card is auto-registered as a Lovelace resource when the integration loads (storage mode dashboards). No manual resource setup is needed.
 
@@ -495,15 +522,15 @@ The card is auto-registered as a Lovelace resource when the integration loads (s
 type: custom:foxess-control-card
 ```
 
-That's it — no configuration required. The card auto-discovers the `sensor.foxess_smart_operations`, `sensor.foxess_battery_forecast`, and `sensor.foxess_battery_soc` entities.
+That's it — no configuration required. The card auto-discovers the `sensor.foxess_smart_operations` and `sensor.foxess_battery_soc` entities.
 
 **What the card shows:**
 
-- **Header**: Battery SoC gauge with colour-coded fill (green/orange/red by level)
+- **Header**: Battery SoC gauge with colour-coded fill (green/orange/red by level), data source badge with staleness indicator
+- **Action buttons**: Charge and Discharge buttons open inline parameter forms (start time, end time, SoC target). Cancel button (with double-tap confirmation) appears during active sessions.
 - **Smart Charge** (green section): Time window, power, target SoC with progress bar, remaining time badge. Shows "Charge Scheduled" with a dim indicator when deferred, "Smart Charge" with a pulsing dot when actively charging.
 - **Smart Discharge** (orange section): Time window, power, min SoC, feed-in energy limit. Shows "Discharge Scheduled" before the window opens, "Discharge Deferred" during the deferred self-use phase, and "Smart Discharge" with a pulsing dot when actively discharging. Power is hidden during the deferred phase since no forced discharge is active.
 - **Idle**: Clean message when no smart operation is active.
-- **Forecast**: SVG sparkline of projected SoC with time axis labels and a "now" marker. Y-axis scales to fit the data range.
 
 To hide the card when no smart operation is active, wrap it in a conditional card:
 
@@ -517,18 +544,23 @@ card:
   type: custom:foxess-control-card
 ```
 
-To override the default entity IDs (e.g. if you renamed them):
+**Configuration options:**
+
+| Option | Default | Description |
+|---|---|---|
+| `operations_entity` | Auto-discovered | Smart operations sensor entity ID. |
+| `soc_entity` | Auto-discovered | Battery SoC sensor entity ID. |
+| `freshness_entity` | Auto-discovered | Data freshness sensor for staleness badge. |
+| `show_cancel` | `true` | Show the cancel button during active sessions. Set to `false` to hide it. |
 
 ```yaml
 type: custom:foxess-control-card
-operations_entity: sensor.foxess_smart_operations
-forecast_entity: sensor.foxess_battery_forecast
-soc_entity: sensor.foxess_battery_soc
+show_cancel: false
 ```
 
 ### Overview card
 
-A second built-in card shows live energy flows between solar, battery, grid and house in a 2×2 layout.
+A second built-in card shows live energy flows between solar, battery, grid and house in a responsive grid layout. Both a visual editor and YAML configuration are supported.
 
 ```yaml
 type: custom:foxess-overview-card
@@ -536,13 +568,33 @@ type: custom:foxess-overview-card
 
 No configuration required — all entities are auto-discovered. The card shows:
 
-- **Solar**: Total solar power with PV1/PV2 breakdown
-- **House**: Household consumption
-- **Grid**: Import/export power with direction indicator, voltage and frequency
-- **Battery**: SoC gauge, charge/discharge rate with direction indicator, temperature, residual energy
+- **Solar**: Total solar power with PV1/PV2 breakdown (clickable for history)
+- **House**: Household consumption (clickable for history)
+- **Grid**: Import/export power with direction indicator, voltage and frequency (clickable for history)
+- **Battery**: SoC gauge, charge/discharge rate with direction indicator, BMS cell temperature, inverter temperature, residual energy (clickable for history)
 - **Work mode**: Current inverter work mode badge in the header
+- **Data source badge**: Shows current data source (WS/API/Modbus) with staleness indicator
 
-To override the default entity IDs:
+Clicking any energy flow node opens the HA entity history dialog. Sub-details (cell temperature, PV strings, grid voltage/frequency, residual energy) are individually clickable.
+
+#### Box customisation
+
+Show, hide, reorder, relabel, and re-icon the four energy flow boxes via the visual editor or YAML `boxes` config. The layout adapts responsively for 1, 3, or 4 visible boxes.
+
+```yaml
+type: custom:foxess-overview-card
+boxes:
+  - battery
+  - type: solar
+    label: PV
+    icon: "☀️"
+```
+
+Each entry in `boxes` can be a string shorthand (`"solar"`) or an object with `type`, `label`, and `icon` properties. Boxes not listed are hidden. Omit `boxes` entirely to show all four with defaults.
+
+#### Entity overrides
+
+All entities are auto-discovered. To override:
 
 ```yaml
 type: custom:foxess-overview-card
@@ -554,6 +606,49 @@ battery_charge_entity: sensor.foxess_charge_rate
 battery_discharge_entity: sensor.foxess_discharge_rate
 soc_entity: sensor.foxess_battery_soc
 work_mode_entity: sensor.foxess_work_mode
+pv1_entity: sensor.foxess_pv1_power
+pv2_entity: sensor.foxess_pv2_power
+grid_voltage_entity: sensor.foxess_grid_voltage
+grid_frequency_entity: sensor.foxess_grid_frequency
+bat_temp_entity: sensor.foxess_battery_temperature
+bms_temp_entity: sensor.foxess_bms_battery_temperature
+residual_entity: sensor.foxess_residual_energy
+data_freshness_entity: sensor.foxess_data_freshness
+```
+
+### Forecast card
+
+An SVG-based card showing the projected SoC trajectory with target/min SoC markers.
+
+```yaml
+type: custom:foxess-forecast-card
+```
+
+No configuration required — entities are auto-discovered. To override:
+
+```yaml
+type: custom:foxess-forecast-card
+forecast_entity: sensor.foxess_battery_forecast
+operations_entity: sensor.foxess_smart_operations
+```
+
+### Session history card
+
+A 24-hour horizontal timeline with coloured session bars and SoC trace overlay.
+
+```yaml
+type: custom:foxess-history-card
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `hours` | `24` | Timeline span: `12`, `24`, or `48`. |
+| `operations_entity` | Auto-discovered | Smart operations sensor entity ID. |
+| `soc_entity` | Auto-discovered | Battery SoC sensor entity ID. |
+
+```yaml
+type: custom:foxess-history-card
+hours: 48
 ```
 
 > **YAML mode dashboards:** If you use YAML-mode Lovelace (not the default storage mode), add the resources manually to your `configuration.yaml`:
@@ -563,6 +658,10 @@ work_mode_entity: sensor.foxess_work_mode
 >     - url: /foxess_control/foxess-control-card.js
 >       type: module
 >     - url: /foxess_control/foxess-overview-card.js
+>       type: module
+>     - url: /foxess_control/foxess-forecast-card.js
+>       type: module
+>     - url: /foxess_control/foxess-history-card.js
 >       type: module
 > ```
 
@@ -648,6 +747,16 @@ automation:
 - Smart sessions use the same algorithms (consumption-aware deferral, SoC monitoring, power adjustment) as cloud mode — only the read/write transport differs.
 - Session recovery after HA restart resumes based on persisted state without needing to verify cloud schedule groups.
 
+### Session resilience
+
+Smart sessions are designed to survive transient failures:
+
+- **Transient API errors**: A single cloud API failure is retried on the next timer tick. Only 3 consecutive failures open the circuit breaker.
+- **Circuit breaker**: After 3 consecutive adapter errors, the session holds position (keeps the current schedule). After 5 more ticks without recovery, the session aborts to self-use to protect the battery.
+- **Automatic replay after outage**: When the circuit breaker aborts a session and the time window is still open, the integration probes the API every 5 minutes and restarts the session on recovery (up to 6 attempts).
+- **HA restart recovery**: Smart sessions are persisted to `.storage`. If HA restarts mid-session, the session is automatically resumed if still within its time window, or cleaned up if expired.
+- **Schedule safety horizon**: The discharge schedule end time is set to a dynamically computed safe horizon based on current SoC, discharge rate, and safety factor. If HA loses connectivity, the inverter's schedule expires and reverts to self-use — the battery is protected without HA intervention.
+
 ## Known limitations
 
 - **Minimum SoC behaviour is unintuitive**: When the battery reaches the minimum SoC during force discharge or feed-in, the inverter's behaviour may not match expectations. Smart actions work around this by setting `fdSoc` to an extreme value (100% for charge, 11% for discharge) so the inverter never triggers its own threshold — HA monitors SoC and stops the action at the user's configured target. For plain `force_charge`/`force_discharge`, consider using an automation to cancel the override before the battery reaches the minimum SoC level.
@@ -676,6 +785,12 @@ See [FAQ.md](FAQ.md) for answers to common questions: back-to-back sessions, wor
 ## Troubleshooting
 
 See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for decision-tree guides to common issues: sessions not starting, grid import during discharge, WebSocket problems, early session aborts, and stale data.
+
+**Diagnostics:** Click "Download Diagnostics" on the integration page (Settings > Devices & Services > FoxESS Control) to export coordinator data, session state, WebSocket status, taper profile, and config — with API keys and credentials redacted.
+
+**Repair issues:** Actionable errors (unmanaged work mode, session aborts) surface in HA's Repairs panel instead of just logs. Issues auto-clear when the problem is resolved or a new session starts.
+
+**Reauthentication:** When the FoxESS API key expires or becomes invalid, HA shows a "Reconfigure" prompt instead of silently failing. Enter a new key without removing and re-adding the integration.
 
 ## Support
 
