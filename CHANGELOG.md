@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.7-beta.24
+
+### Fixed
+- **BMS temperature goes unknown on transient fetch failures**: when the web portal returns no temperature value (server-side issue) or the fetch throws an exception, the last known reading is now carried forward instead of letting the sensor drop to "unknown".
+
 ## 1.0.7-beta.23
 
 ### Added
