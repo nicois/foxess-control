@@ -33,6 +33,8 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.device_registry import DeviceInfo
 
+    from .taper import TaperProfile
+
 # ---------------------------------------------------------------------------
 # Icons
 # ---------------------------------------------------------------------------
@@ -349,12 +351,21 @@ def project_soc_series(
     *,
     flat_until: datetime.datetime | None = None,
     direction: int = 1,
+    taper_profile: TaperProfile | None = None,
+    max_power_w: int = 0,
+    capacity_kwh: float = 0.0,
 ) -> list[dict[str, Any]]:
-    """Project a SoC series from *start* to *end*."""
+    """Project a SoC series from *start* to *end*.
+
+    When *taper_profile* is provided with *max_power_w* and *capacity_kwh*,
+    the effective power (and thus SoC rate) varies per SoC bucket based on
+    observed BMS charge/discharge acceptance ratios.
+    """
     points: list[dict[str, Any]] = []
     t = start
     cur_soc = soc
     step_secs = _FORECAST_STEP.total_seconds()
+    use_taper = taper_profile is not None and max_power_w > 0 and capacity_kwh > 0
     while t <= end:
         epoch_ms = int(t.timestamp() * 1000)
         if t <= now or (flat_until is not None and t < flat_until):
@@ -363,10 +374,19 @@ def project_soc_series(
             continue
         points.append({"time": epoch_ms, "soc": round(cur_soc, 1)})
         t += _FORECAST_STEP
-        if direction > 0:
-            cur_soc = min(cur_soc + rate_per_sec * step_secs, target)
+        if use_taper:
+            assert taper_profile is not None
+            if direction > 0:
+                ratio = taper_profile.charge_ratio(cur_soc)
+            else:
+                ratio = taper_profile.discharge_ratio(cur_soc)
+            effective_rate = power_to_soc_rate(max_power_w * ratio, capacity_kwh)
         else:
-            cur_soc = max(cur_soc - rate_per_sec * step_secs, target)
+            effective_rate = rate_per_sec
+        if direction > 0:
+            cur_soc = min(cur_soc + effective_rate * step_secs, target)
+        else:
+            cur_soc = max(cur_soc - effective_rate * step_secs, target)
     end_ms = int(end.timestamp() * 1000)
     if points and points[-1]["time"] < end_ms:
         points.append({"time": end_ms, "soc": round(cur_soc, 1)})
@@ -400,6 +420,7 @@ def build_forecast(
     """Build a SoC forecast series for active smart operations."""
     now = dt_util.now()
     capacity_kwh = get_battery_capacity_kwh(hass, domain)
+    taper = get_domain_data(hass, domain).taper_profile
 
     if cs is not None:
         soc = get_interpolated_soc(hass, domain)
@@ -414,6 +435,7 @@ def build_forecast(
         effectively_charging: bool = is_effectively_charging(hass, domain, cs)
 
         charge_rate = power_to_soc_rate(power_w, capacity_kwh)
+        forecast_power_w = power_w
 
         deferred_start: datetime.datetime | None = None
         if not effectively_charging and max_power_w > 0:
@@ -425,6 +447,7 @@ def build_forecast(
                 ds_calc = end - datetime.timedelta(hours=charge_hours)
                 deferred_start = ds_calc if ds_calc > now else now
             charge_rate = power_to_soc_rate(max_power_w * dpf, capacity_kwh)
+            forecast_power_w = int(max_power_w * dpf)
 
         return project_soc_series(
             session_start,
@@ -435,6 +458,9 @@ def build_forecast(
             target_soc,
             flat_until=deferred_start if not effectively_charging else None,
             direction=1,
+            taper_profile=taper,
+            max_power_w=forecast_power_w,
+            capacity_kwh=capacity_kwh,
         )
 
     if ds is not None:
@@ -473,6 +499,9 @@ def build_forecast(
             soc_floor,
             flat_until=discharge_start,
             direction=-1,
+            taper_profile=taper,
+            max_power_w=power_w,
+            capacity_kwh=capacity_kwh,
         )
 
     return []

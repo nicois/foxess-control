@@ -29,6 +29,7 @@ from custom_components.foxess_control.sensor import (
     async_setup_entry,
     setup_debug_log,
 )
+from smart_battery.taper import TaperProfile
 
 
 def _make_hass(
@@ -853,6 +854,67 @@ class TestBatteryForecastSensor:
             assert forecast[-1]["soc"] == 80.0
             # Should not exceed target
             assert all(p["soc"] <= 80.0 for p in forecast)
+
+    def test_charging_forecast_curves_with_taper(self) -> None:
+        """Forecast SoC curve bends when taper shows reduced acceptance."""
+        taper = TaperProfile()
+        # Record enough observations to trust: full power up to 79%, then tapering
+        for soc in range(40, 80):
+            for _ in range(3):
+                taper.record_charge(float(soc), 10000, 10000.0)  # ratio 1.0
+        for soc in range(80, 96):
+            for _ in range(3):
+                # Simulate tapering: 50% acceptance above 80%
+                taper.record_charge(float(soc), 10000, 5000.0)  # ratio 0.5
+
+        hass = _make_hass(
+            smart_charge_state=_charge_state(
+                last_power_w=10000,
+                max_power_w=10000,
+                target_soc=95,
+                charging_started=True,
+            )
+        )
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 50.0}
+        hass.data[DOMAIN]["entry1"] = {
+            "inverter": MagicMock(),
+            "coordinator": mock_coordinator,
+        }
+        hass.data[DOMAIN]["_taper_profile"] = taper
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        sensor = BatteryForecastSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 2, 0, 0),
+        ):
+            forecast = sensor.extra_state_attributes["forecast"]
+            assert len(forecast) > 4
+
+            # Find the rate of SoC change per step in the low-SoC region (50-70%)
+            # vs the high-SoC region (80-90%) — taper should halve the rate
+            low_region = [p for p in forecast if 55 <= p["soc"] <= 70]
+            high_region = [p for p in forecast if 82 <= p["soc"] <= 92]
+            assert len(low_region) >= 2, f"Not enough low-region points: {low_region}"
+            assert len(high_region) >= 2, (
+                f"Not enough high-region points: {high_region}"
+            )
+
+            low_rate = (low_region[-1]["soc"] - low_region[0]["soc"]) / (
+                low_region[-1]["time"] - low_region[0]["time"]
+            )
+            high_rate = (high_region[-1]["soc"] - high_region[0]["soc"]) / (
+                high_region[-1]["time"] - high_region[0]["time"]
+            )
+
+            # With 50% taper above 80%, the high-region rate should be
+            # roughly half the low-region rate (allow some tolerance)
+            assert high_rate < low_rate * 0.75, (
+                f"Forecast should show taper: low={low_rate}, high={high_rate}"
+            )
 
     def test_discharging_forecast_drops_to_min(self) -> None:
         """Forecast SoC drops from current toward min_soc."""
