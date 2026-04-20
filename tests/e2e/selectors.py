@@ -33,6 +33,16 @@ class ControlCard:
     DISCHARGE_SECTION = f"{ROOT} >>> .section.discharge"
     DETAIL_VALUE = f"{ROOT} >>> .detail-value"
 
+    # Action buttons
+    ACTION_BTN_CHARGE = f"{ROOT} >>> .action-btn[data-action='charge']"
+    ACTION_BTN_DISCHARGE = f"{ROOT} >>> .action-btn[data-action='discharge']"
+
+    # Form inputs (visible after clicking charge/discharge)
+    FORM_OVERLAY = f"{ROOT} >>> .form-overlay"
+    FORM_START = f"{ROOT} >>> #form-start"
+    FORM_END = f"{ROOT} >>> #form-end"
+    FORM_SOC = f"{ROOT} >>> #form-soc"
+
 
 class OverviewCard:
     """Selectors for foxess-overview-card."""

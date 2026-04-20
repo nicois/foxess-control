@@ -526,6 +526,158 @@ class TestControlCard:
         assert has_marker, "Horizon marker not found in control card"
         assert has_marker["left"], "Horizon marker has no position"
 
+    def test_form_input_survives_state_update(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """Time inputs retain user values across hass state updates.
+
+        Regression test: the card's ``_render()`` method rebuilds innerHTML
+        on every ``set hass()`` call.  Without input preservation, a
+        coordinator poll or WebSocket update (every ~5 s) wipes partially
+        typed start/end times.
+
+        Related: C-020 (user must be able to operate the UI without surprise).
+        """
+        _JS_FIND_CARD = """
+            function findCard(root) {
+                const card = root.querySelector('foxess-control-card');
+                if (card) return card;
+                for (const el of root.querySelectorAll('*')) {
+                    if (el.shadowRoot) {
+                        const f = findCard(el.shadowRoot);
+                        if (f) return f;
+                    }
+                }
+                return null;
+            }
+        """
+
+        # 1. Wait for the card to render, then click the Discharge button
+        page.wait_for_function(
+            f"""() => {{
+                {_JS_FIND_CARD}
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return false;
+                const btn = card.shadowRoot.querySelector(
+                    '.action-btn[data-action="discharge"]'
+                );
+                return !!btn;
+            }}""",
+            timeout=15000,
+        )
+        page.evaluate(
+            f"""() => {{
+                {_JS_FIND_CARD}
+                const card = findCard(document);
+                card.shadowRoot.querySelector(
+                    '.action-btn[data-action="discharge"]'
+                ).click();
+            }}"""
+        )
+
+        # 2. Wait for the form overlay to appear
+        page.wait_for_function(
+            f"""() => {{
+                {_JS_FIND_CARD}
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return false;
+                return !!card.shadowRoot.querySelector('.form-overlay');
+            }}""",
+            timeout=5000,
+        )
+
+        # 3. Fill start and end time inputs
+        page.evaluate(
+            f"""() => {{
+                {_JS_FIND_CARD}
+                const card = findCard(document);
+                const sr = card.shadowRoot;
+                const startInput = sr.querySelector('#form-start');
+                const endInput = sr.querySelector('#form-end');
+                // Use the native setter to set values (like a user typing)
+                const nativeSet = Object.getOwnPropertyDescriptor(
+                    HTMLInputElement.prototype, 'value'
+                ).set;
+                nativeSet.call(startInput, '14:30');
+                startInput.dispatchEvent(new Event('input', {{bubbles: true}}));
+                startInput.dispatchEvent(new Event('change', {{bubbles: true}}));
+                nativeSet.call(endInput, '16:45');
+                endInput.dispatchEvent(new Event('input', {{bubbles: true}}));
+                endInput.dispatchEvent(new Event('change', {{bubbles: true}}));
+            }}"""
+        )
+
+        # Verify values were set
+        vals_before = page.evaluate(
+            f"""() => {{
+                {_JS_FIND_CARD}
+                const card = findCard(document);
+                const sr = card.shadowRoot;
+                return {{
+                    start: sr.querySelector('#form-start').value,
+                    end: sr.querySelector('#form-end').value,
+                }};
+            }}"""
+        )
+        assert vals_before["start"] == "14:30", (
+            f"Setup failed: start={vals_before['start']}"
+        )
+        assert vals_before["end"] == "16:45", f"Setup failed: end={vals_before['end']}"
+
+        # 4–5. Simulate what HA does on every state update: re-assign the
+        #    hass object to the card.  This triggers `set hass()` →
+        #    `_render()` → innerHTML replacement.  This is more reliable
+        #    than waiting for a real coordinator poll (which can take
+        #    minutes in cloud mode) and tests the exact code path that
+        #    causes the bug.
+        page.evaluate(
+            f"""() => {{
+                {_JS_FIND_CARD}
+                const card = findCard(document);
+                // Re-assign hass to trigger a re-render (same as HA does)
+                card.hass = card._hass;
+            }}"""
+        )
+
+        # 6. Verify the form is still visible and inputs retained values
+        vals_after = page.evaluate(
+            f"""() => {{
+                {_JS_FIND_CARD}
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return null;
+                const overlay = card.shadowRoot.querySelector('.form-overlay');
+                const showForm = card._showForm;
+                if (!overlay) return {{
+                    formVisible: false,
+                    showForm: showForm,
+                }};
+                const startInput = card.shadowRoot.querySelector('#form-start');
+                const endInput = card.shadowRoot.querySelector('#form-end');
+                return {{
+                    formVisible: true,
+                    start: startInput ? startInput.value : null,
+                    end: endInput ? endInput.value : null,
+                    showForm: showForm,
+                }};
+            }}"""
+        )
+
+        assert vals_after is not None, "Card not found after re-render"
+        assert vals_after["formVisible"], (
+            f"Form overlay disappeared after state update"
+            f" (_showForm={vals_after.get('showForm')!r})"
+        )
+        assert vals_after["start"] == "14:30", (
+            f"Start time input was reset: expected '14:30', got '{vals_after['start']}'"
+        )
+        assert vals_after["end"] == "16:45", (
+            f"End time input was reset: expected '16:45', got '{vals_after['end']}'"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Screenshot regression

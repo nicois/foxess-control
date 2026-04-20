@@ -11,7 +11,7 @@
  *   # soc_entity: sensor.foxess_battery_soc
  */
 
-const CARD_VERSION = "1.5.0";
+const CARD_VERSION = "1.5.1";
 
 // -- i18n --------------------------------------------------------------------
 
@@ -444,6 +444,7 @@ class FoxESSControlCard extends HTMLElement {
     this._expandedTips = new Set();
     this._cancelConfirm = false;
     this._cancelTimer = null;
+    this._formValues = { start: "", end: "", soc: "" };
     this.shadowRoot.addEventListener("click", (e) => {
       const row = e.target.closest(".progress-row.has-tip");
       if (row) {
@@ -485,6 +486,7 @@ class FoxESSControlCard extends HTMLElement {
     }
     if (action === "charge" || action === "discharge") {
       this._showForm = action;
+      this._formValues = { start: "", end: "", soc: String(action === "charge" ? 100 : 10) };
       this._render();
     }
     if (action === "submit-form") {
@@ -492,16 +494,17 @@ class FoxESSControlCard extends HTMLElement {
     }
     if (action === "close-form") {
       this._showForm = null;
+      this._formValues = { start: "", end: "", soc: "" };
       this._render();
     }
   }
 
   _submitForm() {
     if (!this._hass || !this._showForm) return;
-    const root = this.shadowRoot;
-    const start = root.getElementById("form-start")?.value;
-    const end = root.getElementById("form-end")?.value;
-    const soc = root.getElementById("form-soc")?.value;
+    this._saveFormValues();
+    const start = this._formValues.start;
+    const end = this._formValues.end;
+    const soc = this._formValues.soc;
     if (!start || !end || !soc) return;
     const service =
       this._showForm === "charge" ? "smart_charge" : "smart_discharge";
@@ -511,7 +514,20 @@ class FoxESSControlCard extends HTMLElement {
         : { start_time: start, end_time: end, min_soc: parseInt(soc, 10) };
     this._hass.callService("foxess_control", service, data);
     this._showForm = null;
+    this._formValues = { start: "", end: "", soc: "" };
     this._render();
+  }
+
+  /** Save current form input values so they survive innerHTML replacement. */
+  _saveFormValues() {
+    if (!this._showForm) return;
+    const root = this.shadowRoot;
+    const start = root.getElementById("form-start");
+    const end = root.getElementById("form-end");
+    const soc = root.getElementById("form-soc");
+    if (start) this._formValues.start = start.value;
+    if (end) this._formValues.end = end.value;
+    if (soc) this._formValues.soc = soc.value;
   }
 
   // -- Lovelace lifecycle ----------------------------------------------------
@@ -668,6 +684,9 @@ class FoxESSControlCard extends HTMLElement {
   _render() {
     if (!this._hass) return;
 
+    // Preserve form input values before innerHTML replacement
+    this._saveFormValues();
+
     const ops = this._config.operations_entity;
     const a = this._attr(ops);
     const soc = a.charge_current_soc ?? a.discharge_current_soc ?? this._getSoc();
@@ -704,20 +723,20 @@ class FoxESSControlCard extends HTMLElement {
   _renderForm() {
     const isCharge = this._showForm === "charge";
     const socLabel = isCharge ? this._t("target") : this._t("min_soc");
-    const socDefault = isCharge ? 100 : 10;
+    const fv = this._formValues;
     return `
       <div class="form-overlay">
         <div class="form-row">
           <label>Start</label>
-          <input type="time" id="form-start">
+          <input type="time" id="form-start" value="${fv.start}">
         </div>
         <div class="form-row">
           <label>End</label>
-          <input type="time" id="form-end">
+          <input type="time" id="form-end" value="${fv.end}">
         </div>
         <div class="form-row">
           <label>${socLabel} (%)</label>
-          <input type="number" id="form-soc" min="0" max="100" value="${socDefault}">
+          <input type="number" id="form-soc" min="0" max="100" value="${fv.soc}">
         </div>
         <div class="form-buttons">
           <button class="action-btn" data-action="submit-form">${isCharge ? this._t("btn_charge") : this._t("btn_discharge")}</button>
