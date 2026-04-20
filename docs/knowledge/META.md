@@ -2,7 +2,7 @@
 project: FoxESS Control
 created: 2026-04-14
 last_updated: 2026-04-19
-last_reflection: 2026-04-19T15:47:00+10:00
+last_reflection: 2026-04-20T09:15:00+10:00
 ---
 # Knowledge Tree Meta
 
@@ -224,3 +224,36 @@ last_reflection: 2026-04-19T15:47:00+10:00
   knowledge tree doesn't have a constraint for it. C-029 says "E2E for
   HA-dependent behaviour" but doesn't capture the incremental testing
   discipline.
+
+### 2026-04-20 — Automated reflection (214 interactions, 2026-04-19 to 2026-04-20)
+- **Test count growth**: 670 unit + 126 E2E = 796 total (was 603 + 88
+  = 691). Growth from: overview card E2E tests (click-to-history, box
+  customisation, sub-links), control card form input persistence tests,
+  cold-temperature curtailment tests, BMS temperature preservation tests.
+  `06-tests.md` updated.
+- **New design doc**: `04-design/lovelace-cards.md` created with 4
+  decisions: D-035 (click-to-history), D-036 (box customisation),
+  D-037 (cold-temp curtailment), D-038 (BMS temp preservation).
+  These features were implemented across beta.23–beta.29 without
+  design documentation.
+- **E2E test hardening pattern**: A recurring theme across 3 sessions
+  was replacing one-shot `page.evaluate()` with `wait_for_function()`
+  in Playwright tests. The root cause is consistent: HA custom card
+  shadow DOM renders asynchronously after the `hass` property is set,
+  and under CI load the 2s settle time after reload isn't enough.
+  This pattern should be a documented testing constraint — all
+  Playwright assertions on shadow DOM content must use polling waits,
+  never one-shot evaluate. Recommend adding to C-031 or as new
+  constraint.
+- **Regression-test skill improvements**: User flagged that fix agents
+  were writing tests with plain dicts instead of production types,
+  and accepting fixes without proper root-cause investigation. Skill
+  updated with production-type verification and root-cause requirements.
+  The `test_before_fix` pattern was also added to CLAUDE.md.
+- **Stale areas not updated this pass** (recommend
+  `/project-overview update`):
+  - `05-coverage.md`: Matrix needs D-035 through D-038 added
+  - `02-constraints.md`: No constraint for "Playwright assertions
+    must poll, never one-shot evaluate" pattern
+  - `03-architecture.md`: No mention of Lovelace card architecture
+    (shadow DOM, Web Components, static JS resources)

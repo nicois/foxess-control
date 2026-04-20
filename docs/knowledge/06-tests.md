@@ -1,12 +1,12 @@
 ---
 project: FoxESS Control
 level: 6
-last_verified: 2026-04-19
+last_verified: 2026-04-20
 traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-603 unit + 88 E2E = 691 total.
+670 unit + 126 E2E = 796 total.
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
