@@ -3,6 +3,7 @@
 ## 1.0.7-beta.22
 
 ### Fixed
+- **Discharge power sensor oscillates between actual and target power**: `get_actual_discharge_power_w` treated `batDischargePower == 0.0` (battery not discharging, solar > load) the same as `None` (no data), falling back to the requested target power (~4075W). Now returns 0 when the coordinator explicitly reports no discharge, and only falls back to target when data is unavailable.
 - **Log sensor entities unnamed** (`sensor.foxess_2`, `sensor.foxess_3`): Info Log, Init Debug Log, and Data Freshness sensors relied solely on `_attr_translation_key` for naming, which HA wasn't resolving. Added explicit `_attr_name` so entities register with correct names and entity_ids.
 - **BMS temperature early returns log at WARNING** (C-020, C-026): `_fetch_bms_temperature` silently returned `None` when `web_session` was missing or `battery_compound_id` hadn't been discovered — no log line at all. Both paths now emit WARNING-level messages with actionable diagnostics.
 - **BMS fetch success/failure now logged at INFO**: successful temperature reads, "no value returned", and fetch exceptions were all logged at DEBUG, making them invisible in the info log sensor. All three paths now log at INFO so BMS activity appears in the rolling info log.
