@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 4
-last_verified: 2026-04-20
+last_verified: 2026-04-21
 traces_up: [../02-constraints.md]
 traces_down: [../06-tests.md]
 ---
@@ -98,3 +98,51 @@ pack). A stale value from minutes ago is more useful than "unknown"
 for both display and charge curtailment decisions.
 
 **Traces**: C-020 (operational transparency), C-026 (error surfacing)
+
+### D-039: Control card show_cancel option
+
+**Decision**: A `show_cancel` YAML/editor config option (default `true`)
+controls whether the cancel button appears during active charge/discharge
+sessions. When `false`, the action row is empty during active sessions.
+The option is stored only when `false` — omitted config means all
+defaults apply, preserving backward compatibility.
+
+**Context**: Some users embed the control card in dashboards shared with
+household members who should not cancel sessions. The cancel button's
+double-tap confirmation reduces accidental cancels but doesn't prevent
+intentional ones.
+
+**Rationale**: A per-card toggle is simpler than HA's per-user dashboard
+permissions and doesn't require a separate "read-only" card variant.
+Default `true` preserves existing behaviour.
+
+**Traces**: C-020 (operational transparency — user controls what UI shows)
+
+### D-040: Targeted DOM updates during form display
+
+**Decision**: When the form overlay is present in the shadow DOM,
+`_render()` updates only the header (`outerHTML`), content (`innerHTML`),
+and action-row (`innerHTML`) elements. The form overlay DOM is left
+entirely untouched. Detection uses `existing.querySelector(".form-overlay")`
+rather than the `_showForm` flag, because on the initial form-opening
+render the flag is `true` but the overlay doesn't exist yet.
+
+**Context**: The `set hass()` property fires every ~5 seconds with
+WebSocket data. The previous implementation did `shadowRoot.innerHTML = ...`
+on every call, destroying the entire DOM including open native time
+pickers (`<input type="time">`). Users typing in the form had their
+input cleared and picker popups closed mid-interaction.
+
+**Rationale**: Shadow DOM is designed for encapsulation, but `innerHTML`
+replacement discards it entirely. Targeted updates preserve the form
+element identity (same DOM nodes), so focus, selection state, and native
+picker popups survive. The `_formValues` input listener remains as a
+safety net for form submission, but is no longer needed for value
+restoration after re-render.
+
+**Alternatives considered**: Saving and restoring form values after
+full re-render — rejected because native time picker popup state cannot
+be saved/restored programmatically.
+
+**Traces**: C-020 (operational transparency — user input must not be
+lost during background updates)

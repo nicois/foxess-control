@@ -1,8 +1,8 @@
 ---
 project: FoxESS Control
 created: 2026-04-14
-last_updated: 2026-04-19
-last_reflection: 2026-04-20T09:15:00+10:00
+last_updated: 2026-04-21
+last_reflection: 2026-04-21T00:00:00+10:00
 ---
 # Knowledge Tree Meta
 
@@ -257,3 +257,26 @@ last_reflection: 2026-04-20T09:15:00+10:00
     must poll, never one-shot evaluate" pattern
   - `03-architecture.md`: No mention of Lovelace card architecture
     (shadow DOM, Web Components, static JS resources)
+
+### 2026-04-21 — Update pass (show_cancel + form DOM preservation)
+- **Changes detected**: 2 commits since last update (c36f293..407388b).
+  Source files: `foxess-control-card.js`, `tests/e2e/test_ui.py`.
+- **D-039 added**: Control card `show_cancel` config option — hides
+  cancel button during active sessions. Traces to C-020.
+- **D-040 added**: Targeted DOM updates when form overlay is present.
+  Header/content/action-row updated selectively; form overlay left
+  intact to preserve native time picker state and focus. Traces to
+  C-020. The rejected alternative (save/restore form values after full
+  innerHTML replacement) was the previous implementation — it failed
+  because native picker popup state cannot be saved/restored.
+- **Test counts updated**: 670 unit + 128 E2E = 798 total (was 670 +
+  126 = 796). Growth from `test_time_picker_stays_open_during_rerender`
+  × 2 connection modes.
+- **Coverage matrix updated**: D-035–D-040 added to C-020 and C-001
+  rows. Unit/E2E counts corrected (were 598/88, now 670/128).
+- **README updated**: Documented all 4 Lovelace cards, `show_cancel`,
+  box customisation, click-to-history, BMS temperature, debug log
+  sensors, cold-temp curtailment, session resilience, diagnostics,
+  repair issues, reauthentication.
+- **Stale areas resolved**: `05-coverage.md` D-035–D-038 gap (flagged
+  in 2026-04-20 reflection) now addressed.

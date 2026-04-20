@@ -6,7 +6,7 @@ traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-670 unit + 126 E2E = 796 total.
+670 unit + 128 E2E = 798 total.
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
@@ -234,7 +234,7 @@ Key tests:
 
 ## E2E Tests (Containerised HA + Simulator + Playwright)
 
-**Source**: `tests/e2e/test_e2e.py` (46 tests), `tests/e2e/test_ui.py` (42 tests)
+**Source**: `tests/e2e/test_e2e.py` (46 tests), `tests/e2e/test_ui.py` (44 tests)
 **Infrastructure**: Podman HA container, FoxESS simulator, Playwright Chromium
 
 | Test | Verifies | Constraint |
@@ -273,12 +273,18 @@ Key tests:
 | `TestControlCard::test_progress_hidden_when_idle` | No progress section when idle | C-020 |
 | `TestControlCard::test_progress_visible_during_discharge[api/ws/entity]` | Progress section during discharge | C-020 |
 | `TestControlCard::test_schedule_horizon_during_discharge` | Schedule horizon displayed | C-027 |
+| `TestFormInputPersistence::test_time_input_survives_rerender` | Form values persist through hass update | C-020 |
+| `TestFormInputPersistence::test_time_input_survives_multiple_rerenders` | Form values persist through 3 rapid updates | C-020 |
+| `TestFormInputPersistence::test_rerender_between_field_edits` | Interleaved re-render preserves earlier values | C-020 |
+| `TestFormInputPersistence::test_time_picker_stays_open_during_rerender` | DOM identity and focus preserved (sentinel check) | C-020, D-040 |
+| `TestFormInputPersistence::test_form_recovers_from_page_navigation` | Form recovery after HA page navigation | C-020 |
 | `TestScreenshots::test_idle_screenshot` | Visual regression capture | -- |
 | `TestScreenshots::test_discharging_screenshot` | Visual regression capture | -- |
 
 Tests are parametrized across `[cloud, entity]` connection modes and
 `[api, ws, entity]` data sources. The `ws_refuse` simulator fault blocks
-WS connections for API-only mode. Total E2E count is 88 (46 + 42).
+WS connections for API-only mode. Total E2E count is 128 (46 + 44,
+with cloud/entity parametrization expanding to 86 runnable + 42 skipped).
 
 ## Test Quality Rules
 
