@@ -7,6 +7,8 @@
 - **Log sensor entities unnamed** (`sensor.foxess_2`, `sensor.foxess_3`): Info Log, Init Debug Log, and Data Freshness sensors relied solely on `_attr_translation_key` for naming, which HA wasn't resolving. Added explicit `_attr_name` so entities register with correct names and entity_ids.
 - **BMS temperature early returns log at WARNING** (C-020, C-026): `_fetch_bms_temperature` silently returned `None` when `web_session` was missing or `battery_compound_id` hadn't been discovered — no log line at all. Both paths now emit WARNING-level messages with actionable diagnostics.
 - **BMS fetch success/failure now logged at INFO**: successful temperature reads, "no value returned", and fetch exceptions were all logged at DEBUG, making them invisible in the info log sensor. All three paths now log at INFO so BMS activity appears in the rolling info log.
+- **Lovelace card form inputs reset during typing** (C-020): State updates (~5s with WebSocket active) triggered full card re-renders, clearing user input in time/SoC fields. Form values are now persisted across re-renders via local state.
+- **E2E fixture pipe-buffer deadlock** (C-031): HA container started with `stdout=PIPE` but the pipe was never drained. Under CI load (12 xdist workers), HA's startup logs filled the 64 KiB pipe buffer, deadlocking the container process. Changed to `DEVNULL`; container logs captured via `podman logs` instead. Also hardened `is_ready()` to catch `OSError` during health checks.
 
 ## 1.0.7-beta.20
 
