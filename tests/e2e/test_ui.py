@@ -135,10 +135,90 @@ def _tight_window(minutes: int = 30) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 
+_JS_FIND_OVERVIEW_CARD = """
+function findCard(root) {
+    const c = root.querySelector('foxess-overview-card');
+    if (c) return c;
+    for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) {
+            const f = findCard(el.shadowRoot);
+            if (f) return f;
+        }
+    }
+    return null;
+}
+"""
+
+
 class TestOverviewCard:
     def test_card_renders(self, page: Page) -> None:
         """Overview card is present on the dashboard."""
         assert _find_card(page, "foxess-overview-card")
+
+    def test_node_click_opens_more_info(
+        self,
+        page: Page,
+        foxess_sim: SimulatorHandle | None,
+        ha_e2e: HAClient,
+        connection_mode: str,
+    ) -> None:
+        """Clicking a node fires hass-more-info with the correct entity."""
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
+        _robust_reload(page, settle_ms=2000)
+
+        results = page.evaluate(
+            f"""() => {{
+                {_JS_FIND_OVERVIEW_CARD}
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return null;
+                const sr = card.shadowRoot;
+
+                const captured = [];
+                card.addEventListener('hass-more-info', (e) => {{
+                    captured.push(e.detail.entityId);
+                }});
+
+                const nodes = sr.querySelectorAll('.node[data-entity]');
+                const clicked = [];
+                for (const node of nodes) {{
+                    const entity = node.getAttribute('data-entity');
+                    clicked.push(entity);
+                    node.click();
+                }}
+                return {{ clicked, captured }};
+            }}"""
+        )
+        assert results is not None, "Overview card not found"
+        assert len(results["clicked"]) >= 3, (
+            f"Expected at least 3 clickable nodes, got {len(results['clicked'])}"
+        )
+        assert results["clicked"] == results["captured"], (
+            f"Events mismatch: clicked {results['clicked']}, "
+            f"captured {results['captured']}"
+        )
+
+    def test_node_has_cursor_pointer(
+        self,
+        page: Page,
+        foxess_sim: SimulatorHandle | None,
+        ha_e2e: HAClient,
+        connection_mode: str,
+    ) -> None:
+        """Clickable nodes show pointer cursor."""
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
+        _robust_reload(page, settle_ms=2000)
+
+        cursor = page.evaluate(
+            f"""() => {{
+                {_JS_FIND_OVERVIEW_CARD}
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return null;
+                const node = card.shadowRoot.querySelector('.node[data-entity]');
+                if (!node) return null;
+                return getComputedStyle(node).cursor;
+            }}"""
+        )
+        assert cursor == "pointer", f"Expected pointer cursor, got '{cursor}'"
 
     def test_shows_soc(
         self,

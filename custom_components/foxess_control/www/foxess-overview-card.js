@@ -16,7 +16,7 @@
  *   # etc.
  */
 
-const OVERVIEW_VERSION = "2.5.0";
+const OVERVIEW_VERSION = "2.6.0";
 
 // -- i18n --------------------------------------------------------------------
 
@@ -380,10 +380,25 @@ class FoxESSOverviewCard extends HTMLElement {
           ${this._renderNode("solar", "☀️", this._t("solar"), solarFound, this._formatKw(solar), solarActive, dataSource !== "ws" && (pv1 != null || pv2 != null) ? this._pvDetail(pv1, pv2) : "", eid.solar_entity)}
           ${this._renderNode("house", "🏠", this._t("house"), houseFound, this._formatKw(house), houseActive, "", eid.house_entity)}
           ${this._renderGridNode(gridFound, gridNet, gridImporting, gridExporting, dataSource !== "ws" ? gridV : null, dataSource !== "ws" ? gridHz : null, eid.grid_import_entity)}
-          ${this._renderBatteryNode(soc, socPct, socColor, batNet, batCharging, batDischarging, dataSource !== "ws" ? batTemp : null, bmsTemp, dataSource !== "ws" ? residual : null, batFound)}
+          ${this._renderBatteryNode(soc, socPct, socColor, batNet, batCharging, batDischarging, dataSource !== "ws" ? batTemp : null, bmsTemp, dataSource !== "ws" ? residual : null, batFound, eid.soc_entity)}
         </div>
       </ha-card>
     `;
+
+    this.shadowRoot.querySelectorAll(".node[data-entity]").forEach((node) => {
+      node.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const entityId = node.getAttribute("data-entity");
+        if (entityId) {
+          const event = new CustomEvent("hass-more-info", {
+            bubbles: true,
+            composed: true,
+            detail: { entityId },
+          });
+          this.dispatchEvent(event);
+        }
+      });
+    });
   }
 
   _formatWorkMode(mode) {
@@ -417,7 +432,7 @@ class FoxESSOverviewCard extends HTMLElement {
     if (voltage != null) sub.push(`${voltage.toFixed(0)}V`);
     if (freq != null) sub.push(`${freq.toFixed(1)}Hz`);
     return `
-      <div class="node grid ${active ? "active" : "inactive"}">
+      <div class="node grid ${active ? "active" : "inactive"}"${entityId ? ` data-entity="${entityId}"` : ""}>
         <div class="node-icon">⚡</div>
         <div class="node-value">${active ? this._formatKw(Math.abs(gridNet)) : "—"}</div>
         <div class="node-label">${this._t("grid")}${direction ? " · " + direction : ""}</div>
@@ -438,7 +453,7 @@ class FoxESSOverviewCard extends HTMLElement {
       `;
     }
     return `
-      <div class="node ${cls} ${active ? "active" : "inactive"}">
+      <div class="node ${cls} ${active ? "active" : "inactive"}"${entityId ? ` data-entity="${entityId}"` : ""}>
         <div class="node-icon">${icon}</div>
         <div class="node-value">${value}</div>
         <div class="node-label">${label}</div>
@@ -447,7 +462,7 @@ class FoxESSOverviewCard extends HTMLElement {
     `;
   }
 
-  _renderBatteryNode(soc, socPct, socColor, batNet, charging, discharging, temp, bmsTemp, residual, found) {
+  _renderBatteryNode(soc, socPct, socColor, batNet, charging, discharging, temp, bmsTemp, residual, found, socEntityId) {
     if (!found) {
       return `
         <div class="node battery not-found">
@@ -472,7 +487,7 @@ class FoxESSOverviewCard extends HTMLElement {
     if (residual != null) sub.push(`${residual.toFixed(1)} kWh`);
 
     return `
-      <div class="node battery ${active ? "active" : "inactive"}">
+      <div class="node battery ${active ? "active" : "inactive"}"${socEntityId ? ` data-entity="${socEntityId}"` : ""}>
         <div class="bat-header">
           <svg class="bat-svg" viewBox="0 0 24 14" width="28" height="16">
             <rect x="0.5" y="0.5" width="20" height="13" rx="2" ry="2"
@@ -544,8 +559,10 @@ class FoxESSOverviewCard extends HTMLElement {
         border-radius: 12px;
         padding: 12px;
         text-align: center;
-        transition: opacity 0.3s;
+        transition: opacity 0.3s, transform 0.1s;
       }
+      .node[data-entity] { cursor: pointer; }
+      .node[data-entity]:active { transform: scale(0.97); }
       .node.inactive { opacity: 0.45; }
       .node.not-found { opacity: 0.3; }
 
