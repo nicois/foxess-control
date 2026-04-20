@@ -1129,6 +1129,88 @@ class TestFormInputPersistence:
             f"End time lost after interleaved re-render: '{vals['end']}'"
         )
 
+    def test_time_picker_stays_open_during_rerender(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """Focused time input keeps focus and DOM identity through re-render.
+
+        Regression: the form overlay was rebuilt via innerHTML on every hass
+        update, destroying native time picker popups and losing focus.  With
+        targeted DOM updates, the form-overlay element must survive intact.
+        """
+        assert _find_card(page, "foxess-control-card")
+
+        self._open_form(page, "charge")
+        self._set_form_value(page, "form-start", "02:30")
+
+        # Mark the DOM element with a sentinel and focus it
+        self._safe_evaluate(
+            page,
+            f"""() => {{
+                {_JS_FIND_CONTROL_CARD}
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return;
+                const input = card.shadowRoot.getElementById('form-start');
+                if (input) {{
+                    input._sentinel = 'alive';
+                    input.focus();
+                }}
+            }}""",
+        )
+
+        # Verify focus before the update
+        focused_before = self._safe_evaluate(
+            page,
+            f"""() => {{
+                {_JS_FIND_CONTROL_CARD}
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return false;
+                const input = card.shadowRoot.getElementById('form-start');
+                return input === card.shadowRoot.activeElement;
+            }}""",
+        )
+        assert focused_before, "form-start should be focused before hass update"
+
+        # Trigger hass update (re-render)
+        self._trigger_hass_update(page)
+        self._wait_for_form(page)
+
+        # DOM element must be the SAME node (sentinel survives)
+        sentinel = self._safe_evaluate(
+            page,
+            f"""() => {{
+                {_JS_FIND_CONTROL_CARD}
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return null;
+                const input = card.shadowRoot.getElementById('form-start');
+                return input ? input._sentinel : null;
+            }}""",
+        )
+        assert sentinel == "alive", (
+            f"DOM element was destroyed and recreated (sentinel={sentinel})"
+        )
+
+        # Focus must be preserved
+        focused_after = self._safe_evaluate(
+            page,
+            f"""() => {{
+                {_JS_FIND_CONTROL_CARD}
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return false;
+                const input = card.shadowRoot.getElementById('form-start');
+                return input === card.shadowRoot.activeElement;
+            }}""",
+        )
+        assert focused_after, "form-start lost focus after hass update"
+
+        # Value must also survive
+        vals = self._get_form_values(page)
+        assert vals["start"] == "02:30", f"Start value lost: '{vals['start']}'"
+
     def test_form_recovers_from_page_navigation(
         self,
         page: Page,

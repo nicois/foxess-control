@@ -687,39 +687,41 @@ class FoxESSControlCard extends HTMLElement {
 
     const isActive = chargeActive || dischargeActive;
 
-    this.shadowRoot.innerHTML = `
+    const headerHtml = this._renderHeader(soc);
+    const contentHtml = `
+      ${chargeActive ? this._renderCharge(a) : ""}
+      ${dischargeActive ? this._renderDischarge(a) : ""}
+      ${!isActive ? this._renderIdle() : ""}
+      ${this._renderProgress(a)}
+    `;
+    const actionHtml = isActive
+      ? `<button class="action-btn cancel${this._cancelConfirm ? " confirming" : ""}" data-action="cancel">
+           ${this._cancelConfirm ? this._t("btn_confirm_cancel") : this._t("btn_cancel")}
+         </button>`
+      : `<button class="action-btn" data-action="charge">${this._t("btn_charge")}</button>
+         <button class="action-btn" data-action="discharge">${this._t("btn_discharge")}</button>`;
+
+    const sr = this.shadowRoot;
+    const existing = sr.querySelector("ha-card");
+    if (existing && existing.querySelector(".form-overlay")) {
+      const header = existing.querySelector(".header");
+      const content = existing.querySelector(".content");
+      const actionRow = existing.querySelector(".action-row");
+      if (header) header.outerHTML = headerHtml;
+      if (content) content.innerHTML = contentHtml;
+      if (actionRow) actionRow.innerHTML = actionHtml;
+      return;
+    }
+
+    sr.innerHTML = `
       <style>${FoxESSControlCard._styles()}</style>
       <ha-card>
-        ${this._renderHeader(soc)}
-        <div class="content">
-          ${chargeActive ? this._renderCharge(a) : ""}
-          ${dischargeActive ? this._renderDischarge(a) : ""}
-          ${!isActive ? this._renderIdle() : ""}
-          ${this._renderProgress(a)}
-        </div>
+        ${headerHtml}
+        <div class="content">${contentHtml}</div>
         ${this._showForm ? this._renderForm() : ""}
-        <div class="action-row">
-          ${
-            isActive
-              ? `<button class="action-btn cancel${this._cancelConfirm ? " confirming" : ""}" data-action="cancel">
-                   ${this._cancelConfirm ? this._t("btn_confirm_cancel") : this._t("btn_cancel")}
-                 </button>`
-              : `<button class="action-btn" data-action="charge">${this._t("btn_charge")}</button>
-                 <button class="action-btn" data-action="discharge">${this._t("btn_discharge")}</button>`
-          }
-        </div>
+        <div class="action-row">${actionHtml}</div>
       </ha-card>
     `;
-    if (this._showForm) {
-      const fv = this._formValues;
-      const sr = this.shadowRoot;
-      const startEl = sr.getElementById("form-start");
-      const endEl = sr.getElementById("form-end");
-      const socEl = sr.getElementById("form-soc");
-      if (startEl && fv.start) startEl.value = fv.start;
-      if (endEl && fv.end) endEl.value = fv.end;
-      if (socEl && fv.soc) socEl.value = fv.soc;
-    }
   }
 
   _renderForm() {
