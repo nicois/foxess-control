@@ -140,6 +140,11 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 mode.value,
             )
 
+    def _preserve_bms_temperature(self, data: dict[str, Any]) -> None:
+        """Carry forward the last known BMS temperature into *data*."""
+        if self.data and "bmsBatteryTemperature" in self.data:
+            data["bmsBatteryTemperature"] = self.data["bmsBatteryTemperature"]
+
     async def _fetch_bms_temperature(self, data: dict[str, Any]) -> None:
         """Fetch BMS min cell temperature from the web portal and merge into data."""
         domain_data = self.hass.data.get(DOMAIN)
@@ -170,8 +175,10 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.info("BMS temperature: %.1f°C", temp)
             else:
                 _LOGGER.info("BMS temperature: no value returned from web portal")
+                self._preserve_bms_temperature(data)
         except Exception:
             _LOGGER.info("BMS temperature fetch failed", exc_info=True)
+            self._preserve_bms_temperature(data)
 
     async def _async_update_data(self) -> dict[str, Any]:
         from .foxess.client import FoxESSApiError

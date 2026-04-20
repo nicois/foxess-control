@@ -879,6 +879,56 @@ class TestBmsTemperatureEarlyReturnLogging:
         )
 
     @pytest.mark.asyncio
+    async def test_no_value_preserves_previous_temperature(self) -> None:
+        """When the web portal returns None, the last known value is kept."""
+        coord, dd = self._make_coord_with_domain_data()
+
+        web_session = AsyncMock()
+        web_session.async_get_battery_temperature = AsyncMock(return_value=None)
+        dd["_web_session"] = web_session
+        dd["_battery_compound_id"] = "bat@SN001"
+
+        coord.data = {"bmsBatteryTemperature": 16.8}
+        data: dict[str, Any] = {}
+        await coord._fetch_bms_temperature(data)
+
+        assert data["bmsBatteryTemperature"] == 16.8
+
+    @pytest.mark.asyncio
+    async def test_exception_preserves_previous_temperature(self) -> None:
+        """When the fetch raises, the last known value is kept."""
+        coord, dd = self._make_coord_with_domain_data()
+
+        web_session = AsyncMock()
+        web_session.async_get_battery_temperature = AsyncMock(
+            side_effect=RuntimeError("server error")
+        )
+        dd["_web_session"] = web_session
+        dd["_battery_compound_id"] = "bat@SN001"
+
+        coord.data = {"bmsBatteryTemperature": 15.5}
+        data: dict[str, Any] = {}
+        await coord._fetch_bms_temperature(data)
+
+        assert data["bmsBatteryTemperature"] == 15.5
+
+    @pytest.mark.asyncio
+    async def test_no_value_no_previous_leaves_absent(self) -> None:
+        """When there's no previous value and fetch returns None, key stays absent."""
+        coord, dd = self._make_coord_with_domain_data()
+
+        web_session = AsyncMock()
+        web_session.async_get_battery_temperature = AsyncMock(return_value=None)
+        dd["_web_session"] = web_session
+        dd["_battery_compound_id"] = "bat@SN001"
+
+        coord.data = None  # type: ignore[assignment]
+        data: dict[str, Any] = {}
+        await coord._fetch_bms_temperature(data)
+
+        assert "bmsBatteryTemperature" not in data
+
+    @pytest.mark.asyncio
     async def test_no_warning_when_domain_data_missing(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
