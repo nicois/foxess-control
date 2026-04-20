@@ -1360,6 +1360,9 @@ class TestGalleryScreenshots:
         set_inverter_state(
             connection_mode, foxess_sim, ha_e2e, soc=65, solar_kw=0.5, load_kw=1.8
         )
+        ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_battery_soc", "ge", 64, timeout_s=90
+        )
         start, end = _tight_window(30)
         ha_e2e.call_service(
             "foxess_control",
@@ -1400,6 +1403,9 @@ class TestGalleryScreenshots:
         set_inverter_state(
             connection_mode, foxess_sim, ha_e2e, soc=35, solar_kw=0, load_kw=0.5
         )
+        ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_battery_soc", "le", 36, timeout_s=90
+        )
         start, end = _tight_window(30)
         ha_e2e.call_service(
             "foxess_control",
@@ -1425,6 +1431,9 @@ class TestGalleryScreenshots:
         """Control card: active smart discharge with progress bars."""
         set_inverter_state(
             connection_mode, foxess_sim, ha_e2e, soc=80, solar_kw=0.5, load_kw=1.2
+        )
+        ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_battery_soc", "ge", 79, timeout_s=90
         )
         start, end = _tight_window(30)
         ha_e2e.call_service(
