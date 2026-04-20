@@ -47,6 +47,25 @@ def _tight_window(minutes: int = 30) -> tuple[str, str]:
     )
 
 
+def _wait_for_positive_attr(
+    ha: HAClient,
+    entity_id: str,
+    attr: str,
+    timeout_s: float = 30,
+) -> float:
+    """Poll until an entity attribute is numeric and > 0."""
+    deadline = time.monotonic() + timeout_s
+    last = None
+    while time.monotonic() < deadline:
+        last = ha.get_attributes(entity_id).get(attr)
+        if last is not None and float(last) > 0:
+            return float(last)
+        time.sleep(2)
+    raise TimeoutError(
+        f"{entity_id}.{attr} did not become > 0 within {timeout_s}s (last: {last})"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Smart discharge (both modes)
 # ---------------------------------------------------------------------------
@@ -1017,9 +1036,9 @@ class TestReloadRecovery:
             fatal_states=FATAL_FOR_ACTIVE,
         )
 
-        attrs_before = ha_e2e.get_attributes("sensor.foxess_smart_operations")
-        target_before = attrs_before.get("discharge_target_power_w", 0)
-        assert target_before > 0, "Should have a discharge target before reload"
+        _wait_for_positive_attr(
+            ha_e2e, "sensor.foxess_smart_operations", "discharge_target_power_w"
+        )
 
         ha_e2e.reload_integration()
 
@@ -1029,8 +1048,9 @@ class TestReloadRecovery:
             timeout_s=120,
             fatal_states=FATAL_FOR_ACTIVE,
         )
-        attrs_after = ha_e2e.get_attributes("sensor.foxess_smart_operations")
-        assert attrs_after.get("discharge_target_power_w", 0) > 0
+        _wait_for_positive_attr(
+            ha_e2e, "sensor.foxess_smart_operations", "discharge_target_power_w"
+        )
 
     def test_charge_resumes_after_reload(
         self,
