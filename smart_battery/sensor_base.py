@@ -311,7 +311,7 @@ def estimate_charge_remaining(
     soc = get_soc_value(hass, domain)
     capacity_kwh = get_battery_capacity_kwh(hass, domain)
     target_soc: int = cs.get("target_soc", 100)
-    max_power_w: int = cs.get("max_power_w", 0)
+    max_power_w: int = cs.get("effective_max_power_w", cs.get("max_power_w", 0))
     start: datetime.datetime | None = cs.get("start")
     if soc is not None and capacity_kwh > 0 and max_power_w > 0 and soc < target_soc:
         energy_kwh = (target_soc - soc) / 100.0 * capacity_kwh
@@ -636,6 +636,7 @@ class SmartOperationsOverviewSensor(RestoreSensor):
     _unrecorded_attributes = frozenset(
         {
             "charge_power_w",
+            "charge_effective_max_power_w",
             "charge_current_soc",
             "charge_confirmed_soc",
             "charge_remaining",
@@ -773,6 +774,9 @@ class SmartOperationsOverviewSensor(RestoreSensor):
                         or (cs.get("max_power_w", 0) if charging else 0)
                     ),
                     "charge_max_power_w": cs.get("max_power_w"),
+                    "charge_effective_max_power_w": cs.get(
+                        "effective_max_power_w", cs.get("max_power_w")
+                    ),
                     "charge_target_soc": cs.get("target_soc"),
                     "charge_current_soc": soc,
                     "charge_confirmed_soc": get_soc_value(self.hass, self._domain),

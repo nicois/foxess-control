@@ -171,6 +171,7 @@ def create_discharge_session(
         min_soc=min_soc,
         max_power_w=max_power_w,
         last_power_w=initial_power,
+        target_power_w=initial_power,
         soc_below_min_count=0,
         soc_unavailable_count=0,
         feedin_energy_limit_kwh=feedin_energy_limit,

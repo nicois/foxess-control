@@ -137,6 +137,53 @@ def _get_polling_interval_seconds(hass: HomeAssistant, domain: str) -> int:
     return DEFAULT_POLLING_INTERVAL
 
 
+COLD_TEMP_THRESHOLD_C = 16.0
+COLD_TEMP_CURRENT_LIMIT_A = 80.0
+
+
+def _get_bms_temperature(hass: HomeAssistant, domain: str) -> float | None:
+    """Return the BMS battery temperature in °C, or None if unavailable."""
+    return _get_coordinator_value(hass, domain, "bmsBatteryTemperature")
+
+
+def _get_battery_voltage(hass: HomeAssistant, domain: str) -> float | None:
+    """Return the current battery voltage, or None if unavailable."""
+    return _get_coordinator_value(hass, domain, "batVolt")
+
+
+def _apply_cold_temp_limit(
+    max_power_w: int,
+    hass: HomeAssistant,
+    domain: str,
+) -> int:
+    """Reduce max charge power when BMS battery temperature is low.
+
+    Below COLD_TEMP_THRESHOLD_C the BMS limits charge current to
+    COLD_TEMP_CURRENT_LIMIT_A.  Convert to watts using live battery
+    voltage and return min(max_power_w, cold_limit_w).
+    """
+    temp = _get_bms_temperature(hass, domain)
+    if temp is None or temp >= COLD_TEMP_THRESHOLD_C:
+        return max_power_w
+    voltage = _get_battery_voltage(hass, domain)
+    if voltage is None or voltage <= 0:
+        return max_power_w
+    cold_limit_w = int(COLD_TEMP_CURRENT_LIMIT_A * voltage)
+    if cold_limit_w < max_power_w:
+        _LOGGER.info(
+            "Cold BMS (%.1f°C < %.0f°C): limiting charge to %dW "
+            "(%.0fA × %.1fV) instead of %dW",
+            temp,
+            COLD_TEMP_THRESHOLD_C,
+            cold_limit_w,
+            COLD_TEMP_CURRENT_LIMIT_A,
+            voltage,
+            max_power_w,
+        )
+        return cold_limit_w
+    return max_power_w
+
+
 def _get_store(hass: HomeAssistant, domain: str) -> Store[dict[str, Any]] | None:
     """Return the session Store from domain data."""
     return get_domain_data(hass, domain).store
@@ -468,6 +515,8 @@ def setup_smart_charge_listeners(
         net_consumption = _get_net_consumption(hass, domain)
         headroom = _get_smart_headroom(hass, domain)
         taper = _get_taper_profile(hass, domain)
+        effective_max = _apply_cold_temp_limit(cur_state["max_power_w"], hass, domain)
+        cur_state["effective_max_power_w"] = effective_max
 
         if cur_state.get("charging_started"):
             _record_taper_observation(
@@ -487,7 +536,7 @@ def setup_smart_charge_listeners(
                 cur_soc,
                 cur_state["target_soc"],
                 cur_state["battery_capacity_kwh"],
-                cur_state["max_power_w"],
+                effective_max,
                 cur_state["end"],
                 net_consumption_kw=net_consumption,
                 start=cur_state["start"],
@@ -504,7 +553,7 @@ def setup_smart_charge_listeners(
                     cur_soc,
                     net_consumption,
                     cur_state["battery_capacity_kwh"],
-                    cur_state["max_power_w"],
+                    effective_max,
                     headroom * 100,
                 )
                 return
@@ -515,7 +564,7 @@ def setup_smart_charge_listeners(
                 cur_state["target_soc"],
                 cur_state["battery_capacity_kwh"],
                 remaining,
-                cur_state["max_power_w"],
+                effective_max,
                 net_consumption_kw=net_consumption,
                 headroom=headroom,
                 taper_profile=taper,
@@ -560,7 +609,7 @@ def setup_smart_charge_listeners(
             cur_state["target_soc"],
             cur_state["battery_capacity_kwh"],
             remaining,
-            cur_state["max_power_w"],
+            effective_max,
             net_consumption_kw=net_consumption,
             headroom=headroom,
             charging_started_energy_kwh=cur_state.get("charging_started_energy_kwh"),
@@ -572,7 +621,7 @@ def setup_smart_charge_listeners(
 
         if (
             abs(new_power - cur_state["last_power_w"]) < cur_state["min_power_change"]
-            and new_power != cur_state["max_power_w"]
+            and new_power != effective_max
         ):
             _LOGGER.debug(
                 "Smart charge: power change %dW -> %dW below threshold %dW, skipping",
@@ -822,6 +871,7 @@ def setup_smart_discharge_listeners(
                     return
                 cur_state = hass.data[domain]["_smart_discharge_state"]
                 cur_state["last_power_w"] = new_power
+                cur_state["target_power_w"] = new_power
                 cur_state["discharging_started"] = True
                 cur_state["discharging_started_at"] = now_dt
                 cur_state["start_soc"] = soc_value
