@@ -526,156 +526,218 @@ class TestControlCard:
         assert has_marker, "Horizon marker not found in control card"
         assert has_marker["left"], "Horizon marker has no position"
 
-    def test_form_input_survives_state_update(
+
+# ---------------------------------------------------------------------------
+# Form input persistence tests (C-020: operational transparency)
+# ---------------------------------------------------------------------------
+
+_JS_FIND_CONTROL_CARD = """
+function findCard(root) {
+    const card = root.querySelector('foxess-control-card');
+    if (card) return card;
+    for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) {
+            const f = findCard(el.shadowRoot);
+            if (f) return f;
+        }
+    }
+    return null;
+}
+"""
+
+
+class TestFormInputPersistence:
+    """Verify form inputs survive card re-renders (hass property updates)."""
+
+    def _open_form(self, page: Page, action: str) -> None:
+        """Click a button on the control card to open the form overlay."""
+        page.evaluate(
+            f"""() => {{
+                {_JS_FIND_CONTROL_CARD}
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return;
+                const btn = card.shadowRoot.querySelector(
+                    '[data-action="{action}"]'
+                );
+                if (btn) btn.click();
+            }}"""
+        )
+
+    def _get_form_values(self, page: Page) -> dict[str, str]:
+        """Read form-start, form-end, form-soc values from the control card."""
+        result: dict[str, str] = page.evaluate(
+            f"""() => {{
+                {_JS_FIND_CONTROL_CARD}
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return null;
+                const sr = card.shadowRoot;
+                const start = sr.getElementById('form-start');
+                const end = sr.getElementById('form-end');
+                const soc = sr.getElementById('form-soc');
+                return {{
+                    start: start ? start.value : null,
+                    end: end ? end.value : null,
+                    soc: soc ? soc.value : null,
+                }};
+            }}"""
+        )
+        return result
+
+    def _set_form_value(self, page: Page, input_id: str, value: str) -> None:
+        """Set the value of a form input inside the control card shadow DOM."""
+        page.evaluate(
+            f"""() => {{
+                {_JS_FIND_CONTROL_CARD}
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return;
+                const input = card.shadowRoot.getElementById('{input_id}');
+                if (input) {{
+                    const nativeSetter = Object.getOwnPropertyDescriptor(
+                        window.HTMLInputElement.prototype, 'value'
+                    ).set;
+                    nativeSetter.call(input, '{value}');
+                    input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                }}
+            }}"""
+        )
+
+    def _trigger_hass_update(self, page: Page) -> None:
+        """Simulate HA pushing a state update by re-setting the hass property."""
+        page.evaluate(
+            f"""() => {{
+                {_JS_FIND_CONTROL_CARD}
+                const card = findCard(document);
+                if (card && card._hass) {{
+                    card.hass = card._hass;
+                }}
+            }}"""
+        )
+
+    def _wait_for_form(self, page: Page) -> None:
+        page.wait_for_function(
+            f"""() => {{
+                {_JS_FIND_CONTROL_CARD}
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return false;
+                return !!card.shadowRoot.getElementById('form-start');
+            }}""",
+            timeout=10000,
+        )
+
+    def test_time_input_survives_rerender(
         self,
         page: Page,
         ha_e2e: HAClient,
         foxess_sim: SimulatorHandle | None,
         connection_mode: str,
     ) -> None:
-        """Time inputs retain user values across hass state updates.
+        """Time selector value persists after card re-render (C-020).
 
-        Regression test: the card's ``_render()`` method rebuilds innerHTML
-        on every ``set hass()`` call.  Without input preservation, a
-        coordinator poll or WebSocket update (every ~5 s) wipes partially
-        typed start/end times.
-
-        Related: C-020 (user must be able to operate the UI without surprise).
+        Regression: the time <input type="time"> resets to empty when
+        the card re-renders due to a hass property update (~5s with WS).
         """
-        _JS_FIND_CARD = """
-            function findCard(root) {
-                const card = root.querySelector('foxess-control-card');
-                if (card) return card;
-                for (const el of root.querySelectorAll('*')) {
-                    if (el.shadowRoot) {
-                        const f = findCard(el.shadowRoot);
-                        if (f) return f;
-                    }
-                }
-                return null;
-            }
+        assert _find_card(page, "foxess-control-card")
+
+        self._open_form(page, "charge")
+        self._wait_for_form(page)
+
+        self._set_form_value(page, "form-start", "02:30")
+        self._set_form_value(page, "form-end", "06:45")
+        self._set_form_value(page, "form-soc", "85")
+
+        vals_before = self._get_form_values(page)
+        assert vals_before["start"] == "02:30", (
+            f"Start time not set correctly: {vals_before}"
+        )
+        assert vals_before["end"] == "06:45", (
+            f"End time not set correctly: {vals_before}"
+        )
+
+        self._trigger_hass_update(page)
+        self._wait_for_form(page)
+
+        vals_after = self._get_form_values(page)
+        assert vals_after["start"] == "02:30", (
+            f"Time input RESET after re-render: start was '02:30', "
+            f"now '{vals_after['start']}'"
+        )
+        assert vals_after["end"] == "06:45", (
+            f"Time input RESET after re-render: end was '06:45', "
+            f"now '{vals_after['end']}'"
+        )
+        assert vals_after["soc"] == "85", (
+            f"SoC input RESET after re-render: soc was '85', now '{vals_after['soc']}'"
+        )
+
+    def test_time_input_survives_multiple_rerenders(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """Form values persist through multiple rapid state updates."""
+        assert _find_card(page, "foxess-control-card")
+
+        self._open_form(page, "discharge")
+        self._wait_for_form(page)
+
+        self._set_form_value(page, "form-start", "14:00")
+        self._set_form_value(page, "form-end", "18:30")
+        self._set_form_value(page, "form-soc", "20")
+
+        for _ in range(3):
+            self._trigger_hass_update(page)
+
+        self._wait_for_form(page)
+
+        vals = self._get_form_values(page)
+        assert vals["start"] == "14:00", (
+            f"Start time lost after 3 re-renders: '{vals['start']}'"
+        )
+        assert vals["end"] == "18:30", (
+            f"End time lost after 3 re-renders: '{vals['end']}'"
+        )
+        assert vals["soc"] == "20", f"SoC lost after 3 re-renders: '{vals['soc']}'"
+
+    def test_rerender_between_field_edits(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """A re-render between editing different fields preserves earlier values.
+
+        Scenario: user sets start time, hass update fires, user then sets
+        end time — the start time must still be present.
         """
+        assert _find_card(page, "foxess-control-card")
 
-        # 1. Wait for the card to render, then click the Discharge button
-        page.wait_for_function(
-            f"""() => {{
-                {_JS_FIND_CARD}
-                const card = findCard(document);
-                if (!card || !card.shadowRoot) return false;
-                const btn = card.shadowRoot.querySelector(
-                    '.action-btn[data-action="discharge"]'
-                );
-                return !!btn;
-            }}""",
-            timeout=15000,
-        )
-        page.evaluate(
-            f"""() => {{
-                {_JS_FIND_CARD}
-                const card = findCard(document);
-                card.shadowRoot.querySelector(
-                    '.action-btn[data-action="discharge"]'
-                ).click();
-            }}"""
-        )
+        self._open_form(page, "charge")
+        self._wait_for_form(page)
 
-        # 2. Wait for the form overlay to appear
-        page.wait_for_function(
-            f"""() => {{
-                {_JS_FIND_CARD}
-                const card = findCard(document);
-                if (!card || !card.shadowRoot) return false;
-                return !!card.shadowRoot.querySelector('.form-overlay');
-            }}""",
-            timeout=5000,
-        )
+        # Set only start time
+        self._set_form_value(page, "form-start", "03:15")
 
-        # 3. Fill start and end time inputs
-        page.evaluate(
-            f"""() => {{
-                {_JS_FIND_CARD}
-                const card = findCard(document);
-                const sr = card.shadowRoot;
-                const startInput = sr.querySelector('#form-start');
-                const endInput = sr.querySelector('#form-end');
-                // Use the native setter to set values (like a user typing)
-                const nativeSet = Object.getOwnPropertyDescriptor(
-                    HTMLInputElement.prototype, 'value'
-                ).set;
-                nativeSet.call(startInput, '14:30');
-                startInput.dispatchEvent(new Event('input', {{bubbles: true}}));
-                startInput.dispatchEvent(new Event('change', {{bubbles: true}}));
-                nativeSet.call(endInput, '16:45');
-                endInput.dispatchEvent(new Event('input', {{bubbles: true}}));
-                endInput.dispatchEvent(new Event('change', {{bubbles: true}}));
-            }}"""
-        )
+        # Re-render fires before user fills the next field
+        self._trigger_hass_update(page)
+        self._wait_for_form(page)
 
-        # Verify values were set
-        vals_before = page.evaluate(
-            f"""() => {{
-                {_JS_FIND_CARD}
-                const card = findCard(document);
-                const sr = card.shadowRoot;
-                return {{
-                    start: sr.querySelector('#form-start').value,
-                    end: sr.querySelector('#form-end').value,
-                }};
-            }}"""
-        )
-        assert vals_before["start"] == "14:30", (
-            f"Setup failed: start={vals_before['start']}"
-        )
-        assert vals_before["end"] == "16:45", f"Setup failed: end={vals_before['end']}"
+        # Now set end time
+        self._set_form_value(page, "form-end", "07:00")
 
-        # 4–5. Simulate what HA does on every state update: re-assign the
-        #    hass object to the card.  This triggers `set hass()` →
-        #    `_render()` → innerHTML replacement.  This is more reliable
-        #    than waiting for a real coordinator poll (which can take
-        #    minutes in cloud mode) and tests the exact code path that
-        #    causes the bug.
-        page.evaluate(
-            f"""() => {{
-                {_JS_FIND_CARD}
-                const card = findCard(document);
-                // Re-assign hass to trigger a re-render (same as HA does)
-                card.hass = card._hass;
-            }}"""
-        )
+        # Another re-render
+        self._trigger_hass_update(page)
+        self._wait_for_form(page)
 
-        # 6. Verify the form is still visible and inputs retained values
-        vals_after = page.evaluate(
-            f"""() => {{
-                {_JS_FIND_CARD}
-                const card = findCard(document);
-                if (!card || !card.shadowRoot) return null;
-                const overlay = card.shadowRoot.querySelector('.form-overlay');
-                const showForm = card._showForm;
-                if (!overlay) return {{
-                    formVisible: false,
-                    showForm: showForm,
-                }};
-                const startInput = card.shadowRoot.querySelector('#form-start');
-                const endInput = card.shadowRoot.querySelector('#form-end');
-                return {{
-                    formVisible: true,
-                    start: startInput ? startInput.value : null,
-                    end: endInput ? endInput.value : null,
-                    showForm: showForm,
-                }};
-            }}"""
+        vals = self._get_form_values(page)
+        assert vals["start"] == "03:15", (
+            f"Start time lost after interleaved re-render: '{vals['start']}'"
         )
-
-        assert vals_after is not None, "Card not found after re-render"
-        assert vals_after["formVisible"], (
-            f"Form overlay disappeared after state update"
-            f" (_showForm={vals_after.get('showForm')!r})"
-        )
-        assert vals_after["start"] == "14:30", (
-            f"Start time input was reset: expected '14:30', got '{vals_after['start']}'"
-        )
-        assert vals_after["end"] == "16:45", (
-            f"End time input was reset: expected '16:45', got '{vals_after['end']}'"
+        assert vals["end"] == "07:00", (
+            f"End time lost after interleaved re-render: '{vals['end']}'"
         )
 
 

@@ -445,6 +445,12 @@ class FoxESSControlCard extends HTMLElement {
     this._cancelConfirm = false;
     this._cancelTimer = null;
     this._formValues = { start: "", end: "", soc: "" };
+    this.shadowRoot.addEventListener("input", (e) => {
+      const input = e.target;
+      if (input.id === "form-start") this._formValues.start = input.value;
+      else if (input.id === "form-end") this._formValues.end = input.value;
+      else if (input.id === "form-soc") this._formValues.soc = input.value;
+    });
     this.shadowRoot.addEventListener("click", (e) => {
       const row = e.target.closest(".progress-row.has-tip");
       if (row) {
@@ -486,7 +492,7 @@ class FoxESSControlCard extends HTMLElement {
     }
     if (action === "charge" || action === "discharge") {
       this._showForm = action;
-      this._formValues = { start: "", end: "", soc: String(action === "charge" ? 100 : 10) };
+      this._formValues = { start: "", end: "", soc: "" };
       this._render();
     }
     if (action === "submit-form") {
@@ -501,10 +507,11 @@ class FoxESSControlCard extends HTMLElement {
 
   _submitForm() {
     if (!this._hass || !this._showForm) return;
-    this._saveFormValues();
-    const start = this._formValues.start;
-    const end = this._formValues.end;
-    const soc = this._formValues.soc;
+    const root = this.shadowRoot;
+    const fv = this._formValues;
+    const start = root.getElementById("form-start")?.value || fv.start;
+    const end = root.getElementById("form-end")?.value || fv.end;
+    const soc = root.getElementById("form-soc")?.value || fv.soc;
     if (!start || !end || !soc) return;
     const service =
       this._showForm === "charge" ? "smart_charge" : "smart_discharge";
@@ -516,18 +523,6 @@ class FoxESSControlCard extends HTMLElement {
     this._showForm = null;
     this._formValues = { start: "", end: "", soc: "" };
     this._render();
-  }
-
-  /** Save current form input values so they survive innerHTML replacement. */
-  _saveFormValues() {
-    if (!this._showForm) return;
-    const root = this.shadowRoot;
-    const start = root.getElementById("form-start");
-    const end = root.getElementById("form-end");
-    const soc = root.getElementById("form-soc");
-    if (start) this._formValues.start = start.value;
-    if (end) this._formValues.end = end.value;
-    if (soc) this._formValues.soc = soc.value;
   }
 
   // -- Lovelace lifecycle ----------------------------------------------------
@@ -684,9 +679,6 @@ class FoxESSControlCard extends HTMLElement {
   _render() {
     if (!this._hass) return;
 
-    // Preserve form input values before innerHTML replacement
-    this._saveFormValues();
-
     const ops = this._config.operations_entity;
     const a = this._attr(ops);
     const soc = a.charge_current_soc ?? a.discharge_current_soc ?? this._getSoc();
@@ -718,25 +710,36 @@ class FoxESSControlCard extends HTMLElement {
         </div>
       </ha-card>
     `;
+    if (this._showForm) {
+      const fv = this._formValues;
+      const sr = this.shadowRoot;
+      const startEl = sr.getElementById("form-start");
+      const endEl = sr.getElementById("form-end");
+      const socEl = sr.getElementById("form-soc");
+      if (startEl && fv.start) startEl.value = fv.start;
+      if (endEl && fv.end) endEl.value = fv.end;
+      if (socEl && fv.soc) socEl.value = fv.soc;
+    }
   }
 
   _renderForm() {
     const isCharge = this._showForm === "charge";
     const socLabel = isCharge ? this._t("target") : this._t("min_soc");
     const fv = this._formValues;
+    const socDefault = fv.soc || (isCharge ? 100 : 10);
     return `
       <div class="form-overlay">
         <div class="form-row">
           <label>Start</label>
-          <input type="time" id="form-start" value="${fv.start}">
+          <input type="time" id="form-start" value="${fv.start || ""}">
         </div>
         <div class="form-row">
           <label>End</label>
-          <input type="time" id="form-end" value="${fv.end}">
+          <input type="time" id="form-end" value="${fv.end || ""}">
         </div>
         <div class="form-row">
           <label>${socLabel} (%)</label>
-          <input type="number" id="form-soc" min="0" max="100" value="${fv.soc}">
+          <input type="number" id="form-soc" min="0" max="100" value="${socDefault}">
         </div>
         <div class="form-buttons">
           <button class="action-btn" data-action="submit-form">${isCharge ? this._t("btn_charge") : this._t("btn_discharge")}</button>
