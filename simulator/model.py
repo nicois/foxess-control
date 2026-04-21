@@ -139,6 +139,10 @@ class InverterModel:
     ws_unit: str = "W"  # "W" or "kW"
     ws_time_diff: int = 5  # normal
 
+    # Autonomous rate limiting (per-endpoint, seconds between requests)
+    # Default 0 = disabled, so existing tests are unaffected.
+    rate_limit_seconds: float = 0.0
+
     def get_active_mode(self) -> str:
         """Return the work mode active at the current simulated time."""
         if not self.schedule_enabled or not self.schedule_groups:
@@ -438,6 +442,7 @@ class InverterModel:
             "ws_time_diff": self.ws_time_diff,
             "feedin_total_kwh": round(self.feedin_total_kwh, 3),
             "grid_consumption_total_kwh": round(self.grid_consumption_total_kwh, 3),
+            "rate_limit_seconds": self.rate_limit_seconds,
         }
 
     def reset(self) -> None:

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Any
 
 from aiohttp import WSMsgType, web
@@ -56,6 +57,27 @@ def _api_response(result: Any, errno: int = 0, msg: str = "success") -> web.Resp
     return web.json_response({"errno": errno, "msg": msg, "result": result})
 
 
+def _check_rate_limit(request: web.Request) -> web.Response | None:
+    """Enforce autonomous per-endpoint rate limiting.
+
+    When ``rate_limit_seconds`` > 0 on the model, any request to the same
+    endpoint path within that window returns a FoxESS-style 41807 error.
+    """
+    model = _model(request)
+    if model.rate_limit_seconds <= 0:
+        return None
+
+    endpoint = request.path
+    now = time.monotonic()
+    last_times: dict[str, float] = request.app["rate_limit_times"]
+    last = last_times.get(endpoint, 0.0)
+    if now - last < model.rate_limit_seconds:
+        _LOGGER.debug("Rate-limited %s (%.1fs since last)", endpoint, now - last)
+        return _api_response(None, errno=41807, msg="Too many requests")
+    last_times[endpoint] = now
+    return None
+
+
 def _check_fault(request: web.Request) -> web.Response | None:
     model = _model(request)
     if model.active_fault is None:
@@ -88,18 +110,24 @@ def _check_fault(request: web.Request) -> web.Response | None:
 
 
 async def handle_device_list(request: web.Request) -> web.Response:
+    if rl := _check_rate_limit(request):
+        return rl
     if fault := _check_fault(request):
         return fault
     return _api_response({"data": [{"deviceSN": _model(request).device_sn}]})
 
 
 async def handle_device_detail(request: web.Request) -> web.Response:
+    if rl := _check_rate_limit(request):
+        return rl
     if fault := _check_fault(request):
         return fault
     return _api_response({"capacity": _model(request).max_power_w / 1050})
 
 
 async def handle_real_query(request: web.Request) -> web.Response:
+    if rl := _check_rate_limit(request):
+        return rl
     if fault := _check_fault(request):
         return fault
     body = await request.json()
@@ -118,12 +146,16 @@ async def handle_scheduler_get(request: web.Request) -> web.Response:
             if model.fault_remaining == 0:
                 model.active_fault = None
         return _api_response(None)
+    if rl := _check_rate_limit(request):
+        return rl
     if fault := _check_fault(request):
         return fault
     return _api_response(model.get_schedule_response())
 
 
 async def handle_scheduler_enable(request: web.Request) -> web.Response:
+    if rl := _check_rate_limit(request):
+        return rl
     if fault := _check_fault(request):
         return fault
     body = await request.json()
@@ -155,12 +187,16 @@ async def handle_scheduler_enable(request: web.Request) -> web.Response:
 
 
 async def handle_plant_list(request: web.Request) -> web.Response:
+    if rl := _check_rate_limit(request):
+        return rl
     if fault := _check_fault(request):
         return fault
     return _api_response({"data": [{"stationID": _model(request).plant_id}]})
 
 
 async def handle_battery_soc_get(request: web.Request) -> web.Response:
+    if rl := _check_rate_limit(request):
+        return rl
     if fault := _check_fault(request):
         return fault
     model = _model(request)
@@ -173,6 +209,8 @@ async def handle_battery_soc_get(request: web.Request) -> web.Response:
 
 
 async def handle_battery_soc_set(request: web.Request) -> web.Response:
+    if rl := _check_rate_limit(request):
+        return rl
     if fault := _check_fault(request):
         return fault
     body = await request.json()
@@ -373,6 +411,7 @@ async def handle_sim_ws_stale(request: web.Request) -> web.Response:
 
 async def handle_sim_reset(request: web.Request) -> web.Response:
     _model(request).reset()
+    request.app["rate_limit_times"].clear()
     return web.json_response({"ok": True})
 
 
@@ -385,6 +424,7 @@ def create_app() -> web.Application:
     app = web.Application()
     app["model"] = InverterModel()
     app["ws_clients"] = []
+    app["rate_limit_times"] = {}  # endpoint -> last request monotonic time
 
     # REST API
     app.router.add_post("/op/v0/device/list", handle_device_list)
