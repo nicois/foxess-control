@@ -435,7 +435,21 @@ def page(
     p.goto(f"http://localhost:{ha_port}/lovelace/0", timeout=60000)
     p.wait_for_url("**/lovelace/**", timeout=60000)
     p.wait_for_load_state("networkidle", timeout=30000)
-    p.wait_for_timeout(2000)
+    # Wait for the HA Lovelace panel to render inside the shadow DOM,
+    # rather than a hardcoded sleep.  Under CI load, entity-mode HA
+    # containers take longer to initialise entities and render custom
+    # cards, so a fixed 2s sleep is insufficient.
+    p.wait_for_function(
+        """() => {
+            const main = document.querySelector('home-assistant');
+            if (!main || !main.shadowRoot) return false;
+            const ham = main.shadowRoot.querySelector('home-assistant-main');
+            if (!ham || !ham.shadowRoot) return false;
+            const panel = ham.shadowRoot.querySelector('ha-panel-lovelace');
+            return !!panel;
+        }""",
+        timeout=30000,
+    )
     _log.warning("[%s] page ready: %.1fs", _worker_id(), time.monotonic() - t0)
     yield p
     p.close()

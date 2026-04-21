@@ -83,26 +83,58 @@ def _find_card(page: Page, tag: str, timeout: int = 30000) -> bool:
     (home-assistant >>> home-assistant-main >>> ha-panel-lovelace >>>
     hui-root >>> hui-view >>> hui-card >>> {card}).
     Playwright's `>>>` pierce selector handles this.
+
+    Under CI load, HA can trigger a page navigation (WebSocket reconnect,
+    dashboard auto-refresh) that destroys the JS execution context while
+    ``wait_for_function`` is polling.  When this happens the call raises
+    ``PlaywrightError("Execution context was destroyed")`` immediately —
+    well before the card has had time to render.  To handle this, we
+    retry after waiting for the new page to settle (``networkidle``),
+    spending any remaining timeout budget on the next attempt.
     """
-    try:
-        page.wait_for_function(
-            f"""() => {{
-                // Deep search through all shadow roots
-                function findInShadows(root, tag) {{
-                    if (root.querySelector(tag)) return true;
-                    for (const el of root.querySelectorAll('*')) {{
-                        if (el.shadowRoot && findInShadows(el.shadowRoot, tag))
-                            return true;
-                    }}
-                    return false;
-                }}
-                return findInShadows(document, '{tag}');
-            }}""",
-            timeout=timeout,
-        )
-        return True
-    except (TimeoutError, PlaywrightError):
-        return False
+    import time as _time
+
+    _JS_FIND = f"""() => {{
+        function findInShadows(root, tag) {{
+            if (root.querySelector(tag)) return true;
+            for (const el of root.querySelectorAll('*')) {{
+                if (el.shadowRoot && findInShadows(el.shadowRoot, tag))
+                    return true;
+            }}
+            return false;
+        }}
+        return findInShadows(document, '{tag}');
+    }}"""
+
+    deadline = _time.monotonic() + timeout / 1000
+    remaining_ms = timeout
+
+    while True:
+        try:
+            page.wait_for_function(_JS_FIND, timeout=remaining_ms)
+            return True
+        except PlaywrightError as exc:
+            if "Execution context was destroyed" not in str(
+                exc
+            ) and "navigating" not in str(exc):
+                # Genuine timeout or unrelated error — give up.
+                return False
+            # Navigation destroyed the context.  Wait for the new page
+            # to settle and retry with remaining budget.
+            remaining_ms = int((deadline - _time.monotonic()) * 1000)
+            if remaining_ms <= 0:
+                return False
+            with contextlib.suppress(PlaywrightError):
+                page.wait_for_load_state(
+                    "networkidle",
+                    timeout=min(remaining_ms, 15000),
+                )
+            remaining_ms = int((deadline - _time.monotonic()) * 1000)
+            if remaining_ms <= 0:
+                return False
+            # Loop back to retry wait_for_function.
+        except TimeoutError:
+            return False
 
 
 def _parse_power_kw(text: str) -> float:
