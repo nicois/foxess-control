@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.8-beta.6
+
+### Improved
+- **Flaky test detection**: 20 runs with random half-selection per run — each test averages ~10 runs alongside varying combinations, improving cross-test interaction coverage. Removed unit-test job (deterministic tests don't need flake detection).
+
 ## 1.0.8-beta.5
 
 ### Added
