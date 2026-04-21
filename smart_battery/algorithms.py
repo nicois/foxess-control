@@ -524,6 +524,17 @@ def calculate_discharge_deferred_start(
         else:
             discharge_hours = energy_to_discharge_kwh / effective_kw
 
+        # When a feed-in energy limit constrains the session, the
+        # session stops at the export target — not at min_soc.  Cap
+        # discharge time so the SoC deadline reflects actual usage.
+        if (
+            feedin_energy_limit_kwh is not None
+            and feedin_energy_limit_kwh > 0
+            and effective_kw > 0
+        ):
+            feedin_hours = feedin_energy_limit_kwh / effective_kw
+            discharge_hours = min(discharge_hours, feedin_hours)
+
         if discharge_hours > 0:
             buffered_hours = discharge_hours / (1 - headroom)
             soc_deadline = end - datetime.timedelta(hours=buffered_hours)

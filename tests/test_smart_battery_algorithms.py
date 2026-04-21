@@ -690,3 +690,32 @@ class TestCalculateDischargeDeferredStart:
             start=self._start(),
         )
         assert no_peak == with_peak
+
+    def test_small_feedin_defers_later_than_full_soc(self) -> None:
+        """Small feedin target with large SoC headroom should defer much later.
+
+        Scenario: 1 kWh export target, SoC 60%→10% = 5 kWh available,
+        5 kW max power.  Without the cap the SoC deadline dominates
+        and forced discharge starts far too early.
+        """
+        end = self._end()
+        start = self._start()
+        # Without feedin limit — needs time to drain 5 kWh
+        soc_only = calculate_discharge_deferred_start(
+            60.0, 10, 10.0, 5000, end, start=start
+        )
+        # With 1 kWh feedin limit — only needs ~12 min of forced discharge
+        with_feedin = calculate_discharge_deferred_start(
+            60.0,
+            10,
+            10.0,
+            5000,
+            end,
+            start=start,
+            feedin_energy_limit_kwh=1.0,
+        )
+        # The feedin-limited session should defer significantly later
+        assert with_feedin > soc_only
+        # Should be close to end (1 kWh at 5 kW = 0.2h, buffered ~0.22h)
+        delta = (end - with_feedin).total_seconds() / 60
+        assert delta < 20  # well under 20 minutes, not the ~67 min for full SoC
