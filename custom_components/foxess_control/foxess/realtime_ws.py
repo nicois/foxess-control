@@ -217,6 +217,7 @@ class FoxESSRealtimeWS:
         self._connected = False
         self._stop_event = asyncio.Event()
         self._last_useful_data: float = asyncio.get_event_loop().time()
+        self._last_accepted: dict[str, Any] | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -251,6 +252,7 @@ class FoxESSRealtimeWS:
             timeout=aiohttp.ClientWSTimeout(ws_close=30.0),
         )
         await self._ws.send_str("getdata")
+        self._last_accepted = None
         self._connected = True
         self._last_useful_data = asyncio.get_event_loop().time()
         _LOGGER.info("FoxESS WebSocket connected (plant=%s)", self._plant_id)
@@ -333,6 +335,9 @@ class FoxESSRealtimeWS:
 
             mapped = map_ws_to_coordinator(data)
             if mapped:
+                if not _is_plausible(mapped, self._last_accepted):
+                    continue
+                self._last_accepted = mapped
                 self._last_useful_data = asyncio.get_event_loop().time()
                 try:
                     await self._on_data(mapped)

@@ -452,3 +452,139 @@ class TestIsPlausible:
         ref = {**self.NORMAL, "loadsPower": 5.0}
         candidate = {**ref, "loadsPower": 0.4}
         assert _is_plausible(candidate, ref) is False
+
+
+class TestWsPlausibilityFilter:
+    """FoxESSRealtimeWS drops aberrant messages before calling on_data."""
+
+    @staticmethod
+    def _make_ws_msg(
+        discharge: float = 5500.0,
+        feedin: float = 5000.0,
+        load: float = 480.0,
+        soc: int = 83,
+        grid_status: int = 1,
+    ) -> aiohttp.WSMessage:
+        import json
+
+        return aiohttp.WSMessage(
+            type=aiohttp.WSMsgType.TEXT,
+            data=json.dumps(
+                {
+                    "errno": 0,
+                    "result": {
+                        "node": {
+                            "solar": {"power": {"value": "0"}},
+                            "grid": {
+                                "power": {"value": str(feedin + load)},
+                                "gridStatus": grid_status,
+                            },
+                            "bat": {
+                                "power": {"value": str(discharge)},
+                                "soc": soc,
+                                "charge": 0,
+                            },
+                            "load": {"power": {"value": str(load)}},
+                        },
+                        "timeDiff": 5,
+                    },
+                }
+            ),
+            extra=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_aberrant_message_not_forwarded(self) -> None:
+        """Aberrant WS message (10x lower power) must not reach on_data."""
+        on_data = AsyncMock()
+        on_disconnect = MagicMock()
+        web_session = AsyncMock()
+        web_session.async_ensure_token = AsyncMock(return_value="tok")
+
+        ws = FoxESSRealtimeWS("plant1", web_session, on_data, on_disconnect)
+
+        messages = [
+            self._make_ws_msg(discharge=5500, feedin=5000),  # normal — accepted
+            self._make_ws_msg(discharge=530, feedin=70),  # aberrant — dropped
+            self._make_ws_msg(discharge=5490, feedin=5010),  # normal — accepted
+            aiohttp.WSMessage(type=aiohttp.WSMsgType.CLOSED, data=None, extra=None),
+        ]
+
+        mock_ws = AsyncMock()
+        mock_ws.receive = AsyncMock(side_effect=messages)
+        mock_ws.closed = True
+
+        ws._ws = mock_ws
+        ws._connected = True
+        ws._stop_event.clear()
+
+        with patch.object(
+            ws, "_try_reconnect", new_callable=AsyncMock
+        ) as mock_reconnect:
+
+            async def _fail_reconnect() -> None:
+                ws._connected = False
+
+            mock_reconnect.side_effect = _fail_reconnect
+            await ws._listen_loop()
+
+        assert on_data.call_count == 2, (
+            f"Expected 2 calls (aberrant dropped), got {on_data.call_count}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_first_message_always_accepted(self) -> None:
+        """First message after connect has no reference — must be accepted."""
+        on_data = AsyncMock()
+        on_disconnect = MagicMock()
+        web_session = AsyncMock()
+        web_session.async_ensure_token = AsyncMock(return_value="tok")
+
+        ws = FoxESSRealtimeWS("plant1", web_session, on_data, on_disconnect)
+
+        messages = [
+            self._make_ws_msg(
+                discharge=530, feedin=70
+            ),  # would be aberrant, but first msg
+            aiohttp.WSMessage(type=aiohttp.WSMsgType.CLOSED, data=None, extra=None),
+        ]
+
+        mock_ws = AsyncMock()
+        mock_ws.receive = AsyncMock(side_effect=messages)
+        mock_ws.closed = True
+
+        ws._ws = mock_ws
+        ws._connected = True
+        ws._stop_event.clear()
+
+        with patch.object(
+            ws, "_try_reconnect", new_callable=AsyncMock
+        ) as mock_reconnect:
+
+            async def _fail_reconnect() -> None:
+                ws._connected = False
+
+            mock_reconnect.side_effect = _fail_reconnect
+            await ws._listen_loop()
+
+        assert on_data.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_reconnect_resets_reference(self) -> None:
+        """After reconnect, _last_accepted is reset so first message is accepted."""
+        on_data = AsyncMock()
+        on_disconnect = MagicMock()
+        web_session = AsyncMock()
+        web_session.async_ensure_token = AsyncMock(return_value="tok")
+
+        ws = FoxESSRealtimeWS("plant1", web_session, on_data, on_disconnect)
+        # Simulate a prior accepted message
+        ws._last_accepted = {
+            "batDischargePower": 5.5,
+            "feedinPower": 5.02,
+            "loadsPower": 0.48,
+        }
+
+        # After reconnect, _last_accepted should be None
+        ws2 = FoxESSRealtimeWS("plant1", web_session, on_data, on_disconnect)
+        assert ws2._last_accepted is None
