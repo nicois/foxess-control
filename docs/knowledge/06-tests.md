@@ -6,7 +6,7 @@ traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-719 unit + 140 E2E = 859 total.
+727 unit + 140 E2E = 867 total.
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
@@ -66,6 +66,8 @@ simulator and Playwright browser automation.
 | `TestMapWsToCoordinator::test_grid_exporting_from_balance` | Export direction from balance | C-006 |
 | `TestMapWsToCoordinator::test_grid_fallback_to_gridstatus` | Fallback when data missing | C-006 |
 | `TestStaleness::test_stale_messages_skipped` | timeDiff > 30 filtered | C-005 |
+| `TestIsPlausible::*` (11 tests) | >10x divergence filter | C-004 |
+| `TestWsPlausibilityFilter::*` (3 tests) | Plausibility in WS listen loop | C-004 |
 
 ## Coordinator & Data Injection
 

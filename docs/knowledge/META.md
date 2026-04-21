@@ -345,3 +345,36 @@ last_reflection: 2026-04-21T23:59:00+10:00
     injection, efficiency). These serve C-033 (simulator fidelity) but
     are infrastructure improvements rather than design decisions with
     alternatives considered.
+
+### 2026-04-21 — Update pass (architectural lint + WS plausibility refactor)
+- **Changes detected**: 6 commits since last update (637be15..fa8ffc4).
+  Source files: `coordinator.py`, `realtime_ws.py`, `.semgrep/`,
+  `.githooks/check-module-size`, `.pre-commit-config.yaml`, `CLAUDE.md`,
+  `domain_data.py`, `sensor.py`.
+- **C-034, C-035, C-036 added**: Architectural constraints enforced by
+  automated tooling (semgrep + pre-commit hooks). Module size budget
+  (2000 lines), typed config access (`IntegrationConfig`), typed domain
+  data access (`_dd(hass)`). All three are ACCEPTED in coverage matrix
+  (process/infrastructure constraints without D-NNN).
+- **D-041 added**: WS anomaly plausibility filter. Originally at
+  coordinator level (03d0c5f), refactored to `realtime_ws.py` (fa8ffc4)
+  to keep data-source-specific logic in the WS module. Traces to C-004,
+  C-005. 14 tests (11 unit `TestIsPlausible` + 3 integration
+  `TestWsPlausibilityFilter`).
+- **Semgrep integration**: 4 rules added to `.semgrep/foxess-architecture.yaml`
+  (brand imports, raw hass.data, raw entry.options, service handlers in
+  init). Existing violations fixed in `sensor.py` and `coordinator.py`.
+  `bms_polling_interval` added to `IntegrationConfig`.
+- **Test counts updated**: 727 unit + 140 E2E = 867 total (was 719 +
+  140 = 859). Net +8 unit: 193 coordinator WS divergence tests removed
+  (moved to WS layer), 197 realtime_ws plausibility tests added, plus
+  4 from semgrep-related test changes.
+- **Coverage matrix updated**: C-034–C-036 added as ACCEPTED. D-041
+  added to C-004 and C-005 rows. Total constraints 36 (35 active + 1
+  proposed). Total design decisions 35.
+- **Stale areas resolved from prior reflection**:
+  - WS anomaly dropping now documented as D-041 (was flagged as missing
+    D-NNN for "WS message anomaly dropping").
+  - Architecture constraints now formal C-NNN entries (was flagged as
+    "consider whether they warrant documentation under a principle like
+    C-021").

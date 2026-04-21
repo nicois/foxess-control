@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: WebSocket Real-Time Data
-last_verified: 2026-04-18
+last_verified: 2026-04-21
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -126,6 +126,34 @@ sources are configured is itself a source of confusion.
 `tests/test_coordinator.py::TestDataSourceTracking`,
 `tests/test_sensor.py::TestFoxESSPolledSensor::test_data_source_exposed_as_attribute`,
 `tests/test_sensor.py::TestFoxESSPolledSensor::test_data_source_absent_when_not_set`
+
+### D-041: WS anomaly plausibility filter
+**Decision**: Before injecting a WebSocket message into the coordinator,
+check all power keys against the last accepted message. If any value
+diverges by more than 10× from the last accepted value, drop the entire
+message. Edge cases: first message (no reference) is always accepted;
+near-zero reference (≤ 0.1 kW) is accepted (ramp-up from idle);
+candidate value of 0 is accepted (genuine stop).
+**Context**: The FoxESS WebSocket occasionally sends anomalous messages
+where a single power value spikes to an impossible level (e.g. 50 kW
+discharge from a 10 kW inverter). These corrupt the overview card,
+taper profiles, and feed-in energy integration for the duration of the
+bad value.
+**Rationale**: The 10× threshold is large enough to accommodate genuine
+rapid changes (e.g. cloud burst, EV charger starting) while catching
+physically impossible values. Filtering at the WS layer (in
+`realtime_ws.py`) rather than the coordinator keeps the coordinator
+agnostic to data source quirks. The filter maintains its own
+`_last_accepted` state that resets on reconnection.
+**Alternatives considered**:
+- Coordinator-level filter (original implementation): moved to WS layer
+  because it mixed data-source-specific logic into the brand-agnostic
+  coordinator
+- Per-key clamping to inverter max: rejected because max power varies
+  by installation and is not always known
+**Traces**: C-004, C-005;
+`tests/test_realtime_ws.py::TestIsPlausible` (11 tests),
+`tests/test_realtime_ws.py::TestWsPlausibilityFilter` (3 tests)
 
 ### D-030: Data staleness indicator on Lovelace cards
 **Decision**: Both Lovelace cards (overview and control) compute data
