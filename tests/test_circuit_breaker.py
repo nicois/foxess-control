@@ -178,7 +178,7 @@ class TestCircuitBreakerCharge:
             ):
                 await captured_cb(datetime.datetime(2026, 4, 7, 3, i, 0))
 
-        state = hass.data[DOMAIN].get("_smart_charge_state")
+        state = hass.data[DOMAIN].smart_charge_state
         assert state is not None, "Session must still be alive (circuit breaker open)"
         assert state["circuit_open"] is True
         assert state["circuit_open_ticks"] == 0
@@ -249,7 +249,7 @@ class TestCircuitBreakerCharge:
         assert inv.set_schedule.call_count == call_count_before, (
             "Adapter must not be called while circuit breaker is open"
         )
-        state = hass.data[DOMAIN].get("_smart_charge_state")
+        state = hass.data[DOMAIN].smart_charge_state
         assert state is not None, "Session must survive during hold window"
 
     @pytest.mark.asyncio
@@ -313,7 +313,7 @@ class TestCircuitBreakerCharge:
             ):
                 await captured_cb(datetime.datetime(2026, 4, 7, 3, 10 + tick, 0))
 
-        assert hass.data[DOMAIN].get("_smart_charge_state") is None, (
+        assert hass.data[DOMAIN].smart_charge_state is None, (
             "Session must abort after circuit breaker ticks exhausted"
         )
 
@@ -370,7 +370,7 @@ class TestCircuitBreakerCharge:
             ):
                 await captured_cb(datetime.datetime(2026, 4, 7, 3, i, 0))
 
-        state = hass.data[DOMAIN]["_smart_charge_state"]
+        state = hass.data[DOMAIN].smart_charge_state
         assert state["circuit_open"] is True
 
         # Tick a couple times while open
@@ -443,7 +443,7 @@ class TestCircuitBreakerDischarge:
             )
 
         assert captured_cb is not None
-        assert hass.data[DOMAIN]["_smart_discharge_state"]["discharging_started"]
+        assert hass.data[DOMAIN].smart_discharge_state["discharging_started"]
 
         # Inject error into _check_discharge_soc_inner so every tick fails.
         # set_schedule alone may not be called if power delta is below threshold.
@@ -465,7 +465,7 @@ class TestCircuitBreakerDischarge:
             ):
                 await captured_cb(datetime.datetime(2026, 4, 7, 18, i, 0))
 
-        state = hass.data[DOMAIN].get("_smart_discharge_state")
+        state = hass.data[DOMAIN].smart_discharge_state
         assert state is not None, "Session must survive (breaker open)"
         assert state["circuit_open"] is True
 
@@ -477,7 +477,7 @@ class TestCircuitBreakerDischarge:
             ):
                 await captured_cb(datetime.datetime(2026, 4, 7, 18, 10 + tick, 0))
 
-        assert hass.data[DOMAIN].get("_smart_discharge_state") is None, (
+        assert hass.data[DOMAIN].smart_discharge_state is None, (
             "Discharge session must abort after breaker ticks exhausted"
         )
 
@@ -525,7 +525,7 @@ class TestCircuitBreakerDischarge:
             )
 
         assert captured_cb is not None
-        assert hass.data[DOMAIN]["_smart_discharge_state"]["discharging_started"]
+        assert hass.data[DOMAIN].smart_discharge_state["discharging_started"]
 
         inv.set_schedule.side_effect = FoxESSApiError(41935, "Device offline")
 
