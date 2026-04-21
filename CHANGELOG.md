@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.8-beta.4
+
+### Improved
+- **Typed domain data migration**: replaced untyped `hass.data[DOMAIN]` dict with `FoxESSControlData` dataclass and frozen `IntegrationConfig`, eliminating runtime key errors and enabling IDE support across all accessors.
+- **Service handler extraction**: moved all service handlers from `__init__.py` into `_services.py`, reducing `__init__.py` scope and improving maintainability.
+- **Circuit breaker extraction**: shared `_with_circuit_breaker` function replaces duplicated charge/discharge circuit breaker logic.
+- **Discharge listener decomposition**: 395-line `_check_discharge_soc_inner` split into 7 focused closures (deferred start, feed-in limit, SoC unavailable, suspend/resume, power pacing, SoC threshold) with a slim orchestrator.
+- **Helper deduplication**: extracted shared helpers, deduplicated types, cleaned up dead code across the codebase.
+
+### Simulator
+- **Battery efficiency factor**: configurable round-trip efficiency (charge stores less, discharge draws more from internal capacity).
+- **MD5 signature validation**: optional FoxESS Open API signature checking for testing auth flows.
+- **Per-endpoint rate limiting**: configurable autonomous rate limiting with FoxESS-style 41807 error responses.
+- **null_schedule fault injection**: simulates real API returning `{"result": null}` when no scheduler is configured.
+- **fdSoc enforcement**: simulator validates fdSoc >= 11 and minSocOnGrid <= fdSoc, matching real API constraints.
+
+### Fixed
+- **E2E race: overview card click test**: `test_node_click_opens_more_info` and `test_sub_link_click_opens_more_info` used immediate `page.evaluate()` instead of `wait_for_function()`, causing "Overview card not found" flakes under parallel CI load.
+
 ## 1.0.8-beta.3
 
 ### Added
