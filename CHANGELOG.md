@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.8-beta.10
+
+### Fixed
+- **Discharge deferred start too early with feedin target**: when a feed-in energy limit was set (e.g. 1 kWh), the deferred start calculation used the full SoC→min_soc energy to compute the SoC deadline, causing forced discharge to start far too early. Now caps the SoC deadline at the feedin export time so the session defers correctly (e.g. ~13 min before window end instead of ~67 min).
+
 ## 1.0.8-beta.9
 
 ### Fixed
