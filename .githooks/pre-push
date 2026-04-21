@@ -21,6 +21,14 @@ while read -r local_ref local_oid remote_ref remote_oid; do
   tag="${local_ref#refs/tags/}"
   commit=$(git rev-list -n1 "$tag" 2>/dev/null || echo "$local_oid")
 
+  # Tag must point to a commit on main
+  if ! git merge-base --is-ancestor "$commit" main 2>/dev/null; then
+    echo "❌ Tag $tag points to a commit not on main ($commit)"
+    echo "   Merge to main first, then tag the main branch."
+    exit 1
+  fi
+  echo "✅ Tag $tag is on main"
+
   # Run E2E tests before allowing a tag push
   if command -v podman &>/dev/null; then
     # Clean up orphaned E2E containers from prior failed runs
