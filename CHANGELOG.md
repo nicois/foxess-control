@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.8-beta.5
+
+### Added
+- **Temperature-aware taper profiles**: the adaptive BMS taper model now learns temperature-dependent charge/discharge curtailment independently of SoC effects. Uses a multiplicative decomposition (`effective_ratio = soc_ratio × temp_factor`) with integer-°C-indexed bins, EMA-smoothed. A 10-minute stability gate filters transient power reductions. Gracefully degrades to SoC-only profiling when BMS cell temperature is unavailable.
+- **Simulator cold-temperature taper**: the inverter simulator now models BMS cold-temperature charge curtailment (linear 1.0→0.5 from 15°C→0°C), enabling temperature-aware taper learning in tests.
+
+### Removed
+- **Cold-temperature charge clamp** (`_apply_cold_temp_limit`): the binary 16°C step function that pre-capped requested power has been removed. The BMS enforces its own limits; pre-capping prevented the taper model from observing real curtailment and made learned data one-directional.
+
 ## 1.0.8-beta.4
 
 ### Improved
