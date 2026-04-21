@@ -10,6 +10,7 @@ import pytest
 
 from custom_components.foxess_control.foxess.realtime_ws import (
     FoxESSRealtimeWS,
+    _is_plausible,
     map_ws_to_coordinator,
 )
 from custom_components.foxess_control.foxess.web_session import (
@@ -391,3 +392,63 @@ class TestStaleness:
 
         # Only the 2 fresh messages (timeDiff=5) should be forwarded
         assert on_data.call_count == 2
+
+
+class TestIsPlausible:
+    """Plausibility filter: reject WS messages where any power key diverges >10x."""
+
+    NORMAL = {
+        "SoC": 83.0,
+        "batChargePower": 0.0,
+        "batDischargePower": 5.5,
+        "pvPower": 0.0,
+        "loadsPower": 0.48,
+        "gridConsumptionPower": 0.0,
+        "feedinPower": 5.02,
+    }
+
+    def test_similar_values_accepted(self) -> None:
+        candidate = {**self.NORMAL, "batDischargePower": 5.49, "feedinPower": 5.01}
+        assert _is_plausible(candidate, self.NORMAL) is True
+
+    def test_aberrant_battery_rejected(self) -> None:
+        candidate = {**self.NORMAL, "batDischargePower": 0.53, "feedinPower": 0.07}
+        assert _is_plausible(candidate, self.NORMAL) is False
+
+    def test_aberrant_feedin_only_rejected(self) -> None:
+        candidate = {**self.NORMAL, "feedinPower": 0.05}
+        assert _is_plausible(candidate, self.NORMAL) is False
+
+    def test_near_zero_reference_accepts_any(self) -> None:
+        ref = {**self.NORMAL, "batDischargePower": 0.05}
+        candidate = {**self.NORMAL, "batDischargePower": 5.5}
+        assert _is_plausible(candidate, ref) is True
+
+    def test_zero_candidate_always_accepted(self) -> None:
+        candidate = {**self.NORMAL, "batDischargePower": 0.0, "feedinPower": 0.0}
+        assert _is_plausible(candidate, self.NORMAL) is True
+
+    def test_no_reference_always_accepted(self) -> None:
+        assert _is_plausible(self.NORMAL, None) is True
+
+    def test_empty_reference_always_accepted(self) -> None:
+        assert _is_plausible(self.NORMAL, {"SoC": 80.0}) is True
+
+    def test_missing_candidate_key_accepted(self) -> None:
+        candidate = {"SoC": 83.0, "batDischargePower": 5.5, "loadsPower": 0.48}
+        assert _is_plausible(candidate, self.NORMAL) is True
+
+    def test_charge_anomaly_rejected(self) -> None:
+        ref = {**self.NORMAL, "batChargePower": 3.8, "batDischargePower": 0.0}
+        candidate = {**ref, "batChargePower": 0.35}
+        assert _is_plausible(candidate, ref) is False
+
+    def test_solar_anomaly_rejected(self) -> None:
+        ref = {**self.NORMAL, "pvPower": 4.0}
+        candidate = {**ref, "pvPower": 0.3}
+        assert _is_plausible(candidate, ref) is False
+
+    def test_load_anomaly_rejected(self) -> None:
+        ref = {**self.NORMAL, "loadsPower": 5.0}
+        candidate = {**ref, "loadsPower": 0.4}
+        assert _is_plausible(candidate, ref) is False

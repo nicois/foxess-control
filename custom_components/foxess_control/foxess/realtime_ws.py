@@ -58,6 +58,47 @@ def _to_kw(parsed: tuple[float, str] | None) -> float | None:
     return value / 1000.0
 
 
+_POWER_KEYS = (
+    "batChargePower",
+    "batDischargePower",
+    "pvPower",
+    "loadsPower",
+    "gridConsumptionPower",
+    "feedinPower",
+)
+
+
+def _is_plausible(candidate: dict[str, Any], reference: dict[str, Any] | None) -> bool:
+    """Return False if any power key in *candidate* diverges >10x from *reference*.
+
+    Edge cases preserved from the original coordinator-level filter:
+    - *reference* is ``None`` or missing the key → accept (first message).
+    - Reference value <= 0.1 kW → accept (ramp-up from near-zero).
+    - Candidate value == 0 → accept (genuine stop).
+    """
+    if reference is None:
+        return True
+    for key in _POWER_KEYS:
+        cand_val = candidate.get(key)
+        ref_val = reference.get(key)
+        if (
+            cand_val is not None
+            and ref_val is not None
+            and ref_val > 0.1
+            and cand_val > 0
+            and (cand_val / ref_val > 10 or ref_val / cand_val > 10)
+        ):
+            _LOGGER.warning(
+                "WS %s diverges >10x: candidate=%.4f, "
+                "last_accepted=%.4f — dropping anomalous message",
+                key,
+                cand_val,
+                ref_val,
+            )
+            return False
+    return True
+
+
 def map_ws_to_coordinator(ws_msg: dict[str, Any]) -> dict[str, Any]:
     """Map a WebSocket message to coordinator variable names.
 
