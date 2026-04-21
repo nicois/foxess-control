@@ -1101,3 +1101,196 @@ class TestBmsCompoundIdRediscovery:
             "Re-discovery should be throttled — second attempt within "
             "backoff window should not call async_discover_battery_id again"
         )
+
+
+class TestWsDivergenceFiltering:
+    """WebSocket messages with >10x power divergence must be dropped.
+
+    Production symptom: sensor.foxess_discharge_rate intermittently jumps
+    from ~5.5kW to ~0.5kW every 5-10 seconds then recovers.  The FoxESS
+    WebSocket occasionally sends messages with gridStatus=3 and drastically
+    lower power values.  The coordinator already detects the divergence and
+    logs a warning, but still applies the anomalous value to sensor state.
+
+    The fix must DROP (not apply) WS messages that trigger the divergence
+    warning, preventing the sensor from jumping around.
+
+    Related constraints: C-004 (WS watts/kW), C-005 (stale filtering),
+    C-020 (UI must reflect reality).
+    """
+
+    @staticmethod
+    def _make_coord_with_discharge_data() -> FoxESSDataCoordinator:
+        """Create a coordinator simulating an active discharge at ~5.5kW."""
+        coord = _make_coordinator()
+        coord.data = {
+            "SoC": 80.0,
+            "batChargePower": 0.0,
+            "batDischargePower": 5.52,
+            "feedinPower": 5.01,
+            "loadsPower": 0.51,
+            "pvPower": 0.0,
+            "feedin": 100.0,
+            "_data_source": "ws",
+            "_data_last_update": "2026-04-21T08:38:29+00:00",
+        }
+        return coord
+
+    def test_anomalous_ws_message_is_dropped(self) -> None:
+        """A WS message with >10x lower batDischargePower must not be applied.
+
+        Reproduces the production scenario: discharge at 5.52kW, then a
+        message arrives with 0.517kW (gridStatus=3 anomaly).  The sensor
+        must remain at 5.52kW.
+        """
+        coord = self._make_coord_with_discharge_data()
+
+        # Inject the anomalous message (~10x lower discharge power)
+        coord.inject_realtime_data(
+            {
+                "SoC": 80.0,
+                "batChargePower": 0.0,
+                "batDischargePower": 0.517,
+                "feedinPower": 0.051,
+                "loadsPower": 0.466,
+                "pvPower": 0.0,
+            }
+        )
+
+        assert coord.data is not None
+        assert coord.data["batDischargePower"] == 5.52, (
+            f"Anomalous WS message should be dropped, but batDischargePower "
+            f"was updated to {coord.data['batDischargePower']}"
+        )
+
+    def test_normal_ws_message_is_applied(self) -> None:
+        """A WS message with similar power values must be applied normally."""
+        coord = self._make_coord_with_discharge_data()
+
+        coord.inject_realtime_data(
+            {
+                "SoC": 80.0,
+                "batChargePower": 0.0,
+                "batDischargePower": 5.50,
+                "feedinPower": 5.03,
+                "loadsPower": 0.47,
+                "pvPower": 0.0,
+            }
+        )
+
+        assert coord.data is not None
+        assert coord.data["batDischargePower"] == 5.50, (
+            f"Normal WS message should be applied, but batDischargePower "
+            f"is {coord.data['batDischargePower']}"
+        )
+
+    def test_legitimate_large_change_accepted_when_both_sides_small(self) -> None:
+        """When existing power is small (<0.1kW), any WS value is accepted.
+
+        This covers the case where discharge has just started or stopped
+        and the previous value was near zero.  The >10x check should not
+        block legitimate transitions from near-zero to a real value.
+        """
+        coord = _make_coordinator()
+        coord.data = {
+            "SoC": 80.0,
+            "batChargePower": 0.0,
+            "batDischargePower": 0.05,  # near-zero (just started)
+            "feedin": 100.0,
+            "_data_source": "ws",
+            "_data_last_update": "2026-04-21T08:38:29+00:00",
+        }
+
+        # Real discharge ramps up
+        coord.inject_realtime_data(
+            {
+                "SoC": 80.0,
+                "batChargePower": 0.0,
+                "batDischargePower": 5.50,
+            }
+        )
+
+        assert coord.data is not None
+        assert coord.data["batDischargePower"] == 5.50, (
+            f"Transition from near-zero to real power should be accepted, "
+            f"but batDischargePower is {coord.data['batDischargePower']}"
+        )
+
+    def test_legitimate_stop_accepted_when_ws_value_is_zero(self) -> None:
+        """When WS reports zero power, it should be accepted (discharge stopped).
+
+        The divergence filter must not block a genuine stop (ws=0.0).
+        The existing check already has a `ws_val > 0` guard that allows this.
+        """
+        coord = self._make_coord_with_discharge_data()
+
+        coord.inject_realtime_data(
+            {
+                "SoC": 80.0,
+                "batChargePower": 0.0,
+                "batDischargePower": 0.0,  # discharge stopped
+                "feedinPower": 0.0,
+                "loadsPower": 0.51,
+                "pvPower": 0.0,
+            }
+        )
+
+        assert coord.data is not None
+        assert coord.data["batDischargePower"] == 0.0, (
+            f"Genuine stop (ws=0.0) should be accepted, "
+            f"but batDischargePower is {coord.data['batDischargePower']}"
+        )
+
+    def test_charge_anomaly_also_dropped(self) -> None:
+        """Same filter applies to batChargePower, not just discharge."""
+        coord = _make_coordinator()
+        coord.data = {
+            "SoC": 30.0,
+            "batChargePower": 3.80,
+            "batDischargePower": 0.0,
+            "feedin": 100.0,
+            "_data_source": "ws",
+            "_data_last_update": "2026-04-21T08:38:29+00:00",
+        }
+
+        coord.inject_realtime_data(
+            {
+                "SoC": 30.0,
+                "batChargePower": 0.35,  # >10x lower — anomalous
+                "batDischargePower": 0.0,
+            }
+        )
+
+        assert coord.data is not None
+        assert coord.data["batChargePower"] == 3.80, (
+            f"Anomalous charge WS message should be dropped, but batChargePower "
+            f"was updated to {coord.data['batChargePower']}"
+        )
+
+    def test_divergence_warning_still_logged(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The divergence warning must still be logged even when dropping."""
+        coord = self._make_coord_with_discharge_data()
+
+        with caplog.at_level(
+            logging.WARNING, logger="custom_components.foxess_control.coordinator"
+        ):
+            coord.inject_realtime_data(
+                {
+                    "SoC": 80.0,
+                    "batChargePower": 0.0,
+                    "batDischargePower": 0.517,
+                    "feedinPower": 0.051,
+                    "loadsPower": 0.466,
+                    "pvPower": 0.0,
+                }
+            )
+
+        warning_messages = [
+            r.message for r in caplog.records if r.levelno >= logging.WARNING
+        ]
+        assert any("diverges" in msg for msg in warning_messages), (
+            "Expected a WARNING-level log about divergence, "
+            f"but got: {warning_messages}"
+        )

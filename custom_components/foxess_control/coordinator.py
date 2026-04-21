@@ -515,8 +515,11 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ws_data["_data_source"] = "ws"
         ws_data["_data_last_update"] = dt_util.utcnow().isoformat()
 
-        # Instrumentation: warn when WS power values are >10x different
-        # from existing coordinator values (catches unit mismatch).
+        # Drop WS messages where battery power diverges >10x from the
+        # current coordinator value.  The FoxESS cloud intermittently
+        # sends anomalous messages (gridStatus=3) with drastically lower
+        # power values.  Applying them causes sensor.foxess_discharge_rate
+        # to jump around every 5-10 seconds (C-020 violation).
         for key in ("batChargePower", "batDischargePower"):
             ws_val = ws_data.get(key)
             cur_val = self.data.get(key)
@@ -529,11 +532,12 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ):
                 _LOGGER.warning(
                     "WS %s diverges >10x from coordinator: ws=%.4f, "
-                    "existing=%.4f (possible unit mismatch)",
+                    "existing=%.4f — dropping anomalous message",
                     key,
                     ws_val,
                     cur_val,
                 )
+                return
 
         # Skip if nothing actually changed (avoids redundant entity updates).
         # Exclude _data_last_update — it always differs.
