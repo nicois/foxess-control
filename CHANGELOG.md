@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.8-beta.11
+
+### Fixed
+- **E2E `_find_card` flake under CI load**: `_find_card` now retries when a HA navigation (WebSocket reconnect, dashboard auto-refresh) destroys the JS execution context mid-poll, instead of returning `False` immediately. Replaced hardcoded 2s sleep in `page` fixture with a deterministic wait for `ha-panel-lovelace` in the shadow DOM.
+
+### Improved
+- **E2E timing-based worker balancing**: each E2E run now collects per-test timings from JUnit XML and persists them as an artifact. The next run uses greedy bin-packing (slowest-first) to balance workers by estimated time instead of splitting by count, reducing wall-clock time.
+- **E2E cancel in-progress runs**: new pushes to the same branch cancel any still-running E2E workflow.
+
 ## 1.0.8-beta.10
 
 ### Fixed

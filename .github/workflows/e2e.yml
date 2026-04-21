@@ -17,37 +17,81 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.split.outputs.matrix }}
-      seed: ${{ steps.split.outputs.seed }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - run: pip install -e '.[dev]'
+
+      - name: Download previous timings
+        id: timings
+        uses: dawidd6/action-download-artifact@v9
+        with:
+          name: e2e-timings
+          workflow: e2e.yml
+          branch: develop
+          search_artifacts: true
+          if_no_artifact_found: warn
+        continue-on-error: true
+
       - name: Collect and split tests
         id: split
         run: |
-          seed=$RANDOM
-          echo "seed=$seed" >> "$GITHUB_OUTPUT"
-
-          python -m pytest tests/e2e/ -m slow --co -q --randomly-seed=$seed 2>/dev/null \
+          python -m pytest tests/e2e/ -m slow --co -q 2>/dev/null \
             | grep '::' > all_tests.txt
 
-          python3 -c "
-          import json, math, os
+          python3 << 'PYEOF'
+          import json, math, os, random
 
-          workers = int(os.environ['E2E_WORKERS'])
-          tests = open('all_tests.txt').read().splitlines()
-          per_worker = math.ceil(len(tests) / workers)
+          workers = int(os.environ["E2E_WORKERS"])
+          tests = open("all_tests.txt").read().splitlines()
+
+          # Load previous timings if available
+          timings: dict[str, float] = {}
+          try:
+              with open("e2e-timings.json") as f:
+                  timings = json.load(f)
+              print(f"Loaded timings for {len(timings)} tests")
+          except FileNotFoundError:
+              print("No previous timings found, using equal weights")
+
+          DEFAULT_WEIGHT = 10.0  # seconds, assumed for unknown tests
+
+          # Sort tests slowest-first so greedy bin-packing puts heavy
+          # tests on separate workers.
+          tests.sort(key=lambda t: timings.get(t, DEFAULT_WEIGHT), reverse=True)
+
+          # Greedy bin-packing: assign each test to the lightest worker.
+          buckets: list[list[str]] = [[] for _ in range(workers)]
+          bucket_times: list[float] = [0.0] * workers
+          for t in tests:
+              lightest = min(range(workers), key=lambda i: bucket_times[i])
+              buckets[lightest].append(t)
+              bucket_times[lightest] += timings.get(t, DEFAULT_WEIGHT)
+
+          # Shuffle test order within each worker for flake detection,
+          # but keep the overall assignment balanced by time.
+          seed = random.randint(0, 2**31)
+          rng = random.Random(seed)
+          for b in buckets:
+              rng.shuffle(b)
+
           groups = []
-          for i in range(workers):
-              chunk = tests[i * per_worker : (i + 1) * per_worker]
+          for i, chunk in enumerate(buckets):
               if chunk:
-                  groups.append({'worker': i, 'tests': ' '.join(chunk)})
-          print(f'Split {len(tests)} tests across {len(groups)} workers')
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f'matrix={json.dumps({\"include\": groups})}\n')
-          "
+                  groups.append({
+                      "worker": i,
+                      "tests": " ".join(chunk),
+                      "est_seconds": round(bucket_times[i], 1),
+                  })
+
+          est = [f"w{g['worker']}={g['est_seconds']}s" for g in groups]
+          print(f"Split {len(tests)} tests across {len(groups)} workers: {', '.join(est)}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"matrix={json.dumps({'include': groups})}\n")
+          PYEOF
 
   e2e:
     needs: collect
@@ -66,10 +110,10 @@ jobs:
       - name: Build E2E container
         run: podman build -t ha-foxess-e2e tests/e2e/
 
-      - name: "Run E2E (worker ${{ matrix.worker }})"
+      - name: "Run E2E (worker ${{ matrix.worker }}, ~${{ matrix.est_seconds }}s)"
         run: |
           python -m pytest ${{ matrix.tests }} \
-            --randomly-seed=${{ needs.collect.outputs.seed }} \
+            -p no:randomly \
             -n auto \
             --tb=long \
             --junitxml=e2e-w${{ matrix.worker }}.xml \
@@ -92,6 +136,50 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: results
+
+      - name: Collect timings
+        run: |
+          python3 << 'PYEOF'
+          import json, xml.etree.ElementTree as ET, glob
+
+          timings: dict[str, float] = {}
+          for xml_file in sorted(glob.glob("results/*/e2e-*.xml")):
+              try:
+                  tree = ET.parse(xml_file)
+              except ET.ParseError:
+                  continue
+              for tc in tree.iter("testcase"):
+                  cls = tc.get("classname", "")
+                  name = tc.get("name", "")
+                  time_s = float(tc.get("time", "0"))
+                  # Reconstruct pytest nodeid from JUnit classname + name
+                  # classname: "tests.e2e.test_ui.TestOverviewCard"
+                  # name: "test_default_config_renders_all_four_boxes[cloud]"
+                  parts = cls.rsplit(".", 1)
+                  if len(parts) == 2:
+                      module_path = parts[0].replace(".", "/") + ".py"
+                      test_class = parts[1]
+                      nodeid = f"{module_path}::{test_class}::{name}"
+                  else:
+                      nodeid = f"{cls}::{name}"
+                  if time_s > 0:
+                      timings[nodeid] = round(time_s, 2)
+
+          with open("e2e-timings.json", "w") as f:
+              json.dump(timings, f, indent=2, sort_keys=True)
+          print(f"Collected timings for {len(timings)} tests")
+          if timings:
+              slowest = sorted(timings.items(), key=lambda x: -x[1])[:5]
+              print("Top 5 slowest:")
+              for name, dur in slowest:
+                  print(f"  {dur:6.1f}s  {name.split('::')[-1]}")
+          PYEOF
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: e2e-timings
+          path: e2e-timings.json
+          retention-days: 90
 
       - name: Summarise
         run: |
