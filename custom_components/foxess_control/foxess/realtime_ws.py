@@ -132,9 +132,10 @@ def map_ws_to_coordinator(ws_msg: dict[str, Any]) -> dict[str, Any]:
 
     if data:
         _LOGGER.debug(
-            "WS mapped data: %s (gridStatus=%s)",
+            "WS mapped data: %s (gridStatus=%s) raw_node=%s",
             data,
             grid.get("gridStatus") if grid else None,
+            node,
         )
 
     return data

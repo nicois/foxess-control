@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.8-beta.7
+
+### Improved
+- **WebSocket mapping diagnostics**: the WS debug log now includes the raw `node` dict alongside the derived mapped data, so correctness of the field mapping can be verified from logs alone.
+
 ## 1.0.8-beta.6
 
 ### Fixed
