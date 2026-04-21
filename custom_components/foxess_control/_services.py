@@ -12,6 +12,30 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.util import dt as dt_util
 
+from ._helpers import (
+    SCHEMA_CLEAR_OVERRIDES,
+    SCHEMA_FEEDIN,
+    SCHEMA_FORCE_CHARGE,
+    SCHEMA_FORCE_DISCHARGE,
+    SCHEMA_SMART_CHARGE,
+    SCHEMA_SMART_DISCHARGE,
+    SERVICE_CLEAR_OVERRIDES,
+    SERVICE_FEEDIN,
+    SERVICE_FORCE_CHARGE,
+    SERVICE_FORCE_DISCHARGE,
+    SERVICE_SMART_CHARGE,
+    SERVICE_SMART_DISCHARGE,
+    _apply_mode_via_entities,
+    _cancel_smart_charge,
+    _cancel_smart_discharge,
+    _cfg,
+    _dd,
+    _get_current_soc,
+    _get_inverter,
+    _get_net_consumption,
+    _get_taper_profile,
+    _save_session,
+)
 from .const import DOMAIN
 from .foxess import Inverter, WorkMode
 from .foxess_adapter import (
@@ -108,39 +132,16 @@ def _api_error_handler(
 
 def _register_services(hass: HomeAssistant) -> None:
     """Register inverter control services."""
-    # Late import to avoid circular dependency with __init__.py.
-    # These names are defined in __init__ (or re-exported there).
+    # Late import only for WS/listener functions that live in __init__.py
+    # and depend on heavy HA lifecycle state (adapters, WS objects).
     import custom_components.foxess_control as _pkg
 
-    _dd = _pkg._dd
-    _cfg = _pkg._cfg
-    _get_inverter = _pkg._get_inverter
-    _get_current_soc = _pkg._get_current_soc
-    _get_net_consumption = _pkg._get_net_consumption
-    _get_taper_profile = _pkg._get_taper_profile
-    _apply_mode_via_entities = _pkg._apply_mode_via_entities
-    _cancel_smart_charge = _pkg._cancel_smart_charge
-    _cancel_smart_discharge = _pkg._cancel_smart_discharge
     _setup_smart_charge_listeners = _pkg._setup_smart_charge_listeners
     _setup_smart_discharge_listeners = _pkg._setup_smart_discharge_listeners
-    _save_session = _pkg._save_session
     _should_start_realtime_ws = _pkg._should_start_realtime_ws
     _maybe_start_realtime_ws = _pkg._maybe_start_realtime_ws
     _stop_realtime_ws = _pkg._stop_realtime_ws
     _start_force_op_ws = _pkg._start_force_op_ws
-
-    SCHEMA_CLEAR_OVERRIDES = _pkg.SCHEMA_CLEAR_OVERRIDES
-    SCHEMA_FORCE_CHARGE = _pkg.SCHEMA_FORCE_CHARGE
-    SCHEMA_FORCE_DISCHARGE = _pkg.SCHEMA_FORCE_DISCHARGE
-    SCHEMA_FEEDIN = _pkg.SCHEMA_FEEDIN
-    SCHEMA_SMART_CHARGE = _pkg.SCHEMA_SMART_CHARGE
-    SCHEMA_SMART_DISCHARGE = _pkg.SCHEMA_SMART_DISCHARGE
-    SERVICE_CLEAR_OVERRIDES = _pkg.SERVICE_CLEAR_OVERRIDES
-    SERVICE_FEEDIN = _pkg.SERVICE_FEEDIN
-    SERVICE_FORCE_CHARGE = _pkg.SERVICE_FORCE_CHARGE
-    SERVICE_FORCE_DISCHARGE = _pkg.SERVICE_FORCE_DISCHARGE
-    SERVICE_SMART_CHARGE = _pkg.SERVICE_SMART_CHARGE
-    SERVICE_SMART_DISCHARGE = _pkg.SERVICE_SMART_DISCHARGE
 
     async def handle_clear_overrides(call: ServiceCall) -> None:
         mode_filter: str | None = call.data.get("mode")

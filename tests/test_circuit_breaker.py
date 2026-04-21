@@ -40,6 +40,8 @@ from custom_components.foxess_control.smart_battery.const import (
     MAX_CONSECUTIVE_ADAPTER_ERRORS,
 )
 
+from .conftest import _get_handler
+
 
 def _make_hass(
     inverter: Inverter | None = None,
@@ -107,7 +109,7 @@ def _start_charge_session(hass: MagicMock, inv: MagicMock) -> Any:
         return MagicMock()
 
     _register_services(hass)
-    handler = hass.services.async_register.call_args_list[4].args[2]
+    handler = _get_handler(hass, "smart_charge")
     return handler, capture_interval
 
 
@@ -123,7 +125,7 @@ def _start_discharge_session(hass: MagicMock, inv: MagicMock) -> Any:
         return MagicMock()
 
     _register_services(hass)
-    handler = hass.services.async_register.call_args_list[5].args[2]
+    handler = _get_handler(hass, "smart_discharge")
     return handler, capture_interval
 
 

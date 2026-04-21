@@ -16,12 +16,110 @@ from homeassistant.exceptions import (
     ConfigEntryNotReady,
     ServiceValidationError,
 )
-from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from ._helpers import (  # noqa: I001
+    _MANAGED_WORK_MODES as _MANAGED_WORK_MODES,
+)
+from ._helpers import (
+    MAX_SOC_UNAVAILABLE_COUNT as MAX_SOC_UNAVAILABLE_COUNT,
+)
+from ._helpers import (
+    SCHEMA_CLEAR_OVERRIDES as SCHEMA_CLEAR_OVERRIDES,
+)
+from ._helpers import (
+    SCHEMA_FEEDIN as SCHEMA_FEEDIN,
+)
+from ._helpers import (
+    SCHEMA_FORCE_CHARGE as SCHEMA_FORCE_CHARGE,
+)
+from ._helpers import (
+    SCHEMA_FORCE_DISCHARGE as SCHEMA_FORCE_DISCHARGE,
+)
+from ._helpers import (
+    SCHEMA_SMART_CHARGE as SCHEMA_SMART_CHARGE,
+)
+from ._helpers import (
+    SCHEMA_SMART_DISCHARGE as SCHEMA_SMART_DISCHARGE,
+)
+from ._helpers import (
+    SERVICE_CLEAR_OVERRIDES as SERVICE_CLEAR_OVERRIDES,
+)
+from ._helpers import (
+    SERVICE_FEEDIN as SERVICE_FEEDIN,
+)
+from ._helpers import (
+    SERVICE_FORCE_CHARGE as SERVICE_FORCE_CHARGE,
+)
+from ._helpers import (
+    SERVICE_FORCE_DISCHARGE as SERVICE_FORCE_DISCHARGE,
+)
+from ._helpers import (
+    SERVICE_SMART_CHARGE as SERVICE_SMART_CHARGE,
+)
+from ._helpers import (
+    SERVICE_SMART_DISCHARGE as SERVICE_SMART_DISCHARGE,
+)
+from ._helpers import (
+    STORAGE_KEY as STORAGE_KEY,
+)
+from ._helpers import (
+    STORAGE_VERSION as STORAGE_VERSION,
+)
+from ._helpers import (
+    VALID_MODES as VALID_MODES,
+)
+from ._helpers import (
+    _apply_mode_via_entities as _apply_mode_via_entities,
+)
+from ._helpers import (
+    _cancel_smart_charge as _cancel_smart_charge,
+)
+from ._helpers import (
+    _cancel_smart_discharge as _cancel_smart_discharge,
+)
+from ._helpers import (
+    _cfg as _cfg,
+)
+from ._helpers import (
+    _clear_stored_session as _clear_stored_session,
+)
+from ._helpers import (
+    _dd as _dd,
+)
+from ._helpers import (
+    _first_entry_id as _first_entry_id,
+)
+from ._helpers import (
+    _get_current_soc as _get_current_soc,
+)
+from ._helpers import (
+    _get_entity_adapter as _get_entity_adapter,
+)
+from ._helpers import (
+    _get_feedin_energy_kwh as _get_feedin_energy_kwh,
+)
+from ._helpers import (
+    _get_first_entry as _get_first_entry,
+)
+from ._helpers import (
+    _get_inverter as _get_inverter,
+)
+from ._helpers import (
+    _get_net_consumption as _get_net_consumption,
+)
+from ._helpers import (
+    _get_taper_profile as _get_taper_profile,
+)
+from ._helpers import (
+    _save_session as _save_session,
+)
+from ._helpers import (
+    _save_taper_profile as _save_taper_profile,
+)
 from .const import (
     CONF_API_KEY,
     CONF_DEVICE_SERIAL,
@@ -46,7 +144,7 @@ from .const import (
 from .coordinator import (
     FoxESSDataCoordinator,
     FoxESSEntityCoordinator,
-    get_coordinator_soc,
+    get_coordinator_soc,  # noqa: F401 — re-exported for tests
 )
 from .foxess import FoxESSClient, FoxESSRealtimeWS, FoxESSWebSession, Inverter, WorkMode
 from .foxess_adapter import (
@@ -82,12 +180,6 @@ from .smart_battery.const import (
     SMART_DISCHARGE_CHECK_SECONDS as _sb_SMART_DISCHARGE_CHECK_SECONDS,
 )
 from .smart_battery.listeners import (
-    cancel_smart_charge as _sb_cancel_smart_charge,
-)
-from .smart_battery.listeners import (
-    cancel_smart_discharge as _sb_cancel_smart_discharge,
-)
-from .smart_battery.listeners import (
     setup_smart_charge_listeners as _sb_setup_smart_charge_listeners,
 )
 from .smart_battery.listeners import (
@@ -98,12 +190,6 @@ from .smart_battery.services import (  # noqa: F401
 )
 from .smart_battery.services import (  # noqa: F401
     resolve_start_end_explicit as _resolve_start_end_explicit,
-)
-from .smart_battery.session import (
-    clear_stored_session as _sb_clear_stored_session,
-)
-from .smart_battery.session import (
-    save_session as _sb_save_session,
 )
 from .smart_battery.session import (
     session_data_from_charge_state as _session_data_from_charge_state,
@@ -119,314 +205,9 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
-    from .domain_data import FoxESSControlData, IntegrationConfig
-
-_LOGGER = logging.getLogger(__name__)
-
-SERVICE_CLEAR_OVERRIDES = "clear_overrides"
-SERVICE_FEEDIN = "feedin"
-SERVICE_FORCE_CHARGE = "force_charge"
-SERVICE_FORCE_DISCHARGE = "force_discharge"
-SERVICE_SMART_CHARGE = "smart_charge"
-SERVICE_SMART_DISCHARGE = "smart_discharge"
-
-SMART_CHARGE_ADJUST_INTERVAL = datetime.timedelta(minutes=5)
-SMART_DISCHARGE_CHECK_INTERVAL = datetime.timedelta(seconds=60)
-
-# Cancel a smart session if the SoC entity is unavailable for this many
-# consecutive periodic checks (3 × 5 min = 15 minutes).
-MAX_SOC_UNAVAILABLE_COUNT = 3
-
-
-def _dd(hass: HomeAssistant) -> FoxESSControlData:
-    """Return the typed domain data."""
     from .domain_data import FoxESSControlData
 
-    data = hass.data[DOMAIN]
-    if isinstance(data, FoxESSControlData):
-        return data
-    from .smart_battery.domain_data import _convert_legacy_dict
-
-    return _convert_legacy_dict(data)  # type: ignore[return-value]
-
-
-def _cfg(hass: HomeAssistant) -> IntegrationConfig:
-    """Return the cached IntegrationConfig."""
-    config = _dd(hass).config
-    if config is None:
-        raise ServiceValidationError(
-            "Integration not fully loaded",
-            translation_domain=DOMAIN,
-            translation_key="no_integration",
-        )
-    return config
-
-
-def _record_error(hass: HomeAssistant, message: str) -> None:
-    """Record a session error for UI surfacing (C-026)."""
-    domain_data = hass.data.get(DOMAIN)
-    if domain_data is None:
-        return
-    dd = _dd(hass)
-    prev = dd.smart_error_state or {}
-    dd.smart_error_state = {
-        "last_error": message,
-        "last_error_at": dt_util.now().isoformat(),
-        "error_count": prev.get("error_count", 0) + 1,
-    }
-
-
-# Persist the taper profile to HA Store every N taper observations.
-# Charge ticks every 5 min, discharge every 1 min — real-time save
-# frequency is 25 min (charge) and 5 min (discharge).
-_TAPER_SAVE_EVERY_N = 5
-
-STORAGE_KEY = "foxess_control_sessions"
-STORAGE_VERSION = 1
-
-VALID_MODES = [m.value for m in WorkMode]
-
-_MANAGED_WORK_MODES = frozenset(
-    {
-        WorkMode.SELF_USE.value,
-        WorkMode.FORCE_CHARGE.value,
-        WorkMode.FORCE_DISCHARGE.value,
-        WorkMode.FEEDIN.value,
-    }
-)
-
-SCHEMA_CLEAR_OVERRIDES = vol.Schema(
-    {
-        vol.Optional("mode"): vol.In(VALID_MODES),
-    }
-)
-
-SCHEMA_FORCE_CHARGE = vol.Schema(
-    {
-        vol.Required("duration"): cv.time_period,
-        vol.Optional("power"): vol.All(int, vol.Range(min=100)),
-        vol.Optional("start_time"): cv.time,
-    },
-    extra=vol.ALLOW_EXTRA,
-)
-
-SCHEMA_FORCE_DISCHARGE = vol.Schema(
-    {
-        vol.Required("duration"): cv.time_period,
-        vol.Optional("power"): vol.All(int, vol.Range(min=100)),
-        vol.Optional("start_time"): cv.time,
-    },
-    extra=vol.ALLOW_EXTRA,
-)
-
-SCHEMA_FEEDIN = vol.Schema(
-    {
-        vol.Required("duration"): cv.time_period,
-        vol.Optional("power"): vol.All(int, vol.Range(min=100)),
-        vol.Optional("start_time"): cv.time,
-    },
-    extra=vol.ALLOW_EXTRA,
-)
-
-SCHEMA_SMART_DISCHARGE = vol.Schema(
-    {
-        vol.Required("start_time"): cv.time,
-        vol.Required("end_time"): cv.time,
-        vol.Optional("power"): vol.All(int, vol.Range(min=100)),
-        vol.Required("min_soc"): vol.All(int, vol.Range(min=0, max=100)),
-        vol.Optional("feedin_energy_limit_kwh"): vol.All(
-            vol.Coerce(float), vol.Range(min=0.1)
-        ),
-    },
-    extra=vol.ALLOW_EXTRA,
-)
-
-SCHEMA_SMART_CHARGE = vol.Schema(
-    {
-        vol.Required("start_time"): cv.time,
-        vol.Required("end_time"): cv.time,
-        vol.Required("target_soc"): vol.All(int, vol.Range(min=5, max=100)),
-        vol.Optional("power"): vol.All(int, vol.Range(min=100)),
-    },
-    extra=vol.ALLOW_EXTRA,
-)
-
-
-def _first_entry_id(hass: HomeAssistant) -> str:
-    """Return the entry_id of the first real config entry in domain data.
-
-    NOTE: Services currently operate on a single inverter only.
-    If multiple config entries exist, only the first is used.
-    """
-    dd = hass.data.get(DOMAIN)
-    if dd is not None:
-        for eid in _dd(hass).entries:
-            return eid
-    raise ServiceValidationError(
-        "No FoxESS Control integration configured",
-        translation_domain=DOMAIN,
-        translation_key="no_integration",
-    )
-
-
-def _get_inverter(hass: HomeAssistant) -> Inverter:
-    """Get the first configured Inverter instance."""
-    entry_id = _first_entry_id(hass)
-    inv: Inverter = _dd(hass).entries[entry_id].inverter
-    return inv
-
-
-def _get_first_entry(hass: HomeAssistant) -> ConfigEntry:
-    """Return the first real config entry."""
-    entry_id = _first_entry_id(hass)
-    entry = hass.config_entries.async_get_entry(entry_id)
-    if entry is None:
-        raise ServiceValidationError(
-            "No FoxESS Control integration configured",
-            translation_domain=DOMAIN,
-            translation_key="no_integration",
-        )
-    return entry
-
-
-def _get_entity_adapter(hass: HomeAssistant) -> FoxESSEntityAdapter:
-    """Build a one-shot entity adapter from the current config."""
-    return FoxESSEntityAdapter(
-        entry_options=dict(_get_first_entry(hass).options),
-        max_power_w=_cfg(hass).max_power_w,
-    )
-
-
-async def _apply_mode_via_entities(
-    hass: HomeAssistant,
-    mode: WorkMode,
-    power_w: int | None = None,
-    fd_soc: int = 11,
-) -> None:
-    """Set inverter mode via the entity adapter."""
-    adapter = _get_entity_adapter(hass)
-    await adapter.apply_mode(hass, mode, power_w, fd_soc)
-
-
-def _get_current_soc(hass: HomeAssistant) -> float | None:
-    """Get current battery SoC from the coordinator.
-
-    Returns None if SoC is unavailable.
-    """
-    return get_coordinator_soc(hass)
-
-
-def _get_net_consumption(hass: HomeAssistant) -> float:
-    """Return net site consumption (loads minus solar) in kW.
-
-    Reads ``loadsPower`` and ``pvPower`` from the coordinator.
-    Returns ``0.0`` when coordinator data is unavailable so callers
-    fall back to the previous no-offset behaviour.
-    """
-    domain_data = hass.data.get(DOMAIN)
-    if domain_data is None:
-        return 0.0
-    dd = _dd(hass)
-    for _eid, entry_data in dd.entries.items():
-        coordinator = entry_data.coordinator
-        if coordinator is not None and coordinator.data:
-            try:
-                loads = float(coordinator.data.get("loadsPower", 0))
-                pv = float(coordinator.data.get("pvPower", 0))
-                return loads - pv
-            except (ValueError, TypeError):
-                _LOGGER.warning(
-                    "Failed to parse loadsPower=%r / pvPower=%r "
-                    "from coordinator, using 0",
-                    coordinator.data.get("loadsPower"),
-                    coordinator.data.get("pvPower"),
-                )
-                return 0.0
-    return 0.0
-
-
-def _get_feedin_energy_kwh(hass: HomeAssistant) -> float | None:
-    """Return cumulative grid feed-in energy in kWh from the coordinator.
-
-    Reads the ``feedin`` variable (lifetime counter) rather than
-    the instantaneous ``feedinPower``.  Returns ``None`` when
-    coordinator data is unavailable.
-    """
-    domain_data = hass.data.get(DOMAIN)
-    if domain_data is None:
-        return None
-    dd = _dd(hass)
-    for _eid, entry_data in dd.entries.items():
-        coordinator = entry_data.coordinator
-        if coordinator is not None and coordinator.data:
-            raw = coordinator.data.get("feedin")
-            if raw is None:
-                return None
-            try:
-                return float(raw)
-            except (ValueError, TypeError):
-                return None
-    return None
-
-
-def _get_coordinator_value(hass: HomeAssistant, variable: str) -> float | None:
-    """Read a numeric variable from the coordinator."""
-    domain_data = hass.data.get(DOMAIN)
-    if domain_data is None:
-        return None
-    dd = _dd(hass)
-    for _eid, entry_data in dd.entries.items():
-        coordinator = entry_data.coordinator
-        if coordinator is not None and coordinator.data:
-            raw = coordinator.data.get(variable)
-            if raw is not None:
-                try:
-                    return float(raw)
-                except (ValueError, TypeError):
-                    return None
-    return None
-
-
-def _get_taper_profile(hass: HomeAssistant) -> _TaperProfile | None:
-    """Return the adaptive taper profile from domain data."""
-    if DOMAIN not in hass.data:
-        return None
-    return _dd(hass).taper_profile
-
-
-async def _save_taper_profile(hass: HomeAssistant, profile: _TaperProfile) -> None:
-    """Persist the taper profile to the session Store."""
-    if DOMAIN not in hass.data:
-        return
-    store: Store[dict[str, Any]] | None = _dd(hass).store
-    if store is None:
-        return
-    stored: dict[str, Any] = await store.async_load() or {}
-    stored["taper_profile"] = profile.to_dict()
-    await store.async_save(stored)
-
-
-def _cancel_smart_discharge(hass: HomeAssistant, *, clear_storage: bool = True) -> Any:
-    """Cancel any active smart discharge listeners and clear stored session.
-
-    Returns the WS stop coroutine (if any) so callers that need ordered
-    shutdown can await it after override removal.
-    """
-    return _sb_cancel_smart_discharge(hass, DOMAIN, clear_storage=clear_storage)
-
-
-async def _save_session(hass: HomeAssistant, key: str, data: dict[str, Any]) -> None:
-    """Persist a smart session to storage."""
-    store: Store[dict[str, Any]] | None = _dd(hass).store
-    await _sb_save_session(store, key, data)
-
-
-async def _clear_stored_session(hass: HomeAssistant, key: str) -> None:
-    """Remove a smart session from storage."""
-    store: Store[dict[str, Any]] | None = (
-        _dd(hass).store if DOMAIN in hass.data else None
-    )
-    await _sb_clear_stored_session(store, key)
+_LOGGER = logging.getLogger(__name__)
 
 
 async def _persist_active_sessions(hass: HomeAssistant) -> None:
@@ -465,15 +246,6 @@ async def _async_remove_override(
             mode,
             min_soc_on_grid,
         )
-
-
-def _cancel_smart_charge(hass: HomeAssistant, *, clear_storage: bool = True) -> Any:
-    """Cancel any active smart charge listeners and clear stored session.
-
-    Returns the WS stop coroutine (if any) so callers that need ordered
-    shutdown can await it after override removal.
-    """
-    return _sb_cancel_smart_charge(hass, DOMAIN, clear_storage=clear_storage)
 
 
 def _build_foxess_adapter(
@@ -595,6 +367,82 @@ def _has_matching_schedule_group(
     return False
 
 
+async def _validate_recovery_session(
+    hass: HomeAssistant,
+    inverter: Inverter | None,
+    session_data: dict[str, Any],
+    stored: dict[str, Any],
+    storage_key: str,
+    work_mode: WorkMode,
+    now: datetime.datetime,
+    today_str: str,
+) -> tuple[datetime.datetime, datetime.datetime, bool] | None:
+    """Validate a persisted session for recovery.
+
+    Returns ``(start, end, has_group)`` if the session is valid.
+    Returns ``None`` if the session was stale or expired (the entry
+    is removed from *stored* and the caller should ``return True``).
+    """
+    label = storage_key.replace("_", " ")
+
+    if session_data.get("date") != today_str:
+        _LOGGER.info(
+            "Smart %s: stale session from %s, cleaning up",
+            label,
+            session_data.get("date"),
+        )
+        del stored[storage_key]
+        return None
+
+    end = now.replace(
+        hour=session_data["end_hour"],
+        minute=session_data["end_minute"],
+        second=0,
+        microsecond=0,
+    )
+    if now >= end:
+        _LOGGER.info("Smart %s: session window has passed, cleaning up", label)
+        if _cfg(hass).entity_mode:
+            await _async_remove_override(hass, work_mode)
+        else:
+            assert inverter is not None
+            min_soc_on_grid = _cfg(hass).min_soc_on_grid
+            try:
+                await hass.async_add_executor_job(
+                    _remove_mode_from_schedule,
+                    inverter,
+                    work_mode,
+                    min_soc_on_grid,
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "Smart %s: failed to clean up expired schedule", label
+                )
+        del stored[storage_key]
+        return None
+
+    start = now.replace(
+        hour=session_data["start_hour"],
+        minute=session_data["start_minute"],
+        second=0,
+        microsecond=0,
+    )
+
+    if _cfg(hass).entity_mode:
+        has_group = True
+    else:
+        assert inverter is not None
+        has_group = await hass.async_add_executor_job(
+            _has_matching_schedule_group,
+            inverter,
+            work_mode,
+            session_data["end_hour"],
+            session_data["end_minute"],
+        )
+
+    return start, end, has_group
+
+
 async def _recover_charge_session(
     hass: HomeAssistant,
     inverter: Inverter | None,
@@ -609,58 +457,20 @@ async def _recover_charge_session(
     Returns the (possibly updated) *changed* flag.
     Raises KeyError/TypeError/ValueError on corrupted data.
     """
-    if charge_data.get("date") != today_str:
-        _LOGGER.info(
-            "Smart charge: stale session from %s, cleaning up",
-            charge_data.get("date"),
-        )
-        del stored["smart_charge"]
-        return True
-
-    end = now.replace(
-        hour=charge_data["end_hour"],
-        minute=charge_data["end_minute"],
-        second=0,
-        microsecond=0,
+    result = await _validate_recovery_session(
+        hass,
+        inverter,
+        charge_data,
+        stored,
+        "smart_charge",
+        WorkMode.FORCE_CHARGE,
+        now,
+        today_str,
     )
-    if now >= end:
-        _LOGGER.info("Smart charge: session window has passed, cleaning up")
-        if _cfg(hass).entity_mode:
-            await _async_remove_override(hass, WorkMode.FORCE_CHARGE)
-        else:
-            assert inverter is not None  # cloud mode
-            min_soc_on_grid = _cfg(hass).min_soc_on_grid
-            try:
-                await hass.async_add_executor_job(
-                    _remove_mode_from_schedule,
-                    inverter,
-                    WorkMode.FORCE_CHARGE,
-                    min_soc_on_grid,
-                )
-            except Exception:
-                _LOGGER.exception("Smart charge: failed to clean up expired schedule")
-        del stored["smart_charge"]
+    if result is None:
         return True
+    start, end, has_group = result
 
-    # Window still active — check if session should be resumed
-    start = now.replace(
-        hour=charge_data["start_hour"],
-        minute=charge_data["start_minute"],
-        second=0,
-        microsecond=0,
-    )
-    if _cfg(hass).entity_mode:
-        # Entity mode: no schedule groups to check, always resume
-        has_group = True
-    else:
-        assert inverter is not None  # cloud mode
-        has_group = await hass.async_add_executor_job(
-            _has_matching_schedule_group,
-            inverter,
-            WorkMode.FORCE_CHARGE,
-            charge_data["end_hour"],
-            charge_data["end_minute"],
-        )
     if has_group or not charge_data.get("charging_started", False):
         _LOGGER.info(
             "Smart charge: resuming session %02d:%02d-%02d:%02d (target=%d%%)",
@@ -757,59 +567,21 @@ async def _recover_discharge_session(
     Returns the (possibly updated) *changed* flag.
     Raises KeyError/TypeError/ValueError on corrupted data.
     """
-    if discharge_data.get("date") != today_str:
-        _LOGGER.info(
-            "Smart discharge: stale session from %s, cleaning up",
-            discharge_data.get("date"),
-        )
-        del stored["smart_discharge"]
-        return True
-
-    end = now.replace(
-        hour=discharge_data["end_hour"],
-        minute=discharge_data["end_minute"],
-        second=0,
-        microsecond=0,
+    result = await _validate_recovery_session(
+        hass,
+        inverter,
+        discharge_data,
+        stored,
+        "smart_discharge",
+        WorkMode.FORCE_DISCHARGE,
+        now,
+        today_str,
     )
-    if now >= end:
-        _LOGGER.info("Smart discharge: session window has passed, cleaning up")
-        if _cfg(hass).entity_mode:
-            await _async_remove_override(hass, WorkMode.FORCE_DISCHARGE)
-        else:
-            assert inverter is not None  # cloud mode
-            min_soc_on_grid = _cfg(hass).min_soc_on_grid
-            try:
-                await hass.async_add_executor_job(
-                    _remove_mode_from_schedule,
-                    inverter,
-                    WorkMode.FORCE_DISCHARGE,
-                    min_soc_on_grid,
-                )
-            except Exception:
-                _LOGGER.exception(
-                    "Smart discharge: failed to clean up expired schedule"
-                )
-        del stored["smart_discharge"]
+    if result is None:
         return True
+    start, end, has_group = result
 
-    if _cfg(hass).entity_mode:
-        has_group = True
-    else:
-        assert inverter is not None  # cloud mode
-        has_group = await hass.async_add_executor_job(
-            _has_matching_schedule_group,
-            inverter,
-            WorkMode.FORCE_DISCHARGE,
-            discharge_data["end_hour"],
-            discharge_data["end_minute"],
-        )
     if has_group:
-        start = now.replace(
-            hour=discharge_data["start_hour"],
-            minute=discharge_data["start_minute"],
-            second=0,
-            microsecond=0,
-        )
         _LOGGER.info(
             "Smart discharge: resuming session %02d:%02d-%02d:%02d (min_soc=%d%%)",
             discharge_data["start_hour"],

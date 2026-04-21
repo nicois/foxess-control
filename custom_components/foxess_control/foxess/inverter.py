@@ -3,36 +3,14 @@
 from __future__ import annotations
 
 import datetime
-from enum import StrEnum
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any
+
+from ..smart_battery.types import MinSocSettings, ScheduleGroup, WorkMode
 
 if TYPE_CHECKING:
     from .client import FoxESSClient
 
-
-class WorkMode(StrEnum):
-    SELF_USE = "SelfUse"
-    FORCE_CHARGE = "ForceCharge"
-    FORCE_DISCHARGE = "ForceDischarge"
-    BACKUP = "Backup"
-    FEEDIN = "Feedin"
-
-
-class ScheduleGroup(TypedDict):
-    enable: int
-    startHour: int
-    startMinute: int
-    endHour: int
-    endMinute: int
-    workMode: str
-    minSocOnGrid: int
-    fdSoc: int
-    fdPwr: int
-
-
-class MinSocSettings(TypedDict):
-    minSoc: int
-    minSocOnGrid: int
+__all__ = ["Inverter", "MinSocSettings", "ScheduleGroup", "WorkMode"]
 
 
 def _parse_real_time(result: Any) -> dict[str, Any]:

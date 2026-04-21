@@ -10,6 +10,9 @@ import aiohttp.web
 import pytest
 import requests
 
+if TYPE_CHECKING:
+    from unittest.mock import MagicMock
+
 from simulator.server import create_app
 
 if TYPE_CHECKING:
@@ -85,6 +88,19 @@ def _run_server(
         pass
     finally:
         loop.close()
+
+
+def _get_handler(hass: MagicMock, service_name: str) -> Any:
+    """Look up a registered service handler by name.
+
+    Searches ``hass.services.async_register.call_args_list`` for the
+    registration whose second positional arg matches *service_name*.
+    """
+    for call in hass.services.async_register.call_args_list:
+        if call.args[1] == service_name:
+            return call.args[2]
+    registered = [c.args[1] for c in hass.services.async_register.call_args_list]
+    raise KeyError(f"Service {service_name!r} not found; registered: {registered}")
 
 
 @pytest.fixture(autouse=True)

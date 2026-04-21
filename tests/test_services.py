@@ -37,6 +37,8 @@ from custom_components.foxess_control.domain_data import (
 )
 from custom_components.foxess_control.foxess.inverter import Inverter
 
+from .conftest import _get_handler
+
 
 def _make_hass(
     entry_id: str = "entry1",
@@ -287,7 +289,7 @@ class TestHandleClearOverrides:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[0].args[2]
+        handler = _get_handler(hass, "clear_overrides")
 
         await handler(_make_call({}))
 
@@ -328,7 +330,7 @@ class TestHandleClearOverrides:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[0].args[2]
+        handler = _get_handler(hass, "clear_overrides")
 
         await handler(_make_call({"mode": "ForceCharge"}))
 
@@ -362,7 +364,7 @@ class TestHandleClearOverrides:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[0].args[2]
+        handler = _get_handler(hass, "clear_overrides")
 
         await handler(_make_call({"mode": "ForceCharge"}))
 
@@ -405,7 +407,7 @@ class TestHandleClearOverrides:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[0].args[2]
+        handler = _get_handler(hass, "clear_overrides")
 
         await handler(_make_call({"mode": "ForceDischarge"}))
 
@@ -428,7 +430,7 @@ class TestHandleClearOverrides:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[0].args[2]
+        handler = _get_handler(hass, "clear_overrides")
 
         await handler(_make_call({}))
 
@@ -449,7 +451,7 @@ class TestHandleClearOverrides:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[0].args[2]
+        handler = _get_handler(hass, "clear_overrides")
 
         await handler(_make_call({}))
 
@@ -471,7 +473,7 @@ class TestHandleClearOverrides:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[0].args[2]
+        handler = _get_handler(hass, "clear_overrides")
 
         await handler(_make_call({"mode": "ForceCharge"}))
 
@@ -492,7 +494,7 @@ class TestHandleClearOverrides:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[0].args[2]
+        handler = _get_handler(hass, "clear_overrides")
 
         await handler(_make_call({"mode": "ForceDischarge"}))
 
@@ -513,7 +515,7 @@ class TestHandleClearOverrides:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[0].args[2]
+        handler = _get_handler(hass, "clear_overrides")
 
         await handler(_make_call({"mode": "Feedin"}))
 
@@ -534,7 +536,7 @@ class TestHandleFeedin:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[1].args[2]
+        handler = _get_handler(hass, "feedin")
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -560,7 +562,7 @@ class TestHandleFeedin:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[1].args[2]
+        handler = _get_handler(hass, "feedin")
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -592,7 +594,7 @@ class TestHandleForceCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[2].args[2]
+        handler = _get_handler(hass, "force_charge")
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -618,7 +620,7 @@ class TestHandleForceCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[2].args[2]
+        handler = _get_handler(hass, "force_charge")
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -646,7 +648,7 @@ class TestHandleForceCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[2].args[2]
+        handler = _get_handler(hass, "force_charge")
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -690,7 +692,7 @@ class TestHandleForceCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[2].args[2]
+        handler = _get_handler(hass, "force_charge")
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -734,7 +736,7 @@ class TestHandleForceCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[2].args[2]
+        handler = _get_handler(hass, "force_charge")
 
         with (
             patch(
@@ -759,7 +761,7 @@ class TestHandleForceCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[2].args[2]
+        handler = _get_handler(hass, "force_charge")
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -786,7 +788,7 @@ class TestHandleForceCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[2].args[2]
+        handler = _get_handler(hass, "force_charge")
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -812,7 +814,7 @@ class TestHandleForceDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[3].args[2]
+        handler = _get_handler(hass, "force_discharge")
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -838,7 +840,7 @@ class TestHandleForceDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[3].args[2]
+        handler = _get_handler(hass, "force_discharge")
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -867,7 +869,7 @@ class TestHandleForceDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[3].args[2]
+        handler = _get_handler(hass, "force_discharge")
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -910,7 +912,7 @@ class TestHandleForceDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[3].args[2]
+        handler = _get_handler(hass, "force_discharge")
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -954,7 +956,7 @@ class TestHandleForceDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[3].args[2]
+        handler = _get_handler(hass, "force_discharge")
 
         with (
             patch(
@@ -979,7 +981,7 @@ class TestHandleForceDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[3].args[2]
+        handler = _get_handler(hass, "force_discharge")
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -1002,7 +1004,7 @@ class TestHandleForceDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[3].args[2]
+        handler = _get_handler(hass, "force_discharge")
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -1028,7 +1030,7 @@ class TestHandleForceDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[3].args[2]
+        handler = _get_handler(hass, "force_discharge")
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -1059,7 +1061,7 @@ class TestSmartChargeCoordinatorFallback:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -1103,7 +1105,7 @@ class TestSmartChargeCoordinatorFallback:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -1146,7 +1148,7 @@ class TestHandleSmartDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -1211,7 +1213,7 @@ class TestHandleSmartDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         # now=17:07 is past the deferred deadline (~17:06:50) for
         # SoC=35→30 at 10.5kW over a 10-min window, so discharge
@@ -1272,7 +1274,7 @@ class TestHandleSmartDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         mock_timer_unsub = MagicMock()
         mock_interval_unsub = MagicMock()
@@ -1316,7 +1318,7 @@ class TestHandleSmartDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -1349,7 +1351,7 @@ class TestHandleSmartDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -1395,7 +1397,7 @@ class TestHandleSmartDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -1456,7 +1458,7 @@ class TestHandleSmartDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -1506,7 +1508,7 @@ class TestHandleSmartDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -1555,7 +1557,7 @@ class TestHandleSmartDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -1600,7 +1602,7 @@ class TestHandleSmartDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -1653,7 +1655,7 @@ class TestHandleSmartDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -1721,7 +1723,7 @@ class TestHandleSmartDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -1802,7 +1804,7 @@ class TestHandleSmartDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         # Create session at 17:30, window 18:00–18:30.  The initial
         # deferred check at session creation passes start= correctly,
@@ -1874,7 +1876,7 @@ class TestHandleSmartDischarge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -1937,7 +1939,7 @@ class TestDischargeSocUnavailability:
         )
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -2003,7 +2005,7 @@ class TestDischargeSocUnavailability:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -2081,7 +2083,7 @@ class TestCallbackExceptionSafety:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -2156,7 +2158,7 @@ class TestCallbackExceptionSafety:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -2239,7 +2241,7 @@ class TestErrorSurfacing:
         )
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -2305,7 +2307,7 @@ class TestErrorSurfacing:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -2352,7 +2354,7 @@ class TestSessionBoundaryCleanness:
         )
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         async def _start_session() -> None:
             with (
@@ -2430,7 +2432,7 @@ class TestSessionBoundaryCleanness:
         )
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         async def _start_session() -> None:
             with (
@@ -2496,7 +2498,7 @@ class TestHandleSmartCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -2547,7 +2549,7 @@ class TestHandleSmartCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -2597,7 +2599,7 @@ class TestHandleSmartCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         mock_timer_unsub = MagicMock()
         mock_interval_unsub = MagicMock()
@@ -2644,7 +2646,7 @@ class TestHandleSmartCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -2676,7 +2678,7 @@ class TestHandleSmartCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -2708,7 +2710,7 @@ class TestHandleSmartCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -2744,7 +2746,7 @@ class TestHandleSmartCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -2794,7 +2796,7 @@ class TestHandleSmartCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -2870,7 +2872,7 @@ class TestHandleSmartCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -2941,7 +2943,7 @@ class TestHandleSmartCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -3008,7 +3010,7 @@ class TestHandleSmartCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -3076,7 +3078,7 @@ class TestHandleSmartCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -3138,7 +3140,7 @@ class TestHandleSmartCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -3205,7 +3207,7 @@ class TestHandleSmartCharge:
         )
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -3274,7 +3276,7 @@ class TestHandleSmartCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -3350,7 +3352,7 @@ class TestHandleSmartCharge:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -3442,7 +3444,7 @@ class TestSessionPersistence:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -3493,7 +3495,7 @@ class TestSessionPersistence:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -4261,7 +4263,7 @@ class TestSocStabilityCounters:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -4325,7 +4327,7 @@ class TestSocStabilityCounters:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -4392,7 +4394,7 @@ class TestSocStabilityCounters:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -4447,7 +4449,7 @@ class TestSocStabilityCounters:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -4511,7 +4513,7 @@ class TestFeedinEnergyLimit:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -4583,7 +4585,7 @@ class TestFeedinEnergyLimit:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -4669,7 +4671,7 @@ class TestFeedinEnergyLimit:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -4727,7 +4729,7 @@ class TestFeedinEnergyLimit:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -4790,7 +4792,7 @@ class TestFeedinEnergyLimit:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         pit_patch = patch(
             "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
@@ -4937,7 +4939,7 @@ class TestFeedinEnergyLimit:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         pit_patch = patch(
             "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
@@ -5050,7 +5052,7 @@ class TestFeedinBaselineDeferred:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -5127,7 +5129,7 @@ class TestRemainingZeroCancels:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -5207,7 +5209,7 @@ class TestTransientApiErrorResilience:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -5273,7 +5275,7 @@ class TestTransientApiErrorResilience:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[5].args[2]
+        handler = _get_handler(hass, "smart_discharge")
 
         with (
             patch(
@@ -5347,7 +5349,7 @@ class TestTransientApiErrorResilience:
             return MagicMock()
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
@@ -5450,7 +5452,7 @@ class TestStaleWorkModeAfterCleanupFailure:
         hass.data[DOMAIN].on_session_cancel = _on_session_cancel
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[0].args[2]
+        handler = _get_handler(hass, "clear_overrides")
 
         await handler(_make_call({}))
 
@@ -5490,7 +5492,7 @@ class TestStaleWorkModeAfterCleanupFailure:
         from custom_components.foxess_control import _register_services
 
         _register_services(hass)
-        handler = hass.services.async_register.call_args_list[4].args[2]
+        handler = _get_handler(hass, "smart_charge")
 
         with (
             patch(
