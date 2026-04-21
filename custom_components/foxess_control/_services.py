@@ -196,8 +196,12 @@ def _register_services(hass: HomeAssistant) -> None:
             else:
                 await hass.async_add_executor_job(inverter.self_use, min_soc_on_grid)
 
+        # Dispatch WS linger as background tasks so the service call returns
+        # promptly.  The linger waits up to 30s for a final data push (D-009);
+        # awaiting it inline would block the HA HTTP response and risk a
+        # ReadTimeout for the caller under load.
         for coro in ws_stops:
-            await coro
+            hass.async_create_task(coro, name="foxess_stop_ws_clear_overrides")
 
     async def handle_force_charge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]

@@ -522,6 +522,64 @@ class TestHandleClearOverrides:
         charge_unsub.assert_not_called()
         discharge_unsub.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_clear_overrides_does_not_block_on_ws_linger(self) -> None:
+        """Service handler must not await the WS linger coroutine inline.
+
+        The WS linger waits up to 30s for a final data push (D-009).
+        When clear_overrides awaits that coroutine inside the HTTP service
+        handler, the 30s HTTP timeout can expire first, causing a
+        ReadTimeout for the caller.  The linger must be dispatched as a
+        background task so the service call returns promptly.
+
+        Regression test for CI flake: test_ws_connects_on_second_session
+        timed out at 30s on the clear_overrides call (~19% failure rate).
+        """
+        inv = MagicMock(spec=Inverter)
+        hass = _make_hass(inverter=inv)
+
+        # Simulate an active discharge session so cancel returns a ws_stop
+        hass.data[DOMAIN].smart_discharge_unsubs = [MagicMock()]
+        hass.data[DOMAIN].smart_discharge_state = {"min_soc": 30}
+
+        # The cancel hook returns a coroutine that would block for 30s
+        # if awaited inline (simulating the WS linger timeout).
+        linger_started = asyncio.Event()
+        linger_completed = asyncio.Event()
+
+        async def _slow_linger() -> None:
+            linger_started.set()
+            await asyncio.sleep(30)
+            linger_completed.set()
+
+        hass.data[DOMAIN].on_session_cancel = lambda: _slow_linger()
+
+        # Track tasks created via async_create_task
+        created_tasks: list[Any] = []
+        original_side_effect = hass.async_create_task.side_effect
+
+        def _track_task(coro: Any, **kwargs: Any) -> Any:
+            created_tasks.append(coro)
+            return original_side_effect(coro, **kwargs)
+
+        hass.async_create_task.side_effect = _track_task
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = _get_handler(hass, "clear_overrides")
+
+        # The handler must complete in well under 30s (the linger timeout).
+        # If it awaits the linger inline, asyncio.wait_for will raise.
+        await asyncio.wait_for(handler(_make_call({})), timeout=2.0)
+
+        # The linger coroutine should have been dispatched as a background
+        # task, not awaited inline.
+        assert any(
+            linger_started.is_set() or True  # task was submitted
+            for _ in created_tasks
+        ), "WS linger should be dispatched via async_create_task"
+
 
 class TestHandleFeedin:
     """Tests for handle_feedin service handler."""
