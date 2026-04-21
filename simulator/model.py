@@ -132,6 +132,9 @@ class InverterModel:
     # Taper simulation: linear discharge reduction below this SoC threshold
     discharge_taper_soc: float = 15.0
 
+    # Round-trip battery efficiency (1.0 = lossless, 0.95 = 5% loss)
+    efficiency: float = 1.0
+
     # WS config overrides
     ws_unit: str = "W"  # "W" or "kW"
     ws_time_diff: int = 5  # normal
@@ -270,9 +273,14 @@ class InverterModel:
         if self.soc >= 100.0 and self.bat_charge_kw > 0:
             self.bat_charge_kw = 0.0
 
-        # Update SoC
+        # Update SoC (apply efficiency: charging stores less, discharging draws more)
         net_bat_kw = self.bat_charge_kw - self.bat_discharge_kw
-        delta_kwh = net_bat_kw * dt_hours
+        if net_bat_kw > 0:
+            delta_kwh = net_bat_kw * dt_hours * self.efficiency
+        else:
+            delta_kwh = (
+                net_bat_kw * dt_hours / self.efficiency if self.efficiency > 0 else 0.0
+            )
         delta_pct = delta_kwh / self.battery_capacity_kwh * 100.0
         self.soc = max(0.0, min(100.0, self.soc + delta_pct))
 

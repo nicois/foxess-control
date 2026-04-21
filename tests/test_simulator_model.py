@@ -1,4 +1,4 @@
-"""Tests for InverterModel physics — fdSoc enforcement."""
+"""Tests for InverterModel physics — fdSoc enforcement and efficiency."""
 
 from __future__ import annotations
 
@@ -104,3 +104,47 @@ class TestFdSocEnforcement:
         m = _model_with_schedule("ForceCharge", fd_soc=80, soc=80.0)
         m.tick(300)
         assert m.soc == pytest.approx(80.0, abs=0.01)
+
+
+class TestBatteryEfficiency:
+    """Verify that the efficiency factor affects energy stored/drawn."""
+
+    def test_default_efficiency_is_lossless(self) -> None:
+        m = InverterModel(fuzzing=False)
+        assert m.efficiency == 1.0
+
+    def test_charging_stores_less_energy(self) -> None:
+        """With 90% efficiency, charging stores 90% of input energy."""
+        lossless = _model_with_schedule("ForceCharge", fd_soc=100, soc=50.0)
+        lossy = _model_with_schedule("ForceCharge", fd_soc=100, soc=50.0)
+        lossy.efficiency = 0.90
+
+        lossless.tick(3600)
+        lossy.tick(3600)
+
+        assert lossy.soc < lossless.soc
+        soc_ratio = (lossy.soc - 50.0) / (lossless.soc - 50.0)
+        assert soc_ratio == pytest.approx(0.90, abs=0.01)
+
+    def test_discharging_draws_more_energy(self) -> None:
+        """With 90% efficiency, discharging consumes more battery than delivered."""
+        lossless = _model_with_schedule(
+            "ForceDischarge", fd_soc=10, soc=80.0, load_kw=0.0
+        )
+        lossy = _model_with_schedule("ForceDischarge", fd_soc=10, soc=80.0, load_kw=0.0)
+        lossy.efficiency = 0.90
+
+        lossless.tick(3600)
+        lossy.tick(3600)
+
+        assert lossy.soc < lossless.soc
+
+    def test_efficiency_one_matches_original_behavior(self) -> None:
+        """Efficiency=1.0 should produce identical results to pre-efficiency code."""
+        m = _model_with_schedule("ForceCharge", fd_soc=100, soc=50.0)
+        m.efficiency = 1.0
+        m.tick(60)
+        fd_pwr_kw = m.schedule_groups[0].fdPwr / 1000.0
+        dt_hours = 60.0 / 3600.0
+        expected_delta_pct = fd_pwr_kw * dt_hours / m.battery_capacity_kwh * 100.0
+        assert m.soc == pytest.approx(50.0 + expected_delta_pct, abs=0.1)
