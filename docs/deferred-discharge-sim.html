@@ -62,6 +62,9 @@
   .prio-ok { background: rgba(76, 175, 80, 0.15); border: 1px solid rgba(76, 175, 80, 0.3); }
   .prio-warn { background: rgba(255, 152, 0, 0.15); border: 1px solid rgba(255, 152, 0, 0.3); }
   .prio-fail { background: rgba(244, 67, 54, 0.15); border: 1px solid rgba(244, 67, 54, 0.3); }
+
+  /* Suspension markers in legend */
+  .legend-marker { width: 10px; height: 10px; border-radius: 50%; border: 2px solid; background: none; }
 </style>
 </head>
 <body>
@@ -115,7 +118,7 @@
       <input type="range" id="safety" min="1.0" max="3.0" step="0.1" value="1.5">
     </div>
     <div class="ctrl-group">
-      <label>Peak decay / poll <span class="val" id="v-decay">0.85</span></label>
+      <label>Peak decay / tick (60s) <span class="val" id="v-decay">0.85</span></label>
       <input type="range" id="decay" min="0.50" max="0.99" step="0.01" value="0.85">
     </div>
   </div>
@@ -180,6 +183,36 @@
       <input type="range" id="stepMin" min="5" max="120" step="5" value="30">
     </div>
   </div>
+
+  <h2 style="margin-top:14px">Taper profile</h2>
+  <div class="ctrl-grid">
+    <div class="ctrl-group">
+      <label><input type="checkbox" id="taperEnabled" style="accent-color:#00d4ff"> Enable BMS taper model</label>
+    </div>
+    <div class="ctrl-group">
+      <label>Taper start SoC <span class="val" id="v-taperSoc">40%</span></label>
+      <input type="range" id="taperSoc" min="10" max="60" step="1" value="40">
+    </div>
+    <div class="ctrl-group">
+      <label>Min taper ratio <span class="val" id="v-taperMin">0.30</span></label>
+      <input type="range" id="taperMin" min="0.05" max="0.90" step="0.05" value="0.30">
+    </div>
+  </div>
+
+  <h2 style="margin-top:14px">Solar generation</h2>
+  <div class="ctrl-grid">
+    <div class="ctrl-group">
+      <label><input type="checkbox" id="solarEnabled" style="accent-color:#00d4ff"> Enable solar generation</label>
+    </div>
+    <div class="ctrl-group">
+      <label>Peak solar <span class="val" id="v-solarPeak">5 kW</span></label>
+      <input type="range" id="solarPeak" min="0" max="15" step="0.5" value="5">
+    </div>
+    <div class="ctrl-group">
+      <label>Sunset hour <span class="val" id="v-sunsetHour">20:00</span></label>
+      <input type="range" id="sunsetHour" min="17" max="22" step="0.5" value="20">
+    </div>
+  </div>
 </div>
 
 <!-- Presets -->
@@ -198,9 +231,9 @@
   <div class="sim-panels" id="panels">
     <div class="panel" id="newPanel">
       <h3 id="newTitle">New algorithm (peak-tracked safety floor)</h3>
-      <div class="chart-label">Power (kW) &mdash; discharge, house load, grid flow, safety floor</div>
+      <div class="chart-label">Power (kW) &mdash; discharge, house load, grid flow, safety floor, solar</div>
       <canvas id="newPowerCvs" width="800" height="240"></canvas>
-      <div class="chart-label">SoC (%) &middot; cumulative feed-in (kWh) &middot; peak consumption (kW)</div>
+      <div class="chart-label">SoC (%) &middot; cumulative feed-in (kWh) &middot; peak consumption (kW) &middot; safe horizon</div>
       <canvas id="newSocCvs" width="800" height="200"></canvas>
       <div class="legend" id="newLegend"></div>
       <div class="stats" id="newStats"></div>
@@ -208,7 +241,7 @@
     </div>
     <div class="panel old-algo" id="oldPanel" style="display:none">
       <h3>Old algorithm (instantaneous floor, no peak tracking)</h3>
-      <div class="chart-label">Power (kW) &mdash; discharge, house load, grid flow</div>
+      <div class="chart-label">Power (kW) &mdash; discharge, house load, grid flow, solar</div>
       <canvas id="oldPowerCvs" width="800" height="240"></canvas>
       <div class="chart-label">SoC (%) &middot; cumulative feed-in (kWh)</div>
       <canvas id="oldSocCvs" width="800" height="200"></canvas>
@@ -233,14 +266,18 @@ function P() {
     wEnd:      +document.getElementById('wEnd').value,
     safety:    +document.getElementById('safety').value,
     peakDecay: +document.getElementById('decay').value,
+    taperEnabled: document.getElementById('taperEnabled').checked,
+    taperSoc:  +document.getElementById('taperSoc').value,
+    taperMin:  +document.getElementById('taperMin').value,
+    solarEnabled: document.getElementById('solarEnabled').checked,
+    solarPeak: +document.getElementById('solarPeak').value,
+    sunsetHour: +document.getElementById('sunsetHour').value,
   };
 }
 
 const TICK_S = 60;
-const POLL_TICKS = 5;
 
 function totalTicks(p) { return Math.max(1, (p.wEnd - p.wStart) * 3600 / TICK_S); }
-function tickDecay(p) { return Math.pow(p.peakDecay, 1 / POLL_TICKS); }
 
 // ── Load profile builder ──────────────────────────────────────────
 function buildLoadFn(total) {
@@ -273,29 +310,75 @@ function buildLoadFn(total) {
   return () => 0;
 }
 
-// ── Algorithms (matching smart_battery/algorithms.py exactly) ─────
+// ── Solar profile builder ─────────────────────────────────────────
+function buildSolarFn(p) {
+  if (!p.solarEnabled) return () => 0;
+  const peak = p.solarPeak;
+  const sunset = p.sunsetHour;
+  return (t) => {
+    const hour = p.wStart + t * TICK_S / 3600;
+    if (hour >= sunset) return 0;
+    const hoursToSunset = sunset - hour;
+    const rampHours = 3;
+    if (hoursToSunset >= rampHours) return peak;
+    return peak * (hoursToSunset / rampHours);
+  };
+}
+
+// ── Taper model ───────────────────────────────────────────────────
+function taperRatio(p, soc) {
+  if (!p.taperEnabled) return 1.0;
+  if (soc >= p.taperSoc) return 1.0;
+  const ratio = p.taperMin + (1 - p.taperMin) * (soc - p.minSoc) / (p.taperSoc - p.minSoc);
+  return Math.max(p.taperMin, Math.min(1.0, ratio));
+}
+
+function taperEstimateDischargeHours(p, soc, effectiveKw) {
+  if (!p.taperEnabled || effectiveKw <= 0) {
+    const energy = (soc - p.minSoc) / 100 * p.capKwh;
+    return energy > 0 ? energy / effectiveKw : 0;
+  }
+  let hours = 0;
+  let s = soc;
+  const step = 0.5;
+  while (s > p.minSoc) {
+    const r = taperRatio(p, s);
+    const powerKw = effectiveKw * r;
+    if (powerKw <= 0) break;
+    const dSoc = Math.min(step, s - p.minSoc);
+    const dKwh = dSoc / 100 * p.capKwh;
+    hours += dKwh / powerKw;
+    s -= dSoc;
+  }
+  return hours;
+}
+
+// ── Algorithms (matching smart_battery/algorithms.py) ─────────────
 
 // should_suspend_discharge — P2 preemptive check + end-of-discharge guard
 const END_GUARD_MINUTES = 10.0;
+// Suspension reason constants
+const SUSP_NONE = 0;
+const SUSP_END_GUARD = 1;
+const SUSP_SOC_CONSERVATION = 2;
+
 function shouldSuspend(p, soc, remainH, consumption, peakCons) {
-  if (remainH <= 0 || p.capKwh <= 0) return false;
+  if (remainH <= 0 || p.capKwh <= 0) return SUSP_NONE;
   const energy = (soc - p.minSoc) / 100 * p.capKwh;
-  if (energy <= 0) return true;
+  if (energy <= 0) return SUSP_SOC_CONSERVATION;
   let cons = Math.max(0, consumption);
   if (peakCons != null) cons = Math.max(cons, peakCons);
 
-  // End-of-discharge guard: if remaining energy can't sustain the
-  // safety floor for ~10 minutes, forced discharge would soon drop
-  // to 100W minimum causing grid import.  Self-use avoids this.
   if (cons > 0) {
     const floorKw = cons * p.safety;
     const guardKwh = floorKw * (END_GUARD_MINUTES / 60);
-    if (energy < guardKwh) return true;
+    if (energy < guardKwh) return SUSP_END_GUARD;
   }
 
-  if (cons <= 0) return false;
+  if (cons <= 0) return SUSP_NONE;
   const hoursToMin = energy / cons;
-  return hoursToMin <= remainH * (1 + p.headroom);
+  if (hoursToMin <= remainH * (1 + p.headroom)) return SUSP_SOC_CONSERVATION;
+  return SUSP_NONE;
 }
 
 // calculate_discharge_deferred_start
@@ -312,8 +395,10 @@ function calcDeferredStart(p, soc, remainTicks, consumption, peakCons, feedinRem
     let eff = maxKw - cons;
     if (eff <= 0) eff = 0;
     if (eff > 0) {
-      const hrs = energy / eff / (1 - p.headroom);
-      socDL = remainTicks - hrs * 3600 / TICK_S;
+      const hrs = p.taperEnabled
+        ? taperEstimateDischargeHours(p, soc, eff)
+        : energy / eff;
+      socDL = remainTicks - hrs / (1 - p.headroom) * 3600 / TICK_S;
     }
   }
 
@@ -332,7 +417,17 @@ function calcDeferredStart(p, soc, remainTicks, consumption, peakCons, feedinRem
   return Math.max(0, Math.min(socDL, feedDL));
 }
 
-// calculate_discharge_power
+// compute_safe_schedule_end — C-027
+function computeSafeHorizonTick(p, soc, powerW, currentTick) {
+  const drainKw = powerW / 1000;
+  const energy = (soc - p.minSoc) / 100 * p.capKwh;
+  if (drainKw <= 0 || energy <= 0) return totalTicks(p);
+  const safeHours = energy / drainKw / p.safety;
+  const safeTick = currentTick + safeHours * 3600 / TICK_S;
+  return Math.min(safeTick, totalTicks(p));
+}
+
+// calculate_discharge_power (with optional taper)
 function calcDischargePower(p, soc, remainH, consumption, peakCons, feedinRemKwh) {
   let energy = (soc - p.minSoc) / 100 * p.capKwh;
   if (energy <= 0) return 100;
@@ -363,6 +458,13 @@ function calcDischargePower(p, soc, remainH, consumption, peakCons, feedinRemKwh
   pacedKw -= cons;
   pacedKw *= (1 + p.headroom);
   let powerW = pacedKw * 1000;
+
+  // Apply BMS taper: reduce effective power at low SoC
+  if (p.taperEnabled) {
+    const tr = taperRatio(p, soc);
+    const taperMaxW = p.maxPowerW * tr;
+    powerW = Math.min(powerW, taperMaxW);
+  }
 
   // P1: Safety floor
   if (safetyFloorW > 0 && safetyFloorW <= p.maxPowerW) {
@@ -419,9 +521,8 @@ function calcDeferredStartOLD(p, soc, remainTicks, consumption, feedinRemKwh) {
 }
 
 // ── Simulation ────────────────────────────────────────────────────
-function simulate(p, loadFn, useOld) {
+function simulate(p, loadFn, solarFn, useOld) {
   const total = totalTicks(p);
-  const td = tickDecay(p);
   let soc = p.startSoc;
   let started = false;
   let suspended = false;
@@ -430,20 +531,25 @@ function simulate(p, loadFn, useOld) {
   const feedinLimit = p.feedinLimit > 0 ? p.feedinLimit : null;
 
   const log = { soc: [], powerKw: [], houseKw: [], gridKw: [], feedinKwh: [],
-                peakKw: [], safetyFloorKw: [], deferred: [], suspendedArr: [] };
+                peakKw: [], safetyFloorKw: [], deferred: [], suspendedArr: [],
+                suspendReason: [], safeHorizonTick: [], solarKw: [], netLoadKw: [] };
   let importKwh = 0, maxImportKw = 0, transitionTick = -1;
-  let suspendCount = 0;
+  let endGuardCount = 0, socConservationCount = 0;
 
   for (let t = 0; t < total; t++) {
-    const houseKw = loadFn(t);
+    const rawHouseKw = loadFn(t);
+    const solar = solarFn(t);
+    const houseKw = Math.max(0, rawHouseKw - solar);
     const remTicks = total - t;
     const remH = remTicks * TICK_S / 3600;
     const tickH = TICK_S / 3600;
 
-    // Update peak consumption every tick (matches TICK_DECAY in listeners.py)
-    peakCons = Math.max(Math.max(0, houseKw), peakCons * td);
+    // Decay peak consumption directly per tick (matches production PEAK_DECAY_PER_TICK)
+    peakCons = Math.max(Math.max(0, houseKw), peakCons * p.peakDecay);
 
     let dischW = 0, gridKw = 0;
+    let suspReason = SUSP_NONE;
+    let horizonTick = total;
 
     if (!started) {
       // Self-use: battery serves house, no export
@@ -474,6 +580,7 @@ function simulate(p, loadFn, useOld) {
           dischW = calcDischargePower(p, soc, remH, houseKw, peakCons, feedRem2);
         }
 
+        horizonTick = computeSafeHorizonTick(p, soc, dischW, t);
         soc -= (dischW / 1000 * tickH / p.capKwh) * 100;
         const expKw = dischW / 1000 - houseKw;
         gridKw = expKw;
@@ -492,10 +599,11 @@ function simulate(p, loadFn, useOld) {
       } else {
         // Check suspension (P2 — protect min SoC)
         const feedRem = feedinLimit != null ? feedinLimit - feedinKwh : null;
-        const shouldSusp = !useOld && shouldSuspend(p, soc, remH, houseKw, peakCons);
-        if (shouldSusp) {
+        suspReason = useOld ? SUSP_NONE : shouldSuspend(p, soc, remH, houseKw, peakCons);
+        if (suspReason !== SUSP_NONE) {
           suspended = true;
-          suspendCount++;
+          if (suspReason === SUSP_END_GUARD) endGuardCount++;
+          else socConservationCount++;
           // Suspended — self-use only
           const availKwh = Math.max(0, (soc - p.minSoc) / 100 * p.capKwh);
           const selfUseKw = Math.min(Math.max(0, houseKw), availKwh / tickH);
@@ -508,6 +616,7 @@ function simulate(p, loadFn, useOld) {
           } else {
             dischW = calcDischargePower(p, soc, remH, houseKw, peakCons, feedRem);
           }
+          horizonTick = computeSafeHorizonTick(p, soc, dischW, t);
           soc -= (dischW / 1000 * tickH / p.capKwh) * 100;
           const expKw = dischW / 1000 - houseKw;
           gridKw = expKw;
@@ -531,14 +640,19 @@ function simulate(p, loadFn, useOld) {
     log.safetyFloorKw.push(peakCons * p.safety);
     log.deferred.push(!started);
     log.suspendedArr.push(suspended);
+    log.suspendReason.push(suspReason);
+    log.safeHorizonTick.push(horizonTick);
+    log.solarKw.push(solar);
+    log.netLoadKw.push(rawHouseKw);
   }
 
   return { log, importKwh, maxImportKw, transitionTick,
-           finalFeedin: feedinKwh, finalSoc: soc, suspendCount };
+           finalFeedin: feedinKwh, finalSoc: soc,
+           endGuardCount, socConservationCount };
 }
 
 // ── Chart drawing ─────────────────────────────────────────────────
-function drawChart(cvs, configs, transitionTick, p) {
+function drawChart(cvs, configs, transitionTick, p, suspendReasons) {
   const ctx = cvs.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   const rect = cvs.getBoundingClientRect();
@@ -586,6 +700,19 @@ function drawChart(cvs, configs, transitionTick, p) {
     ctx.setLineDash([3, 3]); ctx.beginPath();
     ctx.moveTo(xP(transitionTick), pad.t); ctx.lineTo(xP(transitionTick), pad.t + ch);
     ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  // Suspension region shading
+  if (suspendReasons) {
+    for (let i = 0; i < suspendReasons.length; i++) {
+      if (suspendReasons[i] === SUSP_END_GUARD) {
+        ctx.fillStyle = 'rgba(255, 152, 0, 0.12)';
+        ctx.fillRect(xP(i) - 1, pad.t, 3, ch);
+      } else if (suspendReasons[i] === SUSP_SOC_CONSERVATION) {
+        ctx.fillStyle = 'rgba(156, 39, 176, 0.12)';
+        ctx.fillRect(xP(i) - 1, pad.t, 3, ch);
+      }
+    }
   }
 
   // Import highlighting (red bars below zero)
@@ -655,7 +782,10 @@ function renderPanel(prefix, r, p, isOld) {
   if (!isOld) {
     powerCfg.push({ data: r.log.safetyFloorKw, color: 'rgba(255,80,80,0.5)', label: 'Floor', dash: [4, 4] });
   }
-  drawChart(pCvs, powerCfg, r.transitionTick, p);
+  if (p.solarEnabled) {
+    powerCfg.push({ data: r.log.solarKw, color: '#ffeb3b', label: 'Solar', alpha: 0.6, dash: [2, 2] });
+  }
+  drawChart(pCvs, powerCfg, r.transitionTick, p, isOld ? null : r.log.suspendReason);
 
   const socCfg = [
     { data: r.log.soc, color: '#00bcd4', label: 'SoC', thick: true, yMin: 0, yMax: 100 },
@@ -663,25 +793,38 @@ function renderPanel(prefix, r, p, isOld) {
   ];
   if (!isOld) {
     socCfg.push({ data: r.log.peakKw, color: 'rgba(255,80,80,0.4)', label: 'Peak' });
+    // Safe horizon as percentage of total ticks → scaled to SoC range for overlay
+    const horizonPct = r.log.safeHorizonTick.map((ht) => (ht / totalTicks(p)) * 100);
+    socCfg.push({ data: horizonPct, color: 'rgba(255,200,0,0.3)', label: 'Safe horizon', dash: [3, 6] });
   }
-  drawChart(sCvs, socCfg, r.transitionTick, p);
+  drawChart(sCvs, socCfg, r.transitionTick, p, isOld ? null : r.log.suspendReason);
 
   // Legend
   const leg = document.getElementById(prefix + 'Legend');
   const items = [
-    ['#ff9800', 'Discharge'], ['#e91e63', 'House load'],
+    ['#ff9800', 'Discharge'], ['#e91e63', 'House load (net of solar)'],
     ['#4caf50', 'Export'], ['#f44336', 'Import (bad!)'],
     ['#00bcd4', 'SoC'], ['#ffc107', 'Feed-in'],
   ];
   if (!isOld) {
     items.push(['rgba(255,80,80,0.5)', 'Safety floor']);
     items.push(['rgba(0,212,255,0.2)', 'Self-use phase']);
+    items.push(['rgba(255,200,0,0.3)', 'Safe horizon (C-027)']);
   }
-  leg.innerHTML = items.map(([c, l]) =>
+  if (p.solarEnabled) {
+    items.push(['#ffeb3b', 'Solar']);
+  }
+  let html = items.map(([c, l]) =>
     `<div class="legend-item"><div class="legend-dot" style="background:${c}"></div>${l}</div>`
   ).join('');
+  if (!isOld) {
+    html += `<div class="legend-item"><div class="legend-marker" style="border-color:#ff9800"></div>End-guard suspend</div>`;
+    html += `<div class="legend-item"><div class="legend-marker" style="border-color:#9c27b0"></div>SoC-conservation suspend</div>`;
+  }
+  leg.innerHTML = html;
 
   // Stats
+  const totalSusp = r.endGuardCount + r.socConservationCount;
   const tMin = r.transitionTick >= 0 ? Math.round(r.transitionTick * TICK_S / 60) : -1;
   const tHour = p.wStart + Math.floor(tMin / 60);
   const tMinR = tMin % 60;
@@ -692,7 +835,7 @@ function renderPanel(prefix, r, p, isOld) {
     <div class="stat"><div class="val">${r.finalFeedin.toFixed(1)} kWh</div><div class="lbl">Feed-in</div></div>
     <div class="stat"><div class="val">${r.finalSoc.toFixed(0)}%</div><div class="lbl">Final SoC</div></div>
     <div class="stat"><div class="val" style="color:${r.maxImportKw > 0.05 ? '#f44336' : '#4caf50'}">${r.importKwh > 0.001 ? r.importKwh.toFixed(2) + ' kWh' : 'None'}</div><div class="lbl">Import</div></div>
-    <div class="stat"><div class="val">${r.suspendCount}</div><div class="lbl">Suspensions</div></div>
+    <div class="stat"><div class="val">${isOld ? totalSusp : r.endGuardCount + ' / ' + r.socConservationCount}</div><div class="lbl">${isOld ? 'Suspensions' : 'Susp (guard/SoC)'}</div></div>
   `;
 
   // Priority board
@@ -730,8 +873,9 @@ function render() {
   if (p.wEnd <= p.wStart) return;
   const total = totalTicks(p);
   const loadFn = buildLoadFn(total);
+  const solarFn = buildSolarFn(p);
 
-  const rNew = simulate(p, loadFn, false);
+  const rNew = simulate(p, loadFn, solarFn, false);
   renderPanel('new', rNew, p, false);
 
   const comparing = document.getElementById('compareOld').checked;
@@ -740,7 +884,7 @@ function render() {
   if (comparing) {
     oldPanel.style.display = '';
     panels.classList.add('comparing');
-    const rOld = simulate(p, loadFn, true);
+    const rOld = simulate(p, loadFn, solarFn, true);
     renderPanel('old', rOld, p, true);
   } else {
     oldPanel.style.display = 'none';
@@ -761,6 +905,8 @@ const presets = [
   { name: '9. SoC-constrained', soc: 45, load: 'steady', steadyKw: 1, desc: 'May not reach feed-in target' },
   { name: '10. No feed-in limit', soc: 80, load: 'steady', steadyKw: 2, feedin: 0, desc: 'Drain to min SoC only' },
   { name: '11. Sudden EV', soc: 90, load: 'step', stepLow: 0.5, stepHigh: 8, stepMin: 30, desc: 'Step load after 30 min' },
+  { name: '12. BMS taper', soc: 90, load: 'steady', steadyKw: 1, taper: true, desc: 'BMS curtails power at low SoC' },
+  { name: '13. Evening solar', soc: 85, load: 'steady', steadyKw: 2, solar: true, solarPeak: 4, sunsetHour: 20, wStart: 17, desc: 'Solar reduces net load during shoulder hours' },
 ];
 
 let activePreset = -1;
@@ -776,10 +922,20 @@ function applyPreset(idx) {
   document.getElementById('capKwh').value = 20;
   document.getElementById('minSoc').value = 30;
   document.getElementById('headroom').value = 10;
-  document.getElementById('wStart').value = 18;
-  document.getElementById('wEnd').value = 20;
+  document.getElementById('wStart').value = pr.wStart || 18;
+  document.getElementById('wEnd').value = pr.wEnd || 20;
   document.getElementById('safety').value = 1.5;
   document.getElementById('decay').value = 0.85;
+
+  // Taper
+  document.getElementById('taperEnabled').checked = !!pr.taper;
+  document.getElementById('taperSoc').value = pr.taperSoc || 40;
+  document.getElementById('taperMin').value = pr.taperMin || 0.30;
+
+  // Solar
+  document.getElementById('solarEnabled').checked = !!pr.solar;
+  document.getElementById('solarPeak').value = pr.solarPeak || 5;
+  document.getElementById('sunsetHour').value = pr.sunsetHour || 20;
 
   document.getElementById('loadType').value = pr.load;
   showLoadParams();
@@ -843,6 +999,10 @@ function updateLabels() {
   document.getElementById('v-stepLow').textContent = document.getElementById('stepLow').value + ' kW';
   document.getElementById('v-stepHigh').textContent = document.getElementById('stepHigh').value + ' kW';
   document.getElementById('v-stepMin').textContent = document.getElementById('stepMin').value + ' min';
+  document.getElementById('v-taperSoc').textContent = document.getElementById('taperSoc').value + '%';
+  document.getElementById('v-taperMin').textContent = (+document.getElementById('taperMin').value).toFixed(2);
+  document.getElementById('v-solarPeak').textContent = document.getElementById('solarPeak').value + ' kW';
+  document.getElementById('v-sunsetHour').textContent = (+document.getElementById('sunsetHour').value).toFixed(1).replace('.0', '') + ':00';
 }
 
 // ── Wire up events ────────────────────────────────────────────────
