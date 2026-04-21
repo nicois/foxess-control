@@ -70,21 +70,26 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _get_capacity_kwh(self) -> float:
         """Read battery capacity from config (needed for SoC integration)."""
         from .const import CONF_BATTERY_CAPACITY_KWH
+        from .smart_battery.domain_data import SmartBatteryDomainData
 
-        for key in self.hass.data.get(DOMAIN, {}):
-            if not str(key).startswith("_"):
-                entry = self.hass.config_entries.async_get_entry(str(key))
-                if entry is not None:
-                    return float(entry.options.get(CONF_BATTERY_CAPACITY_KWH, 0))
+        dd = self.hass.data.get(DOMAIN)
+        if not isinstance(dd, SmartBatteryDomainData):
+            return 0.0
+        for entry_id in dd.entries:
+            entry = self.hass.config_entries.async_get_entry(entry_id)
+            if entry is not None:
+                return float(entry.options.get(CONF_BATTERY_CAPACITY_KWH, 0))
         return 0.0
 
     @property
     def _bms_fetch_interval(self) -> float:
         from .const import CONF_BMS_POLLING_INTERVAL, DEFAULT_BMS_POLLING_INTERVAL
+        from .smart_battery.domain_data import SmartBatteryDomainData
 
-        for key in self.hass.data.get(DOMAIN, {}):
-            if not str(key).startswith("_"):
-                entry = self.hass.config_entries.async_get_entry(str(key))
+        dd = self.hass.data.get(DOMAIN)
+        if isinstance(dd, SmartBatteryDomainData):
+            for entry_id in dd.entries:
+                entry = self.hass.config_entries.async_get_entry(entry_id)
                 if entry is not None:
                     return float(
                         entry.options.get(

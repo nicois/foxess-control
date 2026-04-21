@@ -1422,7 +1422,7 @@ class TestHandleSmartDischarge:
         assert captured_interval is not None
 
         # Simulate SoC dropping to threshold via coordinator
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 30.0}
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {"SoC": 30.0}
 
         # First reading: registers count=1, doesn't cancel yet
         await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
@@ -1483,7 +1483,7 @@ class TestHandleSmartDischarge:
         assert captured_interval is not None
 
         # SoC still above threshold via coordinator
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 50.0}
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {"SoC": 50.0}
 
         await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
 
@@ -1680,7 +1680,7 @@ class TestHandleSmartDischarge:
         assert captured_interval is not None
 
         # Simulate SoC dropping and time advancing past deferred start
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 50.0,
             "loadsPower": 0.0,
             "pvPower": 0.0,
@@ -1755,7 +1755,7 @@ class TestHandleSmartDischarge:
         ws_cb = hass.data[DOMAIN].ws_discharge_callback
         assert ws_cb is not None, "_ws_discharge_callback must be set after setup"
 
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 50.0,
             "loadsPower": 0.0,
             "pvPower": 0.0,
@@ -1965,7 +1965,7 @@ class TestDischargeSocUnavailability:
         inv.set_schedule.reset_mock()
 
         # Make SoC unavailable
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = None
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = None
 
         for i in range(MAX_SOC_UNAVAILABLE_COUNT):
             with patch(
@@ -2030,7 +2030,7 @@ class TestDischargeSocUnavailability:
         assert captured_interval_callback is not None
 
         # Two unavailable readings
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = None
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = None
         for t in [1, 2]:
             with patch(
                 "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -2044,7 +2044,7 @@ class TestDischargeSocUnavailability:
         assert state["soc_unavailable_count"] == 2
 
         # One available reading resets the counter
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 70.0}
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {"SoC": 70.0}
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 18, 0, 0),
@@ -2267,7 +2267,7 @@ class TestErrorSurfacing:
         assert hass.data[DOMAIN].smart_error_state is None
 
         # Make SoC unavailable and fire until abort
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = None
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = None
         for i in range(MAX_SOC_UNAVAILABLE_COUNT):
             with patch(
                 "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -2821,7 +2821,7 @@ class TestHandleSmartCharge:
         assert captured_interval is not None
 
         # Simulate SoC reaching target via coordinator
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 80.0}
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {"SoC": 80.0}
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -2834,7 +2834,7 @@ class TestHandleSmartCharge:
             assert state.get("target_reached") is True
 
             # Simulate SoC dropping below target (consumption spike)
-            hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 75.0}
+            hass.data[DOMAIN].entries["entry1"].coordinator.data = {"SoC": 75.0}
             await captured_interval(datetime.datetime(2026, 4, 7, 5, 5, 0))
             state = hass.data[DOMAIN].smart_charge_state
             assert state is not None
@@ -2901,7 +2901,7 @@ class TestHandleSmartCharge:
 
         # At 60% with 2h left + 3kW load: 60kWh*20%/2h + 3kW = 6000+3000 = 9000W
         # vs initial ~12kW → delta well above 100W threshold
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 60.0,
             "loadsPower": 3.0,
             "pvPower": 0.0,
@@ -3038,7 +3038,7 @@ class TestHandleSmartCharge:
         # 10kWh * 20% = 2kWh; 80% of 10.5kW = 8.4kW; 2/8.4 = 0.238h
         # + 10% time buffer: 0.238/0.9 = 0.264h ≈ 16min
         # deferred_start = 05:44 → still in the future at 05:20
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 60.0}
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {"SoC": 60.0}
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -3166,7 +3166,7 @@ class TestHandleSmartCharge:
         inv.set_schedule.reset_mock()
 
         # Make SoC unavailable by clearing coordinator data
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = None
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = None
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -3233,7 +3233,7 @@ class TestHandleSmartCharge:
         inv.set_schedule.reset_mock()
 
         # Make SoC unavailable
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = None
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = None
 
         # Fire unavailable checks up to threshold
         for i in range(MAX_SOC_UNAVAILABLE_COUNT):
@@ -3301,7 +3301,7 @@ class TestHandleSmartCharge:
         assert captured_interval_callback is not None
 
         # Two unavailable readings
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = None
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = None
 
         for t in [5, 10]:
             with patch(
@@ -3314,7 +3314,7 @@ class TestHandleSmartCharge:
         assert state["soc_unavailable_count"] == 2
 
         # One available reading resets the counter
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 60.0}
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {"SoC": 60.0}
 
         inv.set_schedule.reset_mock()
         with patch(
@@ -3794,7 +3794,7 @@ class TestRecoverSessions:
         # Change SoC so the power recalculation produces a different value,
         # forcing the listener to call apply_mode (which hits the slow path
         # because recovered sessions start with empty adapter groups).
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 30.0,
             "loadsPower": 0.0,
             "pvPower": 0.0,
@@ -4288,7 +4288,7 @@ class TestSocStabilityCounters:
         assert captured_interval is not None
 
         # SoC jumps to target
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 80.0}
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {"SoC": 80.0}
 
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
@@ -4352,7 +4352,7 @@ class TestSocStabilityCounters:
         assert captured_interval is not None
 
         # SoC at target → count=1
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 80.0}
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {"SoC": 80.0}
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 4, 0, 0),
@@ -4362,7 +4362,7 @@ class TestSocStabilityCounters:
         assert hass.data[DOMAIN].smart_charge_state.get("target_reached") is True
 
         # SoC drops back → target_reached clears, session resumes
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 78.0}
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {"SoC": 78.0}
         with patch(
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 4, 5, 0),
@@ -4419,7 +4419,7 @@ class TestSocStabilityCounters:
         assert captured_interval is not None
 
         # SoC drops to threshold
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 30.0}
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {"SoC": 30.0}
         await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
 
         # Session still active after just one reading
@@ -4474,12 +4474,12 @@ class TestSocStabilityCounters:
         assert captured_interval is not None
 
         # SoC dips below → count=1
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 29.0}
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {"SoC": 29.0}
         await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
         assert hass.data[DOMAIN].smart_discharge_state["soc_below_min_count"] == 1
 
         # SoC recovers → counter resets
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {"SoC": 35.0}
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {"SoC": 35.0}
         await captured_interval(datetime.datetime(2026, 4, 7, 18, 1, 0))
         assert hass.data[DOMAIN].smart_discharge_state["soc_below_min_count"] == 0
 
@@ -4542,7 +4542,7 @@ class TestFeedinEnergyLimit:
         assert state["feedin_start_kwh"] is None
 
         # First tick: baseline deferred — listener captures it now
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 75.0,
             "feedin": 100.0,
         }
@@ -4551,7 +4551,7 @@ class TestFeedinEnergyLimit:
         assert state["feedin_start_kwh"] == 100.0
 
         # Counter has increased by 2.5 kWh (> 2.0 limit)
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 70.0,
             "feedin": 102.5,
         }
@@ -4611,7 +4611,7 @@ class TestFeedinEnergyLimit:
         assert captured_interval is not None
 
         # First tick: captures baseline (feedin_start_kwh deferred to listener)
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 75.0,
             "feedin": 500.0,
         }
@@ -4621,7 +4621,7 @@ class TestFeedinEnergyLimit:
         assert state["feedin_start_kwh"] == 500.0
 
         # Counter +1 kWh — under limit
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 70.0,
             "feedin": 501.0,
         }
@@ -4630,7 +4630,7 @@ class TestFeedinEnergyLimit:
         assert state is not None
 
         # Counter +2 kWh — still under
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 65.0,
             "feedin": 502.0,
         }
@@ -4639,7 +4639,7 @@ class TestFeedinEnergyLimit:
         assert state is not None
 
         # Counter +3 kWh — at limit, should cancel
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 60.0,
             "feedin": 503.0,
         }
@@ -4696,7 +4696,7 @@ class TestFeedinEnergyLimit:
         assert captured_interval is not None
 
         # Even with large counter increase, session continues (no limit set)
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 70.0,
             "feedin": 600.0,
         }
@@ -4755,7 +4755,7 @@ class TestFeedinEnergyLimit:
         assert captured_interval is not None
 
         # feedin counter missing from coordinator data
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 70.0,
         }
         await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
@@ -4822,7 +4822,7 @@ class TestFeedinEnergyLimit:
         initial_point_calls = len(point_in_time_calls)
 
         # Baseline tick: listener captures feedin_start_kwh from fresh data
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 78.0,
             "feedin": 100.0,
         }
@@ -4840,7 +4840,7 @@ class TestFeedinEnergyLimit:
 
         # Poll 1: exported 0.30 kWh. No previous reading yet →
         # no observed rate, no early stop scheduled.
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 70.0,
             "feedin": 100.3,
         }
@@ -4861,7 +4861,7 @@ class TestFeedinEnergyLimit:
         # observed_rate = (100.6 - 100.3) / 0.08333 = 3.6 kW
         # energy_next_poll = 3.6 * 0.08333 = 0.30 kWh
         # remaining = 0.40 kWh > 0.30 → no early stop
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 65.0,
             "feedin": 100.6,
         }
@@ -4883,7 +4883,7 @@ class TestFeedinEnergyLimit:
         # remaining = 0.15 kWh, energy_next_poll = 0.25
         # 0.15 <= 0.25 → schedule early stop
         # seconds_to_target = 0.15 / 3.0 * 3600 = 180s
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 62.0,
             "feedin": 100.85,
         }
@@ -4968,7 +4968,7 @@ class TestFeedinEnergyLimit:
         initial_point_calls = len(point_in_time_calls)
 
         # Baseline tick: listener captures feedin_start_kwh from fresh data
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 78.0,
             "feedin": 100.0,
         }
@@ -4982,7 +4982,7 @@ class TestFeedinEnergyLimit:
             await captured_interval(datetime.datetime(2026, 4, 7, 17, 0, 5))
 
         # Poll 1: establish observed rate baseline
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 75.0,
             "feedin": 100.3,
         }
@@ -4999,7 +4999,7 @@ class TestFeedinEnergyLimit:
         # observed_rate = (101.0 - 100.3) / 0.08333 = 8.4 kW
         # energy_next_poll = 8.4 * 0.08333 = 0.70 kWh
         # 2.0 > 0.70 → no early stop
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 70.0,
             "feedin": 101.0,
         }
@@ -5083,7 +5083,7 @@ class TestFeedinBaselineDeferred:
         )
 
         # Simulate WS delivering fresh data on first listener tick
-        hass.data[DOMAIN]["entry1"]["coordinator"].data = {
+        hass.data[DOMAIN].entries["entry1"].coordinator.data = {
             "SoC": 79.0,
             "feedin": 776.31,
         }
@@ -5441,7 +5441,7 @@ class TestStaleWorkModeAfterCleanupFailure:
 
         def _on_session_cancel() -> None:
             entry_id = _first_entry_id(hass)
-            coordinator = hass.data[DOMAIN][entry_id]["coordinator"]
+            coordinator = hass.data[DOMAIN].entries[entry_id].coordinator
             if coordinator.data is not None:
                 coordinator.data["_work_mode"] = None
 
@@ -5452,7 +5452,7 @@ class TestStaleWorkModeAfterCleanupFailure:
 
         await handler(_make_call({}))
 
-        coordinator = hass.data[DOMAIN]["entry1"]["coordinator"]
+        coordinator = hass.data[DOMAIN].entries["entry1"].coordinator
         assert coordinator.data["_work_mode"] is None
 
     @pytest.mark.asyncio

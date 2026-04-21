@@ -627,8 +627,8 @@ class TestBmsTemperatureFetch:
 
         web_session = AsyncMock()
         web_session.async_get_battery_temperature = AsyncMock(return_value=23.5)
-        dd["_web_session"] = web_session
-        dd["_battery_compound_id"] = "abc@SN123"
+        dd.web_session = web_session
+        dd.battery_compound_id = "abc@SN123"
 
         data: dict[str, Any] = {"SoC": 50.0}
         await coord._fetch_bms_temperature(data)
@@ -642,7 +642,7 @@ class TestBmsTemperatureFetch:
     async def test_fetch_bms_skips_when_web_session_missing(self) -> None:
         """Without web_session, _fetch_bms_temperature returns early."""
         coord, dd = self._make_coord_with_domain_data()
-        dd["_battery_compound_id"] = "abc@SN123"
+        dd.battery_compound_id = "abc@SN123"
         # web_session is None (default)
 
         data: dict[str, Any] = {"SoC": 50.0}
@@ -657,7 +657,7 @@ class TestBmsTemperatureFetch:
 
         web_session = AsyncMock()
         web_session.async_discover_battery_id = AsyncMock(return_value=None)
-        dd["_web_session"] = web_session
+        dd.web_session = web_session
         # compound_id is None (default)
 
         data: dict[str, Any] = {"SoC": 50.0}
@@ -691,8 +691,8 @@ class TestBmsTemperatureFetch:
         # --- Step 2: Store web_session and compound_id (simulating __init__.py) ---
         web_session = AsyncMock()
         web_session.async_get_battery_temperature = AsyncMock(return_value=31.5)
-        dd["_web_session"] = web_session
-        dd["_battery_compound_id"] = "bat-id@SN001"
+        dd.web_session = web_session
+        dd.battery_compound_id = "bat-id@SN001"
 
         # Wire hass.async_create_task to schedule real tasks on the
         # running loop (not get_event_loop() which is unreliable under
@@ -763,7 +763,7 @@ class TestBmsTemperatureEarlyReturnLogging:
         DEBUG-level logging to be enabled (C-020, C-026).
         """
         coord, dd = self._make_coord_with_domain_data()
-        dd["_battery_compound_id"] = "abc@SN123"
+        dd.battery_compound_id = "abc@SN123"
         # web_session remains None (default)
 
         data: dict[str, Any] = {}
@@ -790,7 +790,7 @@ class TestBmsTemperatureEarlyReturnLogging:
 
         web_session = AsyncMock()
         web_session.async_discover_battery_id = AsyncMock(return_value=None)
-        dd["_web_session"] = web_session
+        dd.web_session = web_session
         # compound_id remains None (default)
 
         data: dict[str, Any] = {}
@@ -840,8 +840,8 @@ class TestBmsTemperatureEarlyReturnLogging:
 
         web_session = AsyncMock()
         web_session.async_get_battery_temperature = AsyncMock(return_value=22.0)
-        dd["_web_session"] = web_session
-        dd["_battery_compound_id"] = "bat@SN001"
+        dd.web_session = web_session
+        dd.battery_compound_id = "bat@SN001"
 
         data: dict[str, Any] = {}
         with caplog.at_level(
@@ -870,8 +870,8 @@ class TestBmsTemperatureEarlyReturnLogging:
 
         web_session = AsyncMock()
         web_session.async_get_battery_temperature = AsyncMock(return_value=None)
-        dd["_web_session"] = web_session
-        dd["_battery_compound_id"] = "bat@SN001"
+        dd.web_session = web_session
+        dd.battery_compound_id = "bat@SN001"
 
         data: dict[str, Any] = {}
         with caplog.at_level(
@@ -892,8 +892,8 @@ class TestBmsTemperatureEarlyReturnLogging:
 
         web_session = AsyncMock()
         web_session.async_get_battery_temperature = AsyncMock(return_value=None)
-        dd["_web_session"] = web_session
-        dd["_battery_compound_id"] = "bat@SN001"
+        dd.web_session = web_session
+        dd.battery_compound_id = "bat@SN001"
 
         coord.data = {"bmsBatteryTemperature": 16.8}
         data: dict[str, Any] = {}
@@ -910,8 +910,8 @@ class TestBmsTemperatureEarlyReturnLogging:
         web_session.async_get_battery_temperature = AsyncMock(
             side_effect=RuntimeError("server error")
         )
-        dd["_web_session"] = web_session
-        dd["_battery_compound_id"] = "bat@SN001"
+        dd.web_session = web_session
+        dd.battery_compound_id = "bat@SN001"
 
         coord.data = {"bmsBatteryTemperature": 15.5}
         data: dict[str, Any] = {}
@@ -926,8 +926,8 @@ class TestBmsTemperatureEarlyReturnLogging:
 
         web_session = AsyncMock()
         web_session.async_get_battery_temperature = AsyncMock(return_value=None)
-        dd["_web_session"] = web_session
-        dd["_battery_compound_id"] = "bat@SN001"
+        dd.web_session = web_session
+        dd.battery_compound_id = "bat@SN001"
 
         coord.data = None  # type: ignore[assignment]
         data: dict[str, Any] = {}
@@ -1007,13 +1007,13 @@ class TestBmsCompoundIdRediscovery:
         web_session = AsyncMock()
         web_session.async_get_battery_temperature = AsyncMock(return_value=23.5)
         web_session.async_discover_battery_id = AsyncMock(return_value="bat-id@SN001")
-        dd["_web_session"] = web_session
+        dd.web_session = web_session
         dd.plant_id = "plant-123"
 
         data: dict[str, Any] = {"SoC": 50.0}
         await coord._fetch_bms_temperature(data)
 
-        assert dd.get("_battery_compound_id") == "bat-id@SN001"
+        assert dd.battery_compound_id == "bat-id@SN001"
         assert data.get("bmsBatteryTemperature") == 23.5
 
     @pytest.mark.asyncio
@@ -1023,8 +1023,8 @@ class TestBmsCompoundIdRediscovery:
 
         web_session = AsyncMock()
         web_session.async_get_battery_temperature = AsyncMock(return_value=18.0)
-        dd["_web_session"] = web_session
-        dd["_battery_compound_id"] = "existing-bat@SN001"
+        dd.web_session = web_session
+        dd.battery_compound_id = "existing-bat@SN001"
 
         data: dict[str, Any] = {"SoC": 50.0}
         await coord._fetch_bms_temperature(data)
@@ -1039,13 +1039,13 @@ class TestBmsCompoundIdRediscovery:
 
         web_session = AsyncMock()
         web_session.async_discover_battery_id = AsyncMock(return_value=None)
-        dd["_web_session"] = web_session
+        dd.web_session = web_session
         dd.plant_id = "plant-123"
 
         data: dict[str, Any] = {"SoC": 50.0}
         await coord._fetch_bms_temperature(data)
 
-        assert dd.get("_battery_compound_id") is None
+        assert dd.battery_compound_id is None
         assert "bmsBatteryTemperature" not in data
 
     @pytest.mark.asyncio
@@ -1056,7 +1056,7 @@ class TestBmsCompoundIdRediscovery:
         web_session = AsyncMock()
         web_session.async_discover_battery_id = AsyncMock(return_value="new-bat@SN002")
         web_session.async_get_battery_temperature = AsyncMock(return_value=20.0)
-        dd["_web_session"] = web_session
+        dd.web_session = web_session
         dd.plant_id = "my-plant-456"
 
         data: dict[str, Any] = {"SoC": 50.0}
@@ -1072,14 +1072,14 @@ class TestBmsCompoundIdRediscovery:
         web_session = AsyncMock()
         web_session.async_discover_battery_id = AsyncMock(return_value="bat@SN003")
         web_session.async_get_battery_temperature = AsyncMock(return_value=21.0)
-        dd["_web_session"] = web_session
+        dd.web_session = web_session
         dd.plant_id = None
 
         data: dict[str, Any] = {"SoC": 50.0}
         await coord._fetch_bms_temperature(data)
 
         assert dd.plant_id == "plant-123"
-        assert dd.get("_battery_compound_id") == "bat@SN003"
+        assert dd.battery_compound_id == "bat@SN003"
 
     @pytest.mark.asyncio
     async def test_rediscovery_has_backoff(self) -> None:
@@ -1088,7 +1088,7 @@ class TestBmsCompoundIdRediscovery:
 
         web_session = AsyncMock()
         web_session.async_discover_battery_id = AsyncMock(return_value=None)
-        dd["_web_session"] = web_session
+        dd.web_session = web_session
         dd.plant_id = "plant-123"
 
         data1: dict[str, Any] = {"SoC": 50.0}
