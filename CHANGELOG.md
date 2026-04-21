@@ -1,8 +1,9 @@
 # Changelog
 
-## 1.0.8-beta.2
+## 1.0.8-beta.3
 
 ### Added
+- **Taper-aware forecast curve**: the forecast card now uses the adaptive BMS taper profile to vary the SoC rate per bucket, producing a realistic curve that bends at high SoC (charge) or low SoC (discharge) instead of a misleading straight line. Edge extrapolation applies the nearest recorded ratio beyond observed data.
 - **Configurable BMS polling interval**: BMS cell temperature fetch frequency is now adjustable (60–3600s, default 300s) in the integration options, replacing the hardcoded 5-minute interval.
 - **Control card show_cancel option**: cancel button visibility is now configurable via the card editor.
 - **README gallery screenshots**: generated from E2E simulator for reproducible, up-to-date documentation images.
