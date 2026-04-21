@@ -5,7 +5,7 @@
 ```bash
 pytest tests/ --tb=short                    # all tests (unit + E2E)
 pytest tests/ -m "not slow" --tb=short      # unit tests only (skip E2E)
-pre-commit run --all-files                  # ruff + mypy
+pre-commit run --all-files                  # ruff + mypy + semgrep + module size
 ```
 
 ## Key Constraints
@@ -35,6 +35,11 @@ pre-commit run --all-files                  # ruff + mypy
 - **C-009**: FoxESS API: schedule windows must not cross midnight
 - **C-018**: Refuse to modify schedule when unmanaged modes (e.g. Backup) are present
 - **C-019**: Discharge SoC unavailability aborts session after 3 checks (matching charge C-012)
+
+### Architecture
+- **C-034**: No `.py` file in `custom_components/foxess_control/` exceeds 2000 lines
+- **C-035**: Config via `IntegrationConfig` / `_cfg(hass)`, not raw `entry.options`
+- **C-036**: Domain data via `_dd(hass)`, not raw `hass.data[DOMAIN]`
 
 ### Testing Infrastructure
 - **C-028**: Use simulator over mocks; each test gets independent simulator instance

@@ -26,6 +26,23 @@ repos:
         args: [--fix]
       - id: ruff-format
 
+  - repo: local
+    hooks:
+      - id: semgrep-architecture
+        name: architectural lint (semgrep)
+        language: system
+        entry: semgrep --config .semgrep/ --error custom_components/foxess_control/ smart_battery/
+        pass_filenames: false
+        files: ^(custom_components/foxess_control/|smart_battery/).*\.py$
+        types: [python]
+
+      - id: check-module-size
+        name: module size budget
+        language: script
+        entry: .githooks/check-module-size
+        pass_filenames: false
+        files: ^custom_components/foxess_control/.*\.py$
+
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.20.0
     hooks:

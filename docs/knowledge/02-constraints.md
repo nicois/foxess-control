@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 2
-last_verified: 2026-04-19
+last_verified: 2026-04-21
 traces_up: [01-vision.md]
 traces_down: [03-architecture.md, 04-design/]
 ---
@@ -487,6 +487,49 @@ the inverter reverts to self-use automatically.
 instead of reverting to self-use.
 **Traces**: C-024 (safe state on failure);
 D-023; `smart_battery/algorithms.py::compute_safe_schedule_end`
+
+## Invariants — Architecture
+
+Structural rules enforced by automated tooling (semgrep, pre-commit
+hooks) to prevent tech debt recurrence.
+
+### C-034: Module size budget
+**Statement**: No single `.py` file in `custom_components/foxess_control/`
+may exceed 2000 lines. When a module approaches this limit, extract
+cohesive functionality into a dedicated module.
+**Rationale**: `__init__.py` grew to ~2500 lines by accretion before the
+2026-04-21 remediation. Automated enforcement prevents recurrence.
+**Violation consequence**: Pre-commit hook `check-module-size` fails;
+code cannot be committed.
+**Traces**: `.githooks/check-module-size`
+
+### C-035: Typed config access
+**Statement**: Config values must be read via `IntegrationConfig`
+(accessed through `_cfg(hass)` in the brand layer), not via raw
+`entry.options` access. New config fields must be added to
+`IntegrationConfig` in `domain_data.py` before use. Only `__init__.py`
+(builds config), `domain_data.py` (defines config), `config_flow.py`
+(reads options for UI), and `diagnostics.py` (dumps raw options) may
+access `entry.options` directly.
+**Rationale**: Raw `entry.options` access scatters default values and
+type conversions across multiple files, creating inconsistency. The
+`IntegrationConfig` frozen dataclass provides a single source of truth,
+built once at setup time.
+**Violation consequence**: Semgrep rule `no-raw-entry-options` fails
+pre-commit.
+**Traces**: `.semgrep/foxess-architecture.yaml::no-raw-entry-options`
+
+### C-036: Typed domain data access
+**Statement**: Runtime state in `hass.data[DOMAIN]` must be accessed via
+the `_dd(hass)` helper, not by raw dict lookup. Only `__init__.py`
+(setup/teardown), `_helpers.py` (helper definition), and `domain_data.py`
+(type definition) may reference `hass.data[DOMAIN]` directly.
+**Rationale**: Raw dict access was the source of the bridge-layer tech
+debt. Typed access via `_dd()` catches key typos at lint time and
+provides IDE autocomplete.
+**Violation consequence**: Semgrep rule `no-raw-hass-data-access` fails
+pre-commit.
+**Traces**: `.semgrep/foxess-architecture.yaml::no-raw-hass-data-access`
 
 ## Proposed
 

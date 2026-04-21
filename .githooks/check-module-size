@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Enforce module size budget: no single .py file in
+# custom_components/foxess_control/ exceeds MAX_LINES.
+# Keeps __init__.py from growing back to 2500+ lines.
+set -euo pipefail
+
+MAX_LINES=2000
+EXIT_CODE=0
+
+for f in custom_components/foxess_control/*.py; do
+    [ -f "$f" ] || continue
+    lines=$(wc -l < "$f")
+    if [ "$lines" -gt "$MAX_LINES" ]; then
+        echo "ERROR: $f is $lines lines (max $MAX_LINES). Extract code to a dedicated module."
+        EXIT_CODE=1
+    fi
+done
+
+exit $EXIT_CODE
