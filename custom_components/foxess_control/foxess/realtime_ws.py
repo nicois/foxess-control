@@ -139,10 +139,10 @@ def map_ws_to_coordinator(ws_msg: dict[str, Any]) -> dict[str, Any]:
     if load_kw is not None:
         data["loadsPower"] = load_kw
 
-    # Grid power — derive direction from the power balance rather than
-    # the unreliable gridStatus field (whose meaning varies by firmware).
-    # grid = load + bat_charge - bat_discharge - solar
-    # Positive → importing from grid; negative → exporting to grid.
+    # Grid power — derive direction from the power balance, falling back
+    # to gridStatus when the balance is unreliable (e.g. unmeasured
+    # external generation makes the predicted magnitude diverge from the
+    # actual grid reading).
     grid = node.get("grid", {})
     grid_kw = _to_kw(_parse_power(grid.get("power")))
     if grid_kw is not None:
@@ -153,7 +153,27 @@ def map_ws_to_coordinator(ws_msg: dict[str, Any]) -> dict[str, Any]:
 
         if solar is not None and load is not None:
             net = load + bat_charge - bat_discharge - solar
-            importing = net > 0
+            predicted_kw = abs(net)
+            # When the balance-predicted magnitude is close to the actual
+            # grid reading, the balance is trustworthy.  When they diverge
+            # significantly (ratio > 3x or predicted ≈ 0 while grid is
+            # substantial), an unmeasured source is skewing the balance —
+            # fall back to gridStatus.
+            balance_reliable = (
+                grid_kw < 0.05
+                or predicted_kw > 0.05
+                and max(grid_kw / predicted_kw, predicted_kw / grid_kw) < 3.0
+            )
+            if balance_reliable:
+                importing = net > 0
+            else:
+                _LOGGER.debug(
+                    "Grid balance unreliable: predicted=%.3f kW, "
+                    "actual=%.3f kW — using gridStatus",
+                    predicted_kw,
+                    grid_kw,
+                )
+                importing = str(grid.get("gridStatus", "")) == "3"
         else:
             importing = str(grid.get("gridStatus", "")) == "3"
 

@@ -174,6 +174,41 @@ class TestMapWsToCoordinator:
         assert data["gridConsumptionPower"] == 0.0
         assert data["feedinPower"] == pytest.approx(3.0)
 
+    def test_grid_balance_unreliable_unmeasured_generation(self) -> None:
+        """External generation not visible to FoxESS skews the balance.
+
+        Balance predicts import 0.28 kW but actual grid is 1.31 kW —
+        the 3x+ divergence triggers fallback to gridStatus which correctly
+        reports export (gridStatus=2).  Reproduces GitHub issue #3.
+        """
+        msg = self._make_msg(
+            solar={"power": {"value": "0"}},
+            load={"power": {"value": "280"}},
+            bat={"power": {"value": "5"}, "soc": 100, "charge": 1},
+            grid={"power": {"value": "1310"}, "gridStatus": 2},
+        )
+        data = map_ws_to_coordinator(msg)
+        # Balance: 0.28 + 0.005 - 0 - 0 = 0.285 (predicts import)
+        # Actual grid: 1.31 kW — ratio 4.6x → balance unreliable
+        # gridStatus=2 → exporting
+        assert data["gridConsumptionPower"] == 0.0
+        assert data["feedinPower"] == pytest.approx(1.31)
+
+    def test_grid_balance_unreliable_importing(self) -> None:
+        """Divergent balance falls back to gridStatus=3 → importing."""
+        msg = self._make_msg(
+            solar={"power": {"value": "5000"}},
+            load={"power": {"value": "200"}},
+            bat={"power": {"value": "0"}, "soc": 100, "charge": 0},
+            grid={"power": {"value": "800"}, "gridStatus": "3"},
+        )
+        data = map_ws_to_coordinator(msg)
+        # Balance: 0.2 + 0 - 0 - 5.0 = -4.8 (predicts export)
+        # Actual grid: 0.8 kW — ratio 6x → balance unreliable
+        # gridStatus=3 → importing
+        assert data["gridConsumptionPower"] == pytest.approx(0.8)
+        assert data["feedinPower"] == 0.0
+
     def test_grid_fallback_to_gridstatus(self) -> None:
         """When solar/load missing, fall back to gridStatus."""
         msg = {

@@ -85,19 +85,28 @@ post-session values so the overview card immediately reflects reality.
 
 ### D-010: Power balance for grid direction
 **Decision**: Derive grid import/export from power balance
-(`load + charge - discharge - solar`) rather than the `gridStatus` field.
+(`load + charge - discharge - solar`) rather than the `gridStatus` field,
+but fall back to `gridStatus` when the balance-predicted magnitude
+diverges >3× from the actual grid reading.
 **Context**: The `gridStatus` field from the WebSocket has inconsistent
-meaning across firmware versions.
+meaning across firmware versions. However, the power balance assumes
+FoxESS sees all generation and load, which fails when external sources
+(e.g. a separate grid-tied solar inverter) are present.
 **Rationale**: Power balance is physically correct by conservation of
-energy. The `gridStatus` field is only used as fallback when solar or
-load data is missing.
+energy when all sources are visible. When the predicted and actual grid
+magnitudes diverge significantly, an unmeasured source is skewing the
+balance — `gridStatus` is more reliable in that case despite firmware
+inconsistencies.
 **Alternatives considered**:
-- Trust `gridStatus`: rejected after observing incorrect values with
-  certain firmware
+- Trust `gridStatus` always: rejected after observing incorrect values
+  with certain firmware
+- Trust balance always: rejected after GitHub issue #3 showed external
+  generation causing persistent direction swap
 - Ignore grid direction entirely: rejected because feed-in energy
   integration requires it
 **Traces**: C-006;
-`tests/test_realtime_ws.py::TestMapWsToCoordinator::test_grid_importing_from_balance`
+`tests/test_realtime_ws.py::TestMapWsToCoordinator::test_grid_importing_from_balance`,
+`tests/test_realtime_ws.py::TestMapWsToCoordinator::test_grid_balance_unreliable_unmeasured_generation`
 
 
 ### D-021: Visibility of data source on lovelace cards
