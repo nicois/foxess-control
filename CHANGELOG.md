@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.8-beta.9
+
+### Fixed
+- **Grid direction swap with external generation** (issue #3): installations with additional solar inverters not visible to FoxESS (e.g. separate grid-tied panels) could show grid consumption and feed-in swapped. The WS power balance assumed FoxESS sees all generation; when it doesn't, the predicted magnitude diverges from the actual grid reading. Now falls back to `gridStatus` when the divergence exceeds 3×.
+
 ## 1.0.8-beta.8
 
 ### Improved
