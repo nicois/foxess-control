@@ -797,378 +797,361 @@ def setup_smart_discharge_listeners(
             domain,
         )
 
-    async def _check_discharge_soc_inner(
+    async def _start_deferred_discharge(
         cur_state: dict[str, Any],
+    ) -> bool:
+        """Try to start deferred discharge. Returns True if caller should return."""
+        soc_value = _get_current_soc(hass, domain)
+        if soc_value is None or soc_value <= cur_state["min_soc"]:
+            return False
+
+        now_dt = dt_util.now()
+        taper = _get_taper_profile(hass, domain)
+        peak = cur_state.get("consumption_peak_kw", 0.0)
+        deferred = calculate_discharge_deferred_start(
+            soc_value,
+            cur_state["min_soc"],
+            cur_state["battery_capacity_kwh"],
+            cur_state["max_power_w"],
+            cur_state["end"],
+            net_consumption_kw=_get_net_consumption(hass, domain),
+            start=cur_state.get("start"),
+            headroom=_get_smart_headroom(hass, domain),
+            taper_profile=taper,
+            feedin_energy_limit_kwh=cur_state.get("feedin_energy_limit_kwh"),
+            consumption_peak_kw=peak,
+        )
+        if now_dt < deferred:
+            _LOGGER.debug(
+                "Smart discharge: deferring until ~%02d:%02d (SoC=%.1f%%, peak=%.2fkW)",
+                deferred.hour,
+                deferred.minute,
+                soc_value,
+                peak,
+            )
+            return True
+
+        remaining_h = (cur_state["end"] - now_dt).total_seconds() / 3600.0
+        new_power = calculate_discharge_power(
+            soc_value,
+            cur_state["min_soc"],
+            cur_state["battery_capacity_kwh"],
+            remaining_h,
+            cur_state["max_power_w"],
+            net_consumption_kw=_get_net_consumption(hass, domain),
+            headroom=_get_smart_headroom(hass, domain),
+            consumption_peak_kw=peak,
+        )
+        await adapter.apply_mode(
+            hass,
+            WorkMode.FORCE_DISCHARGE,
+            new_power,
+            fd_soc=cur_state.get("min_soc", 11),
+        )
+        if not _is_my_session():
+            return True
+        _ds = get_domain_data(hass, domain).smart_discharge_state
+        assert _ds is not None
+        cur_state = _ds
+        cur_state["last_power_w"] = new_power
+        cur_state["target_power_w"] = new_power
+        cur_state["discharging_started"] = True
+        cur_state["discharging_started_at"] = now_dt
+        cur_state["start_soc"] = soc_value
+        _LOGGER.info(
+            "Smart discharge: deferred discharge started (SoC=%.1f%%, power=%dW)",
+            soc_value,
+            new_power,
+        )
+        await save_session(
+            _get_store(hass, domain),
+            "smart_discharge",
+            session_data_from_discharge_state(cur_state),
+        )
+        return True
+
+    async def _check_feedin_limit(
+        cur_state: dict[str, Any],
+    ) -> tuple[bool, float | None]:
+        """Check feed-in energy limit. Returns (should_return, feedin_remaining)."""
+        feedin_limit = cur_state.get("feedin_energy_limit_kwh")
+        if feedin_limit is None:
+            return False, None
+
+        feedin_now = _get_feedin_energy_kwh(hass, domain)
+        if feedin_now is None:
+            return False, None
+
+        feedin_start = cur_state.get("feedin_start_kwh")
+        if feedin_start is None:
+            _LOGGER.debug(
+                "Smart discharge: feed-in baseline captured at %.2f kWh",
+                feedin_now,
+            )
+            cur_state["feedin_start_kwh"] = feedin_now
+            hass.async_create_task(
+                save_session(
+                    _get_store(hass, domain),
+                    "smart_discharge",
+                    session_data_from_discharge_state(cur_state),
+                ),
+                name=f"{domain}_save_discharge_session",
+            )
+            return False, feedin_limit
+
+        exported = feedin_now - feedin_start
+        if exported >= feedin_limit:
+            if _is_my_session():
+                _log_session_end(
+                    f"feed-in energy {exported:.2f} kWh "
+                    f"reached limit {feedin_limit:.2f} kWh, "
+                    "removing override"
+                )
+                ws_stop = cancel_smart_discharge(hass, domain)
+                await _remove_discharge_override()
+                if ws_stop is not None:
+                    await ws_stop
+            return True, None
+
+        remaining_kwh = feedin_limit - exported
+        _maybe_schedule_feedin_stop(cur_state, feedin_now, remaining_kwh, exported)
+        return False, remaining_kwh
+
+    def _maybe_schedule_feedin_stop(
+        cur_state: dict[str, Any],
+        feedin_now: float,
+        remaining_kwh: float,
+        exported: float,
     ) -> None:
-        # --- Update peak consumption tracker ---
-        current_consumption = max(0.0, _get_net_consumption(hass, domain))
-        old_peak = cur_state.get("consumption_peak_kw", 0.0)
-        cur_state["consumption_peak_kw"] = max(
-            current_consumption, old_peak * PEAK_DECAY_PER_TICK
+        """Schedule an early stop if feed-in will reach limit within one poll."""
+        poll_seconds = _get_polling_interval_seconds(hass, domain)
+        poll_hours = poll_seconds / 3600
+
+        feedin_prev: float | None = cur_state.get("feedin_prev_kwh")
+        has_observed = feedin_prev is not None and feedin_now != feedin_prev
+        observed_rate_kw = 0.0
+        if has_observed:
+            assert feedin_prev is not None
+            observed_rate_kw = (feedin_now - feedin_prev) / poll_hours
+        cur_state["feedin_prev_kwh"] = feedin_now
+
+        if not (
+            has_observed
+            and observed_rate_kw > 0
+            and remaining_kwh <= observed_rate_kw * poll_hours
+            and not cur_state.get("feedin_stop_scheduled")
+        ):
+            return
+
+        seconds_to_target = remaining_kwh / observed_rate_kw * 3600
+        stop_at = dt_util.utcnow() + datetime.timedelta(seconds=seconds_to_target)
+        _LOGGER.info(
+            "Smart discharge: scheduling stop in %.0fs "
+            "(remaining=%.2f kWh, exported=%.2f kWh, observed=%.1fkW)",
+            seconds_to_target,
+            remaining_kwh,
+            exported,
+            observed_rate_kw,
         )
 
-        # --- Deferred self-use phase ---
-        if not cur_state.get("discharging_started", True):
-            soc_value = _get_current_soc(hass, domain)
-            if soc_value is not None and soc_value > cur_state["min_soc"]:
-                now_dt = dt_util.now()
-                taper = _get_taper_profile(hass, domain)
-                peak = cur_state.get("consumption_peak_kw", 0.0)
-                deferred = calculate_discharge_deferred_start(
-                    soc_value,
-                    cur_state["min_soc"],
-                    cur_state["battery_capacity_kwh"],
-                    cur_state["max_power_w"],
-                    cur_state["end"],
-                    net_consumption_kw=_get_net_consumption(hass, domain),
-                    start=cur_state.get("start"),
-                    headroom=_get_smart_headroom(hass, domain),
-                    taper_profile=taper,
-                    feedin_energy_limit_kwh=cur_state.get("feedin_energy_limit_kwh"),
-                    consumption_peak_kw=peak,
-                )
-                if now_dt < deferred:
-                    _LOGGER.debug(
-                        "Smart discharge: deferring until ~%02d:%02d "
-                        "(SoC=%.1f%%, peak=%.2fkW)",
-                        deferred.hour,
-                        deferred.minute,
-                        soc_value,
-                        peak,
-                    )
-                    return
-
-                # Time to start forced discharge — use paced power
-                remaining_h = (cur_state["end"] - now_dt).total_seconds() / 3600.0
-                new_power = calculate_discharge_power(
-                    soc_value,
-                    cur_state["min_soc"],
-                    cur_state["battery_capacity_kwh"],
-                    remaining_h,
-                    cur_state["max_power_w"],
-                    net_consumption_kw=_get_net_consumption(hass, domain),
-                    headroom=_get_smart_headroom(hass, domain),
-                    consumption_peak_kw=peak,
-                )
-                await adapter.apply_mode(
-                    hass,
-                    WorkMode.FORCE_DISCHARGE,
-                    new_power,
-                    fd_soc=cur_state.get("min_soc", 11),
-                )
-                if not _is_my_session():
-                    return
-                _ds = get_domain_data(hass, domain).smart_discharge_state
-                assert _ds is not None
-                cur_state = _ds
-                cur_state["last_power_w"] = new_power
-                cur_state["target_power_w"] = new_power
-                cur_state["discharging_started"] = True
-                cur_state["discharging_started_at"] = now_dt
-                cur_state["start_soc"] = soc_value
-                _LOGGER.info(
-                    "Smart discharge: deferred discharge started "
-                    "(SoC=%.1f%%, power=%dW)",
-                    soc_value,
-                    new_power,
-                )
-                await save_session(
-                    _get_store(hass, domain),
-                    "smart_discharge",
-                    session_data_from_discharge_state(cur_state),
-                )
+        async def _early_stop(_now: datetime.datetime) -> None:
+            if not _is_my_session():
                 return
-            # SoC <= min_soc during deferred phase — fall through to
-            # the SoC threshold check below which will end the session.
+            _log_session_end("early stop triggered (feed-in target ~reached)")
+            ws_stop = cancel_smart_discharge(hass, domain)
+            await _remove_discharge_override()
+            if ws_stop is not None:
+                await ws_stop
 
-        # --- Check feed-in energy limit using cumulative counter ---
-        feedin_remaining_for_pacing: float | None = None
-        feedin_limit = cur_state.get("feedin_energy_limit_kwh")
-        if feedin_limit is not None:
-            feedin_now = _get_feedin_energy_kwh(hass, domain)
-            if feedin_now is not None:
-                feedin_start = cur_state.get("feedin_start_kwh")
-                if feedin_start is None:
-                    _LOGGER.debug(
-                        "Smart discharge: feed-in baseline captured at %.2f kWh",
-                        feedin_now,
-                    )
-                    cur_state["feedin_start_kwh"] = feedin_now
-                    feedin_remaining_for_pacing = feedin_limit
-                    hass.async_create_task(
-                        save_session(
-                            _get_store(hass, domain),
-                            "smart_discharge",
-                            session_data_from_discharge_state(cur_state),
-                        ),
-                        name=f"{domain}_save_discharge_session",
-                    )
-                else:
-                    exported = feedin_now - feedin_start
-                    if exported >= feedin_limit:
-                        if _is_my_session():
-                            _log_session_end(
-                                f"feed-in energy {exported:.2f} kWh "
-                                f"reached limit {feedin_limit:.2f} kWh, "
-                                "removing override"
-                            )
-                            ws_stop = cancel_smart_discharge(hass, domain)
-                            await _remove_discharge_override()
-                            if ws_stop is not None:
-                                await ws_stop
-                        return
+        unsub = async_track_point_in_time(hass, _early_stop, stop_at)
+        get_domain_data(hass, domain).smart_discharge_unsubs.append(unsub)
+        cur_state["feedin_stop_scheduled"] = True
 
-                    remaining_kwh = feedin_limit - exported
-                    feedin_remaining_for_pacing = remaining_kwh
-                    poll_seconds = _get_polling_interval_seconds(hass, domain)
-                    poll_hours = poll_seconds / 3600
-
-                    feedin_prev: float | None = cur_state.get("feedin_prev_kwh")
-                    has_observed = feedin_prev is not None and feedin_now != feedin_prev
-                    if has_observed:
-                        assert feedin_prev is not None  # narrowed above
-                        observed_rate_kw = (feedin_now - feedin_prev) / poll_hours
-                    cur_state["feedin_prev_kwh"] = feedin_now
-
-                    if (
-                        has_observed
-                        and observed_rate_kw > 0
-                        and remaining_kwh <= observed_rate_kw * poll_hours
-                        and not cur_state.get("feedin_stop_scheduled")
-                    ):
-                        seconds_to_target = remaining_kwh / observed_rate_kw * 3600
-                        stop_at = dt_util.utcnow() + datetime.timedelta(
-                            seconds=seconds_to_target
-                        )
-                        _LOGGER.info(
-                            "Smart discharge: scheduling stop in %.0fs "
-                            "(remaining=%.2f kWh, exported=%.2f kWh, "
-                            "observed=%.1fkW)",
-                            seconds_to_target,
-                            remaining_kwh,
-                            exported,
-                            observed_rate_kw,
-                        )
-
-                        async def _early_stop(_now: datetime.datetime) -> None:
-                            if not _is_my_session():
-                                return
-                            _log_session_end(
-                                "early stop triggered (feed-in target ~reached)"
-                            )
-                            ws_stop = cancel_smart_discharge(hass, domain)
-                            await _remove_discharge_override()
-                            if ws_stop is not None:
-                                await ws_stop
-
-                        unsub = async_track_point_in_time(hass, _early_stop, stop_at)
-                        get_domain_data(hass, domain).smart_discharge_unsubs.append(
-                            unsub
-                        )
-                        cur_state["feedin_stop_scheduled"] = True
-
-        # --- Power pacing ---
-        soc_value = _get_current_soc(hass, domain)
-        if soc_value is None:
-            cur_state["soc_unavailable_count"] = (
-                cur_state.get("soc_unavailable_count", 0) + 1
-            )
-            if cur_state["soc_unavailable_count"] >= MAX_SOC_UNAVAILABLE_COUNT:
-                _LOGGER.warning(
-                    "Smart discharge: SoC unavailable for %d checks, aborting",
-                    cur_state["soc_unavailable_count"],
-                )
-                _record_error(hass, domain, "Discharge aborted: SoC unavailable")
-                discharging_started = cur_state.get("discharging_started", False)
-                if _is_my_session():
-                    ws_stop = cancel_smart_discharge(hass, domain)
-                    if discharging_started:
-                        await _remove_discharge_override()
-                    if ws_stop is not None:
-                        await ws_stop
-                return
+    async def _handle_soc_unavailable(cur_state: dict[str, Any]) -> bool:
+        """Abort after too many SoC-unavailable checks. Returns True to stop."""
+        cur_state["soc_unavailable_count"] = (
+            cur_state.get("soc_unavailable_count", 0) + 1
+        )
+        if cur_state["soc_unavailable_count"] < MAX_SOC_UNAVAILABLE_COUNT:
             _LOGGER.debug("Smart discharge: SoC unavailable, skipping adjustment")
-            return
-        cur_state["soc_unavailable_count"] = 0
-
-        taper = _get_taper_profile(hass, domain)
-        if not cur_state.get("suspended", False):
-            _record_taper_observation(
-                hass,
-                domain,
-                taper,
-                cur_state,
-                soc_value,
-                "batDischargePower",
-                "record_discharge",
-                save_every=5,
-            )
-
-        if cur_state.get("pacing_enabled") and soc_value > cur_state["min_soc"]:
-            now_dt = dt_util.now()
-            remaining_h = (cur_state["end"] - now_dt).total_seconds() / 3600.0
-            net_consumption = _get_net_consumption(hass, domain)
-            headroom = _get_smart_headroom(hass, domain)
-            peak = cur_state.get("consumption_peak_kw", 0.0)
-
-            # --- Suspend / resume ---
-            should_suspend_now = remaining_h > 0 and should_suspend_discharge(
-                soc_value,
-                cur_state["min_soc"],
-                cur_state["battery_capacity_kwh"],
-                remaining_h,
-                net_consumption,
-                headroom=headroom,
-                consumption_peak_kw=peak,
-            )
-            was_suspended = cur_state.get("suspended", False)
-
-            if should_suspend_now and not was_suspended:
-                _LOGGER.info(
-                    "Smart discharge: suspending — house consumption "
-                    "(%.2f kW, peak %.2f kW) would breach min SoC %d%% "
-                    "(SoC=%.1f%%, remaining=%.2fh)",
-                    net_consumption,
-                    peak,
-                    cur_state["min_soc"],
-                    soc_value,
-                    remaining_h,
-                )
-                cur_state["suspended"] = True
+            return True
+        _LOGGER.warning(
+            "Smart discharge: SoC unavailable for %d checks, aborting",
+            cur_state["soc_unavailable_count"],
+        )
+        _record_error(hass, domain, "Discharge aborted: SoC unavailable")
+        discharging_started = cur_state.get("discharging_started", False)
+        if _is_my_session():
+            ws_stop = cancel_smart_discharge(hass, domain)
+            if discharging_started:
                 await _remove_discharge_override()
-                if not _is_my_session():
-                    return
-                _ds = get_domain_data(hass, domain).smart_discharge_state
-                assert _ds is not None
-                cur_state = _ds
-                await save_session(
-                    _get_store(hass, domain),
-                    "smart_discharge",
-                    session_data_from_discharge_state(cur_state),
-                )
-            elif was_suspended and not should_suspend_now:
-                _LOGGER.info(
-                    "Smart discharge: resuming — conditions improved "
-                    "(consumption=%.2f kW, SoC=%.1f%%, remaining=%.2fh)",
-                    net_consumption,
-                    soc_value,
-                    remaining_h,
-                )
-                cur_state["suspended"] = False
-                # Fall through to pacing to re-apply the override
+            if ws_stop is not None:
+                await ws_stop
+        return True
 
-            if cur_state.get("suspended"):
+    async def _handle_suspend_resume(
+        cur_state: dict[str, Any],
+        soc_value: float,
+        remaining_h: float,
+        net_consumption: float,
+        headroom: float,
+        peak: float,
+    ) -> tuple[bool, bool]:
+        """Handle suspend/resume logic. Returns (was_suspended, should_return)."""
+        should_suspend_now = remaining_h > 0 and should_suspend_discharge(
+            soc_value,
+            cur_state["min_soc"],
+            cur_state["battery_capacity_kwh"],
+            remaining_h,
+            net_consumption,
+            headroom=headroom,
+            consumption_peak_kw=peak,
+        )
+        was_suspended = cur_state.get("suspended", False)
+
+        if should_suspend_now and not was_suspended:
+            _LOGGER.info(
+                "Smart discharge: suspending — house consumption "
+                "(%.2f kW, peak %.2f kW) would breach min SoC %d%% "
+                "(SoC=%.1f%%, remaining=%.2fh)",
+                net_consumption,
+                peak,
+                cur_state["min_soc"],
+                soc_value,
+                remaining_h,
+            )
+            cur_state["suspended"] = True
+            await _remove_discharge_override()
+            if not _is_my_session():
+                return was_suspended, True
+            _ds = get_domain_data(hass, domain).smart_discharge_state
+            assert _ds is not None
+            await save_session(
+                _get_store(hass, domain),
+                "smart_discharge",
+                session_data_from_discharge_state(_ds),
+            )
+        elif was_suspended and not should_suspend_now:
+            _LOGGER.info(
+                "Smart discharge: resuming — conditions improved "
+                "(consumption=%.2f kW, SoC=%.1f%%, remaining=%.2fh)",
+                net_consumption,
+                soc_value,
+                remaining_h,
+            )
+            cur_state["suspended"] = False
+
+        if cur_state.get("suspended"):
+            return was_suspended, True
+        return was_suspended, False
+
+    async def _apply_discharge_power(
+        cur_state: dict[str, Any],
+        soc_value: float,
+        remaining_h: float,
+        net_consumption: float,
+        headroom: float,
+        peak: float,
+        feedin_remaining: float | None,
+        was_suspended: bool,
+    ) -> None:
+        """Calculate and apply discharge power."""
+        new_power = calculate_discharge_power(
+            soc_value,
+            cur_state["min_soc"],
+            cur_state["battery_capacity_kwh"],
+            remaining_h,
+            cur_state["max_power_w"],
+            net_consumption_kw=net_consumption,
+            headroom=headroom,
+            feedin_remaining_kwh=feedin_remaining,
+            consumption_peak_kw=peak,
+        )
+        min_change = cur_state.get("min_power_change", DEFAULT_MIN_POWER_CHANGE)
+        cur_state["target_power_w"] = new_power
+
+        feedin_self_use = (
+            feedin_remaining is not None
+            and new_power < min_change
+            and cur_state["last_power_w"] != 0
+        )
+        if feedin_self_use:
+            _LOGGER.info(
+                "Smart discharge: target %dW below threshold "
+                "%dW, switching to self-use",
+                new_power,
+                min_change,
+            )
+            cur_state["last_power_w"] = 0
+            await adapter.apply_mode(
+                hass, WorkMode.SELF_USE, 0, fd_soc=cur_state.get("min_soc", 11)
+            )
+            if not _is_my_session():
                 return
-            if remaining_h > 0:
-                new_power = calculate_discharge_power(
-                    soc_value,
-                    cur_state["min_soc"],
-                    cur_state["battery_capacity_kwh"],
-                    remaining_h,
-                    cur_state["max_power_w"],
-                    net_consumption_kw=net_consumption,
-                    headroom=headroom,
-                    feedin_remaining_kwh=feedin_remaining_for_pacing,
-                    consumption_peak_kw=peak,
-                )
-                min_change = cur_state.get("min_power_change", DEFAULT_MIN_POWER_CHANGE)
-                # Always track the algorithm's target for display,
-                # even when the threshold blocks the schedule update.
-                cur_state["target_power_w"] = new_power
+            _ds = get_domain_data(hass, domain).smart_discharge_state
+            assert _ds is not None
+            await save_session(
+                _get_store(hass, domain),
+                "smart_discharge",
+                session_data_from_discharge_state(_ds),
+            )
+            return
 
-                # When feed-in pacing is active and the target is below
-                # the threshold, treat it as self-use: the inverter
-                # covers house load from battery without exporting.
-                # This handles both ramp-up (target hasn't reached
-                # threshold yet) and ramp-down (target dropped below
-                # threshold from a higher rate).
-                feedin_self_use = (
-                    feedin_remaining_for_pacing is not None
-                    and new_power < min_change
-                    and cur_state["last_power_w"] != 0
-                )
-                if feedin_self_use:
-                    _LOGGER.info(
-                        "Smart discharge: target %dW below threshold "
-                        "%dW, switching to self-use",
-                        new_power,
-                        min_change,
-                    )
-                    cur_state["last_power_w"] = 0
-                    await adapter.apply_mode(
-                        hass,
-                        WorkMode.SELF_USE,
-                        0,
-                        fd_soc=cur_state.get("min_soc", 11),
-                    )
-                    if not _is_my_session():
-                        return
-                    _ds = get_domain_data(hass, domain).smart_discharge_state
-                    assert _ds is not None
-                    cur_state = _ds
-                    await save_session(
-                        _get_store(hass, domain),
-                        "smart_discharge",
-                        session_data_from_discharge_state(cur_state),
-                    )
-                else:
-                    power_delta = abs(new_power - cur_state.get("last_power_w", 0))
-                    should_update = (
-                        power_delta >= min_change
-                        or new_power == cur_state["max_power_w"]
-                    )
-                    # Always re-apply when resuming from suspension
-                    if was_suspended and not cur_state.get("suspended"):
-                        should_update = True
+        power_delta = abs(new_power - cur_state.get("last_power_w", 0))
+        should_update = (
+            power_delta >= min_change or new_power == cur_state["max_power_w"]
+        )
+        if was_suspended and not cur_state.get("suspended"):
+            should_update = True
 
-                    if should_update and new_power != cur_state.get("last_power_w", 0):
-                        _LOGGER.info(
-                            "Smart discharge: adjusting power %dW -> %dW "
-                            "(SoC=%.1f%%, remaining=%.2fh)",
-                            cur_state["last_power_w"],
-                            new_power,
-                            soc_value,
-                            remaining_h,
-                        )
-                        cur_state["last_power_w"] = new_power
-                    elif not should_update and new_power != cur_state.get(
-                        "last_power_w", 0
-                    ):
-                        _LOGGER.debug(
-                            "Smart discharge: power change %dW -> %dW "
-                            "below threshold %dW, skipping",
-                            cur_state["last_power_w"],
-                            new_power,
-                            min_change,
-                        )
-                    else:
-                        _LOGGER.debug(
-                            "Smart discharge: holding at %dW "
-                            "(SoC=%.1f%%, remaining=%.2fh)",
-                            new_power,
-                            soc_value,
-                            remaining_h,
-                        )
+        if should_update and new_power != cur_state.get("last_power_w", 0):
+            _LOGGER.info(
+                "Smart discharge: adjusting power %dW -> %dW "
+                "(SoC=%.1f%%, remaining=%.2fh)",
+                cur_state["last_power_w"],
+                new_power,
+                soc_value,
+                remaining_h,
+            )
+            cur_state["last_power_w"] = new_power
+        elif not should_update and new_power != cur_state.get("last_power_w", 0):
+            _LOGGER.debug(
+                "Smart discharge: power change %dW -> %dW "
+                "below threshold %dW, skipping",
+                cur_state["last_power_w"],
+                new_power,
+                min_change,
+            )
+        else:
+            _LOGGER.debug(
+                "Smart discharge: holding at %dW (SoC=%.1f%%, remaining=%.2fh)",
+                new_power,
+                soc_value,
+                remaining_h,
+            )
 
-                    await adapter.apply_mode(
-                        hass,
-                        WorkMode.FORCE_DISCHARGE,
-                        cur_state["last_power_w"],
-                        fd_soc=cur_state.get("min_soc", 11),
-                    )
-                    if not _is_my_session():
-                        return
-                    _ds = get_domain_data(hass, domain).smart_discharge_state
-                    assert _ds is not None
-                    cur_state = _ds
-                    if should_update:
-                        await save_session(
-                            _get_store(hass, domain),
-                            "smart_discharge",
-                            session_data_from_discharge_state(cur_state),
-                        )
+        await adapter.apply_mode(
+            hass,
+            WorkMode.FORCE_DISCHARGE,
+            cur_state["last_power_w"],
+            fd_soc=cur_state.get("min_soc", 11),
+        )
+        if not _is_my_session():
+            return
+        _ds = get_domain_data(hass, domain).smart_discharge_state
+        assert _ds is not None
+        if should_update:
+            await save_session(
+                _get_store(hass, domain),
+                "smart_discharge",
+                session_data_from_discharge_state(_ds),
+            )
 
-        # --- SoC threshold check ---
+    async def _check_soc_threshold(
+        cur_state: dict[str, Any],
+        soc_value: float,
+    ) -> None:
+        """End session when SoC confirmed at/below min_soc."""
         if soc_value <= cur_state["min_soc"]:
             cur_state["soc_below_min_count"] = (
                 cur_state.get("soc_below_min_count", 0) + 1
@@ -1193,6 +1176,81 @@ def setup_smart_discharge_listeners(
                     await ws_stop
         else:
             cur_state["soc_below_min_count"] = 0
+
+    async def _check_discharge_soc_inner(
+        cur_state: dict[str, Any],
+    ) -> None:
+        # Update peak consumption tracker
+        current_consumption = max(0.0, _get_net_consumption(hass, domain))
+        old_peak = cur_state.get("consumption_peak_kw", 0.0)
+        cur_state["consumption_peak_kw"] = max(
+            current_consumption, old_peak * PEAK_DECAY_PER_TICK
+        )
+
+        # Deferred self-use phase
+        if not cur_state.get(
+            "discharging_started", True
+        ) and await _start_deferred_discharge(cur_state):
+            return
+
+        # Feed-in energy limit
+        should_return, feedin_remaining = await _check_feedin_limit(cur_state)
+        if should_return:
+            return
+
+        # SoC availability
+        soc_value = _get_current_soc(hass, domain)
+        if soc_value is None:
+            await _handle_soc_unavailable(cur_state)
+            return
+        cur_state["soc_unavailable_count"] = 0
+
+        # Taper observation
+        taper = _get_taper_profile(hass, domain)
+        if not cur_state.get("suspended", False):
+            _record_taper_observation(
+                hass,
+                domain,
+                taper,
+                cur_state,
+                soc_value,
+                "batDischargePower",
+                "record_discharge",
+                save_every=5,
+            )
+
+        # Power pacing
+        if cur_state.get("pacing_enabled") and soc_value > cur_state["min_soc"]:
+            now_dt = dt_util.now()
+            remaining_h = (cur_state["end"] - now_dt).total_seconds() / 3600.0
+            net_consumption = _get_net_consumption(hass, domain)
+            headroom = _get_smart_headroom(hass, domain)
+            peak = cur_state.get("consumption_peak_kw", 0.0)
+
+            was_suspended, should_stop = await _handle_suspend_resume(
+                cur_state,
+                soc_value,
+                remaining_h,
+                net_consumption,
+                headroom,
+                peak,
+            )
+            if should_stop:
+                return
+            if remaining_h > 0:
+                await _apply_discharge_power(
+                    cur_state,
+                    soc_value,
+                    remaining_h,
+                    net_consumption,
+                    headroom,
+                    peak,
+                    feedin_remaining,
+                    was_suspended,
+                )
+
+        # SoC threshold check
+        await _check_soc_threshold(cur_state, soc_value)
 
     unsubs: list[Callable[[], None]] = [
         async_track_time_interval(
