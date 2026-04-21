@@ -496,9 +496,35 @@ class FoxESSEntityAdapter:
     ) -> None:
         self._opts = entry_options
         self._max_power_w = max_power_w
+        self._first_write: dict[str, bool] = {}
 
     def get_max_power_w(self) -> int:
         return self._max_power_w
+
+    def _log_first_write(
+        self, entity_id: str, action: str, value: Any, error: Exception | None = None
+    ) -> None:
+        """Log the first write attempt for each entity."""
+        if entity_id in self._first_write:
+            return
+        self._first_write[entity_id] = True
+        if error is None:
+            _LOGGER.info(
+                "Entity write OK: %s ← %s.%s(%s)",
+                entity_id,
+                _entity_service_domain(entity_id, "select"),
+                action,
+                value,
+            )
+        else:
+            _LOGGER.warning(
+                "Entity write FAILED: %s ← %s.%s(%s): %s",
+                entity_id,
+                _entity_service_domain(entity_id, "select"),
+                action,
+                value,
+                error,
+            )
 
     async def apply_mode(
         self,
@@ -518,11 +544,16 @@ class FoxESSEntityAdapter:
         mode_option = _ENTITY_MODE_MAP.get(mode)
         if mode_option:
             wm_entity = self._opts[CONF_WORK_MODE_ENTITY]
-            await hass.services.async_call(
-                _entity_service_domain(wm_entity, "select"),
-                "select_option",
-                {"entity_id": wm_entity, "option": mode_option},
-            )
+            try:
+                await hass.services.async_call(
+                    _entity_service_domain(wm_entity, "select"),
+                    "select_option",
+                    {"entity_id": wm_entity, "option": mode_option},
+                )
+                self._log_first_write(wm_entity, "select_option", mode_option)
+            except Exception as err:
+                self._log_first_write(wm_entity, "select_option", mode_option, err)
+                raise
 
         if power_w is not None and mode in (
             WorkMode.FORCE_CHARGE,
@@ -534,19 +565,29 @@ class FoxESSEntityAdapter:
                 else self._opts.get(CONF_DISCHARGE_POWER_ENTITY)
             )
             if power_entity:
-                await hass.services.async_call(
-                    _entity_service_domain(power_entity, "number"),
-                    "set_value",
-                    {"entity_id": power_entity, "value": power_w},
-                )
+                try:
+                    await hass.services.async_call(
+                        _entity_service_domain(power_entity, "number"),
+                        "set_value",
+                        {"entity_id": power_entity, "value": power_w},
+                    )
+                    self._log_first_write(power_entity, "set_value", power_w)
+                except Exception as err:
+                    self._log_first_write(power_entity, "set_value", power_w, err)
+                    raise
 
         min_soc_entity = self._opts.get(CONF_MIN_SOC_ENTITY)
         if min_soc_entity and mode == WorkMode.FORCE_DISCHARGE:
-            await hass.services.async_call(
-                _entity_service_domain(min_soc_entity, "number"),
-                "set_value",
-                {"entity_id": min_soc_entity, "value": fd_soc},
-            )
+            try:
+                await hass.services.async_call(
+                    _entity_service_domain(min_soc_entity, "number"),
+                    "set_value",
+                    {"entity_id": min_soc_entity, "value": fd_soc},
+                )
+                self._log_first_write(min_soc_entity, "set_value", fd_soc)
+            except Exception as err:
+                self._log_first_write(min_soc_entity, "set_value", fd_soc, err)
+                raise
 
     async def remove_override(
         self,

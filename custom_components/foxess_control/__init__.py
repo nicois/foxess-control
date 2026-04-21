@@ -1265,6 +1265,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     polling_interval = int(entry.options.get(CONF_POLLING_INTERVAL, default_poll))
 
     if entity_map:
+        for var_name, entity_id in entity_map.items():
+            _LOGGER.info("Entity mapping: %s → %s", entity_id, var_name)
         _LOGGER.info(
             "Entity mode active: reading from %d mapped entities",
             len(entity_map),
