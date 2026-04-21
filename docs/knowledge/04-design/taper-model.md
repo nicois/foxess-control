@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: Adaptive BMS Taper Model
-last_verified: 2026-04-14
+last_verified: 2026-04-21
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -73,6 +73,45 @@ per-bin variation.
 **Traces**: C-014;
 `tests/test_taper.py::TestIsPlausible`
 
+### D-014: Multiplicative temperature correction factor
+**Decision**: Temperature effects are modelled as an independent multiplicative
+factor applied to the SoC-based taper ratio: `effective_ratio = soc_ratio * temp_factor`.
+Temperature bins are keyed by integer °C on the same TaperProfile.
+**Context**: At low temperatures (< 20°C), the BMS reduces charge acceptance
+to prevent lithium plating. At 19°C the observed charge rate is ~8.5 kW
+instead of 10 kW nominal — a reduction invisible to SoC-only profiling.
+**Rationale**: SoC taper (electrochemical CV phase) and temperature taper
+(kinetic lithium plating protection) are physically independent phenomena
+that multiply naturally. A 2D model (SoC × temp) would have O(100 × 40)
+bins with extremely sparse data. The multiplicative model keeps the existing
+SoC profile useful day-one while temperature converges independently in
+~10-15 integer °C bins. The temperature factor is isolated by dividing out
+the SoC ratio: `temp_factor = (actual/requested) / soc_ratio`.
+**Alternatives considered**:
+- Temperature-bucketed profiles (separate profile per range): 4× convergence
+  time, data sparsity at uncommon temperatures
+- 2D SoC×temp indexing: O(4000) bins, years to converge
+- Hard threshold clamp (the removed `_apply_cold_temp_limit`): binary step
+  at 16°C, prevented taper learning, one-directional data
+**Traces**: C-014;
+`tests/test_taper.py::TestRecordChargeTemp`, `tests/test_taper.py::TestTempFactor`
+
+### D-015: 10-minute stability gate for temperature observations
+**Decision**: Temperature data points are only recorded after the inverter
+has delivered < 95% of requested power for 10 consecutive minutes (measured
+as consecutive polling ticks via a streak counter).
+**Context**: Transient power reductions (ramp-up, cloud cover, grid
+fluctuations) are not BMS temperature limiting. Recording them would
+corrupt the temperature profile with false positives.
+**Rationale**: 10 minutes filters most transients while capturing genuine
+BMS curtailment (which is sustained). The 95% threshold provides noise
+margin. The streak-counter approach works with both the 5-minute charge
+and 1-minute discharge polling intervals (2 and 10 ticks respectively).
+SoC-based taper recording continues unconditionally — only temperature
+recording is gated.
+**Traces**: C-014;
+`smart_battery/listeners.py::_record_taper_observation`
+
 ## Key Behaviours
 
 - Nearest-neighbour interpolation within +/-5 SoC for missing bins.
@@ -80,9 +119,16 @@ per-bin variation.
   use the ratio from SoC 80.
 - Separate charge and discharge dictionaries (BMS taper is asymmetric).
 - Profile persists to HA Store, surviving restarts.
+- Temperature correction: multiplicative factor from integer-°C-indexed bins.
+- Temperature bins use MIN_TEMP_TRUST_COUNT (3) and TEMP_NEIGHBOR_RANGE (3).
+- Graceful degradation: temp_c=None returns factor 1.0 (no correction).
+- 10-minute stability gate filters transient power reductions from temp data.
 
 ## Edge Cases
 
 - **Empty profile**: All ratios return 1.0 (no taper assumed).
 - **Corrupt profile on load**: Auto-reset via plausibility check.
 - **SoC > 100 or < 0**: Clamped to [0, 100] bucket.
+- **No BMS temperature**: All temp factors return 1.0 (transparent fallback).
+- **Cold temp with empty SoC profile**: SoC ratio defaults to 1.0, so temp
+  factor captures the full observed taper until SoC data accumulates.
