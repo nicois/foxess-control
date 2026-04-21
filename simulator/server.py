@@ -9,6 +9,7 @@ simulators can run in the same process without cross-contamination.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -55,6 +56,38 @@ async def _broadcast_ws(app: web.Application, msg: dict[str, Any]) -> None:
 
 def _api_response(result: Any, errno: int = 0, msg: str = "success") -> web.Response:
     return web.json_response({"errno": errno, "msg": msg, "result": result})
+
+
+def _check_signature(request: web.Request) -> web.Response | None:
+    """Validate MD5 signature header when validation is enabled.
+
+    The FoxESS Open API requires::
+
+        signature = MD5(path + '\\r\\n' + token + '\\r\\n' + timestamp)
+
+    where ``\\r\\n`` are the literal four characters, not CRLF bytes.
+    """
+    model = _model(request)
+    if not model.validate_signatures:
+        return None
+
+    token = request.headers.get("token", "")
+    timestamp = request.headers.get("timestamp", "")
+    signature = request.headers.get("signature", "")
+
+    if not token or not timestamp or not signature:
+        return _api_response(None, errno=41808, msg="Invalid signature")
+
+    if token != model.api_key:
+        return _api_response(None, errno=41808, msg="Invalid signature")
+
+    path = request.path
+    expected = hashlib.md5(rf"{path}\r\n{token}\r\n{timestamp}".encode()).hexdigest()
+
+    if signature != expected:
+        return _api_response(None, errno=41808, msg="Invalid signature")
+
+    return None
 
 
 def _check_rate_limit(request: web.Request) -> web.Response | None:
@@ -110,6 +143,8 @@ def _check_fault(request: web.Request) -> web.Response | None:
 
 
 async def handle_device_list(request: web.Request) -> web.Response:
+    if sig_err := _check_signature(request):
+        return sig_err
     if rl := _check_rate_limit(request):
         return rl
     if fault := _check_fault(request):
@@ -118,6 +153,8 @@ async def handle_device_list(request: web.Request) -> web.Response:
 
 
 async def handle_device_detail(request: web.Request) -> web.Response:
+    if sig_err := _check_signature(request):
+        return sig_err
     if rl := _check_rate_limit(request):
         return rl
     if fault := _check_fault(request):
@@ -126,6 +163,8 @@ async def handle_device_detail(request: web.Request) -> web.Response:
 
 
 async def handle_real_query(request: web.Request) -> web.Response:
+    if sig_err := _check_signature(request):
+        return sig_err
     if rl := _check_rate_limit(request):
         return rl
     if fault := _check_fault(request):
@@ -146,6 +185,8 @@ async def handle_scheduler_get(request: web.Request) -> web.Response:
             if model.fault_remaining == 0:
                 model.active_fault = None
         return _api_response(None)
+    if sig_err := _check_signature(request):
+        return sig_err
     if rl := _check_rate_limit(request):
         return rl
     if fault := _check_fault(request):
@@ -154,6 +195,8 @@ async def handle_scheduler_get(request: web.Request) -> web.Response:
 
 
 async def handle_scheduler_enable(request: web.Request) -> web.Response:
+    if sig_err := _check_signature(request):
+        return sig_err
     if rl := _check_rate_limit(request):
         return rl
     if fault := _check_fault(request):
@@ -187,6 +230,8 @@ async def handle_scheduler_enable(request: web.Request) -> web.Response:
 
 
 async def handle_plant_list(request: web.Request) -> web.Response:
+    if sig_err := _check_signature(request):
+        return sig_err
     if rl := _check_rate_limit(request):
         return rl
     if fault := _check_fault(request):
@@ -195,6 +240,8 @@ async def handle_plant_list(request: web.Request) -> web.Response:
 
 
 async def handle_battery_soc_get(request: web.Request) -> web.Response:
+    if sig_err := _check_signature(request):
+        return sig_err
     if rl := _check_rate_limit(request):
         return rl
     if fault := _check_fault(request):
@@ -209,6 +256,8 @@ async def handle_battery_soc_get(request: web.Request) -> web.Response:
 
 
 async def handle_battery_soc_set(request: web.Request) -> web.Response:
+    if sig_err := _check_signature(request):
+        return sig_err
     if rl := _check_rate_limit(request):
         return rl
     if fault := _check_fault(request):

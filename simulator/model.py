@@ -135,6 +135,10 @@ class InverterModel:
     # Round-trip battery efficiency (1.0 = lossless, 0.95 = 5% loss)
     efficiency: float = 1.0
 
+    # Signature validation (off by default for backward compatibility)
+    validate_signatures: bool = False
+    api_key: str = "test-api-key"
+
     # WS config overrides
     ws_unit: str = "W"  # "W" or "kW"
     ws_time_diff: int = 5  # normal
@@ -438,6 +442,8 @@ class InverterModel:
             "min_soc_on_grid": self.min_soc_on_grid,
             "sim_time": self.sim_time.isoformat(),
             "active_fault": self.active_fault,
+            "validate_signatures": self.validate_signatures,
+            "api_key": self.api_key,
             "ws_unit": self.ws_unit,
             "ws_time_diff": self.ws_time_diff,
             "feedin_total_kwh": round(self.feedin_total_kwh, 3),
