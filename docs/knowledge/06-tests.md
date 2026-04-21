@@ -1,12 +1,12 @@
 ---
 project: FoxESS Control
 level: 6
-last_verified: 2026-04-20
+last_verified: 2026-04-21
 traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-670 unit + 128 E2E = 798 total.
+719 unit + 140 E2E = 859 total.
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
@@ -93,6 +93,9 @@ simulator and Playwright browser automation.
 | `TestRecordCharge::test_ignores_low_requested_power` | Quality gate: requested >= 500W | C-014 |
 | `TestIsPlausible::test_corrupted_profile_not_plausible` | Plausibility check | C-014 |
 | `TestSerialization::test_from_dict_clamps_ratios` | Safe deserialization | C-014 |
+| `TestRecordChargeTemp::*` | Temperature factor recording | C-014 |
+| `TestTempFactor::*` | Temperature factor query + nearest-neighbour | C-014 |
+| `TestEstimateChargeHours::*` | Taper-aware time estimation | C-014 |
 
 ## Schedule Merging (FoxESS API)
 
@@ -221,6 +224,18 @@ Key tests:
 - Smart charge/discharge active status
 - Graceful off when data missing
 
+## Simulator Model
+
+**Constraints**: C-028, C-033
+**Source**: `tests/test_simulator_model.py` (22 tests)
+
+Key tests:
+- Charge/discharge taper modelling (BMS CV phase)
+- Battery efficiency factor (round-trip losses)
+- SelfUse solar routing at full SoC
+- ForceCharge solar contribution
+- Power fuzzing jitter
+
 ## Vendored Code Sync
 
 **Constraints**: C-015, C-016, C-021
@@ -234,7 +249,7 @@ Key tests:
 
 ## E2E Tests (Containerised HA + Simulator + Playwright)
 
-**Source**: `tests/e2e/test_e2e.py` (46 tests), `tests/e2e/test_ui.py` (44 tests)
+**Source**: `tests/e2e/test_e2e.py` (62 tests), `tests/e2e/test_ui.py` (78 tests)
 **Infrastructure**: Podman HA container, FoxESS simulator, Playwright Chromium
 
 | Test | Verifies | Constraint |
@@ -283,8 +298,8 @@ Key tests:
 
 Tests are parametrized across `[cloud, entity]` connection modes and
 `[api, ws, entity]` data sources. The `ws_refuse` simulator fault blocks
-WS connections for API-only mode. Total E2E count is 128 (46 + 44,
-with cloud/entity parametrization expanding to 86 runnable + 42 skipped).
+WS connections for API-only mode. Total E2E count is 140 (62 + 78,
+with cloud/entity parametrization).
 
 ## Test Quality Rules
 

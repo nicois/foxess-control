@@ -2,7 +2,7 @@
 project: FoxESS Control
 created: 2026-04-14
 last_updated: 2026-04-21
-last_reflection: 2026-04-21T00:00:00+10:00
+last_reflection: 2026-04-21T23:59:00+10:00
 ---
 # Knowledge Tree Meta
 
@@ -280,3 +280,68 @@ last_reflection: 2026-04-21T00:00:00+10:00
   repair issues, reauthentication.
 - **Stale areas resolved**: `05-coverage.md` D-035–D-038 gap (flagged
   in 2026-04-20 reflection) now addressed.
+
+### 2026-04-21 — Automated reflection (110 interactions, 2026-04-21)
+- **Architecture remediation completed**: 5-phase plan executed across
+  multiple sessions. `__init__.py` reduced from ~2500 to ~1600 lines via
+  extraction of `_services.py` (~800 lines) and `_helpers.py` (~340 lines).
+  `FoxESSControlData` bridge layer (`__getitem__`/`__contains__`/`get`)
+  fully removed — all access now via typed attributes. Config accessors
+  consolidated into frozen `IntegrationConfig` dataclass. Circuit breaker
+  extracted to shared function. Architecture doc updated to reflect new
+  module boundaries.
+- **Temperature-aware taper model**: Already documented (D-014, D-015 in
+  `taper-model.md` from commit 1c505df). Multiplicative SoC × temperature
+  decomposition with 10-minute stability gate. Cold-temperature limit
+  (`_apply_cold_temp_limit`) removed in favour of data-driven model.
+  `test_cold_temp_limit.py` deleted; replaced by `tests/test_taper.py`
+  temperature tests (67 total taper tests).
+- **Simulator enhancements**: 5 new features added: battery efficiency
+  factor, MD5 signature validation, per-endpoint rate limiting,
+  null_schedule fault injection, fdSoc enforcement. New test file
+  `test_simulator_model.py` (22 tests). Architecture doc updated.
+- **Modbus debugging instrumentation**: First-read/write logging for
+  entity-mode, raw WS node in mapping diagnostics. Helps remote users
+  debug Modbus entity mapping without SSH access. Traces to C-020.
+- **Anker Solix X1 assessment**: User evaluated multi-brand candidate.
+  Third-Party Controlled Modbus mode maps to InverterAdapter. Memory
+  already saved in `project_anker_solix_x1.md`.
+- **Discharge sim improvements** (`deferred-discharge-sim.html`): Peak
+  decay fix, BMS taper model, solar generation model, safe horizon
+  visualisation, suspension reason display, priority board, 13 presets.
+  Not tracked in knowledge tree (standalone documentation tool).
+- **WS divergence fix**: Anomalous WS messages now dropped instead of
+  just logging a warning. 193 new coordinator tests added.
+- **CI changes**: E2E parallel workers increased from 12 to 20. Flaky
+  test workflow changed to 20 runs with random half-selection per run
+  (each test run ~10 times on average alongside random others).
+- **Test counts updated**: 719 unit + 140 E2E = 859 total (was 670 +
+  128 = 798). Growth from: simulator model tests (22), taper temperature
+  tests, coordinator WS divergence tests (193), E2E parametrization
+  expansion. Coverage matrix updated.
+- **Knowledge tree updates applied**:
+  - `03-architecture.md`: Module boundaries updated for `_services.py`,
+    `_helpers.py` extraction, bridge layer removal, `IntegrationConfig`.
+    Simulator fidelity section expanded with 5 new features.
+  - `05-coverage.md`: D-014/D-015 added to C-014 row, test counts
+    updated to 719/140/859.
+  - `06-tests.md`: Test counts updated, simulator model section added,
+    taper model section expanded with temperature tests.
+- **Stale areas not updated this pass** (recommend
+  `/project-overview update`):
+  - `02-constraints.md`: No new C-NNN for WS message anomaly dropping
+    (may warrant extending C-004 or C-005 to cover "drop anomalous
+    messages where power values diverge significantly from preceding
+    values"). No constraint for entity-mode first-read/write
+    instrumentation (informational, not an invariant).
+  - `04-design/`: No D-NNN for `IntegrationConfig` consolidation,
+    `_services.py` extraction, or circuit breaker extraction. These are
+    architecture decisions that reduce coupling and improve
+    maintainability but don't implement a specific constraint. Consider
+    whether they warrant documentation under a principle like C-021
+    (code organisation) or are sufficiently captured by the architecture
+    doc updates.
+  - No D-NNN for simulator enhancements (MD5, rate limiting, fault
+    injection, efficiency). These serve C-033 (simulator fidelity) but
+    are infrastructure improvements rather than design decisions with
+    alternatives considered.

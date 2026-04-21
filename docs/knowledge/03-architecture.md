@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 3
-last_verified: 2026-04-19
+last_verified: 2026-04-21
 traces_up: [02-constraints.md]
 traces_down: [04-design/]
 ---
@@ -48,19 +48,32 @@ brands would have their own equivalent package (e.g., `huawei/`,
 `FoxESSWebSession`, `generate_signature()`.
 
 ### `__init__.py` — Integration entry point and orchestration
-**Path**: `custom_components/foxess_control/__init__.py` (112K)
+**Path**: `custom_components/foxess_control/__init__.py` (~1600 lines)
 **Responsibility**: HA `async_setup_entry` / `async_unload_entry`,
-service handler registration, smart charge/discharge session
-orchestration (FoxESS-specific schedule merging, override application,
-WebSocket lifecycle, power adjustment callbacks).
-**Why large**: Partly intentional (HA integration pattern requires setup
-and service registration in `__init__.py`), partly tech debt. The
-FoxESS-specific session orchestration (schedule merging, override
-tracking, WS lifecycle) should be extracted into a FoxESS session
-manager, leaving `__init__.py` as a thin setup/teardown layer.
-Entity-mode dispatch (`_apply_mode_via_entities`) delegates to
-`FoxESSEntityAdapter` — the inline mode-map/dispatch was consolidated
-into the adapter class in beta.32.
+smart charge/discharge session orchestration (FoxESS-specific schedule
+merging, override application, WebSocket lifecycle, power adjustment
+callbacks).
+**Architecture**: Service handlers extracted to `_services.py` (~800
+lines) and shared helpers to `_helpers.py` (~340 lines). Config
+accessors consolidated into frozen `IntegrationConfig` dataclass in
+`domain_data.py`. Entity-mode dispatch delegates to
+`FoxESSEntityAdapter`.
+
+### `_services.py` — Service handler registration
+**Path**: `custom_components/foxess_control/_services.py`
+**Responsibility**: All six HA service handlers (clear_overrides,
+force_charge, force_discharge, feedin, smart_charge, smart_discharge)
+plus error translation decorator and registration function.
+**Why separate**: Extracted from `__init__.py` to reduce its size from
+~2500 to ~1600 lines. Uses late imports to break circular dependencies.
+
+### `_helpers.py` — Shared utility functions
+**Path**: `custom_components/foxess_control/_helpers.py`
+**Responsibility**: Common helper functions deduplicated from
+`__init__.py` and `_services.py` (type construction, domain data
+access, schedule utilities).
+**Why separate**: Eliminates duplication between `__init__.py` and
+`_services.py` without creating circular imports.
 
 ### `coordinator.py` — Data coordinators
 **Path**: `custom_components/foxess_control/coordinator.py`
@@ -129,12 +142,13 @@ max-power bursts or sessions finishing early.
 ### Typed Domain Data (`domain_data.py`)
 **What**: `FoxESSControlData` (domain-level) and `FoxESSEntryData`
 (per-config-entry) dataclasses that replace the untyped
-`hass.data[DOMAIN]` dict.
+`hass.data[DOMAIN]` dict. `IntegrationConfig` is a frozen dataclass
+snapshot of config entry options, built once at setup time.
 **Why**: HA 2024.x+ best practice. Typed `entry.runtime_data` gives
 IDE autocomplete, catches key typos at lint time, and enables
-`_dd()` helper for consistent typed access throughout `__init__.py`.
-A bridge layer (`__getitem__`, `__contains__`, `get`) preserves
-backward compatibility during incremental migration.
+`_dd()` helper for consistent typed access. The bridge layer
+(`__getitem__`, `__contains__`, `get`) was fully removed after
+completing migration — all access is now via typed attributes.
 **Implemented by**: `domain_data.py`, `smart_battery/domain_data.py`.
 
 ### DataUpdateCoordinator
@@ -180,6 +194,18 @@ to minimise deviations from production behaviour (C-033):
   reducing grid import.
 - **Fuzzing**: ±2% random jitter on power readings prevents tests
   from overfitting to exact values.
+- **Battery efficiency**: Configurable round-trip efficiency factor
+  (default 1.0 = lossless). Charging stores less energy, discharging
+  draws more.
+- **MD5 signature validation**: Optional FoxESS-style request signing
+  verification (`model.validate_signatures`). Returns errno 41808 on
+  mismatch.
+- **Per-endpoint rate limiting**: Configurable per-endpoint throttle
+  (`model.rate_limit_seconds`). Returns errno 41807 when exceeded.
+- **null_schedule fault**: Simulates real API returning null schedule
+  data for testing graceful degradation.
+- **fdSoc enforcement**: Simulator validates `fdSoc >= 11` on schedule
+  writes, matching the real API constraint (C-008).
 | `aiohttp` | WebSocket client | Standard async HTTP/WS library; HA already uses it |
 | `requests` | REST API client (sync) | Used in the FoxESS client for synchronous API calls within HA's executor |
 | `voluptuous` | Schema validation | Used for service call and config flow schemas; ships with HA but used directly |
