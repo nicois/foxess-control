@@ -17,6 +17,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util  # noqa: F401 — test patching target
 
+from ._helpers import _dd
 from .const import CONF_DEVICE_SERIAL, CONF_WEB_USERNAME, DOMAIN
 from .coordinator import FoxESSDataCoordinator
 from .smart_battery.sensor_base import (
@@ -217,7 +218,7 @@ async def async_setup_entry(
     if result is not None:
         sensors, handlers = result
         entities.extend(sensors)
-        hass.data[DOMAIN].debug_log_handlers.extend(handlers)
+        _dd(hass).debug_log_handlers.extend(handlers)
 
     async_add_entities(entities)
 

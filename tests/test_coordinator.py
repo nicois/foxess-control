@@ -15,6 +15,7 @@ from custom_components.foxess_control.coordinator import FoxESSDataCoordinator
 from custom_components.foxess_control.domain_data import (
     FoxESSControlData,
     FoxESSEntryData,
+    IntegrationConfig,
 )
 from custom_components.foxess_control.foxess.inverter import Inverter, WorkMode
 
@@ -333,16 +334,20 @@ class TestSocInterpolationDuringDischarge:
 
         coord = _make_coordinator()
         coord.data = {"SoC": 97.0, "_data_source": "ws"}
-        entry = MagicMock()
-        entry.options = {"battery_capacity_kwh": 10.0}
-        # Wire hass.data as a real dict so _get_capacity_kwh can
-        # iterate entry_ids and look up the config entry.
         dd = FoxESSControlData()
         dd.entries["test-entry"] = FoxESSEntryData()
-        coord.hass.data = {DOMAIN: dd}  # type: ignore[assignment]
-        coord.hass.config_entries.async_get_entry = MagicMock(  # type: ignore[method-assign]
-            return_value=entry
+        dd.config = IntegrationConfig(
+            min_soc_on_grid=11,
+            api_min_soc=11,
+            battery_capacity_kwh=10.0,
+            min_power_change=100,
+            max_power_w=12000,
+            smart_headroom=0.1,
+            bms_polling_interval=300.0,
+            ws_mode="auto",
+            entity_mode=False,
         )
+        coord.hass.data = {DOMAIN: dd}  # type: ignore[assignment]
         return coord
 
     @staticmethod
@@ -531,14 +536,20 @@ class TestSocExtrapolationDoesNotStarvePoll:
         }
         inv.get_current_mode.return_value = None
 
-        entry = MagicMock()
-        entry.options = {"battery_capacity_kwh": 10.0}
         dd = FoxESSControlData()
         dd.entries["test-entry"] = FoxESSEntryData()
-        coord.hass.data = {DOMAIN: dd}  # type: ignore[assignment]
-        coord.hass.config_entries.async_get_entry = MagicMock(  # type: ignore[method-assign]
-            return_value=entry
+        dd.config = IntegrationConfig(
+            min_soc_on_grid=11,
+            api_min_soc=11,
+            battery_capacity_kwh=10.0,
+            min_power_change=100,
+            max_power_w=12000,
+            smart_headroom=0.1,
+            bms_polling_interval=300.0,
+            ws_mode="auto",
+            entity_mode=False,
         )
+        coord.hass.data = {DOMAIN: dd}  # type: ignore[assignment]
 
         registered_callbacks: list[Any] = []
 

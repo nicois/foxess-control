@@ -34,6 +34,7 @@ class IntegrationConfig:
     min_power_change: int
     max_power_w: int
     smart_headroom: float
+    bms_polling_interval: float
     ws_mode: str
     entity_mode: bool
 
@@ -46,6 +47,7 @@ def build_config(
     from .const import (
         CONF_API_MIN_SOC,
         CONF_BATTERY_CAPACITY_KWH,
+        CONF_BMS_POLLING_INTERVAL,
         CONF_INVERTER_POWER,
         CONF_MIN_POWER_CHANGE,
         CONF_MIN_SOC_ON_GRID,
@@ -54,6 +56,7 @@ def build_config(
         CONF_WS_ALL_SESSIONS,
         CONF_WS_MODE,
         DEFAULT_API_MIN_SOC,
+        DEFAULT_BMS_POLLING_INTERVAL,
         DEFAULT_INVERTER_POWER,
         DEFAULT_MIN_POWER_CHANGE,
         DEFAULT_MIN_SOC_ON_GRID,
@@ -90,6 +93,9 @@ def build_config(
         ),
         max_power_w=max_power_w,
         smart_headroom=headroom_pct / 100.0,
+        bms_polling_interval=float(
+            entry_options.get(CONF_BMS_POLLING_INTERVAL, DEFAULT_BMS_POLLING_INTERVAL)
+        ),
         ws_mode=ws_mode,
         entity_mode=bool(entry_options.get(CONF_WORK_MODE_ENTITY)),
     )

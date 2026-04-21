@@ -1,0 +1,76 @@
+rules:
+  # C-021: smart_battery/ must not import from brand-specific modules.
+  - id: no-brand-imports-in-smart-battery
+    pattern-regex: >-
+      (?:from\s+custom_components\.foxess_control\.(?:foxess|coordinator|foxess_adapter|_services|_helpers)\b|import\s+custom_components\.foxess_control\.(?:foxess|coordinator|foxess_adapter|_services|_helpers)\b)
+    paths:
+      include:
+        - "**/smart_battery/"
+        - "**/custom_components/foxess_control/smart_battery/"
+    message: >
+      smart_battery/ must not import from brand-specific modules (C-021).
+      This package is brand-agnostic — move brand-specific logic to the
+      integration layer or pass it via the InverterAdapter protocol.
+    languages: [regex]
+    severity: ERROR
+
+  # Typed domain data: use _dd(hass) instead of raw hass.data[DOMAIN].
+  - id: no-raw-hass-data-access
+    pattern: hass.data[$KEY]
+    paths:
+      include:
+        - "**/custom_components/foxess_control/"
+      exclude:
+        - "**/custom_components/foxess_control/__init__.py"
+        - "**/custom_components/foxess_control/_helpers.py"
+        - "**/custom_components/foxess_control/domain_data.py"
+        # smart_battery/ is brand-agnostic and can't import _dd (C-021).
+        # Its domain_data.py is the canonical location for hass.data
+        # management; other smart_battery modules use get_domain_data().
+        - "**/custom_components/foxess_control/smart_battery/"
+        - "**/smart_battery/"
+    message: >
+      Use _dd(hass) from _helpers.py instead of raw hass.data[DOMAIN].
+      Direct dict access bypasses typed domain data and was the source
+      of the bridge-layer tech debt.
+    languages: [python]
+    severity: ERROR
+
+  # Typed config: use _cfg(hass) instead of raw entry.options access.
+  - id: no-raw-entry-options
+    pattern: entry.options
+    paths:
+      include:
+        - "**/custom_components/foxess_control/"
+      exclude:
+        - "**/custom_components/foxess_control/__init__.py"
+        - "**/custom_components/foxess_control/domain_data.py"
+        - "**/custom_components/foxess_control/config_flow.py"
+        - "**/custom_components/foxess_control/diagnostics.py"
+        # smart_battery/ reads entry.options directly because it can't
+        # import IntegrationConfig (C-021). Future: pass config values
+        # via constructor args or InverterAdapter protocol.
+        - "**/custom_components/foxess_control/smart_battery/"
+        - "**/smart_battery/"
+    message: >
+      Use _cfg(hass) from _helpers.py instead of raw entry.options.
+      Config values should come from IntegrationConfig, which is built
+      once at setup time and cached in domain data. If the field you
+      need isn't in IntegrationConfig, add it to domain_data.py first.
+    languages: [python]
+    severity: ERROR
+
+  # Service handlers belong in _services.py, not __init__.py.
+  - id: no-service-handlers-in-init
+    pattern: |
+      async def $FUNC(..., call: ServiceCall, ...):
+          ...
+    paths:
+      include:
+        - "**/custom_components/foxess_control/__init__.py"
+    message: >
+      Service handlers must be defined in _services.py, not __init__.py.
+      The _register_services() function in _services.py is the single
+      registration point for all HA service handlers.
+    languages: [python]
+    severity: ERROR

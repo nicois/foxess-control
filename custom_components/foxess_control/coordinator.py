@@ -69,34 +69,22 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _get_capacity_kwh(self) -> float:
         """Read battery capacity from config (needed for SoC integration)."""
-        from .const import CONF_BATTERY_CAPACITY_KWH
-        from .smart_battery.domain_data import SmartBatteryDomainData
+        from ._helpers import _cfg
 
-        dd = self.hass.data.get(DOMAIN)
-        if not isinstance(dd, SmartBatteryDomainData):
+        try:
+            return _cfg(self.hass).battery_capacity_kwh
+        except Exception:
             return 0.0
-        for entry_id in dd.entries:
-            entry = self.hass.config_entries.async_get_entry(entry_id)
-            if entry is not None:
-                return float(entry.options.get(CONF_BATTERY_CAPACITY_KWH, 0))
-        return 0.0
 
     @property
     def _bms_fetch_interval(self) -> float:
-        from .const import CONF_BMS_POLLING_INTERVAL, DEFAULT_BMS_POLLING_INTERVAL
-        from .smart_battery.domain_data import SmartBatteryDomainData
+        from ._helpers import _cfg
+        from .const import DEFAULT_BMS_POLLING_INTERVAL
 
-        dd = self.hass.data.get(DOMAIN)
-        if isinstance(dd, SmartBatteryDomainData):
-            for entry_id in dd.entries:
-                entry = self.hass.config_entries.async_get_entry(entry_id)
-                if entry is not None:
-                    return float(
-                        entry.options.get(
-                            CONF_BMS_POLLING_INTERVAL, DEFAULT_BMS_POLLING_INTERVAL
-                        )
-                    )
-        return float(DEFAULT_BMS_POLLING_INTERVAL)
+        try:
+            return _cfg(self.hass).bms_polling_interval
+        except Exception:
+            return float(DEFAULT_BMS_POLLING_INTERVAL)
 
     def _fetch_all(self) -> dict[str, Any]:
         """Fetch real-time data and work mode in a single executor job."""
@@ -135,16 +123,12 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             domain_data.pending_override_cleanup = None
             return
-        min_soc_on_grid = 11
-        for key in domain_data.entries:
-            entry = self.hass.config_entries.async_get_entry(str(key))
-            if entry is not None:
-                from .const import CONF_MIN_SOC_ON_GRID, DEFAULT_MIN_SOC_ON_GRID
+        from ._helpers import _cfg
 
-                min_soc_on_grid = entry.options.get(
-                    CONF_MIN_SOC_ON_GRID, DEFAULT_MIN_SOC_ON_GRID
-                )
-                break
+        try:
+            min_soc_on_grid = _cfg(self.hass).min_soc_on_grid
+        except Exception:
+            min_soc_on_grid = 11
         try:
             await self.hass.async_add_executor_job(
                 _remove_mode_from_schedule,
