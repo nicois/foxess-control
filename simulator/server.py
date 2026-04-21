@@ -109,9 +109,18 @@ async def handle_real_query(request: web.Request) -> web.Response:
 
 
 async def handle_scheduler_get(request: web.Request) -> web.Response:
+    model = _model(request)
+    # null_schedule: return {"errno": 0, "result": null} like the real API
+    # when no scheduler is configured (e.g. mode set via app instead of API).
+    if model.active_fault == "null_schedule":
+        if model.fault_remaining > 0:
+            model.fault_remaining -= 1
+            if model.fault_remaining == 0:
+                model.active_fault = None
+        return _api_response(None)
     if fault := _check_fault(request):
         return fault
-    return _api_response(_model(request).get_schedule_response())
+    return _api_response(model.get_schedule_response())
 
 
 async def handle_scheduler_enable(request: web.Request) -> web.Response:
