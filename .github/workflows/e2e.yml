@@ -6,7 +6,7 @@ on:
   pull_request:
 
 env:
-  E2E_WORKERS: 12
+  E2E_WORKERS: 20
 
 jobs:
   collect:
