@@ -35,6 +35,7 @@ def calculate_charge_power(
     effective_charge_window: float = 0.0,
     min_power_change_w: int = 0,
     taper_profile: TaperProfile | None = None,
+    bms_temp_c: float | None = None,
 ) -> int:
     """Calculate the charge power needed to reach target SoC in remaining time.
 
@@ -94,6 +95,7 @@ def calculate_charge_power(
                         target_soc,
                         battery_capacity_kwh,
                         max_power_w,
+                        temp_c=bms_temp_c,
                     )
                     if total_hours > 0:
                         time_frac = min(
@@ -158,6 +160,7 @@ def is_charge_target_reachable(
     net_consumption_kw: float = 0.0,
     headroom: float = 0.10,
     taper_profile: TaperProfile | None = None,
+    bms_temp_c: float | None = None,
 ) -> bool:
     """Return True if the charge target can be reached in the remaining time.
 
@@ -185,6 +188,7 @@ def is_charge_target_reachable(
             target_soc,
             battery_capacity_kwh,
             int(effective_charge_kw * 1000),
+            temp_c=bms_temp_c,
         )
     else:
         charge_hours = energy_needed_kwh / effective_charge_kw
@@ -417,6 +421,7 @@ def calculate_deferred_start(
     start: datetime.datetime | None = None,
     headroom: float = 0.10,
     taper_profile: TaperProfile | None = None,
+    bms_temp_c: float | None = None,
 ) -> datetime.datetime:
     """Calculate the latest time to start charging to reach target SoC by *end*.
 
@@ -448,6 +453,7 @@ def calculate_deferred_start(
             target_soc,
             battery_capacity_kwh,
             int(effective_charge_kw * 1000),
+            temp_c=bms_temp_c,
         )
     else:
         charge_hours = energy_needed_kwh / effective_charge_kw
@@ -471,6 +477,7 @@ def calculate_discharge_deferred_start(
     taper_profile: TaperProfile | None = None,
     feedin_energy_limit_kwh: float | None = None,
     consumption_peak_kw: float | None = None,
+    bms_temp_c: float | None = None,
 ) -> datetime.datetime:
     """Calculate the latest time to start forced discharge to meet goals by *end*.
 
@@ -512,6 +519,7 @@ def calculate_discharge_deferred_start(
                 min_soc,
                 battery_capacity_kwh,
                 int(effective_kw * 1000),
+                temp_c=bms_temp_c,
             )
         else:
             discharge_hours = energy_to_discharge_kwh / effective_kw

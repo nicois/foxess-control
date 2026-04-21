@@ -177,6 +177,33 @@ class TestCalculateDeferredStart:
         # 60% taper → longer charge time → earlier start
         assert tapered < linear
 
+    def test_deferred_start_with_cold_temp(self) -> None:
+        """Cold temperature should require earlier start time."""
+        # Create taper profile with 0.7 ratio at 10°C (trusted)
+        tp = TaperProfile(charge={i: TaperBin(ratio=1.0, count=10) for i in range(101)})
+        tp.charge_temp = {10: TaperBin(ratio=0.7, count=10)}
+        end = datetime.datetime(2025, 1, 1, 6, 0)
+        no_temp = calculate_deferred_start(50.0, 100, 10.0, 5000, end, taper_profile=tp)
+        with_cold_temp = calculate_deferred_start(
+            50.0, 100, 10.0, 5000, end, taper_profile=tp, bms_temp_c=10.0
+        )
+        # Cold temp (0.7 factor) → longer charge time → earlier start
+        assert with_cold_temp < no_temp
+
+    def test_deferred_start_no_temp_unchanged(self) -> None:
+        """Passing None for temperature should produce same result."""
+        tp = TaperProfile(charge={i: TaperBin(ratio=0.8, count=5) for i in range(101)})
+        tp.charge_temp = {10: TaperBin(ratio=0.7, count=10)}
+        end = datetime.datetime(2025, 1, 1, 6, 0)
+        without_param = calculate_deferred_start(
+            50.0, 100, 10.0, 5000, end, taper_profile=tp
+        )
+        with_none = calculate_deferred_start(
+            50.0, 100, 10.0, 5000, end, taper_profile=tp, bms_temp_c=None
+        )
+        # None should be same as omitting the parameter
+        assert without_param == with_none
+
 
 class TestIsChargeTargetReachable:
     """Tests for is_charge_target_reachable (C-022)."""
@@ -216,6 +243,25 @@ class TestIsChargeTargetReachable:
         # With 30% taper: effective ~1.5kW → ~2.2h needed, 2h not enough
         assert (
             is_charge_target_reachable(50.0, 80, 10.0, 2.0, 5000, taper_profile=tp)
+            is False
+        )
+
+    def test_charge_target_reachable_with_temp(self) -> None:
+        """Cold temperature should reduce reachability."""
+        # Create taper profile with reasonable ratios
+        tp = TaperProfile(charge={i: TaperBin(ratio=0.9, count=10) for i in range(101)})
+        tp.charge_temp = {5: TaperBin(ratio=0.3, count=10)}  # Very cold, trusted
+        # Without temp: should be reachable
+        # (3kWh at 4.5kW effective ~0.75h, 1.5h available)
+        assert (
+            is_charge_target_reachable(50.0, 80, 10.0, 1.5, 5000, taper_profile=tp)
+            is True
+        )
+        # With very cold temp (0.3 factor): should be unreachable (needs ~2.5h)
+        assert (
+            is_charge_target_reachable(
+                50.0, 80, 10.0, 1.5, 5000, taper_profile=tp, bms_temp_c=5.0
+            )
             is False
         )
 

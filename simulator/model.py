@@ -131,6 +131,8 @@ class InverterModel:
     charge_taper_soc: float = 90.0
     # Taper simulation: linear discharge reduction below this SoC threshold
     discharge_taper_soc: float = 15.0
+    # Taper simulation: temperature threshold below which charge rate is reduced
+    cold_taper_temp: float = 15.0
 
     # Round-trip battery efficiency (1.0 = lossless, 0.95 = 5% loss)
     efficiency: float = 1.0
@@ -190,6 +192,14 @@ class InverterModel:
             return 0.0
         return (self.soc - self.min_soc) / (self.discharge_taper_soc - self.min_soc)
 
+    def _temp_charge_taper_factor(self) -> float:
+        """BMS reduces charge acceptance at low temperatures."""
+        if self.battery_temperature >= self.cold_taper_temp:
+            return 1.0
+        if self.battery_temperature <= 0.0:
+            return 0.5
+        return 0.5 + 0.5 * (self.battery_temperature / self.cold_taper_temp)
+
     def tick(self, dt_seconds: float) -> None:
         """Advance the model by dt_seconds."""
         dt_hours = dt_seconds / 3600.0
@@ -202,7 +212,7 @@ class InverterModel:
         self.grid_import_kw = 0.0
         self.grid_export_kw = 0.0
 
-        charge_taper = self._charge_taper_factor()
+        charge_taper = self._charge_taper_factor() * self._temp_charge_taper_factor()
         discharge_taper = self._discharge_taper_factor()
 
         if mode == "ForceCharge":

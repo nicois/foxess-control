@@ -11,8 +11,9 @@ The profile is used to:
   - Avoid false "behind schedule" alerts at high SoC
   - Calculate more accurate deferred start times
 
-The model adapts naturally to temperature changes: recent observations
-(reflecting current conditions) dominate via EMA weighting.
+Temperature effects are physically independent of SoC effects (CV-phase
+vs lithium plating protection), so the model uses a multiplicative
+decomposition: effective_ratio = soc_ratio(soc) * temp_factor(temp_c).
 """
 
 from __future__ import annotations
@@ -41,6 +42,13 @@ MIN_REQUESTED_W = 500
 # the reading is likely a sensor error or unit mismatch, not real taper.
 MIN_ACTUAL_W = 50
 
+# Minimum observations before trusting a temperature bin.  Slightly higher
+# than SoC's MIN_TRUST_COUNT because temperature observations are noisier.
+MIN_TEMP_TRUST_COUNT = 3
+
+# Nearest-neighbor search range for temperature bins (°C).
+TEMP_NEIGHBOR_RANGE = 3
+
 
 @dataclass
 class TaperBin:
@@ -56,6 +64,8 @@ class TaperProfile:
 
     charge: dict[int, TaperBin] = field(default_factory=dict)
     discharge: dict[int, TaperBin] = field(default_factory=dict)
+    charge_temp: dict[int, TaperBin] = field(default_factory=dict)
+    discharge_temp: dict[int, TaperBin] = field(default_factory=dict)
 
     # -- Recording ----------------------------------------------------------
 
@@ -95,15 +105,89 @@ class TaperProfile:
                 count=existing.count + 1,
             )
 
+    # -- Temperature recording ------------------------------------------------
+
+    def record_charge_temp(
+        self,
+        temp_c: float,
+        soc: float,
+        requested_w: int,
+        actual_w: float,
+    ) -> None:
+        """Record a charge temperature-taper observation."""
+        self._record_temp(
+            self.charge_temp, self.charge, temp_c, soc, requested_w, actual_w
+        )
+
+    def record_discharge_temp(
+        self,
+        temp_c: float,
+        soc: float,
+        requested_w: int,
+        actual_w: float,
+    ) -> None:
+        """Record a discharge temperature-taper observation."""
+        self._record_temp(
+            self.discharge_temp, self.discharge, temp_c, soc, requested_w, actual_w
+        )
+
+    @staticmethod
+    def _record_temp(
+        temp_bins: dict[int, TaperBin],
+        soc_bins: dict[int, TaperBin],
+        temp_c: float,
+        soc: float,
+        requested_w: int,
+        actual_w: float,
+    ) -> None:
+        if requested_w < MIN_REQUESTED_W:
+            return
+        if actual_w < MIN_ACTUAL_W:
+            return
+
+        raw_ratio = actual_w / requested_w
+
+        # Factor out the SoC effect to isolate temperature contribution.
+        soc_ratio = TaperProfile._ratio(soc_bins, soc)
+        if soc_ratio <= MIN_RATIO:
+            return  # can't divide reliably
+
+        temp_factor = raw_ratio / soc_ratio
+        temp_factor = max(MIN_RATIO, min(MAX_RATIO, temp_factor))
+
+        bucket = max(-20, min(60, int(temp_c)))
+
+        existing = temp_bins.get(bucket)
+        if existing is None or existing.count == 0:
+            temp_bins[bucket] = TaperBin(ratio=temp_factor, count=1)
+        else:
+            new_ratio = EMA_ALPHA * temp_factor + (1 - EMA_ALPHA) * existing.ratio
+            temp_bins[bucket] = TaperBin(
+                ratio=max(MIN_RATIO, min(MAX_RATIO, new_ratio)),
+                count=existing.count + 1,
+            )
+
     # -- Querying -----------------------------------------------------------
 
-    def charge_ratio(self, soc: float) -> float:
+    def charge_ratio(self, soc: float, temp_c: float | None = None) -> float:
         """Expected actual/requested ratio for charging at *soc* %."""
-        return self._ratio(self.charge, soc)
+        return max(
+            MIN_RATIO,
+            min(
+                MAX_RATIO,
+                self._ratio(self.charge, soc) * self.charge_temp_factor(temp_c),
+            ),
+        )
 
-    def discharge_ratio(self, soc: float) -> float:
+    def discharge_ratio(self, soc: float, temp_c: float | None = None) -> float:
         """Expected actual/requested ratio for discharging at *soc* %."""
-        return self._ratio(self.discharge, soc)
+        return max(
+            MIN_RATIO,
+            min(
+                MAX_RATIO,
+                self._ratio(self.discharge, soc) * self.discharge_temp_factor(temp_c),
+            ),
+        )
 
     @staticmethod
     def _ratio(bins: dict[int, TaperBin], soc: float) -> float:
@@ -132,6 +216,44 @@ class TaperProfile:
 
         return 1.0  # no data at all — assume no taper
 
+    # -- Temperature factor -------------------------------------------------
+
+    def charge_temp_factor(self, temp_c: float | None) -> float:
+        """Temperature adjustment factor for charging."""
+        return self._temp_factor(self.charge_temp, temp_c)
+
+    def discharge_temp_factor(self, temp_c: float | None) -> float:
+        """Temperature adjustment factor for discharging."""
+        return self._temp_factor(self.discharge_temp, temp_c)
+
+    @staticmethod
+    def _temp_factor(bins: dict[int, TaperBin], temp_c: float | None) -> float:
+        if temp_c is None:
+            return 1.0
+
+        bucket = max(-20, min(60, int(temp_c)))
+        b = bins.get(bucket)
+        if b is not None and b.count >= MIN_TEMP_TRUST_COUNT:
+            return b.ratio
+
+        # Nearest-neighbor — walk outward up to TEMP_NEIGHBOR_RANGE °C
+        for offset in range(1, TEMP_NEIGHBOR_RANGE + 1):
+            for candidate in (bucket - offset, bucket + offset):
+                if -20 <= candidate <= 60:
+                    b = bins.get(candidate)
+                    if b is not None and b.count >= MIN_TEMP_TRUST_COUNT:
+                        return b.ratio
+
+        # Edge extrapolation
+        trusted = [k for k, v in bins.items() if v.count >= MIN_TEMP_TRUST_COUNT]
+        if trusted:
+            if bucket > max(trusted):
+                return bins[max(trusted)].ratio
+            if bucket < min(trusted):
+                return bins[min(trusted)].ratio
+
+        return 1.0  # no data — assume no temperature effect
+
     # -- Time estimation ----------------------------------------------------
 
     def estimate_charge_hours(
@@ -140,6 +262,7 @@ class TaperProfile:
         target_soc: int,
         capacity_kwh: float,
         max_power_w: int,
+        temp_c: float | None = None,
     ) -> float:
         """Estimate hours to charge from *current_soc* to *target_soc*.
 
@@ -147,7 +270,12 @@ class TaperProfile:
         ratio at each step.
         """
         return self._estimate_hours(
-            self.charge, current_soc, target_soc, capacity_kwh, max_power_w
+            self.charge,
+            current_soc,
+            target_soc,
+            capacity_kwh,
+            max_power_w,
+            temp_factor=self.charge_temp_factor(temp_c),
         )
 
     def estimate_discharge_hours(
@@ -156,10 +284,16 @@ class TaperProfile:
         min_soc: int,
         capacity_kwh: float,
         max_power_w: int,
+        temp_c: float | None = None,
     ) -> float:
         """Estimate hours to discharge from *current_soc* to *min_soc*."""
         return self._estimate_hours(
-            self.discharge, current_soc, min_soc, capacity_kwh, max_power_w
+            self.discharge,
+            current_soc,
+            min_soc,
+            capacity_kwh,
+            max_power_w,
+            temp_factor=self.discharge_temp_factor(temp_c),
         )
 
     @staticmethod
@@ -169,6 +303,7 @@ class TaperProfile:
         to_soc: int,
         capacity_kwh: float,
         max_power_w: int,
+        temp_factor: float = 1.0,
     ) -> float:
         if max_power_w <= 0 or capacity_kwh <= 0:
             return 0.0
@@ -183,7 +318,8 @@ class TaperProfile:
             start = int(from_soc)
             end = int(to_soc)
             for soc_pct in range(start, end):
-                ratio = TaperProfile._ratio(bins, float(soc_pct))
+                soc_ratio = TaperProfile._ratio(bins, float(soc_pct))
+                ratio = max(MIN_RATIO, min(MAX_RATIO, soc_ratio * temp_factor))
                 effective_kw = max_power_kw * ratio
                 total_hours += energy_per_pct / effective_kw
         else:
@@ -191,7 +327,8 @@ class TaperProfile:
             start = int(from_soc)
             end = int(to_soc)
             for soc_pct in range(start, end, -1):
-                ratio = TaperProfile._ratio(bins, float(soc_pct))
+                soc_ratio = TaperProfile._ratio(bins, float(soc_pct))
+                ratio = max(MIN_RATIO, min(MAX_RATIO, soc_ratio * temp_factor))
                 effective_kw = max_power_kw * ratio
                 total_hours += energy_per_pct / effective_kw
 
@@ -213,43 +350,66 @@ class TaperProfile:
             median = sorted(trusted)[len(trusted) // 2]
             if median <= MIN_RATIO * 2:
                 return False
+
+        for bins in (self.charge_temp, self.discharge_temp):
+            trusted = [
+                b.ratio for b in bins.values() if b.count >= MIN_TEMP_TRUST_COUNT
+            ]
+            if not trusted:
+                continue
+            median = sorted(trusted)[len(trusted) // 2]
+            if median <= MIN_RATIO * 2:
+                return False
+
         return True
 
     # -- Serialization ------------------------------------------------------
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict for HA Store."""
-        return {
+        result: dict[str, Any] = {
             "charge": {str(k): [b.ratio, b.count] for k, b in self.charge.items()},
             "discharge": {
                 str(k): [b.ratio, b.count] for k, b in self.discharge.items()
             },
         }
+        if self.charge_temp:
+            result["charge_temp"] = {
+                str(k): [b.ratio, b.count] for k, b in self.charge_temp.items()
+            }
+        if self.discharge_temp:
+            result["discharge_temp"] = {
+                str(k): [b.ratio, b.count] for k, b in self.discharge_temp.items()
+            }
+        return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TaperProfile:
         """Deserialize from HA Store data."""
-        charge: dict[int, TaperBin] = {}
-        discharge: dict[int, TaperBin] = {}
+        return cls(
+            charge=cls._deserialize_bins(data.get("charge"), key_range=(0, 100)),
+            discharge=cls._deserialize_bins(data.get("discharge"), key_range=(0, 100)),
+            charge_temp=cls._deserialize_bins(
+                data.get("charge_temp"), key_range=(-20, 60)
+            ),
+            discharge_temp=cls._deserialize_bins(
+                data.get("discharge_temp"), key_range=(-20, 60)
+            ),
+        )
 
-        for k, v in (data.get("charge") or {}).items():
+    @staticmethod
+    def _deserialize_bins(raw: Any, key_range: tuple[int, int]) -> dict[int, TaperBin]:
+        """Deserialize a dict of bins, clamping keys to *key_range*."""
+        result: dict[int, TaperBin] = {}
+        lo, hi = key_range
+        for k, v in (raw or {}).items():
             try:
-                soc = int(k)
+                key = int(k)
+                key = max(lo, min(hi, key))
                 ratio, count = float(v[0]), int(v[1])
-                charge[soc] = TaperBin(
+                result[key] = TaperBin(
                     ratio=max(MIN_RATIO, min(MAX_RATIO, ratio)), count=count
                 )
             except (ValueError, TypeError, IndexError):
                 continue
-
-        for k, v in (data.get("discharge") or {}).items():
-            try:
-                soc = int(k)
-                ratio, count = float(v[0]), int(v[1])
-                discharge[soc] = TaperBin(
-                    ratio=max(MIN_RATIO, min(MAX_RATIO, ratio)), count=count
-                )
-            except (ValueError, TypeError, IndexError):
-                continue
-
-        return cls(charge=charge, discharge=discharge)
+        return result

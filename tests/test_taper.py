@@ -9,6 +9,7 @@ from smart_battery.taper import (
     MAX_RATIO,
     MIN_RATIO,
     MIN_REQUESTED_W,
+    MIN_TEMP_TRUST_COUNT,
     MIN_TRUST_COUNT,
     TaperBin,
     TaperProfile,
@@ -312,4 +313,242 @@ class TestIsPlausible:
         """Bins with count < MIN_TRUST_COUNT are not considered."""
         tp = TaperProfile()
         tp.charge[80] = TaperBin(ratio=MIN_RATIO, count=1)
+        assert tp.is_plausible()
+
+
+# -- Temperature recording tests -------------------------------------------
+
+
+class TestRecordChargeTemp:
+    def test_first_temp_observation_seeds_directly(self) -> None:
+        """Record at 10C with known SoC ratio."""
+        tp = TaperProfile()
+        # Pre-populate SoC bin at 50% with ratio 0.8, count 5
+        tp.charge[50] = TaperBin(ratio=0.8, count=5)
+        tp.record_charge_temp(10.0, 50.0, 10000, 5600.0)
+        # raw_ratio = 5600/10000 = 0.56
+        # soc_ratio = 0.8
+        # temp_factor = 0.56/0.8 = 0.7
+        assert tp.charge_temp[10].ratio == pytest.approx(0.7)
+        assert tp.charge_temp[10].count == 1
+
+    def test_temp_factor_with_no_soc_data(self) -> None:
+        """SoC ratio defaults to 1.0, so temp factor captures full taper."""
+        tp = TaperProfile()
+        tp.record_charge_temp(10.0, 50.0, 10000, 7000.0)
+        # raw=0.7, soc=1.0, temp=0.7
+        assert tp.charge_temp[10].ratio == pytest.approx(0.7)
+
+    def test_ignores_low_requested(self) -> None:
+        tp = TaperProfile()
+        tp.record_charge_temp(10.0, 50.0, MIN_REQUESTED_W - 1, 200.0)
+        assert tp.charge_temp == {}
+
+    def test_ignores_low_actual(self) -> None:
+        tp = TaperProfile()
+        tp.record_charge_temp(10.0, 50.0, 10000, 10.0)
+        assert tp.charge_temp == {}
+
+    def test_skips_when_soc_ratio_too_low(self) -> None:
+        """When soc_ratio <= MIN_RATIO, dividing is unreliable."""
+        tp = TaperProfile()
+        tp.charge[50] = TaperBin(ratio=MIN_RATIO, count=5)
+        tp.record_charge_temp(10.0, 50.0, 10000, 5000.0)
+        assert tp.charge_temp == {}
+
+    def test_temp_ema_convergence(self) -> None:
+        """20 observations at same temp converge."""
+        tp = TaperProfile()
+        # SoC ratio = 1.0 (no data), so temp_factor = raw_ratio
+        for _ in range(20):
+            tp.record_charge_temp(25.0, 50.0, 10000, 8000.0)
+        # Should converge near 0.8
+        assert tp.charge_temp[25].ratio == pytest.approx(0.8, abs=0.02)
+        assert tp.charge_temp[25].count == 20
+
+    def test_temp_bucket_clamping(self) -> None:
+        tp = TaperProfile()
+        tp.record_charge_temp(-30.0, 50.0, 10000, 8000.0)
+        assert -20 in tp.charge_temp
+        assert -30 not in tp.charge_temp
+
+        tp.record_charge_temp(70.0, 50.0, 10000, 8000.0)
+        assert 60 in tp.charge_temp
+        assert 70 not in tp.charge_temp
+
+
+# -- Temperature factor query tests ----------------------------------------
+
+
+class TestTempFactor:
+    def test_returns_1_with_no_data(self) -> None:
+        tp = TaperProfile()
+        assert tp.charge_temp_factor(25.0) == 1.0
+
+    def test_returns_ratio_when_trusted(self) -> None:
+        tp = TaperProfile()
+        tp.charge_temp[25] = TaperBin(ratio=0.85, count=MIN_TEMP_TRUST_COUNT)
+        assert tp.charge_temp_factor(25.0) == 0.85
+
+    def test_ignores_untrusted_bin(self) -> None:
+        tp = TaperProfile()
+        tp.charge_temp[25] = TaperBin(ratio=0.85, count=MIN_TEMP_TRUST_COUNT - 1)
+        assert tp.charge_temp_factor(25.0) == 1.0
+
+    def test_nearest_neighbor(self) -> None:
+        tp = TaperProfile()
+        tp.charge_temp[22] = TaperBin(ratio=0.75, count=5)
+        # 25 is 3 away from 22, within TEMP_NEIGHBOR_RANGE
+        assert tp.charge_temp_factor(25.0) == 0.75
+
+    def test_edge_extrapolation_cold(self) -> None:
+        """Below all data, uses coldest bin."""
+        tp = TaperProfile()
+        tp.charge_temp[5] = TaperBin(ratio=0.6, count=5)
+        # -10 is well below 5, outside neighbor range
+        assert tp.charge_temp_factor(-10.0) == 0.6
+
+    def test_edge_extrapolation_warm(self) -> None:
+        """Above all data, uses warmest bin."""
+        tp = TaperProfile()
+        tp.charge_temp[30] = TaperBin(ratio=0.9, count=5)
+        # 50 is well above 30, outside neighbor range
+        assert tp.charge_temp_factor(50.0) == 0.9
+
+    def test_none_temp_returns_1(self) -> None:
+        tp = TaperProfile()
+        tp.charge_temp[25] = TaperBin(ratio=0.5, count=10)
+        assert tp.charge_temp_factor(None) == 1.0
+
+
+# -- Combined ratio tests -------------------------------------------------
+
+
+class TestCombinedRatio:
+    def test_multiplicative_combination(self) -> None:
+        tp = TaperProfile()
+        tp.charge[95] = TaperBin(ratio=0.5, count=5)
+        tp.charge_temp[10] = TaperBin(ratio=0.8, count=5)
+        result = tp.charge_ratio(95.0, temp_c=10.0)
+        assert result == pytest.approx(0.5 * 0.8)
+
+    def test_combined_clamped_to_bounds(self) -> None:
+        tp = TaperProfile()
+        # soc_ratio = 0.05 (MIN_RATIO), temp_factor = 0.05
+        # product = 0.0025 — should clamp to MIN_RATIO
+        tp.charge[95] = TaperBin(ratio=MIN_RATIO, count=5)
+        tp.charge_temp[10] = TaperBin(ratio=MIN_RATIO, count=5)
+        assert tp.charge_ratio(95.0, temp_c=10.0) == MIN_RATIO
+
+    def test_backward_compatible_no_temp(self) -> None:
+        """charge_ratio(soc) without temp_c behaves same as before."""
+        tp = TaperProfile()
+        tp.charge[90] = TaperBin(ratio=0.7, count=5)
+        # Without temp — temp_factor defaults to 1.0
+        assert tp.charge_ratio(90.0) == pytest.approx(0.7)
+
+
+# -- Estimate with temperature tests --------------------------------------
+
+
+class TestEstimateWithTemp:
+    def test_cold_temp_increases_charge_time(self) -> None:
+        tp = TaperProfile()
+        tp.charge_temp[5] = TaperBin(ratio=0.5, count=5)
+        # 50kWh battery, 50% to 100% at 10kW
+        hours_cold = tp.estimate_charge_hours(50.0, 100, 50.0, 10000, temp_c=5.0)
+        hours_warm = tp.estimate_charge_hours(50.0, 100, 50.0, 10000)
+        # Cold should take longer (temp_factor 0.5 halves effective power)
+        assert hours_cold > hours_warm
+        # Without SoC taper: cold = 25kWh / 5kW = 5h, warm = 25kWh / 10kW = 2.5h
+        assert hours_cold == pytest.approx(5.0, abs=0.01)
+        assert hours_warm == pytest.approx(2.5, abs=0.01)
+
+    def test_warm_temp_no_effect(self) -> None:
+        """temp_factor=1.0 same as before."""
+        tp = TaperProfile()
+        tp.charge_temp[25] = TaperBin(ratio=1.0, count=5)
+        hours_with = tp.estimate_charge_hours(50.0, 100, 50.0, 10000, temp_c=25.0)
+        hours_without = tp.estimate_charge_hours(50.0, 100, 50.0, 10000)
+        assert hours_with == pytest.approx(hours_without)
+
+    def test_none_temp_matches_no_temp(self) -> None:
+        tp = TaperProfile()
+        tp.charge_temp[25] = TaperBin(ratio=0.5, count=5)
+        hours_none = tp.estimate_charge_hours(50.0, 100, 50.0, 10000, temp_c=None)
+        hours_no = tp.estimate_charge_hours(50.0, 100, 50.0, 10000)
+        assert hours_none == hours_no
+
+
+# -- Serialization with temperature tests ----------------------------------
+
+
+class TestSerializationWithTemp:
+    def test_round_trip_with_temp_data(self) -> None:
+        tp = TaperProfile()
+        tp.charge[90] = TaperBin(ratio=0.7, count=5)
+        tp.charge_temp[10] = TaperBin(ratio=0.8, count=3)
+        tp.discharge_temp[-5] = TaperBin(ratio=0.6, count=4)
+
+        data = tp.to_dict()
+        tp2 = TaperProfile.from_dict(data)
+
+        assert tp2.charge[90].ratio == pytest.approx(0.7)
+        assert tp2.charge_temp[10].ratio == pytest.approx(0.8)
+        assert tp2.charge_temp[10].count == 3
+        assert tp2.discharge_temp[-5].ratio == pytest.approx(0.6)
+        assert tp2.discharge_temp[-5].count == 4
+
+    def test_from_dict_without_temp_keys(self) -> None:
+        """Old format loads with empty temp bins."""
+        data = {
+            "charge": {"90": [0.7, 5]},
+            "discharge": {"10": [0.65, 3]},
+        }
+        tp = TaperProfile.from_dict(data)
+        assert tp.charge[90].ratio == pytest.approx(0.7)
+        assert tp.charge_temp == {}
+        assert tp.discharge_temp == {}
+
+    def test_from_dict_ignores_corrupt_temp(self) -> None:
+        data = {
+            "charge": {"90": [0.7, 5]},
+            "discharge": {},
+            "charge_temp": {
+                "10": [0.8, 3],  # valid
+                "bad": [0.5, 2],  # invalid key
+                "20": "invalid",  # invalid value
+            },
+        }
+        tp = TaperProfile.from_dict(data)
+        assert 10 in tp.charge_temp
+        assert len(tp.charge_temp) == 1
+
+    def test_to_dict_omits_empty_temp(self) -> None:
+        """No bloat when temp bins are empty."""
+        tp = TaperProfile()
+        tp.charge[90] = TaperBin(ratio=0.7, count=5)
+        data = tp.to_dict()
+        assert "charge_temp" not in data
+        assert "discharge_temp" not in data
+
+
+# -- Plausibility with temperature tests -----------------------------------
+
+
+class TestIsPlausibleWithTemp:
+    def test_empty_temp_bins_plausible(self) -> None:
+        tp = TaperProfile()
+        assert tp.is_plausible()
+
+    def test_corrupted_temp_bins_not_plausible(self) -> None:
+        tp = TaperProfile()
+        for temp in range(0, 30):
+            tp.charge_temp[temp] = TaperBin(ratio=MIN_RATIO, count=MIN_TEMP_TRUST_COUNT)
+        assert not tp.is_plausible()
+
+    def test_healthy_temp_bins_plausible(self) -> None:
+        tp = TaperProfile()
+        tp.charge_temp[10] = TaperBin(ratio=0.8, count=5)
+        tp.charge_temp[20] = TaperBin(ratio=0.9, count=5)
         assert tp.is_plausible()
