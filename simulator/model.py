@@ -248,6 +248,18 @@ class InverterModel:
                 if shortfall > 0:
                     self.grid_import_kw = shortfall
 
+        # Clamp charge at fdSoc (inverter stops charging when target reached)
+        if group and mode == "ForceCharge" and self.soc >= group.fdSoc:
+            self.bat_charge_kw = 0.0
+            self.grid_import_kw = max(0, self.load_kw - self.solar_kw)
+            self.grid_export_kw = max(0, self.solar_kw - self.load_kw)
+
+        # Clamp discharge at fdSoc (inverter stops discharging at target floor)
+        if group and mode in ("ForceDischarge", "Feedin") and self.soc <= group.fdSoc:
+            self.bat_discharge_kw = 0.0
+            self.grid_import_kw = max(0, self.load_kw - self.solar_kw)
+            self.grid_export_kw = max(0, self.solar_kw - self.load_kw)
+
         # Clamp discharge at min_soc
         if self.soc <= self.min_soc and self.bat_discharge_kw > 0:
             self.bat_discharge_kw = 0.0

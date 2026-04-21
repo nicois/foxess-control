@@ -9,6 +9,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from custom_components.foxess_control.const import DOMAIN
+from custom_components.foxess_control.domain_data import (
+    FoxESSControlData,
+    FoxESSEntryData,
+)
 from custom_components.foxess_control.sensor import (
     POLLED_SENSOR_DESCRIPTIONS,
     BatteryForecastSensor,
@@ -49,16 +53,13 @@ def _make_hass(
         if coordinator_extra:
             coordinator_data.update(coordinator_extra)
     mock_coordinator.data = coordinator_data
-    domain_data: dict[str, Any] = {
-        "_smart_charge_unsubs": [],
-        "_smart_discharge_unsubs": [],
-        "entry1": {"coordinator": mock_coordinator},
-    }
+    dd = FoxESSControlData()
+    dd.entries["entry1"] = FoxESSEntryData(coordinator=mock_coordinator)
     if smart_charge_state is not None:
-        domain_data["_smart_charge_state"] = smart_charge_state
+        dd.smart_charge_state = smart_charge_state
     if smart_discharge_state is not None:
-        domain_data["_smart_discharge_state"] = smart_discharge_state
-    hass.data = {DOMAIN: domain_data}
+        dd.smart_discharge_state = smart_discharge_state
+    hass.data = {DOMAIN: dd}
     return hass
 
 
@@ -146,10 +147,9 @@ class TestInverterOverrideStatusSensor:
         )
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 20.0}
-        hass.data[DOMAIN]["entry1"] = {
-            "inverter": MagicMock(),
-            "coordinator": mock_coordinator,
-        }
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
@@ -274,10 +274,9 @@ class TestSmartOperationsOverviewSensor:
         )
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 20.0}
-        hass.data[DOMAIN]["entry1"] = {
-            "inverter": MagicMock(),
-            "coordinator": mock_coordinator,
-        }
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
@@ -404,10 +403,9 @@ class TestChargePowerSensor:
         )
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 20.0}
-        hass.data[DOMAIN]["entry1"] = {
-            "inverter": MagicMock(),
-            "coordinator": mock_coordinator,
-        }
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
@@ -456,10 +454,9 @@ class TestChargeRemainingSensor:
         )
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 70.0}
-        hass.data[DOMAIN]["entry1"] = {
-            "inverter": MagicMock(),
-            "coordinator": mock_coordinator,
-        }
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
@@ -489,10 +486,9 @@ class TestChargeRemainingSensor:
         )
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 20.0}
-        hass.data[DOMAIN]["entry1"] = {
-            "inverter": MagicMock(),
-            "coordinator": mock_coordinator,
-        }
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
@@ -518,10 +514,9 @@ class TestChargeRemainingSensor:
         )
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 20.0}
-        hass.data[DOMAIN]["entry1"] = {
-            "inverter": MagicMock(),
-            "coordinator": mock_coordinator,
-        }
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
@@ -551,10 +546,9 @@ class TestChargeRemainingSensor:
         )
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 10.0}
-        hass.data[DOMAIN]["entry1"] = {
-            "inverter": MagicMock(),
-            "coordinator": mock_coordinator,
-        }
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
@@ -702,10 +696,9 @@ class TestDischargeRemainingSensor:
         )
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 40.0}
-        hass.data[DOMAIN]["entry1"] = {
-            "inverter": MagicMock(),
-            "coordinator": mock_coordinator,
-        }
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
@@ -738,10 +731,9 @@ class TestDischargeRemainingSensor:
         )
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 80.0}
-        hass.data[DOMAIN]["entry1"] = {
-            "inverter": MagicMock(),
-            "coordinator": mock_coordinator,
-        }
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
@@ -766,10 +758,9 @@ class TestDischargeRemainingSensor:
         )
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 50.0, "feedin": 104.0}
-        hass.data[DOMAIN]["entry1"] = {
-            "inverter": MagicMock(),
-            "coordinator": mock_coordinator,
-        }
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
 
         sensor = DischargeRemainingSensor(hass, _make_entry())
         with patch(
@@ -791,10 +782,9 @@ class TestDischargeRemainingSensor:
         )
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 50.0, "feedin": 101.0}
-        hass.data[DOMAIN]["entry1"] = {
-            "inverter": MagicMock(),
-            "coordinator": mock_coordinator,
-        }
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
 
         sensor = DischargeRemainingSensor(hass, _make_entry())
         with patch(
@@ -830,10 +820,9 @@ class TestBatteryForecastSensor:
         )
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 40.0}
-        hass.data[DOMAIN]["entry1"] = {
-            "inverter": MagicMock(),
-            "coordinator": mock_coordinator,
-        }
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
@@ -877,11 +866,10 @@ class TestBatteryForecastSensor:
         )
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 50.0}
-        hass.data[DOMAIN]["entry1"] = {
-            "inverter": MagicMock(),
-            "coordinator": mock_coordinator,
-        }
-        hass.data[DOMAIN]["_taper_profile"] = taper
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
+        hass.data[DOMAIN].taper_profile = taper
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
@@ -923,10 +911,9 @@ class TestBatteryForecastSensor:
         )
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 70.0}
-        hass.data[DOMAIN]["entry1"] = {
-            "inverter": MagicMock(),
-            "coordinator": mock_coordinator,
-        }
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
@@ -959,10 +946,9 @@ class TestBatteryForecastSensor:
         )
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 20.0}
-        hass.data[DOMAIN]["entry1"] = {
-            "inverter": MagicMock(),
-            "coordinator": mock_coordinator,
-        }
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
@@ -1001,10 +987,9 @@ class TestBatteryForecastSensor:
         hass = _make_hass(smart_discharge_state=_discharge_state(last_power_w=5000))
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 60.0}
-        hass.data[DOMAIN]["entry1"] = {
-            "inverter": MagicMock(),
-            "coordinator": mock_coordinator,
-        }
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
@@ -1040,10 +1025,9 @@ class TestBatteryForecastSensor:
         )
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 60.0}
-        hass.data[DOMAIN]["entry1"] = {
-            "inverter": MagicMock(),
-            "coordinator": mock_coordinator,
-        }
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
@@ -1065,10 +1049,9 @@ class TestBatteryForecastSensor:
         hass = _make_hass(smart_discharge_state=_discharge_state(last_power_w=5000))
         mock_coordinator = MagicMock()
         mock_coordinator.data = {"SoC": 60.0}
-        hass.data[DOMAIN]["entry1"] = {
-            "inverter": MagicMock(),
-            "coordinator": mock_coordinator,
-        }
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
         mock_entry = MagicMock()
         mock_entry.options = {"battery_capacity_kwh": 10.0}
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
@@ -1246,7 +1229,7 @@ class TestGetSocValue:
         hass = _make_hass()
         coordinator = MagicMock()
         coordinator.data = {"SoC": 72.0}
-        hass.data[DOMAIN]["entry1"] = {"coordinator": coordinator}
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(coordinator=coordinator)
 
         assert _get_soc_value(hass) == 72.0
 

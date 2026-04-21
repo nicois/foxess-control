@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,10 +12,11 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.foxess_control.const import POLLED_VARIABLES
 from custom_components.foxess_control.coordinator import FoxESSDataCoordinator
+from custom_components.foxess_control.domain_data import (
+    FoxESSControlData,
+    FoxESSEntryData,
+)
 from custom_components.foxess_control.foxess.inverter import Inverter, WorkMode
-
-if TYPE_CHECKING:
-    from custom_components.foxess_control.domain_data import FoxESSControlData
 
 
 def _make_coordinator(
@@ -336,7 +337,9 @@ class TestSocInterpolationDuringDischarge:
         entry.options = {"battery_capacity_kwh": 10.0}
         # Wire hass.data as a real dict so _get_capacity_kwh can
         # iterate entry_ids and look up the config entry.
-        coord.hass.data = {DOMAIN: {"test-entry": {}}}  # type: ignore[assignment]
+        dd = FoxESSControlData()
+        dd.entries["test-entry"] = FoxESSEntryData()
+        coord.hass.data = {DOMAIN: dd}  # type: ignore[assignment]
         coord.hass.config_entries.async_get_entry = MagicMock(  # type: ignore[method-assign]
             return_value=entry
         )
@@ -530,7 +533,9 @@ class TestSocExtrapolationDoesNotStarvePoll:
 
         entry = MagicMock()
         entry.options = {"battery_capacity_kwh": 10.0}
-        coord.hass.data = {DOMAIN: {"test-entry": {}}}  # type: ignore[assignment]
+        dd = FoxESSControlData()
+        dd.entries["test-entry"] = FoxESSEntryData()
+        coord.hass.data = {DOMAIN: dd}  # type: ignore[assignment]
         coord.hass.config_entries.async_get_entry = MagicMock(  # type: ignore[method-assign]
             return_value=entry
         )

@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.storage import Store
 
+    from .domain_data import SmartBatteryDomainData
+
 _LOGGER = logging.getLogger(__name__)
 _SAVE_DELAY = 60
 
@@ -132,9 +134,9 @@ def session_data_from_discharge_state(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def cancel_smart_session(
-    domain_data: dict[str, Any],
-    state_key: str,
-    unsubs_key: str,
+    domain_data: SmartBatteryDomainData,
+    state_attr: str,
+    unsubs_attr: str,
     store: Store[dict[str, Any]] | None,
     storage_key: str,
     hass: HomeAssistant,
@@ -147,18 +149,17 @@ def cancel_smart_session(
     coroutine for deferred WS shutdown that the caller should await after
     the override removal completes).
     """
-    unsubs: list[Callable[[], None]] = domain_data.get(unsubs_key, [])
+    unsubs: list[Callable[[], None]] = getattr(domain_data, unsubs_attr, [])
     for unsub in unsubs:
         unsub()
-    domain_data[unsubs_key] = []
-    domain_data.pop(state_key, None)
+    setattr(domain_data, unsubs_attr, [])
+    setattr(domain_data, state_attr, None)
     if clear_storage and store is not None:
         hass.async_create_task(
             clear_stored_session(store, storage_key),
             name=f"smart_battery_clear_{storage_key}",
         )
-    # Brand-specific post-cancel hook (e.g., stop WebSocket)
-    hook = domain_data.get("_on_session_cancel")
+    hook = domain_data.on_session_cancel
     if hook is not None:
         return hook()
     return None

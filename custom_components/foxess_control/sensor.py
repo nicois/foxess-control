@@ -217,7 +217,7 @@ async def async_setup_entry(
     if result is not None:
         sensors, handlers = result
         entities.extend(sensors)
-        hass.data[DOMAIN].setdefault("_debug_log_handlers", []).extend(handlers)
+        hass.data[DOMAIN].debug_log_handlers.extend(handlers)
 
     async_add_entities(entities)
 

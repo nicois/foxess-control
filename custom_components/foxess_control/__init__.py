@@ -179,8 +179,9 @@ def _record_error(hass: HomeAssistant, message: str) -> None:
     domain_data = hass.data.get(DOMAIN)
     if domain_data is None:
         return
-    prev = domain_data.get("_smart_error_state", {})
-    domain_data["_smart_error_state"] = {
+    dd = _dd(hass)
+    prev = dd.smart_error_state or {}
+    dd.smart_error_state = {
         "last_error": message,
         "last_error_at": dt_util.now().isoformat(),
         "error_count": prev.get("error_count", 0) + 1,
@@ -411,24 +412,22 @@ def _get_net_consumption(hass: HomeAssistant) -> float:
     domain_data = hass.data.get(DOMAIN)
     if domain_data is None:
         return 0.0
-    for key in domain_data:
-        if not str(key).startswith("_"):
-            entry_data = domain_data.get(key)
-            if isinstance(entry_data, dict):
-                coordinator = entry_data.get("coordinator")
-                if coordinator is not None and coordinator.data:
-                    try:
-                        loads = float(coordinator.data.get("loadsPower", 0))
-                        pv = float(coordinator.data.get("pvPower", 0))
-                        return loads - pv
-                    except (ValueError, TypeError):
-                        _LOGGER.warning(
-                            "Failed to parse loadsPower=%r / pvPower=%r "
-                            "from coordinator, using 0",
-                            coordinator.data.get("loadsPower"),
-                            coordinator.data.get("pvPower"),
-                        )
-                        return 0.0
+    dd = _dd(hass)
+    for _eid, entry_data in dd.entries.items():
+        coordinator = entry_data.coordinator
+        if coordinator is not None and coordinator.data:
+            try:
+                loads = float(coordinator.data.get("loadsPower", 0))
+                pv = float(coordinator.data.get("pvPower", 0))
+                return loads - pv
+            except (ValueError, TypeError):
+                _LOGGER.warning(
+                    "Failed to parse loadsPower=%r / pvPower=%r "
+                    "from coordinator, using 0",
+                    coordinator.data.get("loadsPower"),
+                    coordinator.data.get("pvPower"),
+                )
+                return 0.0
     return 0.0
 
 
@@ -442,19 +441,17 @@ def _get_feedin_energy_kwh(hass: HomeAssistant) -> float | None:
     domain_data = hass.data.get(DOMAIN)
     if domain_data is None:
         return None
-    for key in domain_data:
-        if not str(key).startswith("_"):
-            entry_data = domain_data.get(key)
-            if isinstance(entry_data, dict):
-                coordinator = entry_data.get("coordinator")
-                if coordinator is not None and coordinator.data:
-                    raw = coordinator.data.get("feedin")
-                    if raw is None:
-                        return None
-                    try:
-                        return float(raw)
-                    except (ValueError, TypeError):
-                        return None
+    dd = _dd(hass)
+    for _eid, entry_data in dd.entries.items():
+        coordinator = entry_data.coordinator
+        if coordinator is not None and coordinator.data:
+            raw = coordinator.data.get("feedin")
+            if raw is None:
+                return None
+            try:
+                return float(raw)
+            except (ValueError, TypeError):
+                return None
     return None
 
 
@@ -463,29 +460,31 @@ def _get_coordinator_value(hass: HomeAssistant, variable: str) -> float | None:
     domain_data = hass.data.get(DOMAIN)
     if domain_data is None:
         return None
-    for key in domain_data:
-        if not str(key).startswith("_"):
-            entry_data = domain_data.get(key)
-            if isinstance(entry_data, dict):
-                coordinator = entry_data.get("coordinator")
-                if coordinator is not None and coordinator.data:
-                    raw = coordinator.data.get(variable)
-                    if raw is not None:
-                        try:
-                            return float(raw)
-                        except (ValueError, TypeError):
-                            return None
+    dd = _dd(hass)
+    for _eid, entry_data in dd.entries.items():
+        coordinator = entry_data.coordinator
+        if coordinator is not None and coordinator.data:
+            raw = coordinator.data.get(variable)
+            if raw is not None:
+                try:
+                    return float(raw)
+                except (ValueError, TypeError):
+                    return None
     return None
 
 
 def _get_taper_profile(hass: HomeAssistant) -> _TaperProfile | None:
     """Return the adaptive taper profile from domain data."""
-    return hass.data.get(DOMAIN, {}).get("_taper_profile")  # type: ignore[no-any-return]
+    if DOMAIN not in hass.data:
+        return None
+    return _dd(hass).taper_profile
 
 
 async def _save_taper_profile(hass: HomeAssistant, profile: _TaperProfile) -> None:
     """Persist the taper profile to the session Store."""
-    store: Store[dict[str, Any]] | None = hass.data.get(DOMAIN, {}).get("_store")
+    if DOMAIN not in hass.data:
+        return
+    store: Store[dict[str, Any]] | None = _dd(hass).store
     if store is None:
         return
     stored: dict[str, Any] = await store.async_load() or {}
@@ -504,13 +503,15 @@ def _cancel_smart_discharge(hass: HomeAssistant, *, clear_storage: bool = True) 
 
 async def _save_session(hass: HomeAssistant, key: str, data: dict[str, Any]) -> None:
     """Persist a smart session to storage."""
-    store: Store[dict[str, Any]] = hass.data[DOMAIN].get("_store")
+    store: Store[dict[str, Any]] | None = _dd(hass).store
     await _sb_save_session(store, key, data)
 
 
 async def _clear_stored_session(hass: HomeAssistant, key: str) -> None:
     """Remove a smart session from storage."""
-    store: Store[dict[str, Any]] | None = hass.data.get(DOMAIN, {}).get("_store")
+    store: Store[dict[str, Any]] | None = (
+        _dd(hass).store if DOMAIN in hass.data else None
+    )
     await _sb_clear_stored_session(store, key)
 
 
@@ -523,10 +524,11 @@ async def _persist_active_sessions(hass: HomeAssistant) -> None:
     domain_data = hass.data.get(DOMAIN)
     if domain_data is None:
         return
-    cs = domain_data.get("_smart_charge_state")
+    dd = _dd(hass)
+    cs = dd.smart_charge_state
     if cs is not None:
         await _save_session(hass, "smart_charge", _session_data_from_charge_state(cs))
-    ds = domain_data.get("_smart_discharge_state")
+    ds = dd.smart_discharge_state
     if ds is not None:
         await _save_session(
             hass, "smart_discharge", _session_data_from_discharge_state(ds)
@@ -622,7 +624,9 @@ def _setup_smart_charge_listeners(
     with a WS-aware wrapper so _maybe_start_realtime_ws fires after
     every charge check (reconnects WS if it dropped mid-session).
     """
-    state = hass.data[DOMAIN]["_smart_charge_state"]
+    dd = _dd(hass)
+    state = dd.smart_charge_state
+    assert state is not None
     adapter = _build_foxess_adapter(hass, inverter, state)
     cb = _sb_setup_smart_charge_listeners(hass, DOMAIN, adapter)  # type: ignore[arg-type]
 
@@ -630,7 +634,7 @@ def _setup_smart_charge_listeners(
         await cb(now)
         await _maybe_start_realtime_ws(hass)
 
-    unsubs = hass.data[DOMAIN].get("_smart_charge_unsubs", [])
+    unsubs = dd.smart_charge_unsubs
     if len(unsubs) >= 2:
         unsubs[1]()
         unsubs[1] = async_track_time_interval(
@@ -653,7 +657,9 @@ def _setup_smart_discharge_listeners(
     with a WS-aware wrapper so _maybe_start_realtime_ws fires after
     every discharge check (including deferred→active transitions).
     """
-    state = hass.data[DOMAIN]["_smart_discharge_state"]
+    dd = _dd(hass)
+    state = dd.smart_discharge_state
+    assert state is not None
     adapter = _build_foxess_adapter(hass, inverter, state)
     cb = _sb_setup_smart_discharge_listeners(hass, DOMAIN, adapter)  # type: ignore[arg-type]
 
@@ -661,9 +667,9 @@ def _setup_smart_discharge_listeners(
         await cb(now)
         await _maybe_start_realtime_ws(hass)
 
-    hass.data[DOMAIN]["_ws_discharge_callback"] = _ws_aware_discharge_cb
+    dd.ws_discharge_callback = _ws_aware_discharge_cb
 
-    unsubs = hass.data[DOMAIN].get("_smart_discharge_unsubs", [])
+    unsubs = dd.smart_discharge_unsubs
     if unsubs:
         unsubs[0]()
         unsubs[0] = async_track_time_interval(
@@ -807,7 +813,7 @@ async def _recover_charge_session(
         else:
             last_power = max_power
 
-        hass.data[DOMAIN]["_smart_charge_state"] = {
+        _dd(hass).smart_charge_state = {
             "session_id": str(uuid.uuid4()),
             "groups": charge_data.get("groups") or [],
             "start": start,
@@ -951,7 +957,7 @@ async def _recover_discharge_session(
                     consumption_peak_kw=recovered_peak,
                 )
 
-        hass.data[DOMAIN]["_smart_discharge_state"] = {
+        _dd(hass).smart_discharge_state = {
             "session_id": str(uuid.uuid4()),
             "groups": discharge_data.get("groups") or [],
             "start": start,
@@ -996,7 +1002,7 @@ async def _recover_sessions(
     inverter: Inverter | None,
 ) -> None:
     """Recover or clean up smart sessions persisted before a restart."""
-    store: Store[dict[str, Any]] | None = hass.data[DOMAIN].get("_store")
+    store: Store[dict[str, Any]] | None = _dd(hass).store
     if store is None:
         return
 
@@ -1092,9 +1098,9 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
         registry = er.async_get(hass)
         # Find the config entry id
         entry_id: str | None = None
-        for key in hass.data.get(DOMAIN, {}):
-            if not str(key).startswith("_"):
-                entry_id = key
+        if DOMAIN in hass.data:
+            for eid in _dd(hass).entries:
+                entry_id = eid
                 break
 
         result: dict[str, str] = {}
@@ -1234,12 +1240,14 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
     if ws_mode == WS_MODE_ALWAYS:
         return True
 
-    domain_data = hass.data.get(DOMAIN, {})
+    if DOMAIN not in hass.data:
+        return False
+    dd = _dd(hass)
 
     # Active forced discharge — only when power is paced below max,
     # which is when house load could exceed discharge power and cause
     # grid import.  At full power there is plenty of headroom.
-    ds = domain_data.get("_smart_discharge_state")
+    ds = dd.smart_discharge_state
     if ds is not None and ds.get("discharging_started", False):
         min_soc = ds.get("min_soc", 0)
         last_pw = ds.get("last_power_w", 0)
@@ -1261,14 +1269,14 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
         return False
 
     # Any *started* smart session
-    cs = domain_data.get("_smart_charge_state")
+    cs = dd.smart_charge_state
     if (ds is not None and ds.get("discharging_started", False)) or (
         cs is not None and cs.get("charging_started", False)
     ):
         return True
 
     # Force operations (charge / discharge / feed-in) with a future end time
-    force_end: datetime.datetime | None = domain_data.get("_force_op_end")
+    force_end: datetime.datetime | None = dd.force_op_end
     return force_end is not None and dt_util.now() < force_end
 
 
@@ -1276,8 +1284,8 @@ async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
     """Start the WebSocket if conditions are met and it's not running."""
     if not _should_start_realtime_ws(hass):
         return
-    domain_data = hass.data[DOMAIN]
-    ws_ref = domain_data.get("_realtime_ws")
+    dd = _dd(hass)
+    ws_ref = dd.realtime_ws
     if ws_ref is not None and ws_ref.is_active:
         _LOGGER.debug("WS: already running or reconnecting, skipping")
         return
@@ -1288,16 +1296,16 @@ async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
     password_md5 = entry.data[CONF_WEB_PASSWORD]  # stored as MD5 hash
 
     # Get or create web session (reused across discharge sessions)
-    web_session: FoxESSWebSession | None = domain_data.get("_web_session")
+    web_session: FoxESSWebSession | None = dd.web_session
     if web_session is None:
         _sim = os.environ.get("FOXESS_SIMULATOR_URL")
         web_session = FoxESSWebSession(
             username, password_md5, base_url=_sim, session=async_get_clientsession(hass)
         )
-        domain_data["_web_session"] = web_session
+        dd.web_session = web_session
 
     # Discover plantId (cached after first call)
-    plant_id: str | None = domain_data.get("_plant_id")
+    plant_id: str | None = dd.plant_id
     if plant_id is None:
         inverter = _get_inverter(hass)
         try:
@@ -1309,11 +1317,11 @@ async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
                 exc_info=True,
             )
             return
-        domain_data["_plant_id"] = plant_id
+        dd.plant_id = plant_id
 
     # Get coordinator for data injection
     entry_id = _first_entry_id(hass)
-    coordinator = domain_data[entry_id]["coordinator"]
+    coordinator = dd.entries[entry_id].coordinator
 
     async def on_data(ws_data: dict[str, Any]) -> None:
         coordinator.inject_realtime_data(ws_data)
@@ -1333,7 +1341,7 @@ async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
     ws = FoxESSRealtimeWS(plant_id, web_session, on_data, on_disconnect, ws_url=_ws_url)
     try:
         await ws.async_connect()
-        domain_data["_realtime_ws"] = ws
+        dd.realtime_ws = ws
         _LOGGER.info("FoxESS WebSocket real-time data stream active")
     except Exception:
         _LOGGER.warning(
@@ -1354,8 +1362,11 @@ async def _stop_realtime_ws(hass: HomeAssistant) -> None:
     the fresh post-session values into the coordinator so the overview card
     immediately reflects reality.
     """
-    domain_data = hass.data.get(DOMAIN, {})
-    ws: FoxESSRealtimeWS | None = domain_data.pop("_realtime_ws", None)
+    if DOMAIN not in hass.data:
+        return
+    dd = _dd(hass)
+    ws: FoxESSRealtimeWS | None = dd.realtime_ws
+    dd.realtime_ws = None
     if ws is None:
         return
 
@@ -1388,12 +1399,15 @@ async def _stop_realtime_ws(hass: HomeAssistant) -> None:
 
     # Update data source badge immediately so the user sees "API"
     # instead of stale "WS" for up to 5 minutes.
-    for _eid, entry_data in domain_data.items():
-        if isinstance(entry_data, dict) and "coordinator" in entry_data:
-            coord = entry_data["coordinator"]
-            if coord.data is not None and coord.data.get("_data_source") == "ws":
-                coord.data["_data_source"] = "api"
-                coord.async_set_updated_data(dict(coord.data))
+    for _eid, entry_data in dd.entries.items():
+        coord = entry_data.coordinator
+        if (
+            coord is not None
+            and coord.data is not None
+            and coord.data.get("_data_source") == "ws"
+        ):
+            coord.data["_data_source"] = "api"
+            coord.async_set_updated_data(dict(coord.data))
 
 
 async def _start_force_op_ws(
@@ -1405,39 +1419,44 @@ async def _start_force_op_ws(
     Sets ``_force_op_end`` so ``_should_start_realtime_ws`` can see the
     active operation, then schedules cleanup when the window expires.
     """
-    domain_data = hass.data.get(DOMAIN, {})
+    if DOMAIN not in hass.data:
+        return
+    dd = _dd(hass)
 
     # Cancel any previous force-op cleanup timer
-    cancel_prev: asyncio.TimerHandle | None = domain_data.pop("_force_op_timer", None)
+    cancel_prev: asyncio.TimerHandle | None = dd.force_op_timer
     if cancel_prev is not None:
         cancel_prev.cancel()
+    dd.force_op_timer = None
 
-    domain_data["_force_op_end"] = end
+    dd.force_op_end = end
     await _maybe_start_realtime_ws(hass)
 
     # Schedule WS stop when the window ends
     delay = max(0.0, (end - dt_util.now()).total_seconds())
 
     def _on_force_op_expired() -> None:
-        domain_data.pop("_force_op_end", None)
-        domain_data.pop("_force_op_timer", None)
+        dd.force_op_end = None
+        dd.force_op_timer = None
         if not _should_start_realtime_ws(hass):
             hass.async_create_task(
                 _stop_realtime_ws(hass), name="foxess_stop_ws_force_op"
             )
 
     handle = hass.loop.call_later(delay, _on_force_op_expired)
-    domain_data["_force_op_timer"] = handle
+    dd.force_op_timer = handle
 
 
 def _trigger_discharge_listener(hass: HomeAssistant) -> None:
     """Invoke the discharge listener immediately (debounced)."""
-    domain_data = hass.data.get(DOMAIN, {})
-    now = _time.monotonic()
-    if now - domain_data.get("_ws_last_trigger", 0) < _WS_DEBOUNCE_SECONDS:
+    if DOMAIN not in hass.data:
         return
-    domain_data["_ws_last_trigger"] = now
-    cb = domain_data.get("_ws_discharge_callback")
+    dd = _dd(hass)
+    now = _time.monotonic()
+    if now - dd.ws_last_trigger < _WS_DEBOUNCE_SECONDS:
+        return
+    dd.ws_last_trigger = now
+    cb = dd.ws_discharge_callback
     if cb is not None:
         hass.async_create_task(cb(dt_util.now()), name="foxess_ws_discharge_callback")
 
@@ -1486,7 +1505,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # the override removal completes so the linger captures post-session
     # data instead of stale forced-discharge/charge values (D-009).
     def _on_session_cancel() -> Coroutine[Any, Any, None] | None:
-        hass.data[DOMAIN].pop("_ws_discharge_callback", None)
+        _dd(hass).ws_discharge_callback = None
         ws_stop: Coroutine[Any, Any, None] | None = None
         if not _should_start_realtime_ws(hass):
             ws_stop = _stop_realtime_ws(hass)
@@ -1511,40 +1530,46 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.info("Cleared work mode %s (session ended)", old)
         return ws_stop
 
-    hass.data[DOMAIN]["_on_session_cancel"] = _on_session_cancel
+    dd.on_session_cancel = _on_session_cancel
 
     # Install structured session logging filter (enriches log records
     # with session_id, session_type, etc. for debug log / E2E capture).
-    if "_session_log_filter" not in hass.data[DOMAIN]:
+    if dd.session_log_filter is None:
         from .smart_battery.logging import install_session_filter
 
         def _session_context() -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-            dd = hass.data.get(DOMAIN, {})
+            if DOMAIN not in hass.data:
+                return (None, None)
+            _dd_inner = _dd(hass)
             return (
-                dd.get("_smart_charge_state"),
-                dd.get("_smart_discharge_state"),
+                _dd_inner.smart_charge_state,
+                _dd_inner.smart_discharge_state,
             )
 
         fox_logger = logging.getLogger("custom_components.foxess_control")
-        hass.data[DOMAIN]["_session_log_filter"] = install_session_filter(
-            fox_logger, _session_context
-        )
+        dd.session_log_filter = install_session_filter(fox_logger, _session_context)
 
     # Load adaptive taper profile from persistent storage
-    if "_taper_profile" not in hass.data[DOMAIN]:
-        store: Store[dict[str, Any]] = hass.data[DOMAIN]["_store"]
-        stored = await store.async_load() or {}
-        raw_taper = stored.get("taper_profile")
-        profile = _TaperProfile.from_dict(raw_taper) if raw_taper else _TaperProfile()
-        if raw_taper and not profile.is_plausible():
-            _LOGGER.warning(
-                "Taper profile has implausible ratios (likely corrupted "
-                "by a sensor unit mismatch); resetting to empty"
+    if dd.taper_profile is None:
+        store: Store[dict[str, Any]] = dd.store
+        try:
+            stored = await store.async_load() or {}
+            raw_taper = stored.get("taper_profile")
+            profile = (
+                _TaperProfile.from_dict(raw_taper) if raw_taper else _TaperProfile()
             )
+            if raw_taper and not profile.is_plausible():
+                _LOGGER.warning(
+                    "Taper profile has implausible ratios (likely corrupted "
+                    "by a sensor unit mismatch); resetting to empty"
+                )
+                profile = _TaperProfile()
+                stored.pop("taper_profile", None)
+                await store.async_save(stored)
+        except Exception:
+            _LOGGER.debug("Could not load taper profile from storage", exc_info=True)
             profile = _TaperProfile()
-            stored.pop("taper_profile", None)
-            await store.async_save(stored)
-        hass.data[DOMAIN]["_taper_profile"] = profile
+        dd.taper_profile = profile
 
     entity_map = _build_entity_map(entry.options)
     entity_mode = bool(entity_map)
@@ -1592,7 +1617,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Eagerly create the web session so BMS temperature polling works
     # from the first coordinator refresh (not just when WebSocket starts).
-    if entry.data.get(CONF_WEB_USERNAME) and not hass.data[DOMAIN].get("_web_session"):
+    if entry.data.get(CONF_WEB_USERNAME) and dd.web_session is None:
         from .foxess.web_session import FoxESSWebSession
 
         _sim = os.environ.get("FOXESS_SIMULATOR_URL")
@@ -1602,15 +1627,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             base_url=_sim,
             session=async_get_clientsession(hass),
         )
-        hass.data[DOMAIN]["_web_session"] = web_session
+        dd.web_session = web_session
 
         # Discover battery compound ID for BMS temperature polling.
         # Runs as a background task so it doesn't block integration setup
         # (the WS discovery can take up to 75s if no bat data is available).
-        if not hass.data[DOMAIN].get("_battery_compound_id"):
+        if dd.battery_compound_id is None:
 
             async def _discover_battery_id() -> None:
-                dd_inner: FoxESSControlData = hass.data[DOMAIN]
+                dd_inner: FoxESSControlData = _dd(hass)
                 _plant_id: str | None = dd_inner.plant_id
                 if _plant_id is None and inverter is not None:
                     try:
@@ -1623,7 +1648,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 if _plant_id:
                     compound_id = await web_session.async_discover_battery_id(_plant_id)
                     if compound_id:
-                        dd_inner["_battery_compound_id"] = compound_id
+                        dd_inner.battery_compound_id = compound_id
 
             hass.async_create_task(
                 _discover_battery_id(), name="foxess_discover_battery_id"
@@ -1837,7 +1862,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Flush active sessions to disk before teardown.  save_session uses
         # async_delay_save (60s coalesce) which won't fire during a reload.
         await _persist_active_sessions(hass)
-        store: Store[dict[str, Any]] | None = hass.data[DOMAIN].get("_store")
+        store: Store[dict[str, Any]] | None = dd.store
         if store is not None:
             stored = await store.async_load() or {}
             if stored:
@@ -1851,25 +1876,26 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.async_create_task(ws_stop, name="foxess_stop_ws_unload_charge")
         # Stop WebSocket unconditionally — _on_session_cancel skips this
         # for "always" mode since _should_start_realtime_ws returns True.
-        ws: FoxESSRealtimeWS | None = hass.data[DOMAIN].pop("_realtime_ws", None)
+        ws: FoxESSRealtimeWS | None = dd.realtime_ws
+        dd.realtime_ws = None
         if ws is not None:
             await ws.async_disconnect()
         # Close web session used for WebSocket auth
-        web_session: FoxESSWebSession | None = hass.data[DOMAIN].pop(
-            "_web_session", None
-        )
+        web_session: FoxESSWebSession | None = dd.web_session
+        dd.web_session = None
         if web_session is not None:
             await web_session.async_close()
         # Detach session context filter
         from .smart_battery.logging import remove_session_filter
 
         fox_logger = logging.getLogger("custom_components.foxess_control")
-        session_filter = hass.data[DOMAIN].pop("_session_log_filter", None)
+        session_filter = dd.session_log_filter
+        dd.session_log_filter = None
         if session_filter is not None:
             remove_session_filter(fox_logger, session_filter)
 
         # Detach debug log handlers and restore logger level
-        for handler in hass.data[DOMAIN].get("_debug_log_handlers", []):
+        for handler in dd.debug_log_handlers:
             fox_logger.removeHandler(handler)
             original = getattr(handler, "original_level", logging.NOTSET)
             fox_logger.setLevel(original)
@@ -1940,11 +1966,13 @@ def _register_services(hass: HomeAssistant) -> None:
                 ws_stops.append(ws_stop)
 
         # Clear force-op WS tracking
-        domain_data = hass.data.get(DOMAIN, {})
-        timer: asyncio.TimerHandle | None = domain_data.pop("_force_op_timer", None)
-        if timer is not None:
-            timer.cancel()
-        domain_data.pop("_force_op_end", None)
+        if DOMAIN in hass.data:
+            _clear_dd = _dd(hass)
+            timer: asyncio.TimerHandle | None = _clear_dd.force_op_timer
+            if timer is not None:
+                timer.cancel()
+            _clear_dd.force_op_timer = None
+            _clear_dd.force_op_end = None
         if not _should_start_realtime_ws(hass) and not ws_stops:
             ws_stops.append(_stop_realtime_ws(hass))
 
@@ -2180,7 +2208,7 @@ def _register_services(hass: HomeAssistant) -> None:
             hass.async_create_task(ws_stop, name="foxess_stop_ws_smart_discharge")
 
         # Cancel any active smart charge — the two sessions would conflict
-        if hass.data[DOMAIN].get("_smart_charge_state") is not None:
+        if _dd(hass).smart_charge_state is not None:
             _LOGGER.info("Smart discharge: cancelling active smart charge session")
             ws_stop = _cancel_smart_charge(hass)
             if ws_stop is not None:
@@ -2206,7 +2234,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 net_consumption_kw=net_consumption,
                 start=start,
                 headroom=headroom,
-                taper_profile=hass.data.get(DOMAIN, {}).get("_taper_profile"),
+                taper_profile=_get_taper_profile(hass),
                 feedin_energy_limit_kwh=feedin_energy_limit,
             )
             should_defer = now < deferred_start
@@ -2282,7 +2310,7 @@ def _register_services(hass: HomeAssistant) -> None:
         )
 
         # Clear any previous error — new session is starting
-        hass.data[DOMAIN].pop("_smart_error_state", None)
+        _dd(hass).smart_error_state = None
 
         # Store state for binary sensor and diagnostics
         # Compute safe schedule horizon for immediate starts (C-027).
@@ -2307,32 +2335,34 @@ def _register_services(hass: HomeAssistant) -> None:
             if safe_end != end:
                 schedule_horizon = safe_end.isoformat()
 
-        hass.data[DOMAIN]["_smart_discharge_state"] = _create_discharge_session(
-            start=start,
-            end=end,
-            min_soc=min_soc,
-            max_power_w=max_power_w,
-            initial_power=initial_power,
-            battery_capacity_kwh=battery_capacity_kwh,
-            min_power_change=_get_min_power_change(hass),
-            pacing_enabled=pacing_enabled,
-            current_soc=current_soc,
-            net_consumption=net_consumption,
-            should_defer=should_defer,
-            now=now,
-            feedin_energy_limit=feedin_energy_limit,
-            schedule_horizon=schedule_horizon,
-            groups=groups,
+        dd = _dd(hass)
+        dd.smart_discharge_state = dict(
+            _create_discharge_session(
+                start=start,
+                end=end,
+                min_soc=min_soc,
+                max_power_w=max_power_w,
+                initial_power=initial_power,
+                battery_capacity_kwh=battery_capacity_kwh,
+                min_power_change=_get_min_power_change(hass),
+                pacing_enabled=pacing_enabled,
+                current_soc=current_soc,
+                net_consumption=net_consumption,
+                should_defer=should_defer,
+                now=now,
+                feedin_energy_limit=feedin_energy_limit,
+                schedule_horizon=schedule_horizon,
+                groups=groups,
+            )
         )
 
         _setup_smart_discharge_listeners(hass, inverter)
 
+        assert dd.smart_discharge_state is not None
         await _save_session(
             hass,
             "smart_discharge",
-            _session_data_from_discharge_state(
-                hass.data[DOMAIN]["_smart_discharge_state"]
-            ),
+            _session_data_from_discharge_state(dd.smart_discharge_state),
         )
 
         # Start WebSocket if discharge is immediately active (not deferred)
@@ -2411,7 +2441,7 @@ def _register_services(hass: HomeAssistant) -> None:
         ws_stop = _cancel_smart_charge(hass)
         if ws_stop is not None:
             hass.async_create_task(ws_stop, name="foxess_stop_ws_smart_charge")
-        if hass.data[DOMAIN].get("_smart_discharge_state") is not None:
+        if _dd(hass).smart_discharge_state is not None:
             _LOGGER.info("Smart charge: cancelling active smart discharge session")
             ws_stop = _cancel_smart_discharge(hass)
             if ws_stop is not None:
@@ -2517,32 +2547,36 @@ def _register_services(hass: HomeAssistant) -> None:
         min_power_change = _get_min_power_change(hass)
 
         # Clear any previous error — new session is starting
-        hass.data[DOMAIN].pop("_smart_error_state", None)
+        _dd(hass).smart_error_state = None
 
         # Store state for periodic adjustments
-        hass.data[DOMAIN]["_smart_charge_state"] = _create_charge_session(
-            start=start,
-            end=end,
-            target_soc=target_soc,
-            battery_capacity_kwh=battery_capacity_kwh,
-            max_power_w=effective_max_power,
-            initial_power=initial_power,
-            min_soc_on_grid=min_soc_on_grid,
-            min_power_change=min_power_change,
-            api_min_soc=api_min_soc,
-            force=force,
-            current_soc=current_soc,
-            should_defer=should_defer,
-            now=now,
-            groups=initial_groups,
+        dd = _dd(hass)
+        dd.smart_charge_state = dict(
+            _create_charge_session(
+                start=start,
+                end=end,
+                target_soc=target_soc,
+                battery_capacity_kwh=battery_capacity_kwh,
+                max_power_w=effective_max_power,
+                initial_power=initial_power,
+                min_soc_on_grid=min_soc_on_grid,
+                min_power_change=min_power_change,
+                api_min_soc=api_min_soc,
+                force=force,
+                current_soc=current_soc,
+                should_defer=should_defer,
+                now=now,
+                groups=initial_groups,
+            )
         )
 
         _setup_smart_charge_listeners(hass, inverter)
 
+        assert dd.smart_charge_state is not None
         await _save_session(
             hass,
             "smart_charge",
-            _session_data_from_charge_state(hass.data[DOMAIN]["_smart_charge_state"]),
+            _session_data_from_charge_state(dd.smart_charge_state),
         )
         await _maybe_start_realtime_ws(hass)
 

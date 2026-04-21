@@ -118,7 +118,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         domain_data = self.hass.data.get(DOMAIN)
         if domain_data is None:
             return
-        pending = domain_data.get("_pending_override_cleanup")
+        pending = domain_data.pending_override_cleanup
         if pending is None:
             return
         mode_str = pending.get("mode", "")
@@ -128,19 +128,18 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.warning(
                 "Pending override cleanup: invalid mode '%s', discarding", mode_str
             )
-            domain_data.pop("_pending_override_cleanup", None)
+            domain_data.pending_override_cleanup = None
             return
         min_soc_on_grid = 11
-        for key in domain_data:
-            if not str(key).startswith("_"):
-                entry = self.hass.config_entries.async_get_entry(str(key))
-                if entry is not None:
-                    from .const import CONF_MIN_SOC_ON_GRID, DEFAULT_MIN_SOC_ON_GRID
+        for key in domain_data.entries:
+            entry = self.hass.config_entries.async_get_entry(str(key))
+            if entry is not None:
+                from .const import CONF_MIN_SOC_ON_GRID, DEFAULT_MIN_SOC_ON_GRID
 
-                    min_soc_on_grid = entry.options.get(
-                        CONF_MIN_SOC_ON_GRID, DEFAULT_MIN_SOC_ON_GRID
-                    )
-                    break
+                min_soc_on_grid = entry.options.get(
+                    CONF_MIN_SOC_ON_GRID, DEFAULT_MIN_SOC_ON_GRID
+                )
+                break
         try:
             await self.hass.async_add_executor_job(
                 _remove_mode_from_schedule,
@@ -148,7 +147,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 mode,
                 min_soc_on_grid,
             )
-            domain_data.pop("_pending_override_cleanup", None)
+            domain_data.pending_override_cleanup = None
             _LOGGER.info("Pending override cleanup succeeded: removed %s", mode.value)
         except Exception:
             _LOGGER.warning(
@@ -181,9 +180,9 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
 
         self._bms_last_rediscovery_attempt = now
-        web_session = domain_data.get("_web_session")
+        web_session = domain_data.web_session
 
-        plant_id = getattr(domain_data, "plant_id", None)
+        plant_id = domain_data.plant_id
         if not plant_id:
             try:
                 plant_id = await self.hass.async_add_executor_job(
@@ -205,7 +204,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 plant_id
             )
             if compound_id:
-                domain_data["_battery_compound_id"] = compound_id
+                domain_data.battery_compound_id = compound_id
                 _LOGGER.info(
                     "BMS re-discovery: found battery compound ID: %s", compound_id
                 )
@@ -229,14 +228,14 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if domain_data is None:
             _LOGGER.debug("BMS temperature: domain data not available")
             return
-        web_session = domain_data.get("_web_session")
+        web_session = domain_data.web_session
         if web_session is None:
             _LOGGER.warning(
                 "BMS temperature: no web session configured — check web "
                 "credentials in the integration options"
             )
             return
-        compound_id = domain_data.get("_battery_compound_id")
+        compound_id = domain_data.battery_compound_id
         if not compound_id:
             compound_id = await self._rediscover_battery_compound_id(domain_data)
             if not compound_id:
@@ -434,7 +433,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if compound_id:
             domain_data = self.hass.data.get(DOMAIN)
             if domain_data is not None:
-                domain_data["_battery_compound_id"] = compound_id
+                domain_data.battery_compound_id = compound_id
 
         # WS provides its own frequent updates — stop REST extrapolation
         if self._soc_interp_cancel is not None:
@@ -556,7 +555,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Quick pre-check: skip if no web session is configured (avoids
         # creating a coroutine that would immediately return).
         domain_data = self.hass.data.get(DOMAIN)
-        if domain_data is None or domain_data.get("_web_session") is None:
+        if domain_data is None or domain_data.web_session is None:
             return
         now = time.monotonic()
         if (

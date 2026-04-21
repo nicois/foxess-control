@@ -409,7 +409,9 @@ class FoxESSCloudAdapter:
 
         # Surface the horizon in session state for the Lovelace card
         if mode == WorkMode.FORCE_DISCHARGE and safe_end != self._end:
-            ds = hass.data.get(DOMAIN, {}).get("_smart_discharge_state")
+            from .smart_battery.domain_data import get_domain_data
+
+            ds = get_domain_data(hass, DOMAIN).smart_discharge_state
             if ds is not None:
                 ds["schedule_horizon"] = safe_end.isoformat()
 

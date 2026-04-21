@@ -1,0 +1,106 @@
+"""Tests for InverterModel physics — fdSoc enforcement."""
+
+from __future__ import annotations
+
+import pytest
+
+from simulator.model import InverterModel, ScheduleGroup
+
+
+def _model_with_schedule(
+    mode: str,
+    fd_soc: int = 80,
+    soc: float = 50.0,
+    solar_kw: float = 0.0,
+    load_kw: float = 0.5,
+) -> InverterModel:
+    m = InverterModel(fuzzing=False, soc=soc, solar_kw=solar_kw, load_kw=load_kw)
+    m.schedule_groups = [
+        ScheduleGroup(
+            enable=1,
+            startHour=0,
+            startMinute=0,
+            endHour=23,
+            endMinute=59,
+            workMode=mode,
+            fdSoc=fd_soc,
+            fdPwr=5000,
+        )
+    ]
+    m.schedule_enabled = True
+    return m
+
+
+class TestFdSocEnforcement:
+    """Verify the simulator stops charging/discharging at fdSoc."""
+
+    def test_force_charge_stops_at_fdsoc(self) -> None:
+        m = _model_with_schedule("ForceCharge", fd_soc=80, soc=80.0)
+        m.tick(60)
+        assert m.bat_charge_kw == 0.0
+
+    def test_force_charge_continues_below_fdsoc(self) -> None:
+        m = _model_with_schedule("ForceCharge", fd_soc=80, soc=70.0)
+        m.tick(60)
+        assert m.bat_charge_kw > 0.0
+
+    def test_force_charge_stops_above_fdsoc(self) -> None:
+        m = _model_with_schedule("ForceCharge", fd_soc=80, soc=85.0)
+        m.tick(60)
+        assert m.bat_charge_kw == 0.0
+
+    def test_force_discharge_stops_at_fdsoc(self) -> None:
+        m = _model_with_schedule("ForceDischarge", fd_soc=20, soc=20.0)
+        m.tick(60)
+        assert m.bat_discharge_kw == 0.0
+
+    def test_force_discharge_continues_above_fdsoc(self) -> None:
+        m = _model_with_schedule("ForceDischarge", fd_soc=20, soc=50.0)
+        m.tick(60)
+        assert m.bat_discharge_kw > 0.0
+
+    def test_force_discharge_stops_below_fdsoc(self) -> None:
+        m = _model_with_schedule("ForceDischarge", fd_soc=20, soc=15.0)
+        m.tick(60)
+        assert m.bat_discharge_kw == 0.0
+
+    def test_feedin_stops_at_fdsoc(self) -> None:
+        m = _model_with_schedule("Feedin", fd_soc=30, soc=30.0)
+        m.tick(60)
+        assert m.bat_discharge_kw == 0.0
+
+    def test_feedin_continues_above_fdsoc(self) -> None:
+        m = _model_with_schedule("Feedin", fd_soc=30, soc=50.0)
+        m.tick(60)
+        assert m.bat_discharge_kw > 0.0
+
+    def test_self_use_not_affected_by_fdsoc(self) -> None:
+        """SelfUse doesn't use fdSoc — battery discharges to meet load."""
+        m = _model_with_schedule("SelfUse", fd_soc=80, soc=50.0, load_kw=2.0)
+        m.tick(60)
+        assert m.bat_discharge_kw > 0.0
+
+    def test_force_charge_grid_recalculated_at_fdsoc(self) -> None:
+        """When charge stops at fdSoc, grid should only supply load."""
+        m = _model_with_schedule(
+            "ForceCharge", fd_soc=80, soc=80.0, solar_kw=1.0, load_kw=0.5
+        )
+        m.tick(60)
+        assert m.bat_charge_kw == 0.0
+        assert m.grid_export_kw == pytest.approx(0.5, abs=0.01)
+        assert m.grid_import_kw == 0.0
+
+    def test_force_discharge_grid_recalculated_at_fdsoc(self) -> None:
+        """When discharge stops at fdSoc, grid must supply any remaining load."""
+        m = _model_with_schedule(
+            "ForceDischarge", fd_soc=20, soc=20.0, solar_kw=0.0, load_kw=1.0
+        )
+        m.tick(60)
+        assert m.bat_discharge_kw == 0.0
+        assert m.grid_import_kw == pytest.approx(1.0, abs=0.01)
+
+    def test_soc_does_not_change_when_clamped_at_fdsoc(self) -> None:
+        """SoC should remain stable when fdSoc clamp is active."""
+        m = _model_with_schedule("ForceCharge", fd_soc=80, soc=80.0)
+        m.tick(300)
+        assert m.soc == pytest.approx(80.0, abs=0.01)

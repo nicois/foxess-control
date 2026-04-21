@@ -14,6 +14,7 @@ from custom_components.foxess_control.binary_sensor import (
     async_setup_entry,
 )
 from custom_components.foxess_control.const import DOMAIN
+from custom_components.foxess_control.domain_data import FoxESSControlData
 
 
 def _make_hass(
@@ -22,15 +23,12 @@ def _make_hass(
 ) -> MagicMock:
     """Create a mock hass with DOMAIN data."""
     hass = MagicMock()
-    domain_data: dict[str, Any] = {
-        "_smart_charge_unsubs": [],
-        "_smart_discharge_unsubs": [],
-    }
+    dd = FoxESSControlData()
     if smart_charge_state is not None:
-        domain_data["_smart_charge_state"] = smart_charge_state
+        dd.smart_charge_state = smart_charge_state
     if smart_discharge_state is not None:
-        domain_data["_smart_discharge_state"] = smart_discharge_state
-    hass.data = {DOMAIN: domain_data}
+        dd.smart_discharge_state = smart_discharge_state
+    hass.data = {DOMAIN: dd}
     return hass
 
 

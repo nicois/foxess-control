@@ -10,6 +10,8 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
+    from .domain_data import FoxESSControlData
+
 from .const import DOMAIN
 
 REDACT_KEYS = {"api_key", "web_password", "web_username", "device_serial"}
@@ -19,29 +21,32 @@ async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
-    domain_data = hass.data.get(DOMAIN, {})
-    entry_data = domain_data.get(entry.entry_id, {})
+    domain_data: FoxESSControlData | None = hass.data.get(DOMAIN)
+    if domain_data is None:
+        return {}
 
-    coordinator = entry_data.get("coordinator")
+    entry_data = domain_data.entries.get(entry.entry_id)
+
+    coordinator = entry_data.coordinator if entry_data else None
     coordinator_data = None
     if coordinator is not None and coordinator.data is not None:
         coordinator_data = dict(coordinator.data)
 
-    inverter = entry_data.get("inverter")
+    inverter = entry_data.inverter if entry_data else None
 
-    charge_state = domain_data.get("_smart_charge_state")
-    discharge_state = domain_data.get("_smart_discharge_state")
-    error_state = domain_data.get("_smart_error_state")
+    charge_state = domain_data.smart_charge_state
+    discharge_state = domain_data.smart_discharge_state
+    error_state = domain_data.smart_error_state
 
-    ws = domain_data.get("_realtime_ws")
+    ws = domain_data.realtime_ws
     ws_info = None
     if ws is not None:
         ws_info = {
-            "connected": ws.connected,
-            "mode": domain_data.get("_ws_mode"),
+            "connected": ws.is_connected,
+            "mode": domain_data.ws_mode,
         }
 
-    taper = domain_data.get("_taper_profile")
+    taper = domain_data.taper_profile
 
     return async_redact_data(
         {

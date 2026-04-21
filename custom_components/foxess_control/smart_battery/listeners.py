@@ -191,11 +191,11 @@ def _get_store(hass: HomeAssistant, domain: str) -> Store[dict[str, Any]] | None
 
 def _record_error(hass: HomeAssistant, domain: str, message: str) -> None:
     """Record a session error for UI surfacing (C-026)."""
-    domain_data = hass.data.get(domain)
-    if domain_data is None:
+    if domain not in hass.data:
         return
-    prev = domain_data.get("_smart_error_state") or {}
-    domain_data["_smart_error_state"] = {
+    dd = get_domain_data(hass, domain)
+    prev = dd.smart_error_state or {}
+    dd.smart_error_state = {
         "last_error": message,
         "last_error_at": dt_util.now().isoformat(),
         "error_count": prev.get("error_count", 0) + 1,
@@ -290,9 +290,9 @@ def cancel_smart_charge(
     Callers should await it AFTER override removal completes.
     """
     return cancel_smart_session(
-        hass.data[domain],
-        "_smart_charge_state",
-        "_smart_charge_unsubs",
+        get_domain_data(hass, domain),
+        "smart_charge_state",
+        "smart_charge_unsubs",
         _get_store(hass, domain),
         "smart_charge",
         hass,
@@ -312,9 +312,9 @@ def cancel_smart_discharge(
     Callers should await it AFTER override removal completes.
     """
     return cancel_smart_session(
-        hass.data[domain],
-        "_smart_discharge_state",
-        "_smart_discharge_unsubs",
+        get_domain_data(hass, domain),
+        "smart_discharge_state",
+        "smart_discharge_unsubs",
         _get_store(hass, domain),
         "smart_discharge",
         hass,
@@ -332,12 +332,14 @@ def setup_smart_charge_listeners(
     Returns the periodic callback so callers can wrap it (e.g. with
     a WebSocket reconnect check).
 
-    Reads all parameters from ``hass.data[domain]["_smart_charge_state"]``.
+    Reads all parameters from the ``smart_charge_state`` attribute of domain data.
     """
     from .types import WorkMode
 
     _clear_session_issue(hass, domain)
-    state = hass.data[domain]["_smart_charge_state"]
+    dd = get_domain_data(hass, domain)
+    state = dd.smart_charge_state
+    assert state is not None, "smart_charge_state must be set before calling listeners"
     end: datetime.datetime = state["end"]
     end_utc = dt_util.as_utc(end)
     my_session_id: str = state["session_id"]
@@ -350,23 +352,20 @@ def setup_smart_charge_listeners(
                 "Smart charge: override removal failed, scheduling retry: %s",
                 _exc_summary(),
             )
-            hass.data[domain]["_pending_override_cleanup"] = {
+            get_domain_data(hass, domain).pending_override_cleanup = {
                 "mode": WorkMode.FORCE_CHARGE.value,
             }
 
     def _is_my_session() -> bool:
-        cur = hass.data[domain].get("_smart_charge_state")
+        cur = get_domain_data(hass, domain).smart_charge_state
         return cur is not None and cur.get("session_id") == my_session_id
 
     async def _on_charge_timer_expire(_now: datetime.datetime) -> None:
         if not _is_my_session():
             return
         _LOGGER.info("Smart charge: window ended, removing override")
-        charging_started = (
-            hass.data[domain]
-            .get("_smart_charge_state", {})
-            .get("charging_started", False)
-        )
+        cur = get_domain_data(hass, domain).smart_charge_state
+        charging_started = (cur or {}).get("charging_started", False)
         ws_stop = cancel_smart_charge(hass, domain)
         if charging_started:
             await _remove_charge_override()
@@ -374,7 +373,7 @@ def setup_smart_charge_listeners(
             await ws_stop
 
     async def _adjust_charge_power(_now: datetime.datetime) -> None:
-        cur_state = hass.data[domain].get("_smart_charge_state")
+        cur_state = get_domain_data(hass, domain).smart_charge_state
         if cur_state is None or cur_state.get("session_id") != my_session_id:
             return
 
@@ -574,7 +573,9 @@ def setup_smart_charge_listeners(
             # Re-check state after await
             if not _is_my_session():
                 return
-            cur_state = hass.data[domain]["_smart_charge_state"]
+            _cs = get_domain_data(hass, domain).smart_charge_state
+            assert _cs is not None
+            cur_state = _cs
 
             cur_state["groups"] = []
             cur_state["last_power_w"] = new_power
@@ -668,7 +669,7 @@ def setup_smart_charge_listeners(
             datetime.timedelta(seconds=SMART_CHARGE_ADJUST_SECONDS),
         ),
     ]
-    hass.data[domain]["_smart_charge_unsubs"] = unsubs
+    dd.smart_charge_unsubs = unsubs
     return _adjust_charge_power
 
 
@@ -679,12 +680,16 @@ def setup_smart_discharge_listeners(
 ) -> Any:
     """Register HA listeners for an active smart discharge session.
 
-    Reads all parameters from ``hass.data[domain]["_smart_discharge_state"]``.
+    Reads all parameters from the ``smart_discharge_state`` attribute of domain data.
     """
     from .types import WorkMode
 
     _clear_session_issue(hass, domain)
-    state = hass.data[domain]["_smart_discharge_state"]
+    dd = get_domain_data(hass, domain)
+    state = dd.smart_discharge_state
+    assert state is not None, (
+        "smart_discharge_state must be set before calling listeners"
+    )
     end: datetime.datetime = state["end"]
     end_utc = dt_util.as_utc(end)
     my_session_id: str = state["session_id"]
@@ -697,16 +702,16 @@ def setup_smart_discharge_listeners(
                 "Smart discharge: override removal failed, scheduling retry: %s",
                 _exc_summary(),
             )
-            hass.data[domain]["_pending_override_cleanup"] = {
+            get_domain_data(hass, domain).pending_override_cleanup = {
                 "mode": WorkMode.FORCE_DISCHARGE.value,
             }
 
     def _is_my_session() -> bool:
-        cur = hass.data[domain].get("_smart_discharge_state")
+        cur = get_domain_data(hass, domain).smart_discharge_state
         return cur is not None and cur.get("session_id") == my_session_id
 
     def _log_session_end(reason: str) -> None:
-        cur = hass.data[domain].get("_smart_discharge_state")
+        cur = get_domain_data(hass, domain).smart_discharge_state
         feedin_str = ""
         if cur is not None:
             feedin_start = cur.get("feedin_start_kwh")
@@ -720,7 +725,7 @@ def setup_smart_discharge_listeners(
     async def _on_timer_expire(_now: datetime.datetime) -> None:
         if not _is_my_session():
             return
-        cur = hass.data[domain].get("_smart_discharge_state")
+        cur = get_domain_data(hass, domain).smart_discharge_state
         was_active = cur is not None and cur.get("discharging_started", True)
         _log_session_end("window ended, removing override")
         ws_stop = cancel_smart_discharge(hass, domain)
@@ -730,7 +735,7 @@ def setup_smart_discharge_listeners(
             await ws_stop
 
     async def _check_discharge_soc(_now: datetime.datetime) -> None:
-        cur_state = hass.data[domain].get("_smart_discharge_state")
+        cur_state = get_domain_data(hass, domain).smart_discharge_state
         if cur_state is None or cur_state.get("session_id") != my_session_id:
             return
 
@@ -869,7 +874,9 @@ def setup_smart_discharge_listeners(
                 )
                 if not _is_my_session():
                     return
-                cur_state = hass.data[domain]["_smart_discharge_state"]
+                _ds = get_domain_data(hass, domain).smart_discharge_state
+                assert _ds is not None
+                cur_state = _ds
                 cur_state["last_power_w"] = new_power
                 cur_state["target_power_w"] = new_power
                 cur_state["discharging_started"] = True
@@ -971,9 +978,9 @@ def setup_smart_discharge_listeners(
                                 await ws_stop
 
                         unsub = async_track_point_in_time(hass, _early_stop, stop_at)
-                        hass.data[domain].setdefault(
-                            "_smart_discharge_unsubs", []
-                        ).append(unsub)
+                        get_domain_data(hass, domain).smart_discharge_unsubs.append(
+                            unsub
+                        )
                         cur_state["feedin_stop_scheduled"] = True
 
         # --- Power pacing ---
@@ -1047,7 +1054,9 @@ def setup_smart_discharge_listeners(
                 await _remove_discharge_override()
                 if not _is_my_session():
                     return
-                cur_state = hass.data[domain]["_smart_discharge_state"]
+                _ds = get_domain_data(hass, domain).smart_discharge_state
+                assert _ds is not None
+                cur_state = _ds
                 await save_session(
                     _get_store(hass, domain),
                     "smart_discharge",
@@ -1110,7 +1119,9 @@ def setup_smart_discharge_listeners(
                     )
                     if not _is_my_session():
                         return
-                    cur_state = hass.data[domain]["_smart_discharge_state"]
+                    _ds = get_domain_data(hass, domain).smart_discharge_state
+                    assert _ds is not None
+                    cur_state = _ds
                     await save_session(
                         _get_store(hass, domain),
                         "smart_discharge",
@@ -1163,7 +1174,9 @@ def setup_smart_discharge_listeners(
                     )
                     if not _is_my_session():
                         return
-                    cur_state = hass.data[domain]["_smart_discharge_state"]
+                    _ds = get_domain_data(hass, domain).smart_discharge_state
+                    assert _ds is not None
+                    cur_state = _ds
                     if should_update:
                         await save_session(
                             _get_store(hass, domain),
@@ -1205,5 +1218,5 @@ def setup_smart_discharge_listeners(
         ),
         async_track_point_in_time(hass, _on_timer_expire, end_utc),
     ]
-    hass.data[domain]["_smart_discharge_unsubs"] = unsubs
+    dd.smart_discharge_unsubs = unsubs
     return _check_discharge_soc

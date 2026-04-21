@@ -23,8 +23,6 @@ if TYPE_CHECKING:
 class FoxESSEntryData(EntryData):
     """Per-config-entry data with FoxESS-typed fields."""
 
-    adapter: Any = None
-
 
 @dataclass
 class FoxESSControlData(SmartBatteryDomainData):
@@ -80,8 +78,6 @@ class FoxESSControlData(SmartBatteryDomainData):
             "_smart_error_state": "smart_error_state",
             "_smart_charge_unsubs": "smart_charge_unsubs",
             "_smart_discharge_unsubs": "smart_discharge_unsubs",
-            "_smart_charge_session_id": "",
-            "_smart_discharge_session_id": "",
             "_store": "store",
             "_taper_profile": "taper_profile",
             "_on_session_cancel": "on_session_cancel",

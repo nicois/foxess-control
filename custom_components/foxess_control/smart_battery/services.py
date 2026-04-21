@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import datetime
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import voluptuous as vol
 from homeassistant.exceptions import ServiceValidationError
@@ -373,7 +373,8 @@ def register_services(
                 initial_power = max_power_w
 
         cancel_smart_discharge(hass, domain)
-        if hass.data[domain].get("_smart_charge_state") is not None:
+        dd = get_domain_data(hass, domain)
+        if dd.smart_charge_state is not None:
             _LOGGER.info("Smart discharge: cancelling active smart charge session")
             cancel_smart_charge(hass, domain)
 
@@ -411,32 +412,34 @@ def register_services(
             if safe_end != end:
                 schedule_horizon = safe_end.isoformat()
 
-        hass.data[domain]["_smart_discharge_state"] = create_discharge_session(
-            start=start,
-            end=end,
-            min_soc=min_soc,
-            max_power_w=max_power_w,
-            initial_power=initial_power,
-            battery_capacity_kwh=battery_capacity_kwh,
-            min_power_change=min_power_change,
-            pacing_enabled=pacing_enabled,
-            current_soc=current_soc,
-            net_consumption=net_consumption,
-            should_defer=should_defer,
-            now=now,
-            feedin_energy_limit=feedin_energy_limit,
-            schedule_horizon=schedule_horizon,
-            groups=[],
+        discharge_state = cast(
+            "dict[str, Any]",
+            create_discharge_session(
+                start=start,
+                end=end,
+                min_soc=min_soc,
+                max_power_w=max_power_w,
+                initial_power=initial_power,
+                battery_capacity_kwh=battery_capacity_kwh,
+                min_power_change=min_power_change,
+                pacing_enabled=pacing_enabled,
+                current_soc=current_soc,
+                net_consumption=net_consumption,
+                should_defer=should_defer,
+                now=now,
+                feedin_energy_limit=feedin_energy_limit,
+                schedule_horizon=schedule_horizon,
+                groups=[],
+            ),
         )
+        dd.smart_discharge_state = discharge_state
 
         setup_smart_discharge_listeners(hass, domain, adapter)
 
         await save_session(
             _get_store(),
             "smart_discharge",
-            session_data_from_discharge_state(
-                hass.data[domain]["_smart_discharge_state"]
-            ),
+            session_data_from_discharge_state(discharge_state),
         )
 
     async def handle_smart_charge(call: ServiceCall) -> None:
@@ -489,7 +492,8 @@ def register_services(
             )
 
         cancel_smart_charge(hass, domain)
-        if hass.data[domain].get("_smart_discharge_state") is not None:
+        dd = get_domain_data(hass, domain)
+        if dd.smart_discharge_state is not None:
             _LOGGER.info("Smart charge: cancelling active smart discharge session")
             cancel_smart_discharge(hass, domain)
 
@@ -548,29 +552,33 @@ def register_services(
             )
         )
 
-        hass.data[domain]["_smart_charge_state"] = create_charge_session(
-            start=start,
-            end=end,
-            target_soc=target_soc,
-            battery_capacity_kwh=battery_capacity_kwh,
-            max_power_w=effective_max_power,
-            initial_power=initial_power,
-            min_soc_on_grid=min_soc_on_grid,
-            min_power_change=min_power_change,
-            api_min_soc=api_min_soc,
-            force=False,
-            current_soc=current_soc,
-            should_defer=should_defer,
-            now=now,
-            groups=[],
+        charge_state = cast(
+            "dict[str, Any]",
+            create_charge_session(
+                start=start,
+                end=end,
+                target_soc=target_soc,
+                battery_capacity_kwh=battery_capacity_kwh,
+                max_power_w=effective_max_power,
+                initial_power=initial_power,
+                min_soc_on_grid=min_soc_on_grid,
+                min_power_change=min_power_change,
+                api_min_soc=api_min_soc,
+                force=False,
+                current_soc=current_soc,
+                should_defer=should_defer,
+                now=now,
+                groups=[],
+            ),
         )
+        dd.smart_charge_state = charge_state
 
         setup_smart_charge_listeners(hass, domain, adapter)
 
         await save_session(
             _get_store(),
             "smart_charge",
-            session_data_from_charge_state(hass.data[domain]["_smart_charge_state"]),
+            session_data_from_charge_state(charge_state),
         )
 
     hass.services.async_register(
