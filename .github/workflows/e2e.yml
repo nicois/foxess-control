@@ -5,6 +5,10 @@ on:
     branches: [develop]
   pull_request:
 
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   E2E_WORKERS: 20
 
