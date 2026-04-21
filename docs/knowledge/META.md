@@ -378,3 +378,29 @@ last_reflection: 2026-04-21T23:59:00+10:00
   - Architecture constraints now formal C-NNN entries (was flagged as
     "consider whether they warrant documentation under a principle like
     C-021").
+
+### 2026-04-21 — Update pass (stale design docs + D-042)
+- **Stale docs refreshed**: 4 design docs updated:
+  - `session-management.md`: D-025 rewritten from "transient error
+    resilience" to "two-tier circuit breaker" — now documents hold
+    phase, replay mechanism, `_with_circuit_breaker` shared function,
+    and `_notify_replay` callback. D-031 updated to reflect bridge
+    layer removal (migration complete). Key behaviours updated.
+  - `foxess-api.md`: D-033 endpoint corrected from
+    `/generic/v0/device/battery/info` (via device UUID) to
+    `/dew/v0/device/detail?id=<compound_id>&category=battery` (via
+    WebSocket-discovered compound ID). Evolution history documented.
+    D-042 added: auth retry on errno 41808/41809 with executor-wrapped
+    WASM signatures.
+  - `smart-charge.md`: Key behaviours updated with temperature-aware
+    time estimates (bms_temp_c passthrough), cold-temp curtailment
+    cross-reference (D-037), circuit breaker cross-reference (D-025).
+  - `smart-discharge.md`: D-004 clarified peak update formula.
+    Key behaviours updated with temperature-aware deferred start and
+    circuit breaker cross-reference.
+- **Coverage matrix**: D-042 added to C-024 row. Design decision count
+  updated to 36 (was 35). D-020 reclassified note added.
+- **Stale areas resolved from check report**:
+  - D-031 bridge layer text (check item 2) — updated to reflect removal
+  - D-033 endpoint reference (check item 3) — corrected
+  - D-025 circuit breaker description (check item 4) — rewritten

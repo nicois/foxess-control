@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: Smart Discharge
-last_verified: 2026-04-18
+last_verified: 2026-04-21
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -70,9 +70,12 @@ power floor constraint.
 
 ### D-004: Peak consumption tracking with exponential decay
 **Decision**: Track highest observed household consumption with
-`PEAK_DECAY_PER_TICK = 0.85` applied at the discharge check interval
-(1 minute), giving a ~4.3-minute half-life. Floor discharge power at
-`peak * 1.5`.
+`PEAK_DECAY_PER_TICK` applied at the discharge check interval
+(1 minute). The decay factor is 0.85 (half-life ~4.3 min). Floor
+discharge power at `peak * 1.5`. The peak value is updated via
+`peak = max(peak * PEAK_DECAY_PER_TICK, current_consumption)` on
+each discharge check tick, ensuring the peak tracks upward immediately
+on spikes and decays exponentially between them.
 **Context**: House load varies unpredictably. A single spike shouldn't
 permanently inflate the discharge floor, but recent spikes should
 be respected.
@@ -149,6 +152,13 @@ on every tick — only when `apply_mode` is already called.
   because discharge power changes have immediate grid-import risk.
 - After suspension (SoC at min), the session re-evaluates on every
   check and resumes if SoC recovers (e.g., from solar input).
+- Temperature-aware deferred start: `bms_temp_c` is passed through to
+  `calculate_discharge_deferred_start` and `estimate_discharge_hours`,
+  allowing the taper model's temperature correction factor to adjust
+  discharge time estimates for BMS current limiting at low temperatures.
+- Circuit breaker protection (D-025): discharge checks are wrapped in
+  `_with_circuit_breaker`. With 1-minute ticks, tier 1 opens at 3 min,
+  tier 2 aborts at 8 min.
 
 ## Edge Cases
 

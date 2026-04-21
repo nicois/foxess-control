@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: Smart Charge
-last_verified: 2026-04-18
+last_verified: 2026-04-21
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -80,6 +80,17 @@ the entity count low and avoids lifecycle complexity.
   choice to avoid over-deferring charge start.
 - Tolerance for trajectory check shrinks as window closes (smaller
   deficit is tolerated early, but any deficit late triggers burst).
+- Temperature-aware time estimates: `bms_temp_c` is passed through to
+  `calculate_charge_power`, `is_charge_target_reachable`, and
+  `calculate_deferred_start`. The taper model's multiplicative
+  temperature correction factor adjusts charge time estimates for BMS
+  current limiting at low temperatures (D-014).
+- Cold-temperature BMS curtailment (D-037): when BMS temperature is
+  below 16°C, max charge power is pre-capped at 80A × battery voltage,
+  anticipating the BMS's physical current limit.
+- Circuit breaker protection (D-025): charge checks are wrapped in
+  `_with_circuit_breaker`. With 5-minute ticks, tier 1 opens at 15 min,
+  tier 2 aborts at 40 min.
 
 ### C-023 Investigation: Solar-aware charge reduction
 **Status**: Under investigation.

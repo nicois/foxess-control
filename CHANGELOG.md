@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.8-beta.8
+
+### Improved
+- **WebSocket plausibility filter**: anomalous WS messages (power values diverging >10× from the last accepted value) are now filtered at the WS layer (`realtime_ws.py`) rather than the coordinator. Keeps data-source-specific logic out of the brand-agnostic coordinator.
+- **Architectural lint enforcement**: semgrep rules and pre-commit hooks now enforce module size budget (2000 lines), typed config access (`IntegrationConfig`), typed domain data access (`_dd(hass)`), and brand-import boundaries. Prevents recurrence of the tech debt patterns addressed in beta.4.
+
 ## 1.0.8-beta.7
 
 ### Improved

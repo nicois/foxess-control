@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: Session Management
-last_verified: 2026-04-19
+last_verified: 2026-04-21
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -97,30 +97,48 @@ Modbus is already faster than the cloud WS.
 **Traces**: C-021;
 `tests/test_entity_mode.py`
 
-### D-025: Transient adapter error resilience
-**Decision**: When `apply_mode` or any other adapter call raises an
-exception during a periodic callback, the error is logged as a warning
-and retried on the next timer tick. Only after
-`MAX_CONSECUTIVE_ADAPTER_ERRORS` (3) consecutive failures is the
-session aborted and the inverter returned to self-use.
+### D-025: Two-tier circuit breaker for adapter errors
+**Decision**: Adapter errors are handled by a shared `_with_circuit_breaker`
+function with two tiers:
+- **Tier 1 (retry)**: Transient errors are retried on the next tick.
+  After `MAX_CONSECUTIVE_ADAPTER_ERRORS` (3) consecutive failures, the
+  circuit breaker opens.
+- **Tier 2 (hold then abort)**: With the breaker open, the session holds
+  its current position (no adapter calls) for up to
+  `CIRCUIT_BREAKER_TICKS_BEFORE_ABORT` (5) additional ticks. If the
+  adapter recovers during this window, the breaker resets and normal
+  operation resumes. If not, the session aborts to self-use and notifies
+  the brand layer for potential session replay.
+
+The `circuit_open`, `circuit_open_ticks`, and `circuit_open_since` fields
+are added to the session state dict. Both charge and discharge listeners
+use the same `_with_circuit_breaker` wrapper.
+
+After a circuit breaker abort, `_notify_replay` calls the brand layer's
+`on_circuit_breaker_abort` callback (if registered on domain data). The
+FoxESS brand layer uses this to schedule automatic session replay with the
+remaining window time — the session is re-created from the stored parameters
+with adjusted start/end times.
+
 **Context**: Production incident 2026-04-17: a transient DNS outage
 caused the FoxESS cloud API to return "Device offline" for ~2 minutes.
-The previous catch-all handler aborted a multi-hour charge session on
-the first error. The session was healthy; only the cloud was briefly
-unreachable.
-**Rationale**: Cloud APIs are inherently unreliable — DNS blips,
-transient 503s, device-offline windows during firmware updates, etc.
-A charge session running from 02:00-06:00 should not die because of
-a 30-second network glitch at 03:00. The retry counter still aborts
-on persistent errors (safety net from C-024).
+The original implementation aborted immediately after 3 errors (~3 min
+for discharge). The two-tier design adds a holding phase that survives
+longer outages without losing the session.
+**Rationale**: With charge ticks at 5 min, tier 2 gives ~25 min of
+tolerance (3 errors × 5 min + 5 ticks × 5 min). With discharge ticks at
+1 min, ~8 min (3 + 5 min). This covers most transient cloud outages.
+The replay mechanism ensures that even when a session does abort, the
+user's scheduled operation is retried rather than silently lost.
 **Alternatives considered**:
-- Catch only specific exception types (FoxESSApiError): rejected
-  because the adapter protocol is brand-agnostic — entity adapters
-  can raise different exceptions (ServiceValidationError, etc.)
-- Infinite retries (never abort): rejected because a truly broken
-  session leaving the inverter in forced mode is a safety risk
+- Single-tier abort after N errors: replaced because it was too
+  aggressive for longer cloud outages
+- Infinite retries: rejected because a truly broken session leaving
+  the inverter in forced mode is a safety risk
+- Per-exception-type handling: rejected because the adapter protocol
+  is brand-agnostic — different adapters raise different exceptions
 **Traces**: C-024;
-`tests/test_services.py::TestTransientApiErrorResilience`,
+`tests/test_services.py::TestTransientApiErrorResilience` (3),
 `tests/test_services.py::TestHandleSmartDischarge::test_deferred_to_discharging_triggers_ws`
 
 ### D-026: Pending override cleanup on failed abort
@@ -210,23 +228,28 @@ retried silently per D-025.
 **Decision**: Store `FoxESSEntryData` (coordinator, inverter, adapter)
 on each config entry's `runtime_data` attribute. Domain-wide state
 (session dicts, store, unsub lists) lives in `FoxESSControlData` at
-`hass.data[DOMAIN]`. A `_dd()` helper in `__init__.py` provides typed
-access with legacy dict conversion fallback.
+`hass.data[DOMAIN]`, accessed via the `_dd(hass)` helper which returns
+the typed dataclass directly. All session state attributes
+(`smart_charge_state`, `smart_discharge_state`, `smart_charge_unsubs`,
+etc.) are typed attributes on `FoxESSControlData`, not dict keys.
 **Context**: HA 2024.x+ introduced `entry.runtime_data` as the
 standard pattern for per-entry typed data, replacing untyped
-`hass.data[DOMAIN][entry_id]` dicts.
+`hass.data[DOMAIN][entry_id]` dicts. The integration had an interim
+bridge layer (`__getitem__`, `__contains__`, `get`) on
+`FoxESSControlData` during migration, which has been fully removed
+(52941f3) — all access is now via typed attributes.
 **Rationale**: Typed access catches key errors at lint time, provides
-IDE autocomplete, and aligns with HA's direction. The bridge layer
-(`__getitem__`, `__contains__`, `get`) on `FoxESSControlData`
-preserves backward compatibility during incremental migration.
+IDE autocomplete, and aligns with HA's direction. The migration was
+completed incrementally (dict → bridge → typed attributes → bridge
+removal) to avoid a risky big-bang rewrite.
 **Alternatives considered**:
 - Big-bang migration (remove all dict access at once): rejected
-  because the integration has ~30 dict access sites; incremental is
+  because the integration had ~30 dict access sites; incremental is
   safer
-- No bridge layer: rejected because test code still uses dict-style
-  access patterns during transition
+- Keep bridge layer permanently: rejected because it defeats the
+  purpose of typed access (callers can still use string keys)
 **Traces**: C-024 (safe state — typed access prevents silent KeyError
-on missing entries);
+on missing entries), C-036 (typed domain data);
 `tests/test_services.py::test_returns_inverter`,
 `tests/test_services.py::test_raises_when_no_entries`
 
@@ -429,6 +452,12 @@ all call sites (`smart_battery/services.py` and `__init__.py`).
 - Charge sessions check SoC every 5 minutes, adjust power accordingly.
 - Discharge sessions check SoC every 1 minute (higher risk).
 - SoC unavailability for 15 minutes (3 checks) triggers cancellation.
-- Adapter errors: 3 consecutive failures triggers cancellation (~15 min
-  for charge, ~3 min for discharge).
+- Circuit breaker: 3 consecutive adapter errors opens breaker (hold
+  position), 5 more ticks without recovery aborts session. Total
+  tolerance: ~25 min for charge, ~8 min for discharge.
+- After circuit breaker abort, the brand layer can replay the session
+  with the remaining window time.
 - Session cancellation restores SelfUse mode.
+- All session state access uses typed `FoxESSControlData` attributes
+  via `_dd(hass)` / `get_domain_data(hass, domain)`. Error state
+  recorded to `dd.smart_error_state` (typed attribute, not dict key).
