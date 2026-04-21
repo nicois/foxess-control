@@ -173,6 +173,7 @@ class TestOverviewCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
         _robust_reload(page, settle_ms=2000)
 
+        assert _find_card(page, "foxess-overview-card"), "Overview card not found"
         results = page.evaluate(
             f"""() => {{
                 {_JS_FIND_OVERVIEW_CARD}
@@ -241,6 +242,7 @@ class TestOverviewCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
         _robust_reload(page, settle_ms=2000)
 
+        assert _find_card(page, "foxess-overview-card"), "Overview card not found"
         results = page.evaluate(
             f"""() => {{
                 {_JS_FIND_OVERVIEW_CARD}
