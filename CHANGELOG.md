@@ -2,6 +2,12 @@
 
 ## 1.0.8-beta.6
 
+### Fixed
+- **WebSocket power value jumping**: the coordinator now drops anomalous WebSocket messages (typically `gridStatus=3`) where battery power diverges >10x from the current value, instead of just logging a warning and applying the bad data. Prevents `sensor.foxess_discharge_rate` from jumping between ~5.5kW and ~0.5kW every few seconds.
+
+### Added
+- **Entity-mode Modbus diagnostics**: one-shot logging for entity-mode (Modbus) users. Logs the full entity mapping at startup, then INFO on first successful read/write per entity and WARNING on first failure. All messages surface in the debug log sensor for remote troubleshooting without SSH.
+
 ### Improved
 - **Flaky test detection**: 20 runs with random half-selection per run — each test averages ~10 runs alongside varying combinations, improving cross-test interaction coverage. Removed unit-test job (deterministic tests don't need flake detection).
 
