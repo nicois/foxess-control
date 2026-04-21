@@ -25,14 +25,9 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_API_KEY,
-    CONF_API_MIN_SOC,
-    CONF_BATTERY_CAPACITY_KWH,
     CONF_DEVICE_SERIAL,
-    CONF_INVERTER_POWER,
     CONF_MIN_POWER_CHANGE,
-    CONF_MIN_SOC_ON_GRID,
     CONF_POLLING_INTERVAL,
-    CONF_SMART_HEADROOM,
     CONF_WEB_PASSWORD,
     CONF_WEB_USERNAME,
     CONF_WORK_MODE_ENTITY,
@@ -40,11 +35,9 @@ from .const import (
     CONF_WS_MODE,
     DEFAULT_API_MIN_SOC,
     DEFAULT_ENTITY_POLLING_INTERVAL,
-    DEFAULT_INVERTER_POWER,
     DEFAULT_MIN_POWER_CHANGE,
     DEFAULT_MIN_SOC_ON_GRID,
     DEFAULT_POLLING_INTERVAL,
-    DEFAULT_SMART_HEADROOM,
     DOMAIN,
     PLATFORMS,
     WS_MODE_ALWAYS,
@@ -142,7 +135,7 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant, ServiceCall
 
-    from .domain_data import FoxESSControlData
+    from .domain_data import FoxESSControlData, IntegrationConfig
     from .foxess.inverter import ScheduleGroup
 
 _LOGGER = logging.getLogger(__name__)
@@ -172,6 +165,18 @@ def _dd(hass: HomeAssistant) -> FoxESSControlData:
     from .smart_battery.domain_data import _convert_legacy_dict
 
     return _convert_legacy_dict(data)  # type: ignore[return-value]
+
+
+def _cfg(hass: HomeAssistant) -> IntegrationConfig:
+    """Return the cached IntegrationConfig."""
+    config = _dd(hass).config
+    if config is None:
+        raise ServiceValidationError(
+            "Integration not fully loaded",
+            translation_domain=DOMAIN,
+            translation_key="no_integration",
+        )
+    return config
 
 
 def _record_error(hass: HomeAssistant, message: str) -> None:
@@ -288,16 +293,6 @@ def _get_inverter(hass: HomeAssistant) -> Inverter:
     return inv
 
 
-def _get_min_soc_on_grid(hass: HomeAssistant) -> int:
-    """Get min_soc_on_grid from the first config entry's options."""
-    entry_id = _first_entry_id(hass)
-    entry = hass.config_entries.async_get_entry(entry_id)
-    if entry is None:
-        return DEFAULT_MIN_SOC_ON_GRID
-    soc: int = entry.options.get(CONF_MIN_SOC_ON_GRID, DEFAULT_MIN_SOC_ON_GRID)
-    return soc
-
-
 def _get_first_entry(hass: HomeAssistant) -> ConfigEntry:
     """Return the first real config entry."""
     entry_id = _first_entry_id(hass)
@@ -311,65 +306,11 @@ def _get_first_entry(hass: HomeAssistant) -> ConfigEntry:
     return entry
 
 
-def _get_ws_mode(hass: HomeAssistant) -> str:
-    """Return the effective ws_mode, migrating from the old boolean."""
-    try:
-        entry = _get_first_entry(hass)
-    except (ServiceValidationError, KeyError):
-        return WS_MODE_AUTO
-    opts = entry.options
-    if CONF_WS_MODE in opts:
-        return str(opts[CONF_WS_MODE])
-    return WS_MODE_SMART_SESSIONS if opts.get(CONF_WS_ALL_SESSIONS) else WS_MODE_AUTO
-
-
-def _get_smart_headroom(hass: HomeAssistant) -> float:
-    """Return the charge headroom as a fraction (e.g. 0.10 for 10%)."""
-    entry = _get_first_entry(hass)
-    pct: int = entry.options.get(CONF_SMART_HEADROOM, DEFAULT_SMART_HEADROOM)
-    return pct / 100.0
-
-
-def _get_polling_interval_seconds(hass: HomeAssistant) -> int:
-    """Return the coordinator's polling interval in seconds."""
-    entry_id = _first_entry_id(hass)
-    coordinator = _dd(hass).entries[entry_id].coordinator
-    if coordinator is not None and coordinator.update_interval is not None:
-        return int(coordinator.update_interval.total_seconds())
-    return DEFAULT_POLLING_INTERVAL
-
-
-def _is_entity_mode(hass: HomeAssistant) -> bool:
-    """Check if entity-based control is configured (foxess_modbus interop)."""
-    try:
-        entry = _get_first_entry(hass)
-    except (ServiceValidationError, KeyError):
-        return False
-    return bool(entry.options.get(CONF_WORK_MODE_ENTITY))
-
-
-def _get_max_power_w(hass: HomeAssistant) -> int:
-    """Return the inverter's maximum power in watts.
-
-    In entity mode this comes from the ``CONF_INVERTER_POWER`` option.
-    In cloud mode it comes from the cached ``Inverter.max_power_w`` property.
-    """
-    entry = _get_first_entry(hass)
-    configured = entry.options.get(CONF_INVERTER_POWER)
-    if configured:
-        return int(configured)
-    # Fall back to cloud API inverter object
-    try:
-        return _get_inverter(hass).max_power_w
-    except Exception:
-        return DEFAULT_INVERTER_POWER
-
-
 def _get_entity_adapter(hass: HomeAssistant) -> FoxESSEntityAdapter:
     """Build a one-shot entity adapter from the current config."""
     return FoxESSEntityAdapter(
         entry_options=dict(_get_first_entry(hass).options),
-        max_power_w=_get_max_power_w(hass),
+        max_power_w=_cfg(hass).max_power_w,
     )
 
 
@@ -382,16 +323,6 @@ async def _apply_mode_via_entities(
     """Set inverter mode via the entity adapter."""
     adapter = _get_entity_adapter(hass)
     await adapter.apply_mode(hass, mode, power_w, fd_soc)
-
-
-def _get_api_min_soc(hass: HomeAssistant) -> int:
-    """Get api_min_soc from the first config entry's options."""
-    entry_id = _first_entry_id(hass)
-    entry = hass.config_entries.async_get_entry(entry_id)
-    if entry is None:
-        return DEFAULT_API_MIN_SOC
-    val: int = int(entry.options.get(CONF_API_MIN_SOC, DEFAULT_API_MIN_SOC))
-    return val
 
 
 def _get_current_soc(hass: HomeAssistant) -> float | None:
@@ -535,36 +466,16 @@ async def _persist_active_sessions(hass: HomeAssistant) -> None:
         )
 
 
-def _get_battery_capacity_kwh(hass: HomeAssistant) -> float:
-    """Get battery_capacity_kwh from the first config entry's options."""
-    entry_id = _first_entry_id(hass)
-    entry = hass.config_entries.async_get_entry(entry_id)
-    if entry is None:
-        return 0.0
-    capacity: float = entry.options.get(CONF_BATTERY_CAPACITY_KWH, 0.0)
-    return capacity
-
-
-def _get_min_power_change(hass: HomeAssistant) -> int:
-    """Get min_power_change from the first config entry's options."""
-    entry_id = _first_entry_id(hass)
-    entry = hass.config_entries.async_get_entry(entry_id)
-    if entry is None:
-        return DEFAULT_MIN_POWER_CHANGE
-    val: int = int(entry.options.get(CONF_MIN_POWER_CHANGE, DEFAULT_MIN_POWER_CHANGE))
-    return val
-
-
 async def _async_remove_override(
     hass: HomeAssistant,
     mode: WorkMode,
 ) -> None:
     """Remove a work-mode override, dispatching to cloud or entity backend."""
-    if _is_entity_mode(hass):
+    if _cfg(hass).entity_mode:
         await _apply_mode_via_entities(hass, WorkMode.SELF_USE)
     else:
         inverter = _get_inverter(hass)
-        min_soc_on_grid = _get_min_soc_on_grid(hass)
+        min_soc_on_grid = _cfg(hass).min_soc_on_grid
         await hass.async_add_executor_job(
             _remove_mode_from_schedule,
             inverter,
@@ -588,10 +499,10 @@ def _build_foxess_adapter(
     state: dict[str, Any],
 ) -> FoxESSCloudAdapter | FoxESSEntityAdapter:
     """Build the appropriate adapter for the current session."""
-    if _is_entity_mode(hass):
+    if _cfg(hass).entity_mode:
         return FoxESSEntityAdapter(
             entry_options=dict(_get_first_entry(hass).options),
-            max_power_w=_get_max_power_w(hass),
+            max_power_w=_cfg(hass).max_power_w,
         )
     inv = inverter or _get_inverter(hass)
     entry_id = _first_entry_id(hass)
@@ -599,8 +510,8 @@ def _build_foxess_adapter(
     adapter = FoxESSCloudAdapter(
         hass=hass,
         inverter=inv,
-        min_soc_on_grid=state.get("min_soc_on_grid", _get_min_soc_on_grid(hass)),
-        api_min_soc=state.get("api_min_soc", _get_api_min_soc(hass)),
+        min_soc_on_grid=state.get("min_soc_on_grid", _cfg(hass).min_soc_on_grid),
+        api_min_soc=state.get("api_min_soc", _cfg(hass).api_min_soc),
         start=state["start"],
         end=state["end"],
         force=state.get("force", False),
@@ -731,11 +642,11 @@ async def _recover_charge_session(
     )
     if now >= end:
         _LOGGER.info("Smart charge: session window has passed, cleaning up")
-        if _is_entity_mode(hass):
+        if _cfg(hass).entity_mode:
             await _async_remove_override(hass, WorkMode.FORCE_CHARGE)
         else:
             assert inverter is not None  # cloud mode
-            min_soc_on_grid = _get_min_soc_on_grid(hass)
+            min_soc_on_grid = _cfg(hass).min_soc_on_grid
             try:
                 await hass.async_add_executor_job(
                     _remove_mode_from_schedule,
@@ -755,7 +666,7 @@ async def _recover_charge_session(
         second=0,
         microsecond=0,
     )
-    if _is_entity_mode(hass):
+    if _cfg(hass).entity_mode:
         # Entity mode: no schedule groups to check, always resume
         has_group = True
     else:
@@ -801,7 +712,7 @@ async def _recover_charge_session(
                 remaining,
                 max_power,
                 net_consumption_kw=_get_net_consumption(hass),
-                headroom=_get_smart_headroom(hass),
+                headroom=_cfg(hass).smart_headroom,
                 charging_started_energy_kwh=started_energy,
                 elapsed_since_charge_started=elapsed_since_start,
                 effective_charge_window=window_from_start,
@@ -879,11 +790,11 @@ async def _recover_discharge_session(
     )
     if now >= end:
         _LOGGER.info("Smart discharge: session window has passed, cleaning up")
-        if _is_entity_mode(hass):
+        if _cfg(hass).entity_mode:
             await _async_remove_override(hass, WorkMode.FORCE_DISCHARGE)
         else:
             assert inverter is not None  # cloud mode
-            min_soc_on_grid = _get_min_soc_on_grid(hass)
+            min_soc_on_grid = _cfg(hass).min_soc_on_grid
             try:
                 await hass.async_add_executor_job(
                     _remove_mode_from_schedule,
@@ -898,7 +809,7 @@ async def _recover_discharge_session(
         del stored["smart_discharge"]
         return True
 
-    if _is_entity_mode(hass):
+    if _cfg(hass).entity_mode:
         has_group = True
     else:
         assert inverter is not None  # cloud mode
@@ -952,7 +863,7 @@ async def _recover_discharge_session(
                     remaining_h,
                     max_power_w,
                     net_consumption_kw=_get_net_consumption(hass),
-                    headroom=_get_smart_headroom(hass),
+                    headroom=_cfg(hass).smart_headroom,
                     feedin_remaining_kwh=feedin_remaining,
                     consumption_peak_kw=recovered_peak,
                 )
@@ -1025,7 +936,7 @@ async def _recover_sessions(
             _LOGGER.warning(
                 "Smart charge: corrupted session data, discarding "
                 "(backend=%s, data=%s): %s",
-                "entity" if _is_entity_mode(hass) else "cloud",
+                "entity" if _cfg(hass).entity_mode else "cloud",
                 charge_data,
                 exc,
             )
@@ -1043,7 +954,7 @@ async def _recover_sessions(
             _LOGGER.warning(
                 "Smart discharge: corrupted session data, discarding "
                 "(backend=%s, data=%s): %s",
-                "entity" if _is_entity_mode(hass) else "cloud",
+                "entity" if _cfg(hass).entity_mode else "cloud",
                 discharge_data,
                 exc,
             )
@@ -1223,7 +1134,7 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
     * **smart_sessions** — WS during any smart session or force op.
     * **always** — WS connected at all times.
     """
-    if _is_entity_mode(hass):
+    if _cfg(hass).entity_mode:
         _LOGGER.debug("WS check: entity mode, skipping")
         return False
     try:
@@ -1235,7 +1146,7 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
         _LOGGER.debug("WS check: no web credentials configured")
         return False
 
-    ws_mode = _get_ws_mode(hass)
+    ws_mode = _cfg(hass).ws_mode
 
     if ws_mode == WS_MODE_ALWAYS:
         return True
@@ -1615,6 +1526,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     dd.entries[entry.entry_id] = entry_data
     entry.runtime_data = entry_data
 
+    from .domain_data import build_config
+
+    dd.config = build_config(
+        dict(entry.options),
+        inverter_max_power_w=inverter.max_power_w if inverter else None,
+    )
+
     # Eagerly create the web session so BMS temperature polling works
     # from the first coordinator refresh (not just when WebSocket starts).
     if entry.data.get(CONF_WEB_USERNAME) and dd.web_session is None:
@@ -1678,11 +1596,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # "always" mode: start WS at integration startup and register a
     # watchdog that re-establishes the connection if it drops.
-    if _get_ws_mode(hass) == WS_MODE_ALWAYS:
+    if _cfg(hass).ws_mode == WS_MODE_ALWAYS:
         await _maybe_start_realtime_ws(hass)
 
         async def _ws_always_watchdog(_now: datetime.datetime) -> None:
-            if _get_ws_mode(hass) == WS_MODE_ALWAYS:
+            if _cfg(hass).ws_mode == WS_MODE_ALWAYS:
                 await _maybe_start_realtime_ws(hass)
 
         entry.async_on_unload(
@@ -1976,19 +1894,19 @@ def _register_services(hass: HomeAssistant) -> None:
         if not _should_start_realtime_ws(hass) and not ws_stops:
             ws_stops.append(_stop_realtime_ws(hass))
 
-        if _is_entity_mode(hass):
+        if _cfg(hass).entity_mode:
             _LOGGER.info("Clearing overrides via entity backend, setting SelfUse")
             await _apply_mode_via_entities(hass, WorkMode.SELF_USE)
         elif mode_filter is None:
             inverter = _get_inverter(hass)
-            min_soc_on_grid = _get_min_soc_on_grid(hass)
+            min_soc_on_grid = _cfg(hass).min_soc_on_grid
             schedule = await hass.async_add_executor_job(inverter.get_schedule)
             _check_schedule_safe(schedule.get("groups", []), hass)
             _LOGGER.info("Clearing all overrides, setting SelfUse")
             await hass.async_add_executor_job(inverter.self_use, min_soc_on_grid)
         else:
             inverter = _get_inverter(hass)
-            min_soc_on_grid = _get_min_soc_on_grid(hass)
+            min_soc_on_grid = _cfg(hass).min_soc_on_grid
             _LOGGER.info("Clearing %s overrides", mode_filter)
             schedule = await hass.async_add_executor_job(inverter.get_schedule)
             _check_schedule_safe(schedule.get("groups", []), hass)
@@ -2035,12 +1953,12 @@ def _register_services(hass: HomeAssistant) -> None:
         if ws_stop is not None:
             hass.async_create_task(ws_stop)
 
-        if _is_entity_mode(hass):
+        if _cfg(hass).entity_mode:
             await _apply_mode_via_entities(hass, WorkMode.FORCE_CHARGE, power)
         else:
             inverter = _get_inverter(hass)
-            min_soc_on_grid = _get_min_soc_on_grid(hass)
-            api_min_soc = _get_api_min_soc(hass)
+            min_soc_on_grid = _cfg(hass).min_soc_on_grid
+            api_min_soc = _cfg(hass).api_min_soc
 
             group = _build_override_group(
                 start,
@@ -2088,8 +2006,8 @@ def _register_services(hass: HomeAssistant) -> None:
         if ws_stop is not None:
             hass.async_create_task(ws_stop, name="foxess_stop_ws_force_discharge")
 
-        if _is_entity_mode(hass):
-            api_min_soc = _get_api_min_soc(hass)
+        if _cfg(hass).entity_mode:
+            api_min_soc = _cfg(hass).api_min_soc
             await _apply_mode_via_entities(
                 hass,
                 WorkMode.FORCE_DISCHARGE,
@@ -2098,8 +2016,8 @@ def _register_services(hass: HomeAssistant) -> None:
             )
         else:
             inverter = _get_inverter(hass)
-            min_soc_on_grid = _get_min_soc_on_grid(hass)
-            api_min_soc = _get_api_min_soc(hass)
+            min_soc_on_grid = _cfg(hass).min_soc_on_grid
+            api_min_soc = _cfg(hass).api_min_soc
 
             group = _build_override_group(
                 start,
@@ -2138,12 +2056,12 @@ def _register_services(hass: HomeAssistant) -> None:
             f"{power}W" if power else "max",
         )
 
-        if _is_entity_mode(hass):
+        if _cfg(hass).entity_mode:
             await _apply_mode_via_entities(hass, WorkMode.FEEDIN, power)
         else:
             inverter = _get_inverter(hass)
-            min_soc_on_grid = _get_min_soc_on_grid(hass)
-            api_min_soc = _get_api_min_soc(hass)
+            min_soc_on_grid = _cfg(hass).min_soc_on_grid
+            api_min_soc = _cfg(hass).api_min_soc
 
             group = _build_override_group(
                 start,
@@ -2184,7 +2102,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 translation_key="soc_unavailable",
             )
 
-        api_min_soc = _get_api_min_soc(hass)
+        api_min_soc = _cfg(hass).api_min_soc
 
         feedin_str = (
             f", feedin_limit={feedin_energy_limit}kWh"
@@ -2214,14 +2132,14 @@ def _register_services(hass: HomeAssistant) -> None:
             if ws_stop is not None:
                 hass.async_create_task(ws_stop, name="foxess_stop_ws_smart_discharge")
 
-        max_power_w = power if power is not None else _get_max_power_w(hass)
-        battery_capacity_kwh = _get_battery_capacity_kwh(hass)
+        max_power_w = power if power is not None else _cfg(hass).max_power_w
+        battery_capacity_kwh = _cfg(hass).battery_capacity_kwh
         pacing_enabled = battery_capacity_kwh > 0
 
         # Decide whether to start discharging now or defer (stay in self-use)
         current_soc = _get_current_soc(hass)
         now = dt_util.now()
-        headroom = _get_smart_headroom(hass)
+        headroom = _cfg(hass).smart_headroom
         net_consumption = _get_net_consumption(hass)
         should_defer = False
         if pacing_enabled and current_soc is not None:
@@ -2269,7 +2187,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
         groups: list[ScheduleGroup] = []
         if not should_defer:
-            if _is_entity_mode(hass):
+            if _cfg(hass).entity_mode:
                 await _apply_mode_via_entities(
                     hass,
                     WorkMode.FORCE_DISCHARGE,
@@ -2278,7 +2196,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 )
             else:
                 inverter = _get_inverter(hass)
-                min_soc_on_grid = _get_min_soc_on_grid(hass)
+                min_soc_on_grid = _cfg(hass).min_soc_on_grid
                 group = _build_override_group(
                     start,
                     end,
@@ -2344,7 +2262,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 max_power_w=max_power_w,
                 initial_power=initial_power,
                 battery_capacity_kwh=battery_capacity_kwh,
-                min_power_change=_get_min_power_change(hass),
+                min_power_change=_cfg(hass).min_power_change,
                 pacing_enabled=pacing_enabled,
                 current_soc=current_soc,
                 net_consumption=net_consumption,
@@ -2386,7 +2304,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 translation_key="soc_unavailable",
             )
 
-        battery_capacity_kwh = _get_battery_capacity_kwh(hass)
+        battery_capacity_kwh = _cfg(hass).battery_capacity_kwh
         if battery_capacity_kwh <= 0:
             raise ServiceValidationError(
                 "Battery capacity (kWh) not configured",
@@ -2394,10 +2312,10 @@ def _register_services(hass: HomeAssistant) -> None:
                 translation_key="battery_capacity_not_configured",
             )
 
-        min_soc_on_grid = _get_min_soc_on_grid(hass)
-        api_min_soc = _get_api_min_soc(hass)
+        min_soc_on_grid = _cfg(hass).min_soc_on_grid
+        api_min_soc = _cfg(hass).api_min_soc
         effective_max_power = (
-            max_power if max_power is not None else _get_max_power_w(hass)
+            max_power if max_power is not None else _cfg(hass).max_power_w
         )
 
         # Read current SoC for initial power calculation and deferred start
@@ -2413,7 +2331,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 },
             )
 
-        entity_mode = _is_entity_mode(hass)
+        entity_mode = _cfg(hass).entity_mode
 
         # Validate conflicts upfront (cloud mode only)
         if not entity_mode:
@@ -2450,7 +2368,7 @@ def _register_services(hass: HomeAssistant) -> None:
         # Decide whether to start charging now or defer
         now = dt_util.now()
         net_consumption = _get_net_consumption(hass)
-        headroom = _get_smart_headroom(hass)
+        headroom = _cfg(hass).smart_headroom
         should_defer = False
         if current_soc is not None:
             deferred_start = _calculate_deferred_start(
@@ -2544,7 +2462,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     initial_groups,
                 )
 
-        min_power_change = _get_min_power_change(hass)
+        min_power_change = _cfg(hass).min_power_change
 
         # Clear any previous error — new session is starting
         _dd(hass).smart_error_state = None

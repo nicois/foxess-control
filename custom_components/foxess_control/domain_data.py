@@ -18,6 +18,83 @@ if TYPE_CHECKING:
     from .foxess import FoxESSRealtimeWS, FoxESSWebSession
 
 
+@dataclass(frozen=True)
+class IntegrationConfig:
+    """Snapshot of config entry options, built once at setup time.
+
+    Replaces the scattered ``_get_X(hass)`` accessor functions that each
+    independently looked up the first config entry and read an option.
+    Rebuilt on options update via ``async_setup_entry`` (HA reloads the
+    entry on options change).
+    """
+
+    min_soc_on_grid: int
+    api_min_soc: int
+    battery_capacity_kwh: float
+    min_power_change: int
+    max_power_w: int
+    smart_headroom: float
+    ws_mode: str
+    entity_mode: bool
+
+
+def build_config(
+    entry_options: dict[str, Any],
+    inverter_max_power_w: int | None = None,
+) -> IntegrationConfig:
+    """Build an IntegrationConfig from a config entry's options dict."""
+    from .const import (
+        CONF_API_MIN_SOC,
+        CONF_BATTERY_CAPACITY_KWH,
+        CONF_INVERTER_POWER,
+        CONF_MIN_POWER_CHANGE,
+        CONF_MIN_SOC_ON_GRID,
+        CONF_SMART_HEADROOM,
+        CONF_WORK_MODE_ENTITY,
+        CONF_WS_ALL_SESSIONS,
+        CONF_WS_MODE,
+        DEFAULT_API_MIN_SOC,
+        DEFAULT_INVERTER_POWER,
+        DEFAULT_MIN_POWER_CHANGE,
+        DEFAULT_MIN_SOC_ON_GRID,
+        DEFAULT_SMART_HEADROOM,
+        WS_MODE_AUTO,
+        WS_MODE_SMART_SESSIONS,
+    )
+
+    configured_power = entry_options.get(CONF_INVERTER_POWER)
+    if configured_power:
+        max_power_w = int(configured_power)
+    elif inverter_max_power_w is not None:
+        max_power_w = inverter_max_power_w
+    else:
+        max_power_w = DEFAULT_INVERTER_POWER
+
+    if CONF_WS_MODE in entry_options:
+        ws_mode = str(entry_options[CONF_WS_MODE])
+    elif entry_options.get(CONF_WS_ALL_SESSIONS):
+        ws_mode = WS_MODE_SMART_SESSIONS
+    else:
+        ws_mode = WS_MODE_AUTO
+
+    headroom_pct: int = entry_options.get(CONF_SMART_HEADROOM, DEFAULT_SMART_HEADROOM)
+
+    return IntegrationConfig(
+        min_soc_on_grid=entry_options.get(
+            CONF_MIN_SOC_ON_GRID, DEFAULT_MIN_SOC_ON_GRID
+        ),
+        api_min_soc=int(entry_options.get(CONF_API_MIN_SOC, DEFAULT_API_MIN_SOC)),
+        battery_capacity_kwh=float(entry_options.get(CONF_BATTERY_CAPACITY_KWH, 0.0)),
+        min_power_change=int(
+            entry_options.get(CONF_MIN_POWER_CHANGE, DEFAULT_MIN_POWER_CHANGE)
+        ),
+        max_power_w=max_power_w,
+        smart_headroom=headroom_pct / 100.0,
+        ws_mode=ws_mode,
+        entity_mode=bool(entry_options.get(CONF_WORK_MODE_ENTITY)),
+    )
+
+
 @dataclass
 class FoxESSEntryData(EntryData):
     """Per-config-entry data with FoxESS-typed fields."""
@@ -26,6 +103,8 @@ class FoxESSEntryData(EntryData):
 @dataclass
 class FoxESSControlData(SmartBatteryDomainData):
     """Complete runtime state for FoxESS Control in ``hass.data[DOMAIN]``."""
+
+    config: IntegrationConfig | None = None
 
     # WebSocket real-time data
     realtime_ws: FoxESSRealtimeWS | None = None

@@ -12,7 +12,6 @@ from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.foxess_control import (
     _get_inverter,
-    _get_min_soc_on_grid,
     async_setup,
     async_setup_entry,
     async_unload_entry,
@@ -34,6 +33,7 @@ from custom_components.foxess_control.const import (
 from custom_components.foxess_control.domain_data import (
     FoxESSControlData,
     FoxESSEntryData,
+    build_config,
 )
 from custom_components.foxess_control.foxess.inverter import Inverter
 
@@ -91,6 +91,9 @@ def _make_hass(
         CONF_SMART_HEADROOM: smart_headroom,
     }
     hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+    dd.config = build_config(
+        dict(mock_entry.options), inverter_max_power_w=inverter.max_power_w
+    )
 
     return hass
 
@@ -121,16 +124,15 @@ class TestGetInverter:
 
 
 class TestGetMinSocOnGrid:
-    """Tests for _get_min_soc_on_grid helper."""
+    """Tests for min_soc_on_grid via IntegrationConfig."""
 
     def test_returns_configured_value(self) -> None:
         hass = _make_hass(min_soc_on_grid=25)
-        assert _get_min_soc_on_grid(hass) == 25
+        assert hass.data[DOMAIN].config.min_soc_on_grid == 25
 
-    def test_returns_default_when_entry_missing(self) -> None:
+    def test_returns_default(self) -> None:
         hass = _make_hass()
-        hass.config_entries.async_get_entry = MagicMock(return_value=None)
-        assert _get_min_soc_on_grid(hass) == DEFAULT_MIN_SOC_ON_GRID
+        assert hass.data[DOMAIN].config.min_soc_on_grid == DEFAULT_MIN_SOC_ON_GRID
 
 
 class TestSetupEntry:

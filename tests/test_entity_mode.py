@@ -9,7 +9,6 @@ from custom_components.foxess_control import (
     _apply_mode_via_entities,
     _async_remove_override,
     _build_entity_map,
-    _is_entity_mode,
 )
 from custom_components.foxess_control.const import (
     CONF_CHARGE_POWER_ENTITY,
@@ -23,40 +22,42 @@ from custom_components.foxess_control.const import (
     DOMAIN,
 )
 from custom_components.foxess_control.coordinator import FoxESSEntityCoordinator
+from custom_components.foxess_control.domain_data import (
+    FoxESSControlData,
+    FoxESSEntryData,
+    build_config,
+)
 from custom_components.foxess_control.foxess.inverter import WorkMode
 
 
+def _make_entity_hass(entry_options: dict[str, Any]) -> MagicMock:
+    """Create a mock hass configured for entity mode tests."""
+    hass = MagicMock()
+    hass.services.async_call = AsyncMock()
+    dd = FoxESSControlData()
+    dd.entries["entry1"] = FoxESSEntryData()
+    dd.config = build_config(entry_options)
+    hass.data = {DOMAIN: dd}
+    entry = MagicMock()
+    entry.options = entry_options
+    hass.config_entries.async_get_entry = MagicMock(return_value=entry)
+    return hass
+
+
 class TestIsEntityMode:
-    """Tests for _is_entity_mode."""
+    """Tests for entity_mode via IntegrationConfig."""
 
     def test_returns_false_when_no_work_mode_entity(self) -> None:
-        hass = MagicMock()
-        entry = MagicMock()
-        entry.options = {}
-        hass.data = {DOMAIN: {"entry1": {"inverter": MagicMock()}}}
-        hass.config_entries.async_get_entry.return_value = entry
-        assert _is_entity_mode(hass) is False
+        cfg = build_config({})
+        assert cfg.entity_mode is False
 
     def test_returns_true_when_work_mode_entity_set(self) -> None:
-        hass = MagicMock()
-        entry = MagicMock()
-        entry.options = {CONF_WORK_MODE_ENTITY: "select.foxess_work_mode"}
-        hass.data = {DOMAIN: {"entry1": {"inverter": MagicMock()}}}
-        hass.config_entries.async_get_entry.return_value = entry
-        assert _is_entity_mode(hass) is True
+        cfg = build_config({CONF_WORK_MODE_ENTITY: "select.foxess_work_mode"})
+        assert cfg.entity_mode is True
 
     def test_returns_false_when_empty_string(self) -> None:
-        hass = MagicMock()
-        entry = MagicMock()
-        entry.options = {CONF_WORK_MODE_ENTITY: ""}
-        hass.data = {DOMAIN: {"entry1": {"inverter": MagicMock()}}}
-        hass.config_entries.async_get_entry.return_value = entry
-        assert _is_entity_mode(hass) is False
-
-    def test_returns_false_when_no_domain_data(self) -> None:
-        hass = MagicMock()
-        hass.data = {}
-        assert _is_entity_mode(hass) is False
+        cfg = build_config({CONF_WORK_MODE_ENTITY: ""})
+        assert cfg.entity_mode is False
 
 
 class TestBuildEntityMap:
@@ -102,12 +103,7 @@ class TestApplyModeViaEntities:
 
     @pytest.mark.asyncio
     async def test_sets_work_mode(self) -> None:
-        hass = MagicMock()
-        hass.services.async_call = AsyncMock()
-        entry = MagicMock()
-        entry.options = {CONF_WORK_MODE_ENTITY: "select.foxess_work_mode"}
-        hass.data = {DOMAIN: {"entry1": {}}}
-        hass.config_entries.async_get_entry.return_value = entry
+        hass = _make_entity_hass({CONF_WORK_MODE_ENTITY: "select.foxess_work_mode"})
 
         await _apply_mode_via_entities(hass, WorkMode.SELF_USE)
 
@@ -119,15 +115,12 @@ class TestApplyModeViaEntities:
 
     @pytest.mark.asyncio
     async def test_sets_charge_power(self) -> None:
-        hass = MagicMock()
-        hass.services.async_call = AsyncMock()
-        entry = MagicMock()
-        entry.options = {
-            CONF_WORK_MODE_ENTITY: "select.foxess_work_mode",
-            CONF_CHARGE_POWER_ENTITY: "number.foxess_charge_power",
-        }
-        hass.data = {DOMAIN: {"entry1": {}}}
-        hass.config_entries.async_get_entry.return_value = entry
+        hass = _make_entity_hass(
+            {
+                CONF_WORK_MODE_ENTITY: "select.foxess_work_mode",
+                CONF_CHARGE_POWER_ENTITY: "number.foxess_charge_power",
+            }
+        )
 
         await _apply_mode_via_entities(hass, WorkMode.FORCE_CHARGE, power_w=5000)
 
@@ -148,16 +141,13 @@ class TestApplyModeViaEntities:
 
     @pytest.mark.asyncio
     async def test_sets_discharge_power_and_min_soc(self) -> None:
-        hass = MagicMock()
-        hass.services.async_call = AsyncMock()
-        entry = MagicMock()
-        entry.options = {
-            CONF_WORK_MODE_ENTITY: "select.foxess_work_mode",
-            CONF_DISCHARGE_POWER_ENTITY: "number.foxess_discharge_power",
-            CONF_MIN_SOC_ENTITY: "number.foxess_min_soc",
-        }
-        hass.data = {DOMAIN: {"entry1": {}}}
-        hass.config_entries.async_get_entry.return_value = entry
+        hass = _make_entity_hass(
+            {
+                CONF_WORK_MODE_ENTITY: "select.foxess_work_mode",
+                CONF_DISCHARGE_POWER_ENTITY: "number.foxess_discharge_power",
+                CONF_MIN_SOC_ENTITY: "number.foxess_min_soc",
+            }
+        )
 
         await _apply_mode_via_entities(
             hass,
@@ -177,15 +167,12 @@ class TestApplyModeViaEntities:
 
     @pytest.mark.asyncio
     async def test_skips_power_when_not_charge_or_discharge(self) -> None:
-        hass = MagicMock()
-        hass.services.async_call = AsyncMock()
-        entry = MagicMock()
-        entry.options = {
-            CONF_WORK_MODE_ENTITY: "select.foxess_work_mode",
-            CONF_CHARGE_POWER_ENTITY: "number.foxess_charge_power",
-        }
-        hass.data = {DOMAIN: {"entry1": {}}}
-        hass.config_entries.async_get_entry.return_value = entry
+        hass = _make_entity_hass(
+            {
+                CONF_WORK_MODE_ENTITY: "select.foxess_work_mode",
+                CONF_CHARGE_POWER_ENTITY: "number.foxess_charge_power",
+            }
+        )
 
         await _apply_mode_via_entities(hass, WorkMode.FEEDIN, power_w=5000)
 
@@ -194,12 +181,7 @@ class TestApplyModeViaEntities:
 
     @pytest.mark.asyncio
     async def test_skips_power_when_no_entity_configured(self) -> None:
-        hass = MagicMock()
-        hass.services.async_call = AsyncMock()
-        entry = MagicMock()
-        entry.options = {CONF_WORK_MODE_ENTITY: "select.foxess_work_mode"}
-        hass.data = {DOMAIN: {"entry1": {}}}
-        hass.config_entries.async_get_entry.return_value = entry
+        hass = _make_entity_hass({CONF_WORK_MODE_ENTITY: "select.foxess_work_mode"})
 
         await _apply_mode_via_entities(hass, WorkMode.FORCE_CHARGE, power_w=5000)
 
@@ -209,12 +191,9 @@ class TestApplyModeViaEntities:
     @pytest.mark.asyncio
     async def test_input_select_uses_input_select_domain(self) -> None:
         """input_select entities must use the input_select service domain."""
-        hass = MagicMock()
-        hass.services.async_call = AsyncMock()
-        entry = MagicMock()
-        entry.options = {CONF_WORK_MODE_ENTITY: "input_select.foxess_work_mode"}
-        hass.data = {DOMAIN: {"entry1": {}}}
-        hass.config_entries.async_get_entry.return_value = entry
+        hass = _make_entity_hass(
+            {CONF_WORK_MODE_ENTITY: "input_select.foxess_work_mode"}
+        )
 
         await _apply_mode_via_entities(hass, WorkMode.SELF_USE)
 
@@ -227,16 +206,13 @@ class TestApplyModeViaEntities:
     @pytest.mark.asyncio
     async def test_input_number_uses_input_number_domain(self) -> None:
         """input_number entities must use the input_number service domain."""
-        hass = MagicMock()
-        hass.services.async_call = AsyncMock()
-        entry = MagicMock()
-        entry.options = {
-            CONF_WORK_MODE_ENTITY: "input_select.foxess_work_mode",
-            CONF_DISCHARGE_POWER_ENTITY: "input_number.foxess_discharge_power",
-            CONF_MIN_SOC_ENTITY: "input_number.foxess_min_soc",
-        }
-        hass.data = {DOMAIN: {"entry1": {}}}
-        hass.config_entries.async_get_entry.return_value = entry
+        hass = _make_entity_hass(
+            {
+                CONF_WORK_MODE_ENTITY: "input_select.foxess_work_mode",
+                CONF_DISCHARGE_POWER_ENTITY: "input_number.foxess_discharge_power",
+                CONF_MIN_SOC_ENTITY: "input_number.foxess_min_soc",
+            }
+        )
 
         await _apply_mode_via_entities(
             hass, WorkMode.FORCE_DISCHARGE, power_w=3000, fd_soc=15
@@ -250,15 +226,12 @@ class TestApplyModeViaEntities:
     @pytest.mark.asyncio
     async def test_platform_select_uses_select_domain(self) -> None:
         """Platform-backed select entities use the select service domain."""
-        hass = MagicMock()
-        hass.services.async_call = AsyncMock()
-        entry = MagicMock()
-        entry.options = {
-            CONF_WORK_MODE_ENTITY: "select.foxess_work_mode",
-            CONF_DISCHARGE_POWER_ENTITY: "number.foxess_discharge_power",
-        }
-        hass.data = {DOMAIN: {"entry1": {}}}
-        hass.config_entries.async_get_entry.return_value = entry
+        hass = _make_entity_hass(
+            {
+                CONF_WORK_MODE_ENTITY: "select.foxess_work_mode",
+                CONF_DISCHARGE_POWER_ENTITY: "number.foxess_discharge_power",
+            }
+        )
 
         await _apply_mode_via_entities(hass, WorkMode.FORCE_DISCHARGE, power_w=3000)
 
@@ -272,12 +245,7 @@ class TestAsyncRemoveOverride:
 
     @pytest.mark.asyncio
     async def test_entity_mode_sets_self_use(self) -> None:
-        hass = MagicMock()
-        hass.services.async_call = AsyncMock()
-        entry = MagicMock()
-        entry.options = {CONF_WORK_MODE_ENTITY: "select.foxess_work_mode"}
-        hass.data = {DOMAIN: {"entry1": {}}}
-        hass.config_entries.async_get_entry.return_value = entry
+        hass = _make_entity_hass({CONF_WORK_MODE_ENTITY: "select.foxess_work_mode"})
 
         await _async_remove_override(hass, WorkMode.FORCE_CHARGE)
 
@@ -289,13 +257,19 @@ class TestAsyncRemoveOverride:
 
     @pytest.mark.asyncio
     async def test_cloud_mode_calls_remove_from_schedule(self) -> None:
+        from custom_components.foxess_control.foxess.inverter import Inverter
+
+        inverter = MagicMock(spec=Inverter)
+        inverter.max_power_w = 10500
         hass = MagicMock()
         hass.async_add_executor_job = AsyncMock()
+        dd = FoxESSControlData()
+        dd.entries["entry1"] = FoxESSEntryData(inverter=inverter)
+        dd.config = build_config({}, inverter_max_power_w=10500)
+        hass.data = {DOMAIN: dd}
         entry = MagicMock()
         entry.options = {}
-        inverter = MagicMock()
-        hass.data = {DOMAIN: {"entry1": {"inverter": inverter}}}
-        hass.config_entries.async_get_entry.return_value = entry
+        hass.config_entries.async_get_entry = MagicMock(return_value=entry)
 
         await _async_remove_override(hass, WorkMode.FORCE_CHARGE)
 

@@ -31,6 +31,7 @@ from custom_components.foxess_control.const import (
 from custom_components.foxess_control.domain_data import (
     FoxESSControlData,
     FoxESSEntryData,
+    build_config,
 )
 from custom_components.foxess_control.foxess.client import FoxESSApiError
 from custom_components.foxess_control.foxess.inverter import Inverter
@@ -81,6 +82,9 @@ def _make_hass(
         CONF_SMART_HEADROOM: DEFAULT_SMART_HEADROOM,
     }
     hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+    dd.config = build_config(
+        dict(mock_entry.options), inverter_max_power_w=inverter.max_power_w
+    )
 
     return hass
 
