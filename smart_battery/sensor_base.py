@@ -6,6 +6,7 @@ so brand integrations create thin subclasses that bind these values.
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -904,7 +905,17 @@ class SmartOperationsOverviewSensor(RestoreSensor):
         if remaining_h <= 0:
             return None
         capacity = get_battery_capacity_kwh(self.hass, self._domain)
-        taper = get_domain_data(self.hass, self._domain).taper_profile
+        dd = get_domain_data(self.hass, self._domain)
+        taper = dd.taper_profile
+        from .domain_data import get_first_coordinator
+
+        bms_temp: float | None = None
+        coordinator = get_first_coordinator(self.hass, self._domain)
+        if coordinator is not None and coordinator.data:
+            raw = coordinator.data.get("bmsBatteryTemperature")
+            if raw is not None:
+                with contextlib.suppress(ValueError, TypeError):
+                    bms_temp = float(raw)
         return is_charge_target_reachable(
             soc,
             cs.get("target_soc", 100),
@@ -912,6 +923,7 @@ class SmartOperationsOverviewSensor(RestoreSensor):
             remaining_h,
             cs.get("max_power_w", 0),
             taper_profile=taper,
+            bms_temp_c=bms_temp,
         )
 
 

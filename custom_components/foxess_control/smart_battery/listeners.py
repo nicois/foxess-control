@@ -299,6 +299,10 @@ async def _save_taper_profile(
     await store.async_save(stored)
 
 
+TEMP_STABILITY_SECONDS = 600  # 10 minutes
+TEMP_DEFICIT_THRESHOLD = 0.95  # actual must be < 95% of requested
+
+
 def _record_taper_observation(
     hass: HomeAssistant,
     domain: str,
@@ -308,17 +312,47 @@ def _record_taper_observation(
     coordinator_var: str,
     record_fn_name: str,
     save_every: int,
+    interval_seconds: int,
 ) -> None:
     """Record a taper observation if conditions are met.
 
     Shared between charge and discharge listeners.
+
+    *interval_seconds* is the listener tick interval (300 for charge,
+    60 for discharge).  Temperature-based taper recording requires the
+    actual power to stay below ``TEMP_DEFICIT_THRESHOLD`` of the
+    requested power for ``TEMP_STABILITY_SECONDS`` consecutive seconds
+    before a temperature observation is recorded.
     """
     if taper is None or cur_state.get("last_power_w", 0) < 500:
+        cur_state["taper_deficit_streak"] = 0
         return
     actual_kw = _get_coordinator_value(hass, domain, coordinator_var)
     if actual_kw is None:
+        cur_state["taper_deficit_streak"] = 0
         return
-    getattr(taper, record_fn_name)(soc, cur_state["last_power_w"], actual_kw * 1000)
+
+    actual_w = actual_kw * 1000
+    requested_w = cur_state["last_power_w"]
+
+    # Always record SoC-based taper (existing behavior, no stability gate)
+    getattr(taper, record_fn_name)(soc, requested_w, actual_w)
+
+    # Temperature recording: require sustained deficit for TEMP_STABILITY_SECONDS
+    if actual_w < requested_w * TEMP_DEFICIT_THRESHOLD:
+        cur_state["taper_deficit_streak"] = cur_state.get("taper_deficit_streak", 0) + 1
+    else:
+        cur_state["taper_deficit_streak"] = 0
+
+    streak_seconds = cur_state["taper_deficit_streak"] * interval_seconds
+    if streak_seconds >= TEMP_STABILITY_SECONDS:
+        bms_temp = _get_bms_temperature(hass, domain)
+        if bms_temp is not None:
+            # record_fn_name is "record_charge" or "record_discharge"
+            # temp method is "record_charge_temp" or "record_discharge_temp"
+            temp_fn_name = record_fn_name + "_temp"
+            getattr(taper, temp_fn_name)(bms_temp, soc, requested_w, actual_w)
+
     cur_state["taper_tick"] = cur_state.get("taper_tick", 0) + 1
     if cur_state["taper_tick"] % save_every == 0:
         hass.async_create_task(
@@ -513,6 +547,8 @@ def setup_smart_charge_listeners(
         effective_max = cur_state["max_power_w"]
         cur_state["effective_max_power_w"] = effective_max
 
+        bms_temp = _get_bms_temperature(hass, domain)
+
         if cur_state.get("charging_started"):
             _record_taper_observation(
                 hass,
@@ -523,6 +559,7 @@ def setup_smart_charge_listeners(
                 "batChargePower",
                 "record_charge",
                 save_every=3,
+                interval_seconds=SMART_CHARGE_ADJUST_SECONDS,
             )
 
         if not cur_state["charging_started"]:
@@ -537,6 +574,7 @@ def setup_smart_charge_listeners(
                 start=cur_state["start"],
                 headroom=headroom,
                 taper_profile=taper,
+                bms_temp_c=bms_temp,
             )
             if now_dt < deferred:
                 _LOGGER.debug(
@@ -563,6 +601,7 @@ def setup_smart_charge_listeners(
                 net_consumption_kw=net_consumption,
                 headroom=headroom,
                 taper_profile=taper,
+                bms_temp_c=bms_temp,
             )
             await adapter.apply_mode(hass, WorkMode.FORCE_CHARGE, new_power, fd_soc=100)
 
@@ -614,6 +653,7 @@ def setup_smart_charge_listeners(
             effective_charge_window=window_from_start,
             min_power_change_w=cur_state["min_power_change"],
             taper_profile=taper,
+            bms_temp_c=bms_temp,
         )
 
         if (
@@ -765,6 +805,7 @@ def setup_smart_discharge_listeners(
 
         now_dt = dt_util.now()
         taper = _get_taper_profile(hass, domain)
+        bms_temp = _get_bms_temperature(hass, domain)
         peak = cur_state.get("consumption_peak_kw", 0.0)
         deferred = calculate_discharge_deferred_start(
             soc_value,
@@ -778,6 +819,7 @@ def setup_smart_discharge_listeners(
             taper_profile=taper,
             feedin_energy_limit_kwh=cur_state.get("feedin_energy_limit_kwh"),
             consumption_peak_kw=peak,
+            bms_temp_c=bms_temp,
         )
         if now_dt < deferred:
             _LOGGER.debug(
@@ -1175,6 +1217,7 @@ def setup_smart_discharge_listeners(
                 "batDischargePower",
                 "record_discharge",
                 save_every=5,
+                interval_seconds=SMART_DISCHARGE_CHECK_SECONDS,
             )
 
         # Power pacing
