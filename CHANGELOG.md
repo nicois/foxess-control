@@ -1,9 +1,10 @@
 # Changelog
 
-## 1.0.9-beta.5
+## 1.0.9-beta.6
 
 ### Fixed
 - **Discharge session lost after HA restart during deferred phase**: when HA restarted before a scheduled discharge window opened (e.g. session created at 07:50 for 07:59–10:01 window, restart at 07:57), session recovery looked for a ForceDischarge schedule on the inverter. Since the schedule isn't written until the window opens, recovery found nothing and discarded the valid session. Now correctly re-creates the session in deferred state, matching charge recovery behaviour (C-024, D-002).
+- **E2E feedin pacing test unreliable on CI**: tuned test parameters (1.6 kWh / 15-min window) so deferral fits within timeout and feedin budget survives the observation fast-forward (D-005).
 
 ## 1.0.9-beta.4
 
