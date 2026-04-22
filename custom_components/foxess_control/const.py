@@ -10,6 +10,12 @@ from .smart_battery.const import (
     CONF_API_MIN_SOC as CONF_API_MIN_SOC,
 )
 from .smart_battery.const import (
+    CONF_BAT_CHARGE_POWER_ENTITY as CONF_BAT_CHARGE_POWER_ENTITY,
+)
+from .smart_battery.const import (
+    CONF_BAT_DISCHARGE_POWER_ENTITY as CONF_BAT_DISCHARGE_POWER_ENTITY,
+)
+from .smart_battery.const import (
     CONF_BATTERY_CAPACITY_KWH as CONF_BATTERY_CAPACITY_KWH,
 )
 from .smart_battery.const import (
@@ -23,6 +29,12 @@ from .smart_battery.const import (
 )
 from .smart_battery.const import (
     CONF_FEEDIN_ENERGY_ENTITY as CONF_FEEDIN_ENERGY_ENTITY,
+)
+from .smart_battery.const import (
+    CONF_FEEDIN_POWER_ENTITY as CONF_FEEDIN_POWER_ENTITY,
+)
+from .smart_battery.const import (
+    CONF_GRID_CONSUMPTION_POWER_ENTITY as CONF_GRID_CONSUMPTION_POWER_ENTITY,
 )
 from .smart_battery.const import (
     CONF_INVERTER_POWER as CONF_INVERTER_POWER,

@@ -14,12 +14,24 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
+from homeassistant.util.unit_conversion import (
+    BaseUnitConverter,
+    EnergyConverter,
+    PowerConverter,
+    TemperatureConverter,
+)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 _SENTINEL = object()
+
+_CONVERTER_FOR_UNIT: dict[str, type[BaseUnitConverter]] = {}
+for _conv in (PowerConverter, EnergyConverter, TemperatureConverter):
+    for _unit in _conv.VALID_UNITS:
+        if _unit is not None:
+            _CONVERTER_FOR_UNIT[_unit] = _conv
 
 
 class EntityCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -34,7 +46,7 @@ class EntityCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self,
         hass: HomeAssistant,
         domain: str,
-        entity_map: dict[str, str],
+        entity_map: dict[str, tuple[str, str]],
         update_interval_seconds: int,
     ) -> None:
         super().__init__(
@@ -43,8 +55,8 @@ class EntityCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             name=domain,
             update_interval=datetime.timedelta(seconds=update_interval_seconds),
         )
-        # {polled_variable_name: entity_id}
-        # e.g. {"SoC": "sensor.huawei_battery_soc"}
+        # {polled_variable_name: (entity_id, expected_unit)}
+        # e.g. {"SoC": ("sensor.huawei_battery_soc", "%")}
         self._entity_map = entity_map
         self._entity_first_read: dict[str, bool] = {}
 
@@ -75,15 +87,31 @@ class EntityCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raw,
             )
 
+    @staticmethod
+    def _convert_unit(
+        value: float, source_unit: str | None, expected_unit: str
+    ) -> float:
+        """Convert *value* from *source_unit* to *expected_unit*."""
+        if not expected_unit or not source_unit:
+            return value
+        if source_unit == expected_unit:
+            return value
+        converter = _CONVERTER_FOR_UNIT.get(expected_unit)
+        if converter is not None and source_unit in converter.VALID_UNITS:
+            return converter.convert(value, source_unit, expected_unit)
+        return value
+
     async def _async_update_data(self) -> dict[str, Any]:
         data: dict[str, Any] = {}
-        for var_name, entity_id in self._entity_map.items():
+        for var_name, (entity_id, expected_unit) in self._entity_map.items():
             if var_name == "_work_mode":
                 continue  # handled separately below
             state = self.hass.states.get(entity_id)
             if state is not None and state.state not in ("unknown", "unavailable"):
                 try:
-                    data[var_name] = float(state.state)
+                    raw = float(state.state)
+                    source_unit = state.attributes.get("unit_of_measurement")
+                    data[var_name] = self._convert_unit(raw, source_unit, expected_unit)
                 except (ValueError, TypeError):
                     data[var_name] = state.state
                 self._log_first_read(var_name, entity_id, data[var_name])
@@ -91,8 +119,9 @@ class EntityCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._log_first_read(var_name, entity_id)
 
         # Work mode from a select entity
-        work_mode_eid = self._entity_map.get("_work_mode")
-        if work_mode_eid:
+        work_mode_entry = self._entity_map.get("_work_mode")
+        if work_mode_entry:
+            work_mode_eid = work_mode_entry[0]
             state = self.hass.states.get(work_mode_eid)
             if state is not None and state.state not in ("unknown", "unavailable"):
                 data["_work_mode"] = state.state

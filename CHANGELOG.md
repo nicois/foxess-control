@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.8-beta.12
+
+### Added
+- **Entity-mode dashboard support**: four new optional entity mappings — battery charge power, battery discharge power, grid consumption power, and grid feed-in power — populate the overview card's grid and battery sections in entity/modbus mode. Previously only SoC, solar, house load, and cumulative feed-in energy were mapped, leaving the overview card's grid flow and charge/discharge rate sections empty.
+- **Automatic unit conversion in entity mode**: the entity coordinator now reads `unit_of_measurement` from each source entity and converts to the expected coordinator unit (e.g. W→kW, Wh→kWh) using HA's built-in `PowerConverter`, `EnergyConverter`, and `TemperatureConverter`. Previously, raw values were passed through without conversion, causing incorrect readings when source entities used different units than the cloud API.
+
 ## 1.0.8-beta.11
 
 ### Fixed

@@ -329,6 +329,10 @@
           "loads_power_entity": "House load power entity (sensor)",
           "pv_power_entity": "Solar generation power entity (sensor)",
           "feedin_energy_entity": "Cumulative feed-in energy entity (sensor)",
+          "bat_charge_power_entity": "Battery charge power entity (sensor)",
+          "bat_discharge_power_entity": "Battery discharge power entity (sensor)",
+          "grid_consumption_power_entity": "Grid consumption power entity (sensor)",
+          "feedin_power_entity": "Grid feed-in power entity (sensor)",
           "inverter_power": "Inverter rated power (W)"
         }
       }

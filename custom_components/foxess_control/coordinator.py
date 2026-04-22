@@ -561,7 +561,7 @@ class FoxESSEntityCoordinator(_EntityCoordinator):
     def __init__(
         self,
         hass: HomeAssistant,
-        entity_map: dict[str, str],
+        entity_map: dict[str, tuple[str, str]],
         update_interval_seconds: int,
     ) -> None:
         super().__init__(

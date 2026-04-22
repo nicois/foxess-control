@@ -122,12 +122,17 @@ If foxess_modbus is not installed, the entity mapping step is hidden entirely.
 | Loads Power Entity | `sensor` | No | House load sensor (improves consumption-aware charging). |
 | PV Power Entity | `sensor` | No | Solar generation sensor (improves charge deferral). |
 | Feed-in Energy Entity | `sensor` | No | Cumulative feed-in energy sensor (for discharge energy limits). |
+| Battery Charge Power Entity | `sensor` | No | Battery charge power sensor (populates overview card charge rate). |
+| Battery Discharge Power Entity | `sensor` | No | Battery discharge power sensor (populates overview card discharge rate). |
+| Grid Consumption Power Entity | `sensor` | No | Grid import power sensor (populates overview card grid section). |
+| Grid Feed-in Power Entity | `sensor` | No | Grid export power sensor (populates overview card grid section). |
 | Inverter Rated Power | — | No | Inverter's maximum power in watts (default 12000). Used as the default power limit when no explicit power is specified in actions. In cloud mode this is queried from the API automatically. |
 
 When entity mode is active:
 
 - **No cloud connection required.** The FoxESS Cloud API key is not needed. If provided, it is unused while entity mode is active.
 - **Reads** come from HA entity states (polled every 30 seconds by default) instead of the FoxESS Cloud API.
+- **Automatic unit conversion**: source entity units are read from `unit_of_measurement` and converted to match the cloud API format (e.g. W→kW, Wh→kWh) using HA's built-in unit converters. No manual unit configuration needed.
 - **Writes** use `select.select_option` and `number.set_value` service calls to foxess_modbus entities instead of the cloud API scheduler.
 - All actions (`force_charge`, `smart_charge`, `smart_discharge`, `feedin`, `clear_overrides`) work identically — only the underlying transport changes.
 - Schedule merging and multi-window management are not used; foxess_control sets the mode directly.

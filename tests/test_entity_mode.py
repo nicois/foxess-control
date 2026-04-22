@@ -79,11 +79,11 @@ class TestBuildEntityMap:
         }
         result = _build_entity_map(opts)
         assert result == {
-            "_work_mode": "select.foxess_work_mode",
-            "SoC": "sensor.foxess_soc",
-            "loadsPower": "sensor.foxess_loads",
-            "pvPower": "sensor.foxess_pv",
-            "feedin": "sensor.foxess_feedin",
+            "_work_mode": ("select.foxess_work_mode", ""),
+            "SoC": ("sensor.foxess_soc", "%"),
+            "loadsPower": ("sensor.foxess_loads", "kW"),
+            "pvPower": ("sensor.foxess_pv", "kW"),
+            "feedin": ("sensor.foxess_feedin", "kWh"),
         }
 
     def test_omits_unconfigured_entities(self) -> None:
@@ -285,8 +285,10 @@ class TestEntityCoordinator:
 
         soc_state = MagicMock()
         soc_state.state = "75.5"
+        soc_state.attributes = {"unit_of_measurement": "%"}
         loads_state = MagicMock()
         loads_state.state = "1.2"
+        loads_state.attributes = {"unit_of_measurement": "kW"}
         work_mode_state = MagicMock()
         work_mode_state.state = "Self Use"
 
@@ -299,10 +301,10 @@ class TestEntityCoordinator:
 
         hass.states.get = get_state
 
-        entity_map = {
-            "SoC": "sensor.foxess_soc",
-            "loadsPower": "sensor.foxess_loads",
-            "_work_mode": "select.foxess_work_mode",
+        entity_map: dict[str, tuple[str, str]] = {
+            "SoC": ("sensor.foxess_soc", "%"),
+            "loadsPower": ("sensor.foxess_loads", "kW"),
+            "_work_mode": ("select.foxess_work_mode", ""),
         }
 
         with patch(
@@ -319,6 +321,106 @@ class TestEntityCoordinator:
         assert data["_work_mode"] == "Self Use"
 
     @pytest.mark.asyncio
+    async def test_converts_watts_to_kw(self) -> None:
+        hass = MagicMock()
+
+        loads_state = MagicMock()
+        loads_state.state = "1500"
+        loads_state.attributes = {"unit_of_measurement": "W"}
+
+        hass.states.get = MagicMock(return_value=loads_state)
+
+        entity_map: dict[str, tuple[str, str]] = {
+            "loadsPower": ("sensor.foxess_loads", "kW"),
+        }
+
+        with patch(
+            "custom_components.foxess_control.coordinator."
+            "DataUpdateCoordinator.__init__"
+        ):
+            coord = FoxESSEntityCoordinator.__new__(FoxESSEntityCoordinator)
+            coord.hass = hass
+            coord._entity_map = entity_map
+
+        data = await coord._async_update_data()
+        assert data["loadsPower"] == pytest.approx(1.5)
+
+    @pytest.mark.asyncio
+    async def test_converts_wh_to_kwh(self) -> None:
+        hass = MagicMock()
+
+        feedin_state = MagicMock()
+        feedin_state.state = "5000"
+        feedin_state.attributes = {"unit_of_measurement": "Wh"}
+
+        hass.states.get = MagicMock(return_value=feedin_state)
+
+        entity_map: dict[str, tuple[str, str]] = {
+            "feedin": ("sensor.foxess_feedin", "kWh"),
+        }
+
+        with patch(
+            "custom_components.foxess_control.coordinator."
+            "DataUpdateCoordinator.__init__"
+        ):
+            coord = FoxESSEntityCoordinator.__new__(FoxESSEntityCoordinator)
+            coord.hass = hass
+            coord._entity_map = entity_map
+
+        data = await coord._async_update_data()
+        assert data["feedin"] == pytest.approx(5.0)
+
+    @pytest.mark.asyncio
+    async def test_no_conversion_when_unit_matches(self) -> None:
+        hass = MagicMock()
+
+        pv_state = MagicMock()
+        pv_state.state = "3.5"
+        pv_state.attributes = {"unit_of_measurement": "kW"}
+
+        hass.states.get = MagicMock(return_value=pv_state)
+
+        entity_map: dict[str, tuple[str, str]] = {
+            "pvPower": ("sensor.foxess_pv", "kW"),
+        }
+
+        with patch(
+            "custom_components.foxess_control.coordinator."
+            "DataUpdateCoordinator.__init__"
+        ):
+            coord = FoxESSEntityCoordinator.__new__(FoxESSEntityCoordinator)
+            coord.hass = hass
+            coord._entity_map = entity_map
+
+        data = await coord._async_update_data()
+        assert data["pvPower"] == pytest.approx(3.5)
+
+    @pytest.mark.asyncio
+    async def test_no_conversion_when_no_unit_attribute(self) -> None:
+        hass = MagicMock()
+
+        soc_state = MagicMock()
+        soc_state.state = "80"
+        soc_state.attributes = {}
+
+        hass.states.get = MagicMock(return_value=soc_state)
+
+        entity_map: dict[str, tuple[str, str]] = {
+            "SoC": ("sensor.foxess_soc", "%"),
+        }
+
+        with patch(
+            "custom_components.foxess_control.coordinator."
+            "DataUpdateCoordinator.__init__"
+        ):
+            coord = FoxESSEntityCoordinator.__new__(FoxESSEntityCoordinator)
+            coord.hass = hass
+            coord._entity_map = entity_map
+
+        data = await coord._async_update_data()
+        assert data["SoC"] == pytest.approx(80.0)
+
+    @pytest.mark.asyncio
     async def test_skips_unavailable_entities(self) -> None:
         hass = MagicMock()
 
@@ -326,6 +428,7 @@ class TestEntityCoordinator:
         unavail_state.state = "unavailable"
         soc_state = MagicMock()
         soc_state.state = "50.0"
+        soc_state.attributes = {"unit_of_measurement": "%"}
 
         def get_state(entity_id: str) -> Any:
             return {
@@ -335,9 +438,9 @@ class TestEntityCoordinator:
 
         hass.states.get = get_state
 
-        entity_map = {
-            "SoC": "sensor.foxess_soc",
-            "loadsPower": "sensor.foxess_loads",
+        entity_map: dict[str, tuple[str, str]] = {
+            "SoC": ("sensor.foxess_soc", "%"),
+            "loadsPower": ("sensor.foxess_loads", "kW"),
         }
 
         with patch(
@@ -358,7 +461,9 @@ class TestEntityCoordinator:
         hass = MagicMock()
         hass.states.get = MagicMock(return_value=None)
 
-        entity_map = {"_work_mode": "select.foxess_nonexistent"}
+        entity_map: dict[str, tuple[str, str]] = {
+            "_work_mode": ("select.foxess_nonexistent", ""),
+        }
 
         with patch(
             "custom_components.foxess_control.coordinator."

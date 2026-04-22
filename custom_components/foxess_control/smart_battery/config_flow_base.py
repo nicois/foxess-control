@@ -30,11 +30,15 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     CONF_API_MIN_SOC,
+    CONF_BAT_CHARGE_POWER_ENTITY,
+    CONF_BAT_DISCHARGE_POWER_ENTITY,
     CONF_BATTERY_CAPACITY_KWH,
     CONF_BMS_POLLING_INTERVAL,
     CONF_CHARGE_POWER_ENTITY,
     CONF_DISCHARGE_POWER_ENTITY,
     CONF_FEEDIN_ENERGY_ENTITY,
+    CONF_FEEDIN_POWER_ENTITY,
+    CONF_GRID_CONSUMPTION_POWER_ENTITY,
     CONF_INVERTER_POWER,
     CONF_LOADS_POWER_ENTITY,
     CONF_MIN_POWER_CHANGE,
@@ -58,14 +62,20 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
-# Standard mapping from config option key → coordinator variable name.
+# Standard mapping from config option key → (coordinator variable, expected unit).
 # This is the shared contract between entity_mapping_schema and EntityCoordinator.
-_ENTITY_VAR_MAP: list[tuple[str, str]] = [
-    (CONF_SOC_ENTITY, "SoC"),
-    (CONF_LOADS_POWER_ENTITY, "loadsPower"),
-    (CONF_PV_POWER_ENTITY, "pvPower"),
-    (CONF_FEEDIN_ENERGY_ENTITY, "feedin"),
-    (CONF_WORK_MODE_ENTITY, "_work_mode"),
+# The expected unit tells the EntityCoordinator what the cloud API would return
+# so it can convert source entities (which may use W, Wh, etc.) to match.
+_ENTITY_VAR_MAP: list[tuple[str, str, str]] = [
+    (CONF_SOC_ENTITY, "SoC", "%"),
+    (CONF_LOADS_POWER_ENTITY, "loadsPower", "kW"),
+    (CONF_PV_POWER_ENTITY, "pvPower", "kW"),
+    (CONF_FEEDIN_ENERGY_ENTITY, "feedin", "kWh"),
+    (CONF_WORK_MODE_ENTITY, "_work_mode", ""),
+    (CONF_BAT_CHARGE_POWER_ENTITY, "batChargePower", "kW"),
+    (CONF_BAT_DISCHARGE_POWER_ENTITY, "batDischargePower", "kW"),
+    (CONF_GRID_CONSUMPTION_POWER_ENTITY, "gridConsumptionPower", "kW"),
+    (CONF_FEEDIN_POWER_ENTITY, "feedinPower", "kW"),
 ]
 
 # All entity keys that the entity mapping step manages
@@ -78,6 +88,10 @@ ENTITY_KEYS = (
     CONF_LOADS_POWER_ENTITY,
     CONF_PV_POWER_ENTITY,
     CONF_FEEDIN_ENERGY_ENTITY,
+    CONF_BAT_CHARGE_POWER_ENTITY,
+    CONF_BAT_DISCHARGE_POWER_ENTITY,
+    CONF_GRID_CONSUMPTION_POWER_ENTITY,
+    CONF_FEEDIN_POWER_ENTITY,
     CONF_INVERTER_POWER,
 )
 
@@ -225,6 +239,22 @@ def entity_mapping_schema(
                 default=_default(CONF_FEEDIN_ENERGY_ENTITY),
             ): sensor_selector,
             vol.Optional(
+                CONF_BAT_CHARGE_POWER_ENTITY,
+                default=_default(CONF_BAT_CHARGE_POWER_ENTITY),
+            ): sensor_selector,
+            vol.Optional(
+                CONF_BAT_DISCHARGE_POWER_ENTITY,
+                default=_default(CONF_BAT_DISCHARGE_POWER_ENTITY),
+            ): sensor_selector,
+            vol.Optional(
+                CONF_GRID_CONSUMPTION_POWER_ENTITY,
+                default=_default(CONF_GRID_CONSUMPTION_POWER_ENTITY),
+            ): sensor_selector,
+            vol.Optional(
+                CONF_FEEDIN_POWER_ENTITY,
+                default=_default(CONF_FEEDIN_POWER_ENTITY),
+            ): sensor_selector,
+            vol.Optional(
                 CONF_INVERTER_POWER,
                 default=opts.get(CONF_INVERTER_POWER, default_inverter_power),
             ): NumberSelector(
@@ -240,19 +270,19 @@ def entity_mapping_schema(
     )
 
 
-def build_entity_map(opts: Any) -> dict[str, str]:
-    """Build a ``{polled_variable: entity_id}`` map from config options.
+def build_entity_map(opts: Any) -> dict[str, tuple[str, str]]:
+    """Build a ``{polled_variable: (entity_id, expected_unit)}`` map.
 
     Returns an empty dict when entity mode is not configured (no work mode entity).
     """
     if not opts.get(CONF_WORK_MODE_ENTITY):
         return {}
 
-    mapping: dict[str, str] = {}
-    for conf_key, var_name in _ENTITY_VAR_MAP:
+    mapping: dict[str, tuple[str, str]] = {}
+    for conf_key, var_name, expected_unit in _ENTITY_VAR_MAP:
         entity_id = opts.get(conf_key, "")
         if entity_id:
-            mapping[var_name] = entity_id
+            mapping[var_name] = (entity_id, expected_unit)
     return mapping
 
 

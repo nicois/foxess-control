@@ -36,6 +36,10 @@ CONF_SOC_ENTITY = "soc_entity"
 CONF_LOADS_POWER_ENTITY = "loads_power_entity"
 CONF_PV_POWER_ENTITY = "pv_power_entity"
 CONF_FEEDIN_ENERGY_ENTITY = "feedin_energy_entity"
+CONF_BAT_CHARGE_POWER_ENTITY = "bat_charge_power_entity"
+CONF_BAT_DISCHARGE_POWER_ENTITY = "bat_discharge_power_entity"
+CONF_GRID_CONSUMPTION_POWER_ENTITY = "grid_consumption_power_entity"
+CONF_FEEDIN_POWER_ENTITY = "feedin_power_entity"
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
 
