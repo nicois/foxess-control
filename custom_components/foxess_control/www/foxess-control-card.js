@@ -695,6 +695,22 @@ class FoxESSControlCard extends HTMLElement {
   _render() {
     if (!this._hass) return;
 
+    // Snapshot live DOM form values before any DOM mutation.  The input
+    // event listener normally keeps _formValues in sync, but a full
+    // re-render (sr.innerHTML = ...) replaces the DOM from _formValues.
+    // If any value was set programmatically without an event (e.g.
+    // browser autocomplete, Playwright native setter race), the snapshot
+    // ensures nothing is lost.
+    if (this._showForm) {
+      const sr0 = this.shadowRoot;
+      const fs = sr0.getElementById("form-start");
+      const fe = sr0.getElementById("form-end");
+      const fc = sr0.getElementById("form-soc");
+      if (fs && fs.value) this._formValues.start = fs.value;
+      if (fe && fe.value) this._formValues.end = fe.value;
+      if (fc && fc.value) this._formValues.soc = fc.value;
+    }
+
     const ops = this._config.operations_entity;
     const a = this._attr(ops);
     const soc = a.charge_current_soc ?? a.discharge_current_soc ?? this._getSoc();

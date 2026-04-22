@@ -872,6 +872,10 @@ class TestFormInputPersistence:
     # the form after a page navigation destroys the execution context.
     _current_form_action: str | None = None
 
+    # Track form values set via _set_form_value so that _recover_form
+    # can restore them after a page navigation recreates the card.
+    _saved_form_values: dict[str, str] = {}  # noqa: RUF012
+
     def _recover_form(self, page: Page, *, _depth: int = 0) -> None:
         """Wait for the page and card to be ready, then re-open the form.
 
@@ -880,6 +884,11 @@ class TestFormInputPersistence:
         method retries up to ``_MAX_RECOVER_DEPTH`` times.  Each retry
         waits for the *new* navigation to finish (``networkidle``)
         before attempting to find the card and re-open the form.
+
+        After re-opening the form, previously-set form values (tracked
+        by ``_saved_form_values``) are injected into the new card's
+        ``_formValues`` and DOM inputs so the form appears as it did
+        before the navigation.
         """
         _MAX_RECOVER_DEPTH = 3
         try:
@@ -897,6 +906,11 @@ class TestFormInputPersistence:
                         if (btn) btn.click();
                     }}"""
                 )
+                # Restore previously-set form values into the new card
+                # instance.  Navigation creates a fresh card with empty
+                # _formValues; clicking the action button also resets them.
+                if self._saved_form_values:
+                    self._restore_form_values(page)
         except PlaywrightError as exc:
             if (
                 "Execution context was destroyed" not in str(exc)
@@ -906,6 +920,47 @@ class TestFormInputPersistence:
             # Another navigation hit during recovery — recurse with
             # incremented depth to wait for the new page to settle.
             self._recover_form(page, _depth=_depth + 1)
+
+    def _restore_form_values(self, page: Page) -> None:
+        """Inject saved form values into the card's _formValues and DOM inputs.
+
+        Called by ``_recover_form`` after a page navigation destroyed the
+        card and a fresh form was opened.  Sets both the card-level
+        ``_formValues`` object (so subsequent renders preserve the values)
+        and the DOM input elements (so reads return the expected values).
+        """
+        vals = self._saved_form_values
+        start = vals.get("form-start", "")
+        end = vals.get("form-end", "")
+        soc = vals.get("form-soc", "")
+        page.evaluate(
+            f"""() => {{
+                {_JS_FIND_CONTROL_CARD}
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return;
+                // Update the card's internal state so renders preserve values
+                if (card._formValues) {{
+                    card._formValues.start = '{start}';
+                    card._formValues.end = '{end}';
+                    card._formValues.soc = '{soc}';
+                }}
+                // Update DOM inputs
+                const nativeSetter = Object.getOwnPropertyDescriptor(
+                    window.HTMLInputElement.prototype, 'value'
+                ).set;
+                for (const [id, val] of [
+                    ['form-start', '{start}'],
+                    ['form-end', '{end}'],
+                    ['form-soc', '{soc}'],
+                ]) {{
+                    const el = card.shadowRoot.getElementById(id);
+                    if (el && val) {{
+                        nativeSetter.call(el, val);
+                        el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    }}
+                }}
+            }}"""
+        )
 
     def _safe_evaluate(  # type: ignore[return]
         self, page: Page, expression: str, *, retries: int = 2
@@ -939,6 +994,7 @@ class TestFormInputPersistence:
         the retry in ``_wait_for_form`` handles it.
         """
         self._current_form_action = action
+        self._saved_form_values = {}
         self._safe_evaluate(
             page,
             f"""() => {{
@@ -980,7 +1036,11 @@ class TestFormInputPersistence:
         Returns after the value is confirmed set.  If the form is not
         open (e.g. after a page navigation closed it), re-opens the form
         and retries.
+
+        Tracks the value in ``_saved_form_values`` so that
+        ``_recover_form`` can restore it after a page navigation.
         """
+        self._saved_form_values[input_id] = value
         found = self._safe_evaluate(
             page,
             f"""() => {{
