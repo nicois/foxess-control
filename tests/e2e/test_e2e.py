@@ -191,21 +191,17 @@ class TestFeedinPacing:
     ) -> None:
         """Feed-in budget pacing caps discharge power below inverter max.
 
-        With a feed-in limit (1 kWh over a 10-min window), the algorithm
-        defers forced discharge until close to the feedin deadline (D-005),
-        then starts at a power below inverter max because the target energy
-        is capped to feedin_remaining + house_absorption.
+        With D-005, feedin-limited sessions defer until the feedin
+        deadline, then discharge at sub-max power.  Parameters chosen
+        so the deferral period is short (~60s) and the feedin budget
+        survives the fast-forward observation:
 
-        After fast-forwarding the simulator (which depletes the feedin
-        budget faster than real time), the power should decrease as the
-        remaining feedin budget shrinks while real time barely advances.
-
-        Steps:
-        1. Start discharge with feed-in limit in a tight window
-        2. Wait for deferred start to expire and discharging to begin
-        3. Assert power is below inverter max (feedin pacing active)
-        4. Fast-forward simulator to deplete feedin budget
-        5. Assert power decreased (less budget remaining -> lower power)
+        - 15-min window, 1.6 kWh feedin, 0.5 kW load, 10.5 kW max
+        - effective_export = 10 kW, feedin drain = 9.6 min
+        - feedin deadline (with 20% headroom) = 12 min before end
+        - now ≈ start+2, so deferral ≈ 1 min
+        - paced power ≈ 1.6/0.2h ≈ 8 kW, clearly below max (10.5 kW)
+        - fast_forward(120s) consumes ~0.33 kWh → power drops to ~6 kW
         """
         if connection_mode != "cloud":
             pytest.skip("requires simulator fast_forward")
@@ -218,7 +214,7 @@ class TestFeedinPacing:
             79,
             timeout_s=90,
         )
-        start, end = _tight_window(10)
+        start, end = _tight_window(15)
         ha_e2e.call_service(
             "foxess_control",
             "smart_discharge",
@@ -226,14 +222,14 @@ class TestFeedinPacing:
                 "start_time": start,
                 "end_time": end,
                 "min_soc": 30,
-                "feedin_energy_limit_kwh": 1.0,
+                "feedin_energy_limit_kwh": 1.6,
             },
         )
 
         ha_e2e.wait_for_state(
             "sensor.foxess_smart_operations",
             "discharging",
-            timeout_s=120,
+            timeout_s=180,
             fatal_states=FATAL_FOR_ACTIVE,
         )
 
@@ -250,16 +246,15 @@ class TestFeedinPacing:
             f"but got {initial_power}W (max={max_power}W)"
         )
 
-        for _ in range(2):
-            soc_before = float(ha_e2e.get_state("sensor.foxess_battery_soc"))
-            foxess_sim.fast_forward(120, step=5)
-            ha_e2e.wait_for_numeric_state(
-                "sensor.foxess_battery_soc",
-                "ne",
-                soc_before,
-                timeout_s=90,
-                poll_interval=2.0,
-            )
+        soc_before = float(ha_e2e.get_state("sensor.foxess_battery_soc"))
+        foxess_sim.fast_forward(120, step=5)
+        ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_battery_soc",
+            "ne",
+            soc_before,
+            timeout_s=90,
+            poll_interval=2.0,
+        )
 
         attrs = ha_e2e.get_attributes("sensor.foxess_smart_operations")
         later_power = attrs.get("discharge_power_w", 0)
