@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: Smart Discharge
-last_verified: 2026-04-21
+last_verified: 2026-04-22
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -97,6 +97,16 @@ rate so the export budget is spread across the full window rather than
 exhausted early. Additionally, track the observed export rate between
 polls and schedule a one-shot stop when the remaining budget will be
 exhausted before the next poll — preventing overshoot of the limit.
+
+The feedin cap is also used to adjust the deferred start calculation:
+when a small feedin limit constrains the session to less discharge time
+than the full SoC drain, the deferred start is computed from the feedin
+drain time. However, this cap is only applied when the uncapped SoC
+deadline falls within the window — when the window is already tight
+(uncapped deadline before start), the feedin cap is skipped so discharge
+starts immediately and feedin pacing can spread the export across the
+available time.
+
 **Context**: Some tariffs limit export kWh per day. Without spreading,
 the session exhausts the limit in the first hour and stops, failing to
 reach min_soc. Without the early-stop, the 5-minute polling interval
@@ -106,18 +116,26 @@ target are achievable within the window. The early-stop uses the
 observed rate (from the cumulative feed-in counter) rather than the
 configured discharge power, since actual export is reduced by house
 consumption and inverter grid-export limits. A one-shot timer at the
-projected completion time stops discharge precisely.
+projected completion time stops discharge precisely. The tight-window
+guard prevents the feedin cap from over-deferring in windows where the
+SoC drain already exceeds the window duration.
 **Alternatives considered**:
 - Export at max until limit hit, then switch to self-use: rejected
   because min_soc target would be missed
 - Stop at next poll after limit reached: rejected because up to
   5 minutes of excess export may incur penalties on capped tariffs
+- Always apply feedin cap to deferred start: rejected after
+  discovering that tight windows (where uncapped SoC deadline falls
+  before window start) caused the session to stay in
+  `discharge_deferred` for most of the window, never transitioning
+  to `discharging`
 The feed-in baseline (the coordinator's `feedin` value at session
 start) is captured on the listener's first tick rather than at session
 setup time, because the coordinator data may not be populated yet when
 the service call runs.
 **Traces**: C-001;
 `tests/test_smart_battery_algorithms.py::TestDischargePowerFeedinConstraint`,
+`tests/test_smart_battery_algorithms.py::TestCalculateDischargeDeferredStart::test_tight_window_feedin_does_not_over_defer`,
 `tests/test_services.py::TestFeedinEnergyLimit`,
 `tests/test_services.py::test_feedin_baseline_not_captured_at_session_start`
 

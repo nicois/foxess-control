@@ -2,7 +2,7 @@
 project: FoxESS Control
 created: 2026-04-14
 last_updated: 2026-04-21
-last_reflection: 2026-04-21T23:59:00+10:00
+last_reflection: 2026-04-22T12:00:00+10:00
 ---
 # Knowledge Tree Meta
 
@@ -404,3 +404,34 @@ last_reflection: 2026-04-21T23:59:00+10:00
   - D-031 bridge layer text (check item 2) — updated to reflect removal
   - D-033 endpoint reference (check item 3) — corrected
   - D-025 circuit breaker description (check item 4) — rewritten
+
+### 2026-04-22 — Update pass (entity-mode dashboard + feedin deferred fix)
+- **Changes detected**: 10 commits since last update (eb5b98e..e81850a).
+  Key changes: entity-mode dashboard support (4 new entity mappings +
+  automatic unit conversion), feedin deferred start over-deferring fix
+  (tight windows), force op premature WS fix, E2E CI timing balancing.
+- **D-005 updated**: Feed-in energy budget spreading decision expanded
+  to document the tight-window guard for deferred start. The feedin cap
+  is now skipped when the uncapped SoC deadline falls before the window
+  start, preventing over-deferral. New test
+  `test_tight_window_feedin_does_not_over_defer` added to traces.
+- **Architecture updated**: Entity mode section expanded with 9
+  coordinator variable mappings via `_ENTITY_VAR_MAP` 3-tuples and
+  automatic unit conversion using HA's `PowerConverter`,
+  `EnergyConverter`, `TemperatureConverter`.
+- **Test counts updated**: 736 unit + 140 E2E = 876 total (was 727 +
+  140 = 867). Growth from entity-mode unit conversion tests (+4) and
+  feedin deferred start regression test (+1), plus build_entity_map
+  updates (+4).
+- **E2E CI timing observation**: Greedy bin-packing for E2E worker
+  distribution (beta.11) is working correctly when timings are
+  available, but falls back to count-based splitting when the artifact
+  download fails (`workflow_conclusion: success` filter skips failed
+  runs). Two inherently slow tests (~7-8 min each:
+  `test_ws_connects_after_deferred_start` at ~471s,
+  `test_api_down_during_discharge_opens_circuit_breaker` at ~417s)
+  dominate wall time. Both are justified: the deferred start test
+  requires real-time deferral (~4 min) because HA's
+  `async_track_time_interval` cannot be accelerated; the circuit
+  breaker test requires 3×60s discharge ticks to trip the breaker
+  (C-024).

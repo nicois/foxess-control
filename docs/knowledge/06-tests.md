@@ -1,12 +1,12 @@
 ---
 project: FoxESS Control
 level: 6
-last_verified: 2026-04-21
+last_verified: 2026-04-22
 traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-727 unit + 140 E2E = 867 total.
+736 unit + 140 E2E = 876 total.
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
@@ -35,7 +35,8 @@ simulator and Playwright browser automation.
 | `TestShouldSuspendDischarge::test_soc_at_min_suspends` | Suspend at min SoC | C-002 |
 | `TestShouldSuspendDischarge::test_soc_below_min_suspends` | Suspend below min SoC | C-002 |
 | `TestShouldSuspendDischarge::test_high_consumption_suspends` | End-guard suspension | C-001 |
-| `TestCalculateDischargeDeferredStart::*` (13 tests) | Deferred start timing | C-001 |
+| `TestCalculateDischargeDeferredStart::*` (14 tests) | Deferred start timing | C-001 |
+| `TestCalculateDischargeDeferredStart::test_tight_window_feedin_does_not_over_defer` | Feedin cap skipped in tight windows | C-001 |
 
 ## Smart Charge Pacing
 
@@ -171,12 +172,14 @@ Key tests:
 ## Entity Mode (Modbus Interop)
 
 **Constraints**: --
-**Source**: `tests/test_entity_mode.py` (21 tests)
+**Source**: `tests/test_entity_mode.py` (25 tests)
 
 Key tests:
 - Work mode mapping (SelfUse/ForceCharge/ForceDischarge)
 - Entity state reading with unavailable fallback
 - Power and SoC entity writes
+- Unit conversion: W→kW, Wh→kWh via HA's built-in converters
+- All 9 entity mappings populated via `build_entity_map` 3-tuples
 
 ## Config Flow
 

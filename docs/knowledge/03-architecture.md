@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 3
-last_verified: 2026-04-21
+last_verified: 2026-04-22
 traces_up: [02-constraints.md]
 traces_down: [04-design/]
 ---
@@ -35,6 +35,13 @@ pacing logic. The `InverterAdapter` protocol is the abstraction boundary.
 `SessionContextFilter` (structured logging),
 `create_charge_session()`, `create_discharge_session()` (factory
 functions centralising session state construction).
+Entity mode maps 9 coordinator variables (SoC, loadsPower, pvPower,
+feedin, _work_mode, batChargePower, batDischargePower,
+gridConsumptionPower, feedinPower) from HA entities via
+`_ENTITY_VAR_MAP` 3-tuples `(conf_key, var_name, expected_unit)`.
+The `EntityCoordinator` reads each entity's `unit_of_measurement`
+attribute and converts to the expected unit using HA's built-in
+`PowerConverter`, `EnergyConverter`, and `TemperatureConverter`.
 
 ### `foxess/` — FoxESS Cloud API client
 **Path**: `custom_components/foxess_control/foxess/`
