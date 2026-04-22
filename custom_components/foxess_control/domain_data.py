@@ -122,6 +122,7 @@ class FoxESSControlData(SmartBatteryDomainData):
 
     # Force operation tracking
     force_op_timer: asyncio.TimerHandle | None = None
+    force_op_start_timer: asyncio.TimerHandle | None = None
     force_op_end: Any = None
 
     # Session logging

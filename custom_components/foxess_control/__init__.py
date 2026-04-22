@@ -1078,10 +1078,12 @@ async def _stop_realtime_ws(hass: HomeAssistant) -> None:
 
 async def _start_force_op_ws(
     hass: HomeAssistant,
+    start: datetime.datetime,
     end: datetime.datetime,
 ) -> None:
     """Activate WebSocket for the duration of a force operation.
 
+    If *start* is in the future, defers WS activation until then.
     Sets ``_force_op_end`` so ``_should_start_realtime_ws`` can see the
     active operation, then schedules cleanup when the window expires.
     """
@@ -1089,17 +1091,34 @@ async def _start_force_op_ws(
         return
     dd = _dd(hass)
 
-    # Cancel any previous force-op cleanup timer
+    # Cancel any previous force-op timers
     cancel_prev: asyncio.TimerHandle | None = dd.force_op_timer
     if cancel_prev is not None:
         cancel_prev.cancel()
     dd.force_op_timer = None
+    if dd.force_op_start_timer is not None:
+        dd.force_op_start_timer.cancel()
+        dd.force_op_start_timer = None
 
     dd.force_op_end = end
-    await _maybe_start_realtime_ws(hass)
+
+    now = dt_util.now()
+    start_delay = max(0.0, (start - now).total_seconds())
+
+    if start_delay > 0:
+
+        def _on_force_op_start() -> None:
+            dd.force_op_start_timer = None
+            hass.async_create_task(
+                _maybe_start_realtime_ws(hass), name="foxess_start_ws_force_op"
+            )
+
+        dd.force_op_start_timer = hass.loop.call_later(start_delay, _on_force_op_start)
+    else:
+        await _maybe_start_realtime_ws(hass)
 
     # Schedule WS stop when the window ends
-    delay = max(0.0, (end - dt_util.now()).total_seconds())
+    end_delay = max(0.0, (end - now).total_seconds())
 
     def _on_force_op_expired() -> None:
         dd.force_op_end = None
@@ -1109,7 +1128,7 @@ async def _start_force_op_ws(
                 _stop_realtime_ws(hass), name="foxess_stop_ws_force_op"
             )
 
-    handle = hass.loop.call_later(delay, _on_force_op_expired)
+    handle = hass.loop.call_later(end_delay, _on_force_op_expired)
     dd.force_op_timer = handle
 
 

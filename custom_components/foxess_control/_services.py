@@ -162,6 +162,9 @@ def _register_services(hass: HomeAssistant) -> None:
             if timer is not None:
                 timer.cancel()
             _clear_dd.force_op_timer = None
+            if _clear_dd.force_op_start_timer is not None:
+                _clear_dd.force_op_start_timer.cancel()
+                _clear_dd.force_op_start_timer = None
             _clear_dd.force_op_end = None
         if not _should_start_realtime_ws(hass) and not ws_stops:
             ws_stops.append(_stop_realtime_ws(hass))
@@ -252,7 +255,7 @@ def _register_services(hass: HomeAssistant) -> None:
             )
             await hass.async_add_executor_job(inverter.set_schedule, groups)
 
-        await _start_force_op_ws(hass, end)
+        await _start_force_op_ws(hass, start, end)
 
     async def handle_force_discharge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
@@ -309,7 +312,7 @@ def _register_services(hass: HomeAssistant) -> None:
             )
             await hass.async_add_executor_job(inverter.set_schedule, groups)
 
-        await _start_force_op_ws(hass, end)
+        await _start_force_op_ws(hass, start, end)
 
     async def handle_feedin(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
@@ -353,7 +356,7 @@ def _register_services(hass: HomeAssistant) -> None:
             )
             await hass.async_add_executor_job(inverter.set_schedule, groups)
 
-        await _start_force_op_ws(hass, end)
+        await _start_force_op_ws(hass, start, end)
 
     async def handle_smart_discharge(call: ServiceCall) -> None:
         start_time: datetime.time = call.data["start_time"]
