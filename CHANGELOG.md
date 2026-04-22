@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.9-beta.8
+
+### Added
+- **Grid export limit configuration**: new integration option (default 5 kW) for the net export cap set on the inverter. When configured, discharge deferral accounts for the capped export rate, and discharge power always uses maximum inverter power (firmware handles export capping). Set to 0 for legacy power-pacing behaviour.
+
+### Fixed
+- **Poll timer not reset on deferred session creation**: creating a deferred charge or discharge session didn't trigger a coordinator refresh, leaving the next poll up to 300s away. Now calls `async_request_refresh()` immediately so the UI updates within seconds.
+- **Discharge power unnecessarily paced when export-limited**: when a grid export limit is configured, power pacing reduced discharge power below the inverter maximum even though the firmware already caps grid export. Now uses maximum power and relies on deferral timing for energy management.
+
 ## 1.0.9
 
 ### Fixed
