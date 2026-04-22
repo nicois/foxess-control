@@ -123,6 +123,18 @@
     </div>
   </div>
 
+  <h2 style="margin-top:14px">Session type</h2>
+  <div class="ctrl-grid">
+    <div class="ctrl-group">
+      <label>Mode</label>
+      <select id="sessionMode">
+        <option value="smart">Smart discharge (paced)</option>
+        <option value="force_discharge">Force discharge (max power)</option>
+        <option value="force_charge">Force charge (max power)</option>
+      </select>
+    </div>
+  </div>
+
   <h2 style="margin-top:14px">Load profile</h2>
   <div class="ctrl-grid">
     <div class="ctrl-group">
@@ -272,6 +284,7 @@ function P() {
     solarEnabled: document.getElementById('solarEnabled').checked,
     solarPeak: +document.getElementById('solarPeak').value,
     sunsetHour: +document.getElementById('sunsetHour').value,
+    sessionMode: document.getElementById('sessionMode').value,
   };
 }
 
@@ -395,9 +408,15 @@ function calcDeferredStart(p, soc, remainTicks, consumption, peakCons, feedinRem
     let eff = maxKw - cons;
     if (eff <= 0) eff = 0;
     if (eff > 0) {
-      const hrs = p.taperEnabled
+      let hrs = p.taperEnabled
         ? taperEstimateDischargeHours(p, soc, eff)
         : energy / eff;
+      // D-005: when feedin is the binding constraint, cap SoC deadline
+      // by feedin drain time — session stops at feedin target, not min_soc
+      if (feedinRemKwh != null && feedinRemKwh > 0) {
+        const feedinHrs = feedinRemKwh / eff;
+        hrs = Math.min(hrs, feedinHrs);
+      }
       socDL = remainTicks - hrs / (1 - p.headroom) * 3600 / TICK_S;
     }
   }
@@ -529,6 +548,8 @@ function simulate(p, loadFn, solarFn, useOld) {
   let feedinKwh = 0;
   let peakCons = 0;
   const feedinLimit = p.feedinLimit > 0 ? p.feedinLimit : null;
+  const isForce = p.sessionMode === 'force_discharge' || p.sessionMode === 'force_charge';
+  const isCharge = p.sessionMode === 'force_charge';
 
   const log = { soc: [], powerKw: [], houseKw: [], gridKw: [], feedinKwh: [],
                 peakKw: [], safetyFloorKw: [], deferred: [], suspendedArr: [],
@@ -551,7 +572,34 @@ function simulate(p, loadFn, solarFn, useOld) {
     let suspReason = SUSP_NONE;
     let horizonTick = total;
 
-    if (!started) {
+    if (isCharge) {
+      // Force charge: draw from grid at max power, charge battery
+      if (soc < 100) {
+        const chargeKw = p.maxPowerW / 1000;
+        soc += (chargeKw * tickH / p.capKwh) * 100;
+        soc = Math.min(100, soc);
+        gridKw = -(chargeKw + houseKw); // all from grid
+      } else {
+        gridKw = -houseKw;
+      }
+      started = true;
+      if (transitionTick < 0) transitionTick = 0;
+    } else if (isForce) {
+      // Force discharge: max power immediately, no deferral/pacing
+      started = true;
+      if (transitionTick < 0) transitionTick = 0;
+      if (soc > p.minSoc) {
+        dischW = p.maxPowerW;
+        horizonTick = computeSafeHorizonTick(p, soc, dischW, t);
+        soc -= (dischW / 1000 * tickH / p.capKwh) * 100;
+        const expKw = dischW / 1000 - houseKw;
+        gridKw = expKw;
+        if (expKw > 0) feedinKwh += expKw * tickH;
+      } else {
+        // Battery empty — self-use
+        gridKw = -houseKw;
+      }
+    } else if (!started) {
       // Self-use: battery serves house, no export
       const availKwh = Math.max(0, (soc - p.minSoc) / 100 * p.capKwh);
       const selfUseKw = Math.min(Math.max(0, houseKw), availKwh / tickH);
@@ -632,7 +680,7 @@ function simulate(p, loadFn, solarFn, useOld) {
 
     soc = Math.max(0, Math.min(100, soc));
     log.soc.push(soc);
-    log.powerKw.push(dischW / 1000);
+    log.powerKw.push(isCharge ? 0 : dischW / 1000);
     log.houseKw.push(houseKw);
     log.gridKw.push(gridKw);
     log.feedinKwh.push(feedinKwh);
@@ -875,6 +923,8 @@ function render() {
   const loadFn = buildLoadFn(total);
   const solarFn = buildSolarFn(p);
 
+  const modeLabels = { smart: 'Smart discharge (peak-tracked safety floor)', force_discharge: 'Force discharge (max power)', force_charge: 'Force charge (max power)' };
+  document.getElementById('newTitle').textContent = modeLabels[p.sessionMode] || modeLabels.smart;
   const rNew = simulate(p, loadFn, solarFn, false);
   renderPanel('new', rNew, p, false);
 
@@ -907,6 +957,9 @@ const presets = [
   { name: '11. Sudden EV', soc: 90, load: 'step', stepLow: 0.5, stepHigh: 8, stepMin: 30, desc: 'Step load after 30 min' },
   { name: '12. BMS taper', soc: 90, load: 'steady', steadyKw: 1, taper: true, desc: 'BMS curtails power at low SoC' },
   { name: '13. Evening solar', soc: 85, load: 'steady', steadyKw: 2, solar: true, solarPeak: 4, sunsetHour: 20, wStart: 17, desc: 'Solar reduces net load during shoulder hours' },
+  { name: '14. Large bat + small feedin', soc: 98, load: 'steady', steadyKw: 0.2, capKwh: 42, maxPower: 10500, minSoc: 21, feedin: 1, wStart: 16, wEnd: 17, desc: 'Production bug: 42kWh battery, 1kWh feedin, 51min window — should defer not start immediately' },
+  { name: '15. Force discharge', soc: 90, load: 'steady', steadyKw: 0.5, mode: 'force_discharge', desc: 'Max power discharge, no pacing or deferral' },
+  { name: '16. Force charge', soc: 30, load: 'steady', steadyKw: 0.5, mode: 'force_charge', desc: 'Max power charge from grid' },
 ];
 
 let activePreset = -1;
@@ -918,14 +971,15 @@ function applyPreset(idx) {
   if (pr.feedin !== undefined) document.getElementById('feedin').value = pr.feedin;
   else document.getElementById('feedin').value = 10;
   // Reset other params to defaults
-  document.getElementById('maxPower').value = 15000;
-  document.getElementById('capKwh').value = 20;
-  document.getElementById('minSoc').value = 30;
+  document.getElementById('maxPower').value = pr.maxPower || 15000;
+  document.getElementById('capKwh').value = pr.capKwh || 20;
+  document.getElementById('minSoc').value = pr.minSoc || 30;
   document.getElementById('headroom').value = 10;
   document.getElementById('wStart').value = pr.wStart || 18;
   document.getElementById('wEnd').value = pr.wEnd || 20;
   document.getElementById('safety').value = 1.5;
   document.getElementById('decay').value = 0.85;
+  document.getElementById('sessionMode').value = pr.mode || 'smart';
 
   // Taper
   document.getElementById('taperEnabled').checked = !!pr.taper;
@@ -1030,6 +1084,13 @@ function init() {
 
   document.getElementById('loadType').addEventListener('change', () => {
     showLoadParams();
+    activePreset = -1;
+    highlightPreset(-1);
+    updateLabels();
+    render();
+  });
+
+  document.getElementById('sessionMode').addEventListener('change', () => {
     activePreset = -1;
     highlightPreset(-1);
     updateLabels();
