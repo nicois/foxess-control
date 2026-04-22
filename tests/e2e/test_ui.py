@@ -56,6 +56,8 @@ def _robust_reload(page: Page, settle_ms: int = 1000) -> None:
             page.wait_for_load_state("load", timeout=5000)
         page.goto(url, wait_until="networkidle", timeout=30000)
     if settle_ms > 0:
+        # networkidle fires before HA's Lovelace JS has finished re-rendering
+        # cards; without this settle, element locators may hit stale DOM.
         page.wait_for_timeout(settle_ms)
 
 

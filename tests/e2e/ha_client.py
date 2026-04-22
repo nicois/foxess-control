@@ -232,6 +232,57 @@ class HAClient:
             f"within {timeout_s}s (last: '{last}')"
         )
 
+    def wait_for_numeric_attribute(
+        self,
+        entity_id: str,
+        attr: str,
+        condition: str,
+        value: float,
+        timeout_s: float = 30,
+        poll_interval: float = 2.0,
+    ) -> float:
+        """Poll until a numeric entity attribute satisfies *condition*.
+
+        condition: "lt", "gt", "le", "ge", "eq", "ne"
+        """
+        import operator
+
+        ops = {
+            "lt": operator.lt,
+            "gt": operator.gt,
+            "le": operator.le,
+            "ge": operator.ge,
+            "eq": operator.eq,
+            "ne": operator.ne,
+        }
+        op = ops[condition]
+        t0 = time.monotonic()
+        deadline = t0 + timeout_s
+        last = None
+        while time.monotonic() < deadline:
+            attrs = self.get_attributes(entity_id)
+            raw = attrs.get(attr)
+            if raw is not None:
+                try:
+                    last = float(raw)
+                    if op(last, value):
+                        _log.warning(
+                            "wait_for_numeric_attribute %s.%s %s %s: %.1fs",
+                            entity_id,
+                            attr,
+                            condition,
+                            value,
+                            time.monotonic() - t0,
+                        )
+                        return last
+                except (ValueError, TypeError):
+                    pass
+            time.sleep(poll_interval)
+        raise TimeoutError(
+            f"{entity_id}.{attr} did not satisfy {condition} {value} "
+            f"within {timeout_s}s (last: {last})"
+        )
+
     def enable_entity(self, entity_id: str) -> None:
         """Enable a disabled-by-default entity via the WS entity registry API."""
         import websocket as _ws

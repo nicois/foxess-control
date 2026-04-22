@@ -54,16 +54,7 @@ def _wait_for_positive_attr(
     timeout_s: float = 30,
 ) -> float:
     """Poll until an entity attribute is numeric and > 0."""
-    deadline = time.monotonic() + timeout_s
-    last = None
-    while time.monotonic() < deadline:
-        last = ha.get_attributes(entity_id).get(attr)
-        if last is not None and float(last) > 0:
-            return float(last)
-        time.sleep(2)
-    raise TimeoutError(
-        f"{entity_id}.{attr} did not become > 0 within {timeout_s}s (last: {last})"
-    )
+    return ha.wait_for_numeric_attribute(entity_id, attr, "gt", 0, timeout_s=timeout_s)
 
 
 # ---------------------------------------------------------------------------
@@ -243,15 +234,13 @@ class TestFeedinPacing:
             fatal_states=FATAL_FOR_ACTIVE,
         )
 
-        deadline = time.monotonic() + 30
-        initial_power = 0
-        while time.monotonic() < deadline:
-            attrs = ha_e2e.get_attributes("sensor.foxess_smart_operations")
-            initial_power = attrs.get("discharge_power_w", 0)
-            if initial_power > 0:
-                break
-            time.sleep(2)
-        assert initial_power > 0, "Discharge should be active"
+        initial_power = ha_e2e.wait_for_numeric_attribute(
+            "sensor.foxess_smart_operations",
+            "discharge_power_w",
+            "gt",
+            0,
+            timeout_s=30,
+        )
         max_power = 10500
         assert initial_power < max_power * 0.5, (
             f"Feed-in pacing should limit power well below max, "
