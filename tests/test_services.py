@@ -73,6 +73,7 @@ def _make_hass(
     mock_coordinator = MagicMock()
     mock_coordinator.data = coordinator_data
     mock_coordinator.update_interval = datetime.timedelta(seconds=300)
+    mock_coordinator.async_request_refresh = AsyncMock()
 
     dd = FoxESSControlData()
     dd.entries[entry_id] = FoxESSEntryData(

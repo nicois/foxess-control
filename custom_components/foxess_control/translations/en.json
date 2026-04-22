@@ -314,6 +314,7 @@
           "polling_interval": "API Polling Interval (seconds)",
           "bms_polling_interval": "BMS Temperature Polling Interval (seconds)",
           "smart_headroom": "Smart Headroom (%)",
+          "grid_export_limit": "Grid Export Limit (W) — net export cap set on inverter (0 = no limit)",
           "ws_mode": "WebSocket real-time data mode"
         }
       },

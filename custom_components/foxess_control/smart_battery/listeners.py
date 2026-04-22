@@ -127,6 +127,20 @@ def _get_smart_headroom(hass: HomeAssistant, domain: str) -> float:
     return DEFAULT_SMART_HEADROOM / 100.0
 
 
+def _get_grid_export_limit(hass: HomeAssistant, domain: str) -> int:
+    """Return the grid export limit in watts (0 = no limit)."""
+    from .const import CONF_GRID_EXPORT_LIMIT, DEFAULT_GRID_EXPORT_LIMIT
+
+    dd = get_domain_data(hass, domain)
+    for entry_data in dd.entries.values():
+        entry = getattr(entry_data, "entry", None)
+        if entry is not None:
+            return int(
+                entry.options.get(CONF_GRID_EXPORT_LIMIT, DEFAULT_GRID_EXPORT_LIMIT)
+            )
+    return DEFAULT_GRID_EXPORT_LIMIT
+
+
 def _get_polling_interval_seconds(hass: HomeAssistant, domain: str) -> int:
     """Return the coordinator's polling interval in seconds."""
     from .const import DEFAULT_POLLING_INTERVAL
@@ -827,6 +841,7 @@ def setup_smart_discharge_listeners(
             feedin_energy_limit_kwh=cur_state.get("feedin_energy_limit_kwh"),
             consumption_peak_kw=peak,
             bms_temp_c=bms_temp,
+            grid_export_limit_w=_get_grid_export_limit(hass, domain),
         )
         if now_dt < deferred:
             _LOGGER.debug(
@@ -839,16 +854,19 @@ def setup_smart_discharge_listeners(
             return True
 
         remaining_h = (cur_state["end"] - now_dt).total_seconds() / 3600.0
-        new_power = calculate_discharge_power(
-            soc_value,
-            cur_state["min_soc"],
-            cur_state["battery_capacity_kwh"],
-            remaining_h,
-            cur_state["max_power_w"],
-            net_consumption_kw=_get_net_consumption(hass, domain),
-            headroom=_get_smart_headroom(hass, domain),
-            consumption_peak_kw=peak,
-        )
+        if _get_grid_export_limit(hass, domain) > 0:
+            new_power = cur_state["max_power_w"]
+        else:
+            new_power = calculate_discharge_power(
+                soc_value,
+                cur_state["min_soc"],
+                cur_state["battery_capacity_kwh"],
+                remaining_h,
+                cur_state["max_power_w"],
+                net_consumption_kw=_get_net_consumption(hass, domain),
+                headroom=_get_smart_headroom(hass, domain),
+                consumption_peak_kw=peak,
+            )
         await adapter.apply_mode(
             hass,
             WorkMode.FORCE_DISCHARGE,
@@ -1063,17 +1081,20 @@ def setup_smart_discharge_listeners(
         was_suspended: bool,
     ) -> None:
         """Calculate and apply discharge power."""
-        new_power = calculate_discharge_power(
-            soc_value,
-            cur_state["min_soc"],
-            cur_state["battery_capacity_kwh"],
-            remaining_h,
-            cur_state["max_power_w"],
-            net_consumption_kw=net_consumption,
-            headroom=headroom,
-            feedin_remaining_kwh=feedin_remaining,
-            consumption_peak_kw=peak,
-        )
+        if _get_grid_export_limit(hass, domain) > 0:
+            new_power = cur_state["max_power_w"]
+        else:
+            new_power = calculate_discharge_power(
+                soc_value,
+                cur_state["min_soc"],
+                cur_state["battery_capacity_kwh"],
+                remaining_h,
+                cur_state["max_power_w"],
+                net_consumption_kw=net_consumption,
+                headroom=headroom,
+                feedin_remaining_kwh=feedin_remaining,
+                consumption_peak_kw=peak,
+            )
         min_change = cur_state.get("min_power_change", DEFAULT_MIN_POWER_CHANGE)
         cur_state["target_power_w"] = new_power
 

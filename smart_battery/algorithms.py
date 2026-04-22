@@ -478,6 +478,7 @@ def calculate_discharge_deferred_start(
     feedin_energy_limit_kwh: float | None = None,
     consumption_peak_kw: float | None = None,
     bms_temp_c: float | None = None,
+    grid_export_limit_w: int = 0,
 ) -> datetime.datetime:
     """Calculate the latest time to start forced discharge to meet goals by *end*.
 
@@ -533,7 +534,13 @@ def calculate_discharge_deferred_start(
             and feedin_energy_limit_kwh > 0
             and effective_kw > 0
         ):
-            feedin_hours = feedin_energy_limit_kwh / effective_kw
+            export_rate_kw = effective_kw
+            if grid_export_limit_w > 0:
+                export_rate_kw = min(export_rate_kw, grid_export_limit_w / 1000.0)
+            if export_rate_kw > 0:
+                feedin_hours = feedin_energy_limit_kwh / export_rate_kw
+            else:
+                feedin_hours = feedin_energy_limit_kwh / effective_kw
             discharge_hours = min(discharge_hours, feedin_hours)
 
         if discharge_hours > 0:
@@ -556,6 +563,8 @@ def calculate_discharge_deferred_start(
         if consumption_peak_kw is not None:
             consumption = max(consumption, consumption_peak_kw)
         effective_export_kw = max_power_kw - consumption
+        if grid_export_limit_w > 0:
+            effective_export_kw = min(effective_export_kw, grid_export_limit_w / 1000.0)
         if effective_export_kw <= 0:
             # Can't export at all — need the full window.
             effective_export_kw = max_power_kw * 0.1  # fallback

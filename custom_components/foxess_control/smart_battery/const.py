@@ -15,6 +15,7 @@ CONF_POLLING_INTERVAL = "polling_interval"
 CONF_BMS_POLLING_INTERVAL = "bms_polling_interval"
 CONF_API_MIN_SOC = "api_min_soc"
 CONF_INVERTER_POWER = "inverter_power"
+CONF_GRID_EXPORT_LIMIT = "grid_export_limit"
 
 DEFAULT_MIN_POWER_CHANGE = 500
 DEFAULT_MIN_SOC_ON_GRID = 15
@@ -24,6 +25,7 @@ DEFAULT_BMS_POLLING_INTERVAL = 300  # seconds
 DEFAULT_ENTITY_POLLING_INTERVAL = 30  # seconds — entity mode updates are fast
 DEFAULT_API_MIN_SOC = 11
 DEFAULT_INVERTER_POWER = 12000  # watts
+DEFAULT_GRID_EXPORT_LIMIT = 5000  # watts — net export cap
 
 MAX_OVERRIDE_HOURS = 4
 

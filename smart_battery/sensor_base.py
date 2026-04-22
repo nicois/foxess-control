@@ -23,7 +23,9 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_BATTERY_CAPACITY_KWH,
+    CONF_GRID_EXPORT_LIMIT,
     CONF_SMART_HEADROOM,
+    DEFAULT_GRID_EXPORT_LIMIT,
     DEFAULT_SMART_HEADROOM,
 )
 from .coordinator import get_coordinator_soc
@@ -113,6 +115,20 @@ def get_smart_headroom_fraction(hass: HomeAssistant, domain: str) -> float:
             pct: int = entry.options.get(CONF_SMART_HEADROOM, DEFAULT_SMART_HEADROOM)
             return pct / 100.0
     return DEFAULT_SMART_HEADROOM / 100.0
+
+
+def _get_grid_export_limit(hass: HomeAssistant, domain: str) -> int:
+    """Read grid export limit from the first config entry's options (watts, 0=none)."""
+    from .domain_data import get_first_entry_id
+
+    eid = get_first_entry_id(hass, domain)
+    if eid is not None:
+        entry = hass.config_entries.async_get_entry(eid)
+        if entry is not None:
+            return int(
+                entry.options.get(CONF_GRID_EXPORT_LIMIT, DEFAULT_GRID_EXPORT_LIMIT)
+            )
+    return DEFAULT_GRID_EXPORT_LIMIT
 
 
 def get_coordinator_value(hass: HomeAssistant, domain: str, key: str) -> float | None:
@@ -266,6 +282,7 @@ def estimate_discharge_remaining(
                 end,
                 headroom=headroom,
                 feedin_energy_limit_kwh=ds.get("feedin_energy_limit_kwh"),
+                grid_export_limit_w=_get_grid_export_limit(hass, domain),
             )
             if now < deferred:
                 wait = deferred - now

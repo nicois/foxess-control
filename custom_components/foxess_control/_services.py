@@ -30,6 +30,7 @@ from ._helpers import (
     _cancel_smart_discharge,
     _cfg,
     _dd,
+    _first_entry_id,
     _get_current_soc,
     _get_inverter,
     _get_net_consumption,
@@ -335,6 +336,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 headroom=headroom,
                 taper_profile=_get_taper_profile(hass),
                 feedin_energy_limit_kwh=feedin_energy_limit,
+                grid_export_limit_w=_cfg(hass).grid_export_limit_w,
             )
             should_defer = now < deferred_start
 
@@ -351,7 +353,11 @@ def _register_services(hass: HomeAssistant) -> None:
             )
             initial_power = 0
         else:
-            if pacing_enabled and current_soc is not None:
+            if (
+                pacing_enabled
+                and current_soc is not None
+                and _cfg(hass).grid_export_limit_w == 0
+            ):
                 remaining = (end - now).total_seconds() / 3600.0
                 initial_power = _calculate_discharge_power(
                     current_soc,
@@ -461,7 +467,10 @@ def _register_services(hass: HomeAssistant) -> None:
             _session_data_from_discharge_state(dd.smart_discharge_state),
         )
 
-        if not should_defer:
+        if should_defer:
+            coordinator = _dd(hass).entries[_first_entry_id(hass)].coordinator
+            await coordinator.async_request_refresh()
+        else:
             await _maybe_start_realtime_ws(hass)
 
     async def handle_smart_discharge(call: ServiceCall) -> None:
@@ -707,6 +716,9 @@ def _register_services(hass: HomeAssistant) -> None:
             "smart_charge",
             _session_data_from_charge_state(dd.smart_charge_state),
         )
+        if should_defer:
+            coordinator = _dd(hass).entries[_first_entry_id(hass)].coordinator
+            await coordinator.async_request_refresh()
         await _maybe_start_realtime_ws(hass)
 
     async def handle_smart_charge(call: ServiceCall) -> None:

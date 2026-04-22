@@ -32,6 +32,7 @@ class IntegrationConfig:
     battery_capacity_kwh: float
     min_power_change: int
     max_power_w: int
+    grid_export_limit_w: int
     smart_headroom: float
     bms_polling_interval: float
     ws_mode: str
@@ -47,6 +48,7 @@ def build_config(
         CONF_API_MIN_SOC,
         CONF_BATTERY_CAPACITY_KWH,
         CONF_BMS_POLLING_INTERVAL,
+        CONF_GRID_EXPORT_LIMIT,
         CONF_INVERTER_POWER,
         CONF_MIN_POWER_CHANGE,
         CONF_MIN_SOC_ON_GRID,
@@ -56,6 +58,7 @@ def build_config(
         CONF_WS_MODE,
         DEFAULT_API_MIN_SOC,
         DEFAULT_BMS_POLLING_INTERVAL,
+        DEFAULT_GRID_EXPORT_LIMIT,
         DEFAULT_INVERTER_POWER,
         DEFAULT_MIN_POWER_CHANGE,
         DEFAULT_MIN_SOC_ON_GRID,
@@ -91,6 +94,9 @@ def build_config(
             entry_options.get(CONF_MIN_POWER_CHANGE, DEFAULT_MIN_POWER_CHANGE)
         ),
         max_power_w=max_power_w,
+        grid_export_limit_w=int(
+            entry_options.get(CONF_GRID_EXPORT_LIMIT, DEFAULT_GRID_EXPORT_LIMIT)
+        ),
         smart_headroom=headroom_pct / 100.0,
         bms_polling_interval=float(
             entry_options.get(CONF_BMS_POLLING_INTERVAL, DEFAULT_BMS_POLLING_INTERVAL)

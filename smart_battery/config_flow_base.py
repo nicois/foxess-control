@@ -39,6 +39,7 @@ from .const import (
     CONF_FEEDIN_ENERGY_ENTITY,
     CONF_FEEDIN_POWER_ENTITY,
     CONF_GRID_CONSUMPTION_POWER_ENTITY,
+    CONF_GRID_EXPORT_LIMIT,
     CONF_INVERTER_POWER,
     CONF_LOADS_POWER_ENTITY,
     CONF_MIN_POWER_CHANGE,
@@ -51,6 +52,7 @@ from .const import (
     CONF_WORK_MODE_ENTITY,
     DEFAULT_API_MIN_SOC,
     DEFAULT_BMS_POLLING_INTERVAL,
+    DEFAULT_GRID_EXPORT_LIMIT,
     DEFAULT_INVERTER_POWER,
     DEFAULT_MIN_POWER_CHANGE,
     DEFAULT_MIN_SOC_ON_GRID,
@@ -178,6 +180,18 @@ def battery_options_schema(
                     max=25,
                     step=1,
                     unit_of_measurement="%",
+                    mode=NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Optional(
+                CONF_GRID_EXPORT_LIMIT,
+                default=opts.get(CONF_GRID_EXPORT_LIMIT, DEFAULT_GRID_EXPORT_LIMIT),
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=0,
+                    max=30000,
+                    step=100,
+                    unit_of_measurement="W",
                     mode=NumberSelectorMode.BOX,
                 )
             ),

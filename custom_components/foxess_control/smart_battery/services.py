@@ -31,10 +31,12 @@ from .algorithms import (
 from .const import (
     CONF_API_MIN_SOC,
     CONF_BATTERY_CAPACITY_KWH,
+    CONF_GRID_EXPORT_LIMIT,
     CONF_MIN_POWER_CHANGE,
     CONF_MIN_SOC_ON_GRID,
     CONF_SMART_HEADROOM,
     DEFAULT_API_MIN_SOC,
+    DEFAULT_GRID_EXPORT_LIMIT,
     DEFAULT_MIN_POWER_CHANGE,
     DEFAULT_MIN_SOC_ON_GRID,
     DEFAULT_SMART_HEADROOM,
@@ -331,6 +333,11 @@ def register_services(
                 headroom=headroom,
                 taper_profile=get_domain_data(hass, domain).taper_profile,
                 feedin_energy_limit_kwh=feedin_energy_limit,
+                grid_export_limit_w=int(
+                    _get_entry_option(
+                        hass, domain, CONF_GRID_EXPORT_LIMIT, DEFAULT_GRID_EXPORT_LIMIT
+                    )
+                ),
             )
             should_defer = now < deferred_start
 
@@ -347,7 +354,12 @@ def register_services(
             )
             initial_power = 0
         else:
-            if pacing_enabled and current_soc is not None:
+            grid_export_limit = int(
+                _get_entry_option(
+                    hass, domain, CONF_GRID_EXPORT_LIMIT, DEFAULT_GRID_EXPORT_LIMIT
+                )
+            )
+            if pacing_enabled and current_soc is not None and grid_export_limit == 0:
                 from .algorithms import calculate_discharge_power
 
                 remaining = (end - now).total_seconds() / 3600.0
