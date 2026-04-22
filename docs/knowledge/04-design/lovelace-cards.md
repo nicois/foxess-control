@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 4
-last_verified: 2026-04-21
+last_verified: 2026-04-23
 traces_up: [../02-constraints.md]
 traces_down: [../06-tests.md]
 ---
@@ -125,7 +125,10 @@ Default `true` preserves existing behaviour.
 and action-row (`innerHTML`) elements. The form overlay DOM is left
 entirely untouched. Detection uses `existing.querySelector(".form-overlay")`
 rather than the `_showForm` flag, because on the initial form-opening
-render the flag is `true` but the overlay doesn't exist yet.
+render the flag is `true` but the overlay doesn't exist yet. A
+`_formValues` snapshot captures live input values at the start of every
+`_render()` call; an `input` event listener on the shadow root keeps
+`_formValues` in sync between renders.
 
 **Context**: The `set hass()` property fires every ~5 seconds with
 WebSocket data. The previous implementation did `shadowRoot.innerHTML = ...`
@@ -136,13 +139,74 @@ input cleared and picker popups closed mid-interaction.
 **Rationale**: Shadow DOM is designed for encapsulation, but `innerHTML`
 replacement discards it entirely. Targeted updates preserve the form
 element identity (same DOM nodes), so focus, selection state, and native
-picker popups survive. The `_formValues` input listener remains as a
-safety net for form submission, but is no longer needed for value
-restoration after re-render.
+picker popups survive. The `_formValues` snapshot catches
+programmatically-set values (browser autocomplete, test automation) that
+bypass the `input` event.
 
-**Alternatives considered**: Saving and restoring form values after
-full re-render — rejected because native time picker popup state cannot
-be saved/restored programmatically.
+**Alternatives considered**:
+- LitElement migration — attempted and reverted. HA bundles Lit into
+  hashed webpack chunks with no import map; custom cards loaded as ES
+  module resources cannot `import("lit")` or resolve bare specifiers.
+  Extracting Lit from HA's global scope
+  (`Object.getPrototypeOf(customElements.get("ha-panel-lovelace"))`)
+  gives the base class but not the `html`/`css` tagged-template
+  functions, which are separate module-scope exports inaccessible from
+  outside the bundle. A build step (Rollup/Webpack) to bundle Lit into
+  the card JS would work but adds infrastructure complexity.
+- morphdom (~3 KB DOM diffing library) — could replace the manual
+  querySelector logic with a single `morphdom(container, newHTML)` call
+  that preserves input elements automatically. Worth revisiting if the
+  card's DOM structure grows more complex (>5 independently-updating
+  regions), but overkill for the current 3-region layout.
+- Saving and restoring form values after full re-render — rejected
+  because native time picker popup state cannot be saved/restored
+  programmatically.
+
+**Known fragility**: `header.outerHTML = headerHtml` replaces the
+header element itself, so the next querySelector must re-find it. If
+the rendered headerHtml omits the `.header` class, the surgical path
+silently falls through to full `innerHTML`. Formalising the containers
+as persistent wrapper `<div>`s created once at `connectedCallback` and
+updating only their `innerHTML` would eliminate this coupling.
 
 **Traces**: C-020 (operational transparency — user input must not be
 lost during background updates)
+
+### D-041: Vanilla HTMLElement constraint for custom cards
+
+**Decision**: All custom Lovelace cards remain vanilla `HTMLElement`
+subclasses. No framework or library dependency beyond the Web
+Components API.
+
+**Context**: HA's frontend bundles Lit (and all other dependencies)
+into content-hashed webpack chunks. There is no import map, no global
+`lit` module, and no stable URL for Lit's exports. Custom cards loaded
+as `type: module` Lovelace resources can resolve relative URLs and CDN
+imports but cannot resolve bare specifiers like `"lit"`.
+
+**Rationale**: Attempted LitElement migration (2026-04-23) confirmed
+that:
+1. `import("lit")` fails — no import map in HA's `index.html`.
+2. Extracting LitElement from HA's prototype chain
+   (`Object.getPrototypeOf(customElements.get("ha-panel-lovelace"))`)
+   yields the class but not `html`/`css`/`nothing`, which are
+   separate module exports inlined into a hashed chunk.
+3. CDN imports (e.g. `https://esm.sh/lit@3`) work but introduce a
+   runtime dependency on an external service, risk version mismatch
+   with HA's internal Lit, and add load latency.
+4. Bundling Lit into the card JS (the approach used by mushroom-cards
+   and other popular HA cards) requires a build step
+   (Rollup/Webpack/esbuild), which this project does not currently
+   have for frontend assets.
+
+Vanilla HTMLElement with targeted DOM updates (D-040) is the pragmatic
+choice until a frontend build pipeline is introduced.
+
+**Alternatives considered**:
+- Bundled Lit (Rollup) — the correct long-term solution if the card
+  grows complex enough to justify build infrastructure.
+- morphdom (inlined, ~3 KB) — viable intermediate step; provides DOM
+  diffing without framework overhead. No build step needed if the
+  minified source is vendored into the JS file.
+
+**Traces**: D-040 (targeted DOM updates depend on this constraint)
