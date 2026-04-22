@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.8-beta.13
+
+### Changed
+- **Force operations unified with smart sessions**: `force_charge` and `force_discharge` now create smart sessions internally with a `full_power` flag, gaining circuit breaker protection, restart recovery, UI state, and sensor visibility for free. The `power` parameter has been removed — force operations always charge/discharge at maximum inverter power.
+
+### Fixed
+- **Force operation premature WebSocket connection**: force ops opened the WS connection at service call time, before the schedule was applied. The WS now starts through the smart session listener, matching the timing of smart operations.
+
+### Removed
+- **Force operation WS timer infrastructure**: dedicated `_start_force_op_ws`, `force_op_timer`, `force_op_start_timer`, and `force_op_end` fields removed — smart session lifecycle manages WS connections.
+
 ## 1.0.8-beta.12
 
 ### Added

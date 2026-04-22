@@ -669,7 +669,7 @@ class TestHandleForceCharge:
         assert groups[0]["fdSoc"] == 100
 
     @pytest.mark.asyncio
-    async def test_force_charge_with_power(self) -> None:
+    async def test_force_charge_uses_max_power(self) -> None:
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
@@ -684,17 +684,10 @@ class TestHandleForceCharge:
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 14, 0, 0),
         ):
-            await handler(
-                _make_call(
-                    {
-                        "duration": datetime.timedelta(hours=1),
-                        "power": 6000,
-                    }
-                )
-            )
+            await handler(_make_call({"duration": datetime.timedelta(hours=1)}))
 
         groups = inv.set_schedule.call_args.args[0]
-        assert groups[0]["fdPwr"] == 6000
+        assert groups[0]["fdPwr"] == 10500
 
     @pytest.mark.asyncio
     async def test_force_charge_with_start_time(self) -> None:
@@ -806,7 +799,7 @@ class TestHandleForceCharge:
             await handler(_make_call({"duration": datetime.timedelta(hours=1)}))
 
     @pytest.mark.asyncio
-    async def test_force_charge_cancels_smart_charge(self) -> None:
+    async def test_force_charge_cancels_previous_smart_charge(self) -> None:
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
@@ -828,8 +821,10 @@ class TestHandleForceCharge:
             await handler(_make_call({"duration": datetime.timedelta(hours=1)}))
 
         unsub.assert_called_once()
-        assert hass.data[DOMAIN].smart_charge_unsubs == []
-        assert hass.data[DOMAIN].smart_charge_state is None
+        state = hass.data[DOMAIN].smart_charge_state
+        assert state is not None
+        assert state["full_power"] is True
+        assert state["target_soc"] == 100
 
     @pytest.mark.asyncio
     async def test_force_charge_cancels_smart_discharge(self) -> None:
@@ -918,7 +913,7 @@ class TestHandleForceDischarge:
         assert groups[0]["endHour"] == 20
 
     @pytest.mark.asyncio
-    async def test_force_discharge_with_power(self) -> None:
+    async def test_force_discharge_uses_max_power(self) -> None:
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
@@ -933,17 +928,10 @@ class TestHandleForceDischarge:
             "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
             return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
         ):
-            await handler(
-                _make_call(
-                    {
-                        "duration": datetime.timedelta(hours=2),
-                        "power": 5000,
-                    }
-                )
-            )
+            await handler(_make_call({"duration": datetime.timedelta(hours=2)}))
 
         groups = inv.set_schedule.call_args.args[0]
-        assert groups[0]["fdPwr"] == 5000
+        assert groups[0]["fdPwr"] == 10500
 
     @pytest.mark.asyncio
     async def test_force_discharge_replace_conflicts_removes_overlap(self) -> None:
@@ -1026,7 +1014,7 @@ class TestHandleForceDischarge:
             await handler(_make_call({"duration": datetime.timedelta(hours=2)}))
 
     @pytest.mark.asyncio
-    async def test_force_discharge_cancels_smart_discharge(self) -> None:
+    async def test_force_discharge_cancels_previous_smart_discharge(self) -> None:
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
@@ -1048,8 +1036,10 @@ class TestHandleForceDischarge:
             await handler(_make_call({"duration": datetime.timedelta(hours=2)}))
 
         unsub.assert_called_once()
-        assert hass.data[DOMAIN].smart_discharge_unsubs == []
-        assert hass.data[DOMAIN].smart_discharge_state is None
+        state = hass.data[DOMAIN].smart_discharge_state
+        assert state is not None
+        assert state["full_power"] is True
+        assert state["pacing_enabled"] is False
 
     @pytest.mark.asyncio
     async def test_force_discharge_uses_custom_api_min_soc(self) -> None:

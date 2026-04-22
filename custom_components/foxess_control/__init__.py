@@ -486,11 +486,14 @@ async def _recover_charge_session(
         max_power = charge_data.get("max_power_w", 10000)
         target_soc = charge_data.get("target_soc", 100)
         capacity = charge_data.get("battery_capacity_kwh", 0.0)
+        is_full_power = charge_data.get("full_power", False)
         started_at_str = charge_data.get("charging_started_at")
         started_at = dt_util.parse_datetime(started_at_str) if started_at_str else None
         started_energy = charge_data.get("charging_started_energy_kwh")
         if not charge_data.get("charging_started", False):
             last_power = 0
+        elif is_full_power:
+            last_power = max_power
         elif current_soc is not None:
             if started_at is not None:
                 elapsed_since_start = (now - started_at).total_seconds() / 3600.0
@@ -537,6 +540,7 @@ async def _recover_charge_session(
             "charging_started_at": started_at,
             "charging_started_energy_kwh": started_energy,
             "force": charge_data.get("force", False),
+            "full_power": is_full_power,
             "soc_unavailable_count": 0,
             "soc_above_target_count": 0,
             "start_soc": charge_data.get("start_soc"),
@@ -591,12 +595,15 @@ async def _recover_discharge_session(
             discharge_data.get("min_soc", 10),
         )
         recovered_power = discharge_data.get("last_power_w", 0)
+        is_full_power = discharge_data.get("full_power", False)
         pacing_enabled = discharge_data.get("pacing_enabled", False)
         battery_capacity_kwh = discharge_data.get("battery_capacity_kwh", 0.0)
         min_soc = discharge_data.get("min_soc", 10)
         max_power_w = discharge_data.get("max_power_w", recovered_power)
 
-        if pacing_enabled and battery_capacity_kwh > 0:
+        if is_full_power:
+            recovered_power = max_power_w
+        elif pacing_enabled and battery_capacity_kwh > 0:
             current_soc = _get_current_soc(hass)
             remaining_h = (end - now).total_seconds() / 3600.0
             # Compute remaining feedin budget for pacing
@@ -650,6 +657,7 @@ async def _recover_discharge_session(
             ),
             "consumption_peak_kw": discharge_data.get("consumption_peak_kw", 0.0),
             "start_soc": discharge_data.get("start_soc"),
+            "full_power": is_full_power,
         }
         _setup_smart_discharge_listeners(hass, inverter)
     else:
@@ -934,16 +942,10 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
         _LOGGER.debug("WS check: ws_mode=%s, no paced discharge", ws_mode)
         return False
 
-    # Any *started* smart session
     cs = dd.smart_charge_state
-    if (ds is not None and ds.get("discharging_started", False)) or (
+    return (ds is not None and ds.get("discharging_started", False)) or (
         cs is not None and cs.get("charging_started", False)
-    ):
-        return True
-
-    # Force operations (charge / discharge / feed-in) with a future end time
-    force_end: datetime.datetime | None = dd.force_op_end
-    return force_end is not None and dt_util.now() < force_end
+    )
 
 
 async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
@@ -1074,62 +1076,6 @@ async def _stop_realtime_ws(hass: HomeAssistant) -> None:
         ):
             coord.data["_data_source"] = "api"
             coord.async_set_updated_data(dict(coord.data))
-
-
-async def _start_force_op_ws(
-    hass: HomeAssistant,
-    start: datetime.datetime,
-    end: datetime.datetime,
-) -> None:
-    """Activate WebSocket for the duration of a force operation.
-
-    If *start* is in the future, defers WS activation until then.
-    Sets ``_force_op_end`` so ``_should_start_realtime_ws`` can see the
-    active operation, then schedules cleanup when the window expires.
-    """
-    if DOMAIN not in hass.data:
-        return
-    dd = _dd(hass)
-
-    # Cancel any previous force-op timers
-    cancel_prev: asyncio.TimerHandle | None = dd.force_op_timer
-    if cancel_prev is not None:
-        cancel_prev.cancel()
-    dd.force_op_timer = None
-    if dd.force_op_start_timer is not None:
-        dd.force_op_start_timer.cancel()
-        dd.force_op_start_timer = None
-
-    dd.force_op_end = end
-
-    now = dt_util.now()
-    start_delay = max(0.0, (start - now).total_seconds())
-
-    if start_delay > 0:
-
-        def _on_force_op_start() -> None:
-            dd.force_op_start_timer = None
-            hass.async_create_task(
-                _maybe_start_realtime_ws(hass), name="foxess_start_ws_force_op"
-            )
-
-        dd.force_op_start_timer = hass.loop.call_later(start_delay, _on_force_op_start)
-    else:
-        await _maybe_start_realtime_ws(hass)
-
-    # Schedule WS stop when the window ends
-    end_delay = max(0.0, (end - now).total_seconds())
-
-    def _on_force_op_expired() -> None:
-        dd.force_op_end = None
-        dd.force_op_timer = None
-        if not _should_start_realtime_ws(hass):
-            hass.async_create_task(
-                _stop_realtime_ws(hass), name="foxess_stop_ws_force_op"
-            )
-
-    handle = hass.loop.call_later(end_delay, _on_force_op_expired)
-    dd.force_op_timer = handle
 
 
 def _trigger_discharge_listener(hass: HomeAssistant) -> None:

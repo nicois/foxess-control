@@ -633,28 +633,35 @@ def setup_smart_charge_listeners(
             return
 
         # Already charging — adjust power as needed
-        started_at = cur_state.get("charging_started_at")
-        if started_at is not None:
-            elapsed_since_start = (now_dt - started_at).total_seconds() / 3600.0
-            window_from_start = (cur_state["end"] - started_at).total_seconds() / 3600.0
+        if cur_state.get("full_power"):
+            new_power = effective_max
         else:
-            elapsed_since_start = 0.0
-            window_from_start = 0.0
-        new_power = calculate_charge_power(
-            cur_soc,
-            cur_state["target_soc"],
-            cur_state["battery_capacity_kwh"],
-            remaining,
-            effective_max,
-            net_consumption_kw=net_consumption,
-            headroom=headroom,
-            charging_started_energy_kwh=cur_state.get("charging_started_energy_kwh"),
-            elapsed_since_charge_started=elapsed_since_start,
-            effective_charge_window=window_from_start,
-            min_power_change_w=cur_state["min_power_change"],
-            taper_profile=taper,
-            bms_temp_c=bms_temp,
-        )
+            started_at = cur_state.get("charging_started_at")
+            if started_at is not None:
+                elapsed_since_start = (now_dt - started_at).total_seconds() / 3600.0
+                window_from_start = (
+                    cur_state["end"] - started_at
+                ).total_seconds() / 3600.0
+            else:
+                elapsed_since_start = 0.0
+                window_from_start = 0.0
+            new_power = calculate_charge_power(
+                cur_soc,
+                cur_state["target_soc"],
+                cur_state["battery_capacity_kwh"],
+                remaining,
+                effective_max,
+                net_consumption_kw=net_consumption,
+                headroom=headroom,
+                charging_started_energy_kwh=cur_state.get(
+                    "charging_started_energy_kwh"
+                ),
+                elapsed_since_charge_started=elapsed_since_start,
+                effective_charge_window=window_from_start,
+                min_power_change_w=cur_state["min_power_change"],
+                taper_profile=taper,
+                bms_temp_c=bms_temp,
+            )
 
         if (
             abs(new_power - cur_state["last_power_w"]) < cur_state["min_power_change"]

@@ -186,12 +186,11 @@ data:
 
 ### `foxess_control.force_charge`
 
-Forces the inverter to charge the battery for a specified duration. The inverter automatically reverts to self-use when the window ends. Cancels any running `smart_charge` session, since it replaces the underlying `ForceCharge` schedule.
+Charges the battery at maximum inverter power for a specified duration. Internally creates a smart session with `full_power` mode, providing circuit breaker protection, restart recovery, and UI state. The inverter automatically reverts to self-use when the window ends or the battery reaches 100% SoC.
 
 | Parameter | Required | Default | Description |
 |---|---|---|---|
 | `duration` | Yes | | How long to force charge. Maximum 4 hours. Must not extend past midnight. |
-| `power` | No | Inverter max | Charge power limit in watts (min 100). |
 | `start_time` | No | Now | Time of day to start the override (e.g. `"14:30:00"`). |
 | `replace_conflicts` | No | false | Remove conflicting overrides instead of aborting. |
 
@@ -199,17 +198,15 @@ Forces the inverter to charge the battery for a specified duration. The inverter
 action: foxess_control.force_charge
 data:
   duration: "01:30:00"
-  power: 6000
 ```
 
 ### `foxess_control.force_discharge`
 
-Forces the inverter to discharge the battery for a specified duration. The inverter automatically reverts to self-use when the window ends. Cancels any running `smart_discharge` session, since it replaces the underlying `ForceDischarge` schedule.
+Discharges the battery at maximum inverter power for a specified duration. Internally creates a smart session with `full_power` mode, providing circuit breaker protection, restart recovery, and UI state. The inverter automatically reverts to self-use when the window ends or the battery reaches min SoC.
 
 | Parameter | Required | Default | Description |
 |---|---|---|---|
 | `duration` | Yes | | How long to force discharge. Maximum 4 hours. Must not extend past midnight. |
-| `power` | No | Inverter max | Discharge power limit in watts (min 100). |
 | `start_time` | No | Now | Time of day to start the override (e.g. `"17:00:00"`). |
 | `replace_conflicts` | No | false | Remove conflicting overrides instead of aborting. |
 
@@ -217,7 +214,6 @@ Forces the inverter to discharge the battery for a specified duration. The inver
 action: foxess_control.force_discharge
 data:
   duration: "02:00:00"
-  power: 5000
 ```
 
 ### `foxess_control.smart_charge`
@@ -237,7 +233,7 @@ If the battery capacity is too large or the SoC too low to reach the target with
 
 When the BMS battery temperature is below 16°C, the maximum charge power is automatically capped at 80A × live battery voltage (~4 kW at 50 V) to match the BMS's physical current limit. This prevents over-requesting, which causes the inverter to oscillate. The effective limit is exposed via the `charge_effective_max_power_w` sensor attribute.
 
-Only one smart charge session can be active at a time. Starting a new `smart_charge` cancels any previous session, and also cancels any active `smart_discharge` session to prevent schedule conflicts. A `force_charge` action also cancels any running smart charge, since it replaces the underlying `ForceCharge` schedule.
+Only one smart charge session can be active at a time. Starting a new `smart_charge` cancels any previous session, and also cancels any active `smart_discharge` session to prevent schedule conflicts. A `force_charge` action also cancels any running smart charge, replacing it with a full-power smart session.
 
 **Stopping a running smart charge:** Call `foxess_control.clear_overrides` (with no mode, or with `mode: ForceCharge`). This removes the schedule **and** cancels the background listeners.
 
@@ -276,7 +272,7 @@ Discharges the battery within a time window, deferring forced discharge as long 
 
 The session stops at whichever condition is reached first: time window end, SoC threshold, or feed-in energy limit.
 
-Only one smart discharge session can be active at a time. Starting a new `smart_discharge` cancels any previous session, and also cancels any active `smart_charge` session to prevent schedule conflicts. A `force_discharge` action also cancels any running smart discharge, since it replaces the underlying `ForceDischarge` schedule.
+Only one smart discharge session can be active at a time. Starting a new `smart_discharge` cancels any previous session, and also cancels any active `smart_charge` session to prevent schedule conflicts. A `force_discharge` action also cancels any running smart discharge, replacing it with a full-power smart session.
 
 **Stopping a running smart discharge:** Call `foxess_control.clear_overrides` (with no mode, or with `mode: ForceDischarge`). This removes the schedule **and** cancels the background listeners.
 

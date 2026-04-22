@@ -92,6 +92,7 @@ def session_data_from_charge_state(state: dict[str, Any]) -> dict[str, Any]:
         "min_power_change": state["min_power_change"],
         "api_min_soc": state.get("api_min_soc", DEFAULT_API_MIN_SOC),
         "force": state.get("force", False),
+        "full_power": state.get("full_power", False),
         "charging_started": state["charging_started"],
         "charging_started_at": (
             state["charging_started_at"].isoformat()
@@ -124,6 +125,8 @@ def session_data_from_discharge_state(state: dict[str, Any]) -> dict[str, Any]:
         data["pacing_enabled"] = True
         data["battery_capacity_kwh"] = state["battery_capacity_kwh"]
         data["min_power_change"] = state["min_power_change"]
+    if state.get("full_power"):
+        data["full_power"] = True
     data["discharging_started"] = state.get("discharging_started", True)
     started_at = state.get("discharging_started_at")
     data["discharging_started_at"] = started_at.isoformat() if started_at else None

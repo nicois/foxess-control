@@ -83,7 +83,6 @@ from .smart_battery.types import (
 )
 
 if TYPE_CHECKING:
-    import asyncio
     import datetime
     from collections.abc import Callable, Coroutine
 
@@ -141,7 +140,6 @@ def _register_services(hass: HomeAssistant) -> None:
     _should_start_realtime_ws = _pkg._should_start_realtime_ws
     _maybe_start_realtime_ws = _pkg._maybe_start_realtime_ws
     _stop_realtime_ws = _pkg._stop_realtime_ws
-    _start_force_op_ws = _pkg._start_force_op_ws
 
     async def handle_clear_overrides(call: ServiceCall) -> None:
         mode_filter: str | None = call.data.get("mode")
@@ -156,16 +154,6 @@ def _register_services(hass: HomeAssistant) -> None:
             if ws_stop is not None:
                 ws_stops.append(ws_stop)
 
-        if DOMAIN in hass.data:
-            _clear_dd = _dd(hass)
-            timer: asyncio.TimerHandle | None = _clear_dd.force_op_timer
-            if timer is not None:
-                timer.cancel()
-            _clear_dd.force_op_timer = None
-            if _clear_dd.force_op_start_timer is not None:
-                _clear_dd.force_op_start_timer.cancel()
-                _clear_dd.force_op_start_timer = None
-            _clear_dd.force_op_end = None
         if not _should_start_realtime_ws(hass) and not ws_stops:
             ws_stops.append(_stop_realtime_ws(hass))
 
@@ -208,111 +196,50 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def handle_force_charge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
-        power: int | None = call.data.get("power")
         start_time: datetime.time | None = call.data.get("start_time")
         force: bool = call.data.get("replace_conflicts", False)
         start, end = _resolve_start_end(duration, start_time)
 
         _LOGGER.info(
-            "Force charge %02d:%02d - %02d:%02d (power=%s)",
+            "Force charge %02d:%02d - %02d:%02d (full power)",
             start.hour,
             start.minute,
             end.hour,
             end.minute,
-            f"{power}W" if power else "max",
         )
 
-        ws_stop = _cancel_smart_charge(hass)
-        if ws_stop is not None:
-            hass.async_create_task(ws_stop)
-        ws_stop = _cancel_smart_discharge(hass)
-        if ws_stop is not None:
-            hass.async_create_task(ws_stop)
-
-        if _cfg(hass).entity_mode:
-            await _apply_mode_via_entities(hass, WorkMode.FORCE_CHARGE, power)
-        else:
-            inverter = _get_inverter(hass)
-            min_soc_on_grid = _cfg(hass).min_soc_on_grid
-            api_min_soc = _cfg(hass).api_min_soc
-
-            group = _build_override_group(
-                start,
-                end,
-                WorkMode.FORCE_CHARGE,
-                inverter,
-                min_soc_on_grid,
-                fd_soc=100,
-                fd_pwr=power,
-                api_min_soc=api_min_soc,
-            )
-            groups = await hass.async_add_executor_job(
-                _merge_with_existing,
-                inverter,
-                group,
-                WorkMode.FORCE_CHARGE,
-                force,
-            )
-            await hass.async_add_executor_job(inverter.set_schedule, groups)
-
-        await _start_force_op_ws(hass, start, end)
+        await _do_smart_charge(
+            start=start,
+            end=end,
+            target_soc=100,
+            max_power=None,
+            replace_conflicts=force,
+            full_power=True,
+        )
 
     async def handle_force_discharge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
-        power: int | None = call.data.get("power")
         start_time: datetime.time | None = call.data.get("start_time")
         force: bool = call.data.get("replace_conflicts", False)
         start, end = _resolve_start_end(duration, start_time)
 
         _LOGGER.info(
-            "Force discharge %02d:%02d - %02d:%02d (power=%s)",
+            "Force discharge %02d:%02d - %02d:%02d (full power)",
             start.hour,
             start.minute,
             end.hour,
             end.minute,
-            f"{power}W" if power else "max",
         )
 
-        ws_stop = _cancel_smart_charge(hass)
-        if ws_stop is not None:
-            hass.async_create_task(ws_stop, name="foxess_stop_ws_force_discharge")
-        ws_stop = _cancel_smart_discharge(hass)
-        if ws_stop is not None:
-            hass.async_create_task(ws_stop, name="foxess_stop_ws_force_discharge")
-
-        if _cfg(hass).entity_mode:
-            api_min_soc = _cfg(hass).api_min_soc
-            await _apply_mode_via_entities(
-                hass,
-                WorkMode.FORCE_DISCHARGE,
-                power,
-                fd_soc=api_min_soc,
-            )
-        else:
-            inverter = _get_inverter(hass)
-            min_soc_on_grid = _cfg(hass).min_soc_on_grid
-            api_min_soc = _cfg(hass).api_min_soc
-
-            group = _build_override_group(
-                start,
-                end,
-                WorkMode.FORCE_DISCHARGE,
-                inverter,
-                min_soc_on_grid,
-                fd_soc=api_min_soc,
-                fd_pwr=power,
-                api_min_soc=api_min_soc,
-            )
-            groups = await hass.async_add_executor_job(
-                _merge_with_existing,
-                inverter,
-                group,
-                WorkMode.FORCE_DISCHARGE,
-                force,
-            )
-            await hass.async_add_executor_job(inverter.set_schedule, groups)
-
-        await _start_force_op_ws(hass, start, end)
+        await _do_smart_discharge(
+            start=start,
+            end=end,
+            min_soc=_cfg(hass).api_min_soc,
+            power=None,
+            replace_conflicts=force,
+            feedin_energy_limit=None,
+            full_power=True,
+        )
 
     async def handle_feedin(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
@@ -356,20 +283,18 @@ def _register_services(hass: HomeAssistant) -> None:
             )
             await hass.async_add_executor_job(inverter.set_schedule, groups)
 
-        await _start_force_op_ws(hass, start, end)
-
-    async def handle_smart_discharge(call: ServiceCall) -> None:
-        start_time: datetime.time = call.data["start_time"]
-        end_time: datetime.time = call.data["end_time"]
-        power: int | None = call.data.get("power")
-        min_soc: int = call.data["min_soc"]
-        force: bool = call.data.get("replace_conflicts", False)
-        feedin_energy_limit: float | None = call.data.get("feedin_energy_limit_kwh")
-        inverter: Inverter | None = None
-
-        start, end = _resolve_start_end_explicit(start_time, end_time)
-
-        if _get_current_soc(hass) is None:
+    async def _do_smart_discharge(
+        *,
+        start: datetime.datetime,
+        end: datetime.datetime,
+        min_soc: int,
+        power: int | None,
+        replace_conflicts: bool,
+        feedin_energy_limit: float | None,
+        full_power: bool = False,
+    ) -> None:
+        """Core smart discharge logic shared by smart_discharge and force_discharge."""
+        if not full_power and _get_current_soc(hass) is None:
             raise ServiceValidationError(
                 "Battery SoC is not available",
                 translation_domain=DOMAIN,
@@ -377,22 +302,7 @@ def _register_services(hass: HomeAssistant) -> None:
             )
 
         api_min_soc = _cfg(hass).api_min_soc
-
-        feedin_str = (
-            f", feedin_limit={feedin_energy_limit}kWh"
-            if feedin_energy_limit is not None
-            else ""
-        )
-        _LOGGER.info(
-            "Smart discharge %02d:%02d - %02d:%02d (power=%s, min_soc=%d%%%s)",
-            start.hour,
-            start.minute,
-            end.hour,
-            end.minute,
-            f"{power}W" if power else "max",
-            min_soc,
-            feedin_str,
-        )
+        inverter: Inverter | None = None
 
         ws_stop = _cancel_smart_discharge(hass)
         if ws_stop is not None:
@@ -406,7 +316,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
         max_power_w = power if power is not None else _cfg(hass).max_power_w
         battery_capacity_kwh = _cfg(hass).battery_capacity_kwh
-        pacing_enabled = battery_capacity_kwh > 0
+        pacing_enabled = not full_power and battery_capacity_kwh > 0
 
         current_soc = _get_current_soc(hass)
         now = dt_util.now()
@@ -483,7 +393,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     inverter,
                     group,
                     WorkMode.FORCE_DISCHARGE,
-                    force,
+                    replace_conflicts,
                 )
                 await hass.async_add_executor_job(inverter.set_schedule, groups)
 
@@ -502,7 +412,8 @@ def _register_services(hass: HomeAssistant) -> None:
 
         schedule_horizon: str | None = None
         if (
-            not should_defer
+            not full_power
+            and not should_defer
             and initial_power > 0
             and battery_capacity_kwh > 0
             and current_soc is not None
@@ -537,6 +448,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 feedin_energy_limit=feedin_energy_limit,
                 schedule_horizon=schedule_horizon,
                 groups=groups,
+                full_power=full_power,
             )
         )
 
@@ -552,30 +464,81 @@ def _register_services(hass: HomeAssistant) -> None:
         if not should_defer:
             await _maybe_start_realtime_ws(hass)
 
-    async def handle_smart_charge(call: ServiceCall) -> None:
+    async def handle_smart_discharge(call: ServiceCall) -> None:
         start_time_val: datetime.time = call.data["start_time"]
         end_time_val: datetime.time = call.data["end_time"]
-        max_power: int | None = call.data.get("power")
-        target_soc: int = call.data["target_soc"]
+        power: int | None = call.data.get("power")
+        min_soc: int = call.data["min_soc"]
         force: bool = call.data.get("replace_conflicts", False)
-        inverter: Inverter | None = None
+        feedin_energy_limit: float | None = call.data.get("feedin_energy_limit_kwh")
 
         start, end = _resolve_start_end_explicit(start_time_val, end_time_val)
 
-        if _get_current_soc(hass) is None:
-            raise ServiceValidationError(
-                "Battery SoC is not available",
-                translation_domain=DOMAIN,
-                translation_key="soc_unavailable",
-            )
+        feedin_str = (
+            f", feedin_limit={feedin_energy_limit}kWh"
+            if feedin_energy_limit is not None
+            else ""
+        )
+        _LOGGER.info(
+            "Smart discharge %02d:%02d - %02d:%02d (power=%s, min_soc=%d%%%s)",
+            start.hour,
+            start.minute,
+            end.hour,
+            end.minute,
+            f"{power}W" if power else "max",
+            min_soc,
+            feedin_str,
+        )
 
-        battery_capacity_kwh = _cfg(hass).battery_capacity_kwh
-        if battery_capacity_kwh <= 0:
-            raise ServiceValidationError(
-                "Battery capacity (kWh) not configured",
-                translation_domain=DOMAIN,
-                translation_key="battery_capacity_not_configured",
-            )
+        await _do_smart_discharge(
+            start=start,
+            end=end,
+            min_soc=min_soc,
+            power=power,
+            replace_conflicts=force,
+            feedin_energy_limit=feedin_energy_limit,
+        )
+
+    async def _do_smart_charge(
+        *,
+        start: datetime.datetime,
+        end: datetime.datetime,
+        target_soc: int,
+        max_power: int | None,
+        replace_conflicts: bool,
+        full_power: bool = False,
+    ) -> None:
+        """Core smart charge logic shared by smart_charge and force_charge."""
+        if not full_power:
+            if _get_current_soc(hass) is None:
+                raise ServiceValidationError(
+                    "Battery SoC is not available",
+                    translation_domain=DOMAIN,
+                    translation_key="soc_unavailable",
+                )
+
+            battery_capacity_kwh = _cfg(hass).battery_capacity_kwh
+            if battery_capacity_kwh <= 0:
+                raise ServiceValidationError(
+                    "Battery capacity (kWh) not configured",
+                    translation_domain=DOMAIN,
+                    translation_key="battery_capacity_not_configured",
+                )
+
+            current_soc = _get_current_soc(hass)
+            if current_soc is not None and current_soc >= target_soc:
+                raise ServiceValidationError(
+                    f"Current SoC ({current_soc}%) at or above target ({target_soc}%)",
+                    translation_domain=DOMAIN,
+                    translation_key="soc_above_target",
+                    translation_placeholders={
+                        "current_soc": str(current_soc),
+                        "target_soc": str(target_soc),
+                    },
+                )
+        else:
+            battery_capacity_kwh = _cfg(hass).battery_capacity_kwh
+            current_soc = _get_current_soc(hass)
 
         min_soc_on_grid = _cfg(hass).min_soc_on_grid
         api_min_soc = _cfg(hass).api_min_soc
@@ -583,19 +546,8 @@ def _register_services(hass: HomeAssistant) -> None:
             max_power if max_power is not None else _cfg(hass).max_power_w
         )
 
-        current_soc = _get_current_soc(hass)
-        if current_soc is not None and current_soc >= target_soc:
-            raise ServiceValidationError(
-                f"Current SoC ({current_soc}%) at or above target ({target_soc}%)",
-                translation_domain=DOMAIN,
-                translation_key="soc_above_target",
-                translation_placeholders={
-                    "current_soc": str(current_soc),
-                    "target_soc": str(target_soc),
-                },
-            )
-
         entity_mode = _cfg(hass).entity_mode
+        inverter: Inverter | None = None
 
         if not entity_mode:
             inverter = _get_inverter(hass)
@@ -614,7 +566,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 inverter,
                 validation_group,
                 WorkMode.FORCE_CHARGE,
-                force,
+                replace_conflicts,
             )
 
         ws_stop = _cancel_smart_charge(hass)
@@ -630,7 +582,7 @@ def _register_services(hass: HomeAssistant) -> None:
         net_consumption = _get_net_consumption(hass)
         headroom = _cfg(hass).smart_headroom
         should_defer = False
-        if current_soc is not None:
+        if not full_power and current_soc is not None:
             deferred_start = _calculate_deferred_start(
                 current_soc,
                 target_soc,
@@ -666,7 +618,7 @@ def _register_services(hass: HomeAssistant) -> None:
         else:
             remaining = (end - now).total_seconds() / 3600.0
             initial_power = effective_max_power
-            if current_soc is not None:
+            if not full_power and current_soc is not None:
                 initial_power = _calculate_charge_power(
                     current_soc,
                     target_soc,
@@ -715,7 +667,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     inverter,
                     group,
                     WorkMode.FORCE_CHARGE,
-                    force,
+                    replace_conflicts,
                 )
                 await hass.async_add_executor_job(
                     inverter.set_schedule,
@@ -738,11 +690,12 @@ def _register_services(hass: HomeAssistant) -> None:
                 min_soc_on_grid=min_soc_on_grid,
                 min_power_change=min_power_change,
                 api_min_soc=api_min_soc,
-                force=force,
+                force=replace_conflicts,
                 current_soc=current_soc,
                 should_defer=should_defer,
                 now=now,
                 groups=initial_groups,
+                full_power=full_power,
             )
         )
 
@@ -755,6 +708,33 @@ def _register_services(hass: HomeAssistant) -> None:
             _session_data_from_charge_state(dd.smart_charge_state),
         )
         await _maybe_start_realtime_ws(hass)
+
+    async def handle_smart_charge(call: ServiceCall) -> None:
+        start_time_val: datetime.time = call.data["start_time"]
+        end_time_val: datetime.time = call.data["end_time"]
+        max_power: int | None = call.data.get("power")
+        target_soc: int = call.data["target_soc"]
+        force: bool = call.data.get("replace_conflicts", False)
+
+        start, end = _resolve_start_end_explicit(start_time_val, end_time_val)
+
+        _LOGGER.info(
+            "Smart charge %02d:%02d - %02d:%02d (power=%s, target_soc=%d%%)",
+            start.hour,
+            start.minute,
+            end.hour,
+            end.minute,
+            f"{max_power}W" if max_power else "max",
+            target_soc,
+        )
+
+        await _do_smart_charge(
+            start=start,
+            end=end,
+            target_soc=target_soc,
+            max_power=max_power,
+            replace_conflicts=force,
+        )
 
     hass.services.async_register(
         DOMAIN,

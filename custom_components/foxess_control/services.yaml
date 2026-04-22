@@ -53,7 +53,7 @@ feedin:
 force_charge:
   name: Force charge
   description: >-
-    Charge the battery for a set duration, optionally at a specific time and power limit. The inverter automatically reverts to self-use when the window ends.
+    Charge the battery at maximum inverter power for a set duration. Uses the smart session infrastructure for monitoring, circuit breaker, and restart recovery. The inverter automatically reverts to self-use when the window ends or the battery reaches 100%.
   fields:
     duration:
       name: Duration
@@ -61,14 +61,6 @@ force_charge:
       required: true
       selector:
         duration:
-    power:
-      name: Power limit
-      description: >-
-        Charge power limit in watts. Defaults to inverter rated power if not set.
-      selector:
-        number:
-          min: 100
-          unit_of_measurement: W
     start_time:
       name: Start time
       description: >-
@@ -87,7 +79,7 @@ force_charge:
 force_discharge:
   name: Force discharge
   description: >-
-    Discharge the battery for a set duration, optionally at a specific time and power limit. The inverter automatically reverts to self-use when the window ends.
+    Discharge the battery at maximum inverter power for a set duration. Uses the smart session infrastructure for monitoring, circuit breaker, and restart recovery. The inverter automatically reverts to self-use when the window ends or the battery reaches minimum SoC.
   fields:
     duration:
       name: Duration
@@ -95,14 +87,6 @@ force_discharge:
       required: true
       selector:
         duration:
-    power:
-      name: Power limit
-      description: >-
-        Discharge power limit in watts. Defaults to inverter rated power if not set.
-      selector:
-        number:
-          min: 100
-          unit_of_measurement: W
     start_time:
       name: Start time
       description: >-

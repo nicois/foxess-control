@@ -65,6 +65,7 @@ class ChargeSessionState(TypedDict, total=False):
     soc_above_target_count: int
     consecutive_error_count: int
     taper_tick: int
+    full_power: bool
 
 
 class DischargeSessionState(TypedDict, total=False):
@@ -95,6 +96,7 @@ class DischargeSessionState(TypedDict, total=False):
     taper_tick: int
     target_power_w: int
     schedule_horizon: str | None
+    full_power: bool
 
 
 def create_charge_session(
@@ -113,6 +115,7 @@ def create_charge_session(
     should_defer: bool,
     now: datetime.datetime,
     groups: list[Any] | None = None,
+    full_power: bool = False,
 ) -> ChargeSessionState:
     """Build a fully-initialized charge session state dict."""
     return ChargeSessionState(
@@ -141,6 +144,7 @@ def create_charge_session(
         force=force,
         soc_unavailable_count=0,
         start_soc=current_soc,
+        full_power=full_power,
     )
 
 
@@ -161,6 +165,7 @@ def create_discharge_session(
     feedin_energy_limit: float | None = None,
     schedule_horizon: str | None = None,
     groups: list[Any] | None = None,
+    full_power: bool = False,
 ) -> DischargeSessionState:
     """Build a fully-initialized discharge session state dict."""
     return DischargeSessionState(
@@ -184,4 +189,5 @@ def create_discharge_session(
         discharging_started_at=None if should_defer else now,
         consumption_peak_kw=max(0.0, net_consumption),
         schedule_horizon=schedule_horizon,
+        full_power=full_power,
     )

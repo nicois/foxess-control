@@ -77,7 +77,6 @@ SCHEMA_CLEAR_OVERRIDES = vol.Schema({vol.Optional("mode"): vol.In(VALID_MODES)})
 SCHEMA_FORCE_CHARGE = vol.Schema(
     {
         vol.Required("duration"): cv.time_period,
-        vol.Optional("power"): vol.All(int, vol.Range(min=100)),
         vol.Optional("start_time"): cv.time,
     },
     extra=vol.ALLOW_EXTRA,
@@ -86,7 +85,6 @@ SCHEMA_FORCE_CHARGE = vol.Schema(
 SCHEMA_FORCE_DISCHARGE = vol.Schema(
     {
         vol.Required("duration"): cv.time_period,
-        vol.Optional("power"): vol.All(int, vol.Range(min=100)),
         vol.Optional("start_time"): cv.time,
     },
     extra=vol.ALLOW_EXTRA,
@@ -240,42 +238,36 @@ def register_services(
 
     async def handle_force_charge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
-        power: int | None = call.data.get("power")
         start_time: datetime.time | None = call.data.get("start_time")
         start, end = resolve_start_end(duration, start_time)
 
         _LOGGER.info(
-            "Force charge %02d:%02d - %02d:%02d (power=%s)",
+            "Force charge %02d:%02d - %02d:%02d (full power)",
             start.hour,
             start.minute,
             end.hour,
             end.minute,
-            f"{power}W" if power else "max",
         )
         cancel_smart_charge(hass, domain)
-        await adapter.apply_mode(hass, WorkMode.FORCE_CHARGE, power)
+        await adapter.apply_mode(hass, WorkMode.FORCE_CHARGE)
 
     async def handle_force_discharge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
-        power: int | None = call.data.get("power")
         start_time: datetime.time | None = call.data.get("start_time")
         start, end = resolve_start_end(duration, start_time)
 
         _LOGGER.info(
-            "Force discharge %02d:%02d - %02d:%02d (power=%s)",
+            "Force discharge %02d:%02d - %02d:%02d (full power)",
             start.hour,
             start.minute,
             end.hour,
             end.minute,
-            f"{power}W" if power else "max",
         )
         cancel_smart_discharge(hass, domain)
         api_min_soc = int(
             _get_entry_option(hass, domain, CONF_API_MIN_SOC, DEFAULT_API_MIN_SOC)
         )
-        await adapter.apply_mode(
-            hass, WorkMode.FORCE_DISCHARGE, power, fd_soc=api_min_soc
-        )
+        await adapter.apply_mode(hass, WorkMode.FORCE_DISCHARGE, fd_soc=api_min_soc)
 
     async def handle_feedin(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]

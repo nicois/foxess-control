@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any
 from .smart_battery.domain_data import EntryData, SmartBatteryDomainData
 
 if TYPE_CHECKING:
-    import asyncio
     from collections.abc import Callable, Coroutine
 
     from .foxess import FoxESSRealtimeWS, FoxESSWebSession
@@ -119,11 +118,6 @@ class FoxESSControlData(SmartBatteryDomainData):
     ws_mode: str = ""
     ws_discharge_callback: Callable[..., Any] | None = None
     ws_last_trigger: float = 0.0
-
-    # Force operation tracking
-    force_op_timer: asyncio.TimerHandle | None = None
-    force_op_start_timer: asyncio.TimerHandle | None = None
-    force_op_end: Any = None
 
     # Session logging
     session_log_filter: Any = None
