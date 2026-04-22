@@ -1,8 +1,9 @@
 # Changelog
 
-## 1.0.9-beta.1
+## 1.0.9-beta.2
 
 ### Fixed
+- **WebSocket connected before discharge window opened**: calling `smart_discharge` (or `smart_charge`) before the window start time caused WebSocket to connect immediately during the "scheduled" phase. WS now waits until the window actually opens. Also fixed the same issue for charge sessions in `smart_sessions` mode.
 - **Discharge deferred countdown not shown on card**: the badge next to "Discharge Deferred" showed a bare duration (e.g. "2h 15m") without indicating it was a countdown to discharge start. Now shows "discharges in 2h 15m" (localised in all 10 languages).
 
 ## 1.0.8
