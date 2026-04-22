@@ -45,6 +45,33 @@ def pytest_configure(config: Any) -> None:
     logging.getLogger("e2e.timing").addHandler(handler)
 
 
+# Invalid connection_mode + data_source combinations.
+# Deselecting at collection time avoids fixture setup (including the
+# expensive page/container fixtures) for combos that would be skipped
+# anyway.  Without this, the page fixture's wait_for_function can
+# time out under CI load before the data_source fixture's pytest.skip()
+# gets a chance to execute — causing spurious ERRORs.
+_INVALID_COMBOS = {"entity-api", "entity-ws", "cloud-entity"}
+
+
+def pytest_collection_modifyitems(
+    config: Any,  # noqa: ARG001
+    items: list[Any],
+) -> None:
+    """Deselect tests with invalid connection_mode + data_source combos."""
+    keep: list[Any] = []
+    for item in items:
+        # Node IDs end with e.g. [entity-ws] or [cloud-api].
+        # Only filter items that have a two-part parametrisation matching
+        # the connection_mode-data_source pattern.
+        node_id = item.nodeid
+        bracket = node_id.rsplit("[", 1)[-1].rstrip("]") if "[" in node_id else ""
+        if bracket in _INVALID_COMBOS:
+            continue
+        keep.append(item)
+    items[:] = keep
+
+
 def pytest_runtest_logreport(report: Any) -> None:
     """Collect test durations (works on xdist controller)."""
     if report.when == "call":
@@ -529,7 +556,9 @@ def data_source(
     """Control the active data source for the test.
 
     Valid combinations: cloud → [api, ws], entity → [entity].
-    Invalid cross-products are skipped at runtime.
+    Invalid cross-products are deselected at collection time by
+    pytest_collection_modifyitems (see _INVALID_COMBOS).  The runtime
+    guards below are kept as a safety net.
     """
     mode: str = request.param
     if connection_mode == "entity" and mode != "entity":
