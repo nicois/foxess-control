@@ -150,8 +150,10 @@ the service call runs.
 **Traces**: C-001, D-002;
 `tests/test_smart_battery_algorithms.py::TestDischargePowerFeedinConstraint`,
 `tests/test_smart_battery_algorithms.py::TestCalculateDischargeDeferredStart::test_tight_window_feedin_does_not_over_defer`,
+`tests/test_smart_battery_algorithms.py::TestCalculateDischargeDeferredStart::test_large_battery_feedin_defers_by_feedin_deadline`,
 `tests/test_services.py::TestFeedinEnergyLimit`,
-`tests/test_services.py::test_feedin_baseline_not_captured_at_session_start`
+`tests/test_services.py::test_feedin_baseline_not_captured_at_session_start`,
+`tests/e2e/test_e2e.py::TestFeedinPacing::test_feedin_power_adjusts_over_time`
 
 ### D-023: Progressive schedule extension (safe horizon)
 **Decision**: Instead of setting the inverter schedule end time to the

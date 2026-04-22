@@ -1,9 +1,10 @@
 # Changelog
 
-## 1.0.9-beta.3
+## 1.0.9-beta.4
 
 ### Fixed
 - **Feedin-limited discharge started immediately instead of deferring**: large batteries with small feedin limits (e.g. 42 kWh battery, 1 kWh feedin, 51 min window) started forced discharge immediately at low paced power (~1.5 kW) for the entire window, creating sustained grid import risk. Now defers until the feedin deadline (~7 min before end) and discharges at full power, maximising headroom above household load (D-005, C-001).
+- **E2E feedin pacing test timed out after deferral fix**: the feedin pacing E2E test used a 30-min window that resulted in a long deferral under the corrected algorithm, exceeding the 120s test timeout. Reduced window to 10 min and updated assertions to match the new deferral behaviour.
 
 ## 1.0.9-beta.2
 
