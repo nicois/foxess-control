@@ -7,9 +7,9 @@ traces_down: [../06-tests.md]
 ---
 # Lovelace Card Design Decisions
 
-Two custom cards: `foxess-overview-card` (energy flow visualisation,
-vanilla HTMLElement) and `foxess-control-card` (session management UI,
-LitElement). Both use shadow DOM, loaded as static JS resources.
+Two custom cards: `foxess-overview-card` (energy flow visualisation)
+and `foxess-control-card` (session management UI). Both are vanilla
+Web Components using shadow DOM, loaded as static JS resources.
 
 ### D-035: Click-to-history on overview card nodes
 
@@ -118,41 +118,31 @@ Default `true` preserves existing behaviour.
 
 **Traces**: C-020 (operational transparency — user controls what UI shows)
 
-### D-040: LitElement for control card
+### D-040: Targeted DOM updates during form display
 
-**Decision**: `foxess-control-card` uses LitElement (extracted from HA's
-global scope at runtime) instead of vanilla HTMLElement. The `render()`
-method returns `html` tagged templates; Lit's DOM diffing preserves
-existing elements across re-renders. Form inputs use `.value=` property
-bindings with `@input` handlers writing to a non-reactive `_formValues`
-map.
+**Decision**: When the form overlay is present in the shadow DOM,
+`_render()` updates only the header (`outerHTML`), content (`innerHTML`),
+and action-row (`innerHTML`) elements. The form overlay DOM is left
+entirely untouched. Detection uses `existing.querySelector(".form-overlay")`
+rather than the `_showForm` flag, because on the initial form-opening
+render the flag is `true` but the overlay doesn't exist yet.
 
 **Context**: The `set hass()` property fires every ~5 seconds with
-WebSocket data. The previous vanilla implementation did
-`shadowRoot.innerHTML = ...` on every call, destroying the entire DOM
-including open native time pickers. Users typing in the form had their
-input cleared and picker popups closed mid-interaction. Targeted DOM
-update patches and value snapshot/restore workarounds were brittle and
-grew in complexity.
+WebSocket data. The previous implementation did `shadowRoot.innerHTML = ...`
+on every call, destroying the entire DOM including open native time
+pickers (`<input type="time">`). Users typing in the form had their
+input cleared and picker popups closed mid-interaction.
 
-**Rationale**: LitElement's DOM diffing eliminates the entire class of
-form value preservation problems — elements are reused, not recreated,
-so focus, selection state, and native picker popups survive
-automatically. HA already ships LitElement, so there is no new
-dependency. Extracting `LitBase` from HA's global scope
-(`Object.getPrototypeOf(customElements.get("ha-panel-lovelace"))`)
-avoids bundling a separate Lit copy. `_formValues` is deliberately
-non-reactive (plain object, not a reactive property) so form input
-changes don't trigger re-renders.
+**Rationale**: Shadow DOM is designed for encapsulation, but `innerHTML`
+replacement discards it entirely. Targeted updates preserve the form
+element identity (same DOM nodes), so focus, selection state, and native
+picker popups survive. The `_formValues` input listener remains as a
+safety net for form submission, but is no longer needed for value
+restoration after re-render.
 
-**Alternatives considered**:
-- Targeted DOM updates (D-040 prior revision) — worked but required
-  fragile querySelector-based patching and couldn't handle all edge
-  cases (e.g. picker popup state).
-- Value snapshot/restore before innerHTML — couldn't restore native
-  picker popup state programmatically.
-- Bundling Lit as a dependency — rejected because HA already provides
-  it and bundling would increase card size and create version conflicts.
+**Alternatives considered**: Saving and restoring form values after
+full re-render — rejected because native time picker popup state cannot
+be saved/restored programmatically.
 
 **Traces**: C-020 (operational transparency — user input must not be
 lost during background updates)

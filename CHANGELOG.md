@@ -2,9 +2,6 @@
 
 ## 1.0.9
 
-### Changed
-- **Control card migrated to LitElement**: `foxess-control-card` now uses LitElement (extracted from HA's global scope) instead of vanilla HTMLElement with `innerHTML` rendering. Lit's DOM diffing preserves form elements across re-renders, eliminating input value loss, picker popup dismissal, and the need for snapshot/restore workarounds (D-040).
-
 ### Fixed
 - **Feedin-limited discharge started immediately instead of deferring**: large batteries with small feedin limits (e.g. 42 kWh battery, 1 kWh feedin, 51 min window) started forced discharge immediately at low paced power (~1.5 kW) for the entire window, creating sustained grid import risk. Now defers until the feedin deadline and discharges at full power, maximising headroom above household load (D-005, C-001).
 - **Discharge session lost after HA restart during deferred phase**: when HA restarted before a scheduled discharge window opened, session recovery looked for a ForceDischarge schedule on the inverter. Since the schedule isn't written until the window opens, recovery found nothing and discarded the valid session. Now correctly re-creates the session in deferred state, matching charge recovery behaviour (C-024, D-002).
