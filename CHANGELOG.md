@@ -1,49 +1,24 @@
 # Changelog
 
-## 1.0.8-beta.13
-
-### Changed
-- **Force operations unified with smart sessions**: `force_charge` and `force_discharge` now create smart sessions internally with a `full_power` flag, gaining circuit breaker protection, restart recovery, UI state, and sensor visibility for free. The `power` parameter has been removed — force operations always charge/discharge at maximum inverter power.
-
-### Fixed
-- **Force operation premature WebSocket connection**: force ops opened the WS connection at service call time, before the schedule was applied. The WS now starts through the smart session listener, matching the timing of smart operations.
-
-### Removed
-- **Force operation WS timer infrastructure**: dedicated `_start_force_op_ws`, `force_op_timer`, `force_op_start_timer`, and `force_op_end` fields removed — smart session lifecycle manages WS connections.
-
-## 1.0.8-beta.12
+## 1.0.8
 
 ### Added
-- **Entity-mode dashboard support**: four new optional entity mappings — battery charge power, battery discharge power, grid consumption power, and grid feed-in power — populate the overview card's grid and battery sections in entity/modbus mode. Previously only SoC, solar, house load, and cumulative feed-in energy were mapped, leaving the overview card's grid flow and charge/discharge rate sections empty.
-- **Automatic unit conversion in entity mode**: the entity coordinator now reads `unit_of_measurement` from each source entity and converts to the expected coordinator unit (e.g. W→kW, Wh→kWh) using HA's built-in `PowerConverter`, `EnergyConverter`, and `TemperatureConverter`. Previously, raw values were passed through without conversion, causing incorrect readings when source entities used different units than the cloud API.
+- **Entity-mode dashboard support**: four new optional entity mappings — battery charge power, battery discharge power, grid consumption power, and grid feed-in power — populate the overview card's grid and battery sections in entity/modbus mode.
+- **Automatic unit conversion in entity mode**: the entity coordinator reads `unit_of_measurement` from each source entity and converts to the expected coordinator unit (e.g. W→kW, Wh→kWh) using HA's built-in `PowerConverter`, `EnergyConverter`, and `TemperatureConverter`.
+
+### Changed
+- **Force operations unified with smart sessions**: `force_charge` and `force_discharge` now create smart sessions internally with a `full_power` flag, gaining circuit breaker protection, restart recovery, UI state, and sensor visibility. The `power` parameter has been removed — force operations always charge/discharge at maximum inverter power.
 
 ### Fixed
-- **Feedin deferred start over-deferring in tight windows**: when the discharge window was short enough that the full SoC drain already exceeded it, the feedin energy cap incorrectly shortened the estimated forced-discharge time, pushing the deferred start far into the window. The session would stay in `discharge_deferred` instead of transitioning to `discharging`. Now skips the feedin cap when the window is already tight, so discharge starts immediately and feedin pacing spreads the export across the available time.
-
-## 1.0.8-beta.11
-
-### Fixed
-- **E2E `_find_card` flake under CI load**: `_find_card` now retries when a HA navigation (WebSocket reconnect, dashboard auto-refresh) destroys the JS execution context mid-poll, instead of returning `False` immediately. Replaced hardcoded 2s sleep in `page` fixture with a deterministic wait for `ha-panel-lovelace` in the shadow DOM.
+- **Grid direction swap with external generation** (issue #3): installations with additional solar inverters not visible to FoxESS could show grid consumption and feed-in swapped. Now falls back to `gridStatus` when the power balance diverges >3× from the actual grid reading.
+- **Discharge deferred start with feedin target**: the feedin energy cap caused incorrect deferred start timing in two scenarios — starting too early (full SoC energy used instead of feedin drain time) and staying deferred too long in tight windows (feedin cap over-deferring when the SoC deadline already exceeded the window).
+- **Force operation premature WebSocket connection**: force ops opened the WS connection at service call time, before the schedule was applied. Now starts through the smart session listener.
+- **`clear_overrides` 30s timeout**: WS linger dispatched as background task to avoid blocking the service call.
 
 ### Improved
-- **E2E timing-based worker balancing**: each E2E run now collects per-test timings from JUnit XML and persists them as an artifact. The next run uses greedy bin-packing (slowest-first) to balance workers by estimated time instead of splitting by count, reducing wall-clock time.
-- **E2E cancel in-progress runs**: new pushes to the same branch cancel any still-running E2E workflow.
-
-## 1.0.8-beta.10
-
-### Fixed
-- **Discharge deferred start too early with feedin target**: when a feed-in energy limit was set (e.g. 1 kWh), the deferred start calculation used the full SoC→min_soc energy to compute the SoC deadline, causing forced discharge to start far too early. Now caps the SoC deadline at the feedin export time so the session defers correctly (e.g. ~13 min before window end instead of ~67 min).
-
-## 1.0.8-beta.9
-
-### Fixed
-- **Grid direction swap with external generation** (issue #3): installations with additional solar inverters not visible to FoxESS (e.g. separate grid-tied panels) could show grid consumption and feed-in swapped. The WS power balance assumed FoxESS sees all generation; when it doesn't, the predicted magnitude diverges from the actual grid reading. Now falls back to `gridStatus` when the divergence exceeds 3×.
-
-## 1.0.8-beta.8
-
-### Improved
-- **WebSocket plausibility filter**: anomalous WS messages (power values diverging >10× from the last accepted value) are now filtered at the WS layer (`realtime_ws.py`) rather than the coordinator. Keeps data-source-specific logic out of the brand-agnostic coordinator.
-- **Architectural lint enforcement**: semgrep rules and pre-commit hooks now enforce module size budget (2000 lines), typed config access (`IntegrationConfig`), typed domain data access (`_dd(hass)`), and brand-import boundaries. Prevents recurrence of the tech debt patterns addressed in beta.4.
+- **WebSocket plausibility filter**: anomalous WS messages (power values diverging >10× from the last accepted value) now filtered at the WS layer rather than the coordinator. Keeps data-source-specific logic out of the brand-agnostic coordinator.
+- **Architectural lint enforcement**: semgrep rules and pre-commit hooks enforce module size budget (2000 lines), typed config access (`IntegrationConfig`), typed domain data access (`_dd(hass)`), and brand-import boundaries.
+- **E2E timing-based worker balancing**: greedy bin-packing distributes tests across CI workers by estimated time, and new pushes cancel in-progress E2E workflows.
 
 ## 1.0.8-beta.7
 
