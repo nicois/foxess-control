@@ -917,12 +917,26 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
     if DOMAIN not in hass.data:
         return False
     dd = _dd(hass)
+    now = dt_util.now()
 
     # Active forced discharge — only when power is paced below max,
     # which is when house load could exceed discharge power and cause
     # grid import.  At full power there is plenty of headroom.
     ds = dd.smart_discharge_state
     if ds is not None and ds.get("discharging_started", False):
+        # Block WS during the scheduled phase (service called before
+        # window opens).  discharging_started is True for any non-deferred
+        # session, but the window hasn't actually begun until now >= start.
+        ds_start = ds.get("start")
+        if ds_start is not None and now < ds_start:
+            _LOGGER.debug(
+                "WS check: discharge scheduled but window not yet open "
+                "(now=%s, start=%s)",
+                now,
+                ds_start,
+            )
+            return False
+
         min_soc = ds.get("min_soc", 0)
         last_pw = ds.get("last_power_w", 0)
         max_pw = ds.get("max_power_w", 0)
@@ -943,6 +957,17 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
         return False
 
     cs = dd.smart_charge_state
+    # Also check charge scheduled phase: block WS before charge window opens.
+    if cs is not None and cs.get("charging_started", False):
+        cs_start = cs.get("start")
+        if cs_start is not None and now < cs_start:
+            _LOGGER.debug(
+                "WS check: charge scheduled but window not yet open (now=%s, start=%s)",
+                now,
+                cs_start,
+            )
+            return False
+
     return (ds is not None and ds.get("discharging_started", False)) or (
         cs is not None and cs.get("charging_started", False)
     )

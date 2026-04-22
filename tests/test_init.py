@@ -24,9 +24,21 @@ from custom_components.foxess_control import (
     _resolve_start_end,
     _resolve_start_end_explicit,
     _sanitize_group,
+    _should_start_realtime_ws,
     _should_suspend_discharge,
 )
-from custom_components.foxess_control.const import DOMAIN
+from custom_components.foxess_control.const import (
+    CONF_WEB_USERNAME,
+    CONF_WS_MODE,
+    DOMAIN,
+    WS_MODE_AUTO,
+    WS_MODE_SMART_SESSIONS,
+)
+from custom_components.foxess_control.domain_data import (
+    FoxESSControlData,
+    FoxESSEntryData,
+    build_config,
+)
 from custom_components.foxess_control.foxess.inverter import (
     Inverter,
     ScheduleGroup,
@@ -1750,3 +1762,191 @@ class TestShouldSuspendDischarge:
     def test_negative_consumption_never_suspends(self) -> None:
         # Negative consumption (solar surplus) — battery is charging
         assert not _should_suspend_discharge(50.0, 30, 42.0, 2.0, -3.0)
+
+
+def _make_ws_hass(
+    ws_mode: str = WS_MODE_AUTO,
+    entity_mode: bool = False,
+) -> MagicMock:
+    """Create a mock hass suitable for _should_start_realtime_ws tests.
+
+    Sets up FoxESSControlData with web credentials and the given ws_mode,
+    so the function gets past the early-return guards.
+    """
+    hass = MagicMock()
+
+    inv = MagicMock(spec=Inverter)
+    inv.max_power_w = 10500
+
+    dd = FoxESSControlData()
+    dd.entries["entry1"] = FoxESSEntryData(inverter=inv)
+    dd.config = build_config(
+        {CONF_WS_MODE: ws_mode},
+        inverter_max_power_w=inv.max_power_w,
+    )
+    # Override entity_mode if requested
+    if entity_mode:
+        object.__setattr__(dd.config, "entity_mode", True)
+    hass.data = {DOMAIN: dd}
+
+    # Mock config entry with web credentials
+    mock_entry = MagicMock()
+    mock_entry.data = {CONF_WEB_USERNAME: "user@example.com"}
+    hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+    return hass
+
+
+class TestShouldStartRealtimeWs:
+    """Tests for _should_start_realtime_ws WebSocket guard function.
+
+    Verifies the function correctly blocks WS during the scheduled phase
+    (service called before window opens, now < start) and allows it once
+    the window actually starts.
+    """
+
+    def test_discharge_scheduled_phase_blocks_ws_auto(self) -> None:
+        """WS must NOT connect during discharge_scheduled phase (auto mode).
+
+        Scenario: user calls smart_discharge at 14:25 for a 14:28-14:35
+        window. should_defer=False (not deferral), so discharging_started=True.
+        But now < start, so the sensor shows 'discharge_scheduled'.
+        WS should NOT connect until 14:28.
+        """
+        hass = _make_ws_hass(ws_mode=WS_MODE_AUTO)
+        dd: FoxESSControlData = hass.data[DOMAIN]
+
+        start = datetime.datetime(2026, 4, 22, 14, 28, 0)
+        dd.smart_discharge_state = dict(
+            discharging_started=True,
+            start=start,
+            end=datetime.datetime(2026, 4, 22, 14, 35, 0),
+            min_soc=30,
+            last_power_w=5000,
+            max_power_w=10500,
+        )
+
+        # now=14:25, before window opens
+        now = datetime.datetime(2026, 4, 22, 14, 25, 0)
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is False
+
+    def test_discharge_scheduled_phase_blocks_ws_smart_sessions(self) -> None:
+        """WS must NOT connect during scheduled phase (smart_sessions)."""
+        hass = _make_ws_hass(ws_mode=WS_MODE_SMART_SESSIONS)
+        dd: FoxESSControlData = hass.data[DOMAIN]
+
+        start = datetime.datetime(2026, 4, 22, 14, 28, 0)
+        dd.smart_discharge_state = dict(
+            discharging_started=True,
+            start=start,
+            end=datetime.datetime(2026, 4, 22, 14, 35, 0),
+            min_soc=30,
+            last_power_w=5000,
+            max_power_w=10500,
+        )
+
+        now = datetime.datetime(2026, 4, 22, 14, 25, 0)
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is False
+
+    def test_discharge_window_started_allows_ws_auto(self) -> None:
+        """WS SHOULD connect once window has started (auto, paced)."""
+        hass = _make_ws_hass(ws_mode=WS_MODE_AUTO)
+        dd: FoxESSControlData = hass.data[DOMAIN]
+
+        start = datetime.datetime(2026, 4, 22, 14, 28, 0)
+        dd.smart_discharge_state = dict(
+            discharging_started=True,
+            start=start,
+            end=datetime.datetime(2026, 4, 22, 14, 35, 0),
+            min_soc=30,
+            last_power_w=5000,
+            max_power_w=10500,
+        )
+
+        # now=14:28, exactly at window start
+        now = datetime.datetime(2026, 4, 22, 14, 28, 0)
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is True
+
+    def test_discharge_window_started_allows_ws_smart_sessions(self) -> None:
+        """WS SHOULD connect once window has started (smart_sessions)."""
+        hass = _make_ws_hass(ws_mode=WS_MODE_SMART_SESSIONS)
+        dd: FoxESSControlData = hass.data[DOMAIN]
+
+        start = datetime.datetime(2026, 4, 22, 14, 28, 0)
+        dd.smart_discharge_state = dict(
+            discharging_started=True,
+            start=start,
+            end=datetime.datetime(2026, 4, 22, 14, 35, 0),
+            min_soc=30,
+            last_power_w=5000,
+            max_power_w=10500,
+        )
+
+        now = datetime.datetime(2026, 4, 22, 14, 28, 0)
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is True
+
+    def test_deferred_discharge_blocks_ws(self) -> None:
+        """WS must NOT connect for deferred sessions (discharging_started=False)."""
+        hass = _make_ws_hass(ws_mode=WS_MODE_AUTO)
+        dd: FoxESSControlData = hass.data[DOMAIN]
+
+        dd.smart_discharge_state = dict(
+            discharging_started=False,
+            start=datetime.datetime(2026, 4, 22, 14, 28, 0),
+            end=datetime.datetime(2026, 4, 22, 14, 35, 0),
+            min_soc=30,
+            last_power_w=5000,
+            max_power_w=10500,
+        )
+
+        now = datetime.datetime(2026, 4, 22, 14, 25, 0)
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is False
+
+    def test_charge_scheduled_phase_blocks_ws_smart_sessions(self) -> None:
+        """WS must NOT connect during charge scheduled phase (before window).
+
+        Charge sessions can also be created before the window opens.
+        The same now < start guard must apply.
+        """
+        hass = _make_ws_hass(ws_mode=WS_MODE_SMART_SESSIONS)
+        dd: FoxESSControlData = hass.data[DOMAIN]
+
+        start = datetime.datetime(2026, 4, 22, 2, 0, 0)
+        dd.smart_charge_state = dict(
+            charging_started=True,
+            start=start,
+            end=datetime.datetime(2026, 4, 22, 5, 0, 0),
+            target_soc=100,
+            last_power_w=5000,
+            max_power_w=10500,
+        )
+
+        # now=1:55, before charge window opens at 2:00
+        now = datetime.datetime(2026, 4, 22, 1, 55, 0)
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is False
+
+    def test_charge_window_started_allows_ws_smart_sessions(self) -> None:
+        """WS SHOULD connect once charge window has started (smart_sessions)."""
+        hass = _make_ws_hass(ws_mode=WS_MODE_SMART_SESSIONS)
+        dd: FoxESSControlData = hass.data[DOMAIN]
+
+        start = datetime.datetime(2026, 4, 22, 2, 0, 0)
+        dd.smart_charge_state = dict(
+            charging_started=True,
+            start=start,
+            end=datetime.datetime(2026, 4, 22, 5, 0, 0),
+            target_soc=100,
+            last_power_w=5000,
+            max_power_w=10500,
+        )
+
+        # now=2:00, at window start
+        now = datetime.datetime(2026, 4, 22, 2, 0, 0)
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is True
