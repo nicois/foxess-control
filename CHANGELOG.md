@@ -6,6 +6,9 @@
 - **Entity-mode dashboard support**: four new optional entity mappings — battery charge power, battery discharge power, grid consumption power, and grid feed-in power — populate the overview card's grid and battery sections in entity/modbus mode. Previously only SoC, solar, house load, and cumulative feed-in energy were mapped, leaving the overview card's grid flow and charge/discharge rate sections empty.
 - **Automatic unit conversion in entity mode**: the entity coordinator now reads `unit_of_measurement` from each source entity and converts to the expected coordinator unit (e.g. W→kW, Wh→kWh) using HA's built-in `PowerConverter`, `EnergyConverter`, and `TemperatureConverter`. Previously, raw values were passed through without conversion, causing incorrect readings when source entities used different units than the cloud API.
 
+### Fixed
+- **Feedin deferred start over-deferring in tight windows**: when the discharge window was short enough that the full SoC drain already exceeded it, the feedin energy cap incorrectly shortened the estimated forced-discharge time, pushing the deferred start far into the window. The session would stay in `discharge_deferred` instead of transitioning to `discharging`. Now skips the feedin cap when the window is already tight, so discharge starts immediately and feedin pacing spreads the export across the available time.
+
 ## 1.0.8-beta.11
 
 ### Fixed
