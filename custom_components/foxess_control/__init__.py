@@ -585,7 +585,7 @@ async def _recover_discharge_session(
         return True
     start, end, has_group = result
 
-    if has_group:
+    if has_group or not discharge_data.get("discharging_started", False):
         _LOGGER.info(
             "Smart discharge: resuming session %02d:%02d-%02d:%02d (min_soc=%d%%)",
             discharge_data["start_hour"],
@@ -601,7 +601,9 @@ async def _recover_discharge_session(
         min_soc = discharge_data.get("min_soc", 10)
         max_power_w = discharge_data.get("max_power_w", recovered_power)
 
-        if is_full_power:
+        if not discharge_data.get("discharging_started", False):
+            recovered_power = 0
+        elif is_full_power:
             recovered_power = max_power_w
         elif pacing_enabled and battery_capacity_kwh > 0:
             current_soc = _get_current_soc(hass)

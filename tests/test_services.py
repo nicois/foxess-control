@@ -4285,6 +4285,167 @@ class TestRecoverSessions:
         assert hass.data[DOMAIN].smart_discharge_state is None
         store.async_save.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_deferred_discharge_session_resumed(self) -> None:
+        """A deferred discharge session (before window opens) resumes after restart.
+
+        Production bug: HA restart at 07:57 with window 07:59-10:01. Session was
+        in discharge_scheduled phase (discharging_started=False). Recovery looked
+        for a ForceDischarge group on the inverter, found none (schedule not
+        written until window opens), and discarded the valid session.
+        """
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        # No schedule on inverter — deferred start hasn't written one yet
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 80.0},
+        )
+        store = hass.data[DOMAIN].store
+        store.async_load = AsyncMock(
+            return_value={
+                "smart_discharge": {
+                    "date": "2026-04-22",
+                    "start_hour": 7,
+                    "start_minute": 59,
+                    "end_hour": 10,
+                    "end_minute": 1,
+                    "min_soc": 10,
+                    "last_power_w": 0,
+                    "discharging_started": False,
+                    "battery_capacity_kwh": 10.0,
+                    "max_power_w": 10500,
+                }
+            }
+        )
+
+        from custom_components.foxess_control import _recover_sessions
+
+        with (
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 22, 7, 57, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            await _recover_sessions(hass, inv)
+
+        # Session MUST be recovered, not discarded
+        state = hass.data[DOMAIN].smart_discharge_state
+        assert state is not None, (
+            "Deferred discharge session (discharging_started=False) should be "
+            "recovered even when no ForceDischarge group exists on the inverter"
+        )
+        assert state["discharging_started"] is False
+        assert state["last_power_w"] == 0
+        assert state["min_soc"] == 10
+        unsubs = hass.data[DOMAIN].smart_discharge_unsubs
+        assert len(unsubs) == 2
+
+    @pytest.mark.asyncio
+    async def test_active_discharge_no_group_discards(self) -> None:
+        """Active discharge (discharging_started=True) with no group is discarded.
+
+        When discharging has started (schedule was written) but the group is no
+        longer present on the inverter, the session should be discarded — something
+        external cleared the schedule.
+        """
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 50.0},
+        )
+        store = hass.data[DOMAIN].store
+        store.async_load = AsyncMock(
+            return_value={
+                "smart_discharge": {
+                    "date": "2026-04-22",
+                    "start_hour": 8,
+                    "start_minute": 0,
+                    "end_hour": 10,
+                    "end_minute": 0,
+                    "min_soc": 10,
+                    "last_power_w": 5000,
+                    "discharging_started": True,
+                    "battery_capacity_kwh": 10.0,
+                    "max_power_w": 10500,
+                }
+            }
+        )
+
+        from custom_components.foxess_control import _recover_sessions
+
+        with patch(
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 22, 9, 0, 0),
+        ):
+            await _recover_sessions(hass, inv)
+
+        # Active session with no matching group should be discarded
+        assert hass.data[DOMAIN].smart_discharge_state is None
+        store.async_save.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_deferred_discharge_recovery_shows_zero_power(self) -> None:
+        """Recovered deferred discharge session should show last_power_w=0."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 90.0},
+        )
+        store = hass.data[DOMAIN].store
+        store.async_load = AsyncMock(
+            return_value={
+                "smart_discharge": {
+                    "date": "2026-04-22",
+                    "start_hour": 10,
+                    "start_minute": 0,
+                    "end_hour": 14,
+                    "end_minute": 0,
+                    "min_soc": 10,
+                    "last_power_w": 0,
+                    "discharging_started": False,
+                    "battery_capacity_kwh": 10.0,
+                    "max_power_w": 10500,
+                }
+            }
+        )
+
+        from custom_components.foxess_control import _recover_sessions
+
+        with (
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 22, 9, 30, 0),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
+                return_value=MagicMock(),
+            ),
+        ):
+            await _recover_sessions(hass, inv)
+
+        state = hass.data[DOMAIN].smart_discharge_state
+        assert state is not None
+        assert state["discharging_started"] is False
+        assert state["last_power_w"] == 0
+
 
 class TestSocStabilityCounters:
     """Tests for SoC stability counters (require 2 consecutive readings)."""
