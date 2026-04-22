@@ -448,21 +448,14 @@ function _getStrings(lang) {
 // -- LitElement bootstrap ----------------------------------------------------
 
 (async () => {
-  await customElements.whenDefined("ha-panel-lovelace");
-  const LitBase = Object.getPrototypeOf(
-    customElements.get("ha-panel-lovelace")
-  );
-  const { html, css, nothing } = LitBase.prototype.constructor;
+  const lit = await import("lit");
+  const { LitElement: LitBase, html, css, nothing } = lit;
 
-  // Try to get unsafeHTML from Lit's directives for translation strings
-  // that contain HTML (e.g. idle_hint with <b> tags).
   let unsafeHTML;
   try {
     const mod = await import("lit/directives/unsafe-html.js");
     unsafeHTML = mod.unsafeHTML;
   } catch {
-    // Fallback: render HTML string into a <span> via a simple directive-like
-    // function that returns a TemplateResult containing innerHTML.
     unsafeHTML = (str) => {
       const d = document.createElement("span");
       d.innerHTML = str;
