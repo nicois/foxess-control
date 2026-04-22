@@ -121,6 +121,10 @@
       <label>Peak decay / tick (60s) <span class="val" id="v-decay">0.85</span></label>
       <input type="range" id="decay" min="0.50" max="0.99" step="0.01" value="0.85">
     </div>
+    <div class="ctrl-group">
+      <label>Grid export limit <span class="val" id="v-exportLimit">5 kW</span></label>
+      <input type="range" id="exportLimit" min="0" max="30000" step="500" value="5000">
+    </div>
   </div>
 
   <h2 style="margin-top:14px">Session type</h2>
@@ -285,6 +289,7 @@ function P() {
     solarPeak: +document.getElementById('solarPeak').value,
     sunsetHour: +document.getElementById('sunsetHour').value,
     sessionMode: document.getElementById('sessionMode').value,
+    exportLimitW: +document.getElementById('exportLimit').value,
   };
 }
 
@@ -414,7 +419,9 @@ function calcDeferredStart(p, soc, remainTicks, consumption, peakCons, feedinRem
       // D-005: when feedin is the binding constraint, cap SoC deadline
       // by feedin drain time — session stops at feedin target, not min_soc
       if (feedinRemKwh != null && feedinRemKwh > 0) {
-        const feedinHrs = feedinRemKwh / eff;
+        let exportRate = eff;
+        if (p.exportLimitW > 0) exportRate = Math.min(exportRate, p.exportLimitW / 1000);
+        const feedinHrs = exportRate > 0 ? feedinRemKwh / exportRate : feedinRemKwh / eff;
         hrs = Math.min(hrs, feedinHrs);
       }
       socDL = remainTicks - hrs / (1 - p.headroom) * 3600 / TICK_S;
@@ -428,6 +435,7 @@ function calcDeferredStart(p, soc, remainTicks, consumption, peakCons, feedinRem
     let cons = Math.max(0, consumption);
     if (peakCons != null) cons = Math.max(cons, peakCons);
     let effExport = maxKw - cons;
+    if (p.exportLimitW > 0) effExport = Math.min(effExport, p.exportLimitW / 1000);
     if (effExport <= 0) effExport = maxKw * 0.1;
     const hrs = feedinRemKwh / effExport / (1 - feedinHeadroom);
     feedDL = remainTicks - hrs * 3600 / TICK_S;
@@ -451,6 +459,7 @@ function calcDischargePower(p, soc, remainH, consumption, peakCons, feedinRemKwh
   let energy = (soc - p.minSoc) / 100 * p.capKwh;
   if (energy <= 0) return 100;
   if (remainH <= 0) return p.maxPowerW;
+  if (p.exportLimitW > 0) return p.maxPowerW;
 
   const cons = Math.max(0, consumption);
   const peak = Math.max(cons, peakCons || 0);
@@ -671,6 +680,17 @@ function simulate(p, loadFn, solarFn, useOld) {
           if (expKw > 0) feedinKwh += expKw * tickH;
         }
       }
+    }
+
+    // Inverter firmware caps net grid export
+    if (p.exportLimitW > 0 && gridKw > p.exportLimitW / 1000) {
+      const excessKw = gridKw - p.exportLimitW / 1000;
+      // Reduce actual feedin by the excess that couldn't be exported
+      feedinKwh -= excessKw * tickH;
+      // Excess energy stays in battery
+      soc += (excessKw * tickH / p.capKwh) * 100;
+      dischW -= excessKw * 1000;
+      gridKw = p.exportLimitW / 1000;
     }
 
     if (gridKw < -0.01 && started) {
@@ -960,6 +980,8 @@ const presets = [
   { name: '14. Large bat + small feedin', soc: 98, load: 'steady', steadyKw: 0.2, capKwh: 42, maxPower: 10500, minSoc: 21, feedin: 1, wStart: 16, wEnd: 17, desc: 'Production bug: 42kWh battery, 1kWh feedin, 51min window — should defer not start immediately' },
   { name: '15. Force discharge', soc: 90, load: 'steady', steadyKw: 0.5, mode: 'force_discharge', desc: 'Max power discharge, no pacing or deferral' },
   { name: '16. Force charge', soc: 30, load: 'steady', steadyKw: 0.5, mode: 'force_charge', desc: 'Max power charge from grid' },
+  { name: '17. Export-limited', soc: 90, load: 'steady', steadyKw: 2, exportLimitW: 5000, desc: '5kW net export cap — firmware clamps grid export, deferral accounts for capped rate' },
+  { name: '18. No export limit', soc: 90, load: 'steady', steadyKw: 2, exportLimitW: 0, desc: 'No export limit — power pacing active, legacy behavior' },
 ];
 
 let activePreset = -1;
@@ -979,6 +1001,7 @@ function applyPreset(idx) {
   document.getElementById('wEnd').value = pr.wEnd || 20;
   document.getElementById('safety').value = 1.5;
   document.getElementById('decay').value = 0.85;
+  document.getElementById('exportLimit').value = pr.exportLimitW !== undefined ? pr.exportLimitW : 5000;
   document.getElementById('sessionMode').value = pr.mode || 'smart';
 
   // Taper
@@ -1043,6 +1066,8 @@ function updateLabels() {
   document.getElementById('v-wEnd').textContent = document.getElementById('wEnd').value + ':00';
   document.getElementById('v-safety').textContent = (+document.getElementById('safety').value).toFixed(1) + 'x';
   document.getElementById('v-decay').textContent = document.getElementById('decay').value;
+  const expLim = +document.getElementById('exportLimit').value;
+  document.getElementById('v-exportLimit').textContent = expLim === 0 ? 'None' : (expLim / 1000).toFixed(1) + ' kW';
   document.getElementById('v-steadyKw').textContent = document.getElementById('steadyKw').value + ' kW';
   document.getElementById('v-burstBase').textContent = document.getElementById('burstBase').value + ' kW';
   document.getElementById('v-burstSpike').textContent = document.getElementById('burstSpike').value + ' kW';
