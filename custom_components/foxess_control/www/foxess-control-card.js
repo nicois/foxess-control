@@ -1,5 +1,5 @@
 /**
- * FoxESS Control — custom Lovelace card.
+ * FoxESS Control — custom Lovelace card (LitElement).
  *
  * Renders smart charge / discharge status with a battery gauge
  * and progress bars showing time elapsed vs goal completion.
@@ -11,7 +11,7 @@
  *   # soc_entity: sensor.foxess_battery_soc
  */
 
-const CARD_VERSION = "1.5.2";
+const CARD_VERSION = "1.6.0";
 
 // -- i18n --------------------------------------------------------------------
 
@@ -445,729 +445,49 @@ function _getStrings(lang) {
   return TRANSLATIONS[lc] || TRANSLATIONS[lc.split("-")[0]] || TRANSLATIONS.en;
 }
 
-class FoxESSControlCard extends HTMLElement {
-  constructor() {
-    super();
-    this.attachShadow({ mode: "open" });
-    this._config = {};
-    this._hass = null;
-    this._expandedTips = new Set();
-    this._cancelConfirm = false;
-    this._cancelTimer = null;
-    this._formValues = { start: "", end: "", soc: "" };
-    this.shadowRoot.addEventListener("input", (e) => {
-      const input = e.target;
-      if (input.id === "form-start") this._formValues.start = input.value;
-      else if (input.id === "form-end") this._formValues.end = input.value;
-      else if (input.id === "form-soc") this._formValues.soc = input.value;
-    });
-    this.shadowRoot.addEventListener("click", (e) => {
-      const row = e.target.closest(".progress-row.has-tip");
-      if (row) {
-        const key = row.dataset.tipKey;
-        if (key) {
-          if (this._expandedTips.has(key)) {
-            this._expandedTips.delete(key);
-            row.classList.remove("expanded");
-          } else {
-            this._expandedTips.add(key);
-            row.classList.add("expanded");
-          }
-        }
-        return;
-      }
-      const btn = e.target.closest(".action-btn");
-      if (btn) this._handleAction(btn.dataset.action);
-    });
-  }
+// -- LitElement bootstrap ----------------------------------------------------
 
-  _handleAction(action) {
-    if (!this._hass || !action) return;
-    if (action === "cancel") {
-      if (!this._cancelConfirm) {
-        this._cancelConfirm = true;
-        this._render();
-        clearTimeout(this._cancelTimer);
-        this._cancelTimer = setTimeout(() => {
-          this._cancelConfirm = false;
-          this._render();
-        }, 3000);
-        return;
-      }
-      this._cancelConfirm = false;
-      clearTimeout(this._cancelTimer);
-      this._hass.callService("foxess_control", "clear_overrides", {});
-      this._render();
-      return;
-    }
-    if (action === "charge" || action === "discharge") {
-      this._showForm = action;
-      this._formValues = { start: "", end: "", soc: "" };
-      this._render();
-    }
-    if (action === "submit-form") {
-      this._submitForm();
-    }
-    if (action === "close-form") {
-      this._showForm = null;
-      this._formValues = { start: "", end: "", soc: "" };
-      this._render();
-    }
-  }
+(async () => {
+  await customElements.whenDefined("ha-panel-lovelace");
+  const LitBase = Object.getPrototypeOf(
+    customElements.get("ha-panel-lovelace")
+  );
+  const { html, css, nothing } = LitBase.prototype.constructor;
 
-  _submitForm() {
-    if (!this._hass || !this._showForm) return;
-    const root = this.shadowRoot;
-    const fv = this._formValues;
-    const start = root.getElementById("form-start")?.value || fv.start;
-    const end = root.getElementById("form-end")?.value || fv.end;
-    const soc = root.getElementById("form-soc")?.value || fv.soc;
-    if (!start || !end || !soc) return;
-    const service =
-      this._showForm === "charge" ? "smart_charge" : "smart_discharge";
-    const data =
-      this._showForm === "charge"
-        ? { start_time: start, end_time: end, target_soc: parseInt(soc, 10) }
-        : { start_time: start, end_time: end, min_soc: parseInt(soc, 10) };
-    this._hass.callService("foxess_control", service, data);
-    this._showForm = null;
-    this._formValues = { start: "", end: "", soc: "" };
-    this._render();
-  }
-
-  // -- Lovelace lifecycle ----------------------------------------------------
-
-  setConfig(config) {
-    this._config = {
-      operations_entity:
-        config.operations_entity || "sensor.foxess_smart_operations",
-      soc_entity: config.soc_entity || "sensor.foxess_battery_soc",
-      ...config,
-    };
-    this._entityMap = null;
-    this._fetchPending = false;
-  }
-
-  set hass(hass) {
-    this._hass = hass;
-    if (!this._entityMap && !this._fetchPending) {
-      this._fetchPending = true;
-      this._fetchEntityMap();
-    }
-    this._render();
-  }
-
-  async _fetchEntityMap() {
-    try {
-      this._entityMap = await this._hass.callWS({
-        type: "foxess_control/entity_map",
-      });
-    } catch (_e) {
-      this._entityMap = {};
-    }
-    this._fetchPending = false;
-    this._render();
-  }
-
-  _getFreshnessEntityId() {
-    if (this._config.freshness_entity) return this._config.freshness_entity;
-    if (this._entityMap && this._entityMap.data_freshness)
-      return this._entityMap.data_freshness;
-    return null;
-  }
-
-  getCardSize() {
-    return 4;
-  }
-
-  static getStubConfig() {
-    return {};
-  }
-
-  // -- Helpers ---------------------------------------------------------------
-
-  _t(key) {
-    const lang = this._hass && (this._hass.language || (this._hass.locale && this._hass.locale.language));
-    const strings = _getStrings(lang);
-    return strings[key] || TRANSLATIONS.en[key] || key;
-  }
-
-  _entity(id) {
-    return this._hass && this._hass.states[id];
-  }
-
-  _attr(id) {
-    const e = this._entity(id);
-    return e ? e.attributes : {};
-  }
-
-  _state(id) {
-    const e = this._entity(id);
-    return e ? e.state : null;
-  }
-
-  /** Read the data_source attribute from the SoC entity. */
-  _getDataSource() {
-    const e = this._entity(this._config.soc_entity);
-    return e && e.attributes && e.attributes.data_source ? e.attributes.data_source : null;
-  }
-
-  _dataSourceBadge(source, ageSeconds) {
-    if (!source) return "";
-    const labels = { ws: "WS", api: "API", modbus: "Modbus" };
-    const label = labels[source] || source;
-    const staleThreshold = 30;
-    const isStale = typeof ageSeconds === "number" && ageSeconds > staleThreshold;
-    const ageLabel = typeof ageSeconds === "number" ? this._formatAge(ageSeconds) : "";
-    const cls = isStale ? "data-source stale" : "data-source";
-    const title = ageLabel ? `Data: ${label} (${ageLabel} ago)` : `Data: ${label}`;
-    const text = isStale ? `${label} · ${ageLabel}` : label;
-    return `<span class="${cls}" title="${title}">${text}</span>`;
-  }
-
-  _formatAge(seconds) {
-    if (seconds < 60) return `${seconds}s`;
-    const m = Math.floor(seconds / 60);
-    if (m < 60) return `${m}m`;
-    const h = Math.floor(m / 60);
-    return `${h}h${m % 60}m`;
-  }
-
-  _formatPower(watts) {
-    if (watts == null) return "";
-    const w = Number(watts);
-    if (Number.isNaN(w)) return "";
-    if (w >= 1000) {
-      const kw = w / 1000;
-      return kw === Math.floor(kw) ? `${kw} kW` : `${kw.toFixed(1)} kW`;
-    }
-    return `${w} W`;
-  }
-
-  _formatDuration(ms) {
-    if (ms <= 0) return this._t("dur_m").replace("{0}", "0");
-    const totalMin = Math.round(ms / 60000);
-    const h = Math.floor(totalMin / 60);
-    const m = totalMin % 60;
-    if (h === 0) return this._t("dur_m").replace("{0}", m);
-    if (m === 0) return this._t("dur_h").replace("{0}", h);
-    return this._t("dur_hm").replace("{0}", h).replace("{1}", m);
-  }
-
-  _translateRemaining(text) {
-    if (!text) return "";
-    // "starts in Xh Ym" / "starts in Xm"
-    const startsMatch = text.match(/^starts in (.+)$/);
-    if (startsMatch) {
-      const dur = this._translateDurationStr(startsMatch[1]);
-      return this._t("starts_in").replace("{0}", dur);
-    }
-    // "defers Xh Ym" / "defers Xm"
-    const defersMatch = text.match(/^defers (.+)$/);
-    if (defersMatch) {
-      const dur = this._translateDurationStr(defersMatch[1]);
-      return this._t("defers_in").replace("{0}", dur);
-    }
-    // "ending"
-    if (text === "ending") return this._t("ending");
-    // "X.X kWh left"
-    const kwhMatch = text.match(/^([\d.]+) kWh left$/);
-    if (kwhMatch) return this._t("kwh_left").replace("{0}", kwhMatch[1]);
-    // bare duration "Xh Ym" / "Xm" / "Xh"
-    return this._translateDurationStr(text);
-  }
-
-  _translateDurationStr(text) {
-    // "Xh Ym"
-    const hm = text.match(/^(\d+)h (\d+)m$/);
-    if (hm) return this._t("dur_hm").replace("{0}", hm[1]).replace("{1}", hm[2]);
-    // "Xh"
-    const ho = text.match(/^(\d+)h$/);
-    if (ho) return this._t("dur_h").replace("{0}", ho[1]);
-    // "Xm"
-    const mo = text.match(/^(\d+)m$/);
-    if (mo) return this._t("dur_m").replace("{0}", mo[1]);
-    return text;
-  }
-
-  // -- Rendering -------------------------------------------------------------
-
-  _render() {
-    if (!this._hass) return;
-
-    // Snapshot live DOM form values before any DOM mutation.  The input
-    // event listener normally keeps _formValues in sync, but a full
-    // re-render (sr.innerHTML = ...) replaces the DOM from _formValues.
-    // If any value was set programmatically without an event (e.g.
-    // browser autocomplete, Playwright native setter race), the snapshot
-    // ensures nothing is lost.
-    if (this._showForm) {
-      const sr0 = this.shadowRoot;
-      const fs = sr0.getElementById("form-start");
-      const fe = sr0.getElementById("form-end");
-      const fc = sr0.getElementById("form-soc");
-      if (fs && fs.value) this._formValues.start = fs.value;
-      if (fe && fe.value) this._formValues.end = fe.value;
-      if (fc && fc.value) this._formValues.soc = fc.value;
-    }
-
-    const ops = this._config.operations_entity;
-    const a = this._attr(ops);
-    const soc = a.charge_current_soc ?? a.discharge_current_soc ?? this._getSoc();
-    const chargeActive = a.charge_active === true;
-    const dischargeActive = a.discharge_active === true;
-
-    const isActive = chargeActive || dischargeActive;
-
-    const headerHtml = this._renderHeader(soc);
-    const contentHtml = `
-      ${chargeActive ? this._renderCharge(a) : ""}
-      ${dischargeActive ? this._renderDischarge(a) : ""}
-      ${!isActive ? this._renderIdle() : ""}
-      ${this._renderProgress(a)}
-    `;
-    const showCancel = this._config.show_cancel !== false;
-    const actionHtml = isActive
-      ? (showCancel
-          ? `<button class="action-btn cancel${this._cancelConfirm ? " confirming" : ""}" data-action="cancel">
-               ${this._cancelConfirm ? this._t("btn_confirm_cancel") : this._t("btn_cancel")}
-             </button>`
-          : "")
-      : `<button class="action-btn" data-action="charge">${this._t("btn_charge")}</button>
-         <button class="action-btn" data-action="discharge">${this._t("btn_discharge")}</button>`;
-
-    const sr = this.shadowRoot;
-    const existing = sr.querySelector("ha-card");
-    if (existing && existing.querySelector(".form-overlay")) {
-      const header = existing.querySelector(".header");
-      const content = existing.querySelector(".content");
-      const actionRow = existing.querySelector(".action-row");
-      if (header) header.outerHTML = headerHtml;
-      if (content) content.innerHTML = contentHtml;
-      if (actionRow) actionRow.innerHTML = actionHtml;
-      return;
-    }
-
-    sr.innerHTML = `
-      <style>${FoxESSControlCard._styles()}</style>
-      <ha-card>
-        ${headerHtml}
-        <div class="content">${contentHtml}</div>
-        ${this._showForm ? this._renderForm() : ""}
-        <div class="action-row">${actionHtml}</div>
-      </ha-card>
-    `;
-  }
-
-  _renderForm() {
-    const isCharge = this._showForm === "charge";
-    const socLabel = isCharge ? this._t("target") : this._t("min_soc");
-    const fv = this._formValues;
-    const socDefault = fv.soc || (isCharge ? 100 : 10);
-    return `
-      <div class="form-overlay">
-        <div class="form-row">
-          <label>Start</label>
-          <input type="time" id="form-start" value="${fv.start || ""}">
-        </div>
-        <div class="form-row">
-          <label>End</label>
-          <input type="time" id="form-end" value="${fv.end || ""}">
-        </div>
-        <div class="form-row">
-          <label>${socLabel} (%)</label>
-          <input type="number" id="form-soc" min="0" max="100" value="${socDefault}">
-        </div>
-        <div class="form-buttons">
-          <button class="action-btn" data-action="submit-form">${isCharge ? this._t("btn_charge") : this._t("btn_discharge")}</button>
-          <button class="action-btn cancel" data-action="close-form">${this._t("btn_cancel")}</button>
-        </div>
-      </div>
-    `;
-  }
-
-  _getSoc() {
-    const s = this._state(this._config.soc_entity);
-    return s != null && s !== "unavailable" && s !== "unknown"
-      ? parseFloat(s)
-      : null;
-  }
-
-  _renderHeader(soc) {
-    const socVal = soc != null ? Math.round(soc) : null;
-    const socPct = socVal != null ? Math.max(0, Math.min(100, socVal)) : 0;
-
-    // Battery bar colour
-    let barColor = "var(--success-color, #4caf50)";
-    if (socPct <= 15) barColor = "var(--error-color, #f44336)";
-    else if (socPct <= 30) barColor = "var(--warning-color, #ff9800)";
-
-    const dataSource = this._getDataSource();
-    const freshnessId = this._getFreshnessEntityId();
-    const freshnessEntity = freshnessId && this._entity(freshnessId);
-    const lastUpdate = freshnessEntity && freshnessEntity.attributes && freshnessEntity.attributes.last_update;
-    const ageSeconds = lastUpdate ? Math.max(0, Math.round((Date.now() - new Date(lastUpdate).getTime()) / 1000)) : null;
-
-    return `
-      <div class="header">
-        <div class="header-left">
-          <div class="title">${this._t("title")}${this._dataSourceBadge(dataSource, ageSeconds)}</div>
-        </div>
-        <div class="header-right">
-          <div class="soc-group">
-            <svg class="battery-icon" viewBox="0 0 24 14" width="32" height="18">
-              <rect x="0.5" y="0.5" width="20" height="13" rx="2" ry="2"
-                    fill="none" stroke="var(--primary-text-color)" stroke-width="1"/>
-              <rect x="20.5" y="4" width="3" height="6" rx="1" ry="1"
-                    fill="var(--primary-text-color)"/>
-              <rect x="2" y="2" width="${(socPct / 100) * 17}" height="10" rx="1" ry="1"
-                    fill="${barColor}"/>
-            </svg>
-            <span class="soc-text">${socVal != null ? socVal + "%" : "—"}</span>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  _renderCharge(a) {
-    const phase = a.charge_phase;
-    const deferred = phase === "deferred";
-    const power = a.charge_power_w || 0;
-    const target = a.charge_target_soc;
-    const current = a.charge_current_soc;
-    const remaining = a.charge_remaining || "";
-    const window = a.charge_window || "";
-
-    return `
-      <div class="section charge">
-        <div class="section-header">
-          <div class="section-icon-group">
-            <span class="dot ${deferred ? "dot-waiting" : "dot-active"}"></span>
-            <span class="section-title">${deferred ? this._t("charge_scheduled") : this._t("smart_charge")}</span>
-          </div>
-          <span class="section-badge charge-badge">${this._translateRemaining(remaining)}</span>
-        </div>
-        <div class="section-body">
-          <div class="detail-row">
-            <span class="detail-label">${this._t("window")}</span>
-            <span class="detail-value">${window}</span>
-          </div>
-          ${!deferred ? `
-          <div class="detail-row">
-            <span class="detail-label">${this._t("power")}</span>
-            <span class="detail-value">${this._formatPower(power)}</span>
-          </div>` : ""}
-          <div class="detail-row">
-            <span class="detail-label">${this._t("target")}</span>
-            <span class="detail-value">${current != null ? Math.round(current) : "?"}% → ${target != null ? target : "?"}%</span>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  _renderDischarge(a) {
-    const power = a.discharge_power_w || 0;
-    const minSoc = a.discharge_min_soc;
-    const current = a.discharge_current_soc;
-    const remaining = a.discharge_remaining || "";
-    const window = a.discharge_window || "";
-    const beforeStart = remaining.startsWith && remaining.startsWith("starts");
-    const scheduled = beforeStart || remaining.startsWith("scheduled");
-    const opsState = this._state(this._config.operations_entity) || "";
-    const suspended = opsState.includes("suspended");
-    const deferred = opsState.includes("deferred");
-
-    // Feed-in energy progress
-    const feedinLimit = a.discharge_feedin_limit_kwh;
-    const feedinUsed = a.discharge_feedin_used_kwh;
-    const feedinProjected = a.discharge_feedin_projected_kwh;
-
-    return `
-      <div class="section discharge">
-        <div class="section-header">
-          <div class="section-icon-group">
-            <span class="dot ${scheduled || suspended || deferred ? "dot-waiting" : "dot-active dot-discharge"}"></span>
-            <span class="section-title">${scheduled ? this._t("discharge_scheduled") : deferred ? this._t("discharge_deferred") : suspended ? this._t("discharge_suspended") : this._t("smart_discharge")}</span>
-          </div>
-          <span class="section-badge discharge-badge">${this._translateRemaining(remaining)}</span>
-        </div>
-        <div class="section-body">
-          <div class="detail-row">
-            <span class="detail-label">${this._t("window")}</span>
-            <span class="detail-value">${window}</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">${this._t("power")}</span>
-            <span class="detail-value">${deferred ? this._t("self_use") : scheduled ? "—" : this._formatPower(power)}${
-              !deferred && !scheduled && a.discharge_target_power_w != null && a.discharge_target_power_w !== power
-                ? ` <span style="opacity:0.5">→ ${this._formatPower(a.discharge_target_power_w)}</span>`
-                : ""
-            }</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">${this._t("min_soc")}</span>
-            <span class="detail-value">${minSoc != null ? minSoc + "%" : "—"}</span>
-          </div>
-          ${feedinLimit != null ? `
-          <div class="detail-row">
-            <span class="detail-label">${this._t("feedin")}</span>
-            <span class="detail-value">${feedinUsed != null ? feedinUsed : "—"} / ${feedinLimit} kWh${feedinProjected != null ? ` (→${feedinProjected})` : ""}</span>
-          </div>` : ""}
-        </div>
-      </div>
-    `;
-  }
-
-  _renderIdle() {
-    return `
-      <div class="idle">
-        <svg class="idle-icon" viewBox="0 0 24 24" width="40" height="40">
-          <path fill="var(--secondary-text-color)"
-                d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48
-                   10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10
-                   14.17l7.59-7.59L19 8l-9 9z"/>
-        </svg>
-        <div class="idle-text">${this._t("no_active")}</div>
-        <div class="idle-sub">${this._t("idle_hint")}</div>
-      </div>
-    `;
-  }
-
-  _progressBar(label, value, pct, fillClass, tooltip, tipKey) {
-    const hasTip = !!tooltip;
-    const expanded = hasTip && tipKey && this._expandedTips.has(tipKey);
-    return `
-      <div class="progress-row${hasTip ? " has-tip" : ""}${expanded ? " expanded" : ""}"${tipKey ? ` data-tip-key="${tipKey}"` : ""}>
-        <div class="detail-row">
-          <span class="detail-label">${label}</span>
-          <span class="detail-value">${value}</span>
-        </div>
-        <div class="progress-track">
-          <div class="progress-fill ${fillClass}" style="width:${pct}%"></div>
-        </div>
-        ${hasTip ? `<div class="progress-tip">${tooltip}</div>` : ""}
-      </div>
-    `;
-  }
-
-  _timeProgressBar(label, value, pct, horizonPct, tooltip, tipKey) {
-    const hasTip = !!tooltip;
-    const expanded = hasTip && tipKey && this._expandedTips.has(tipKey);
-    const marker = horizonPct != null
-      ? `<div class="horizon-marker" style="left:${horizonPct}%" title="Schedule horizon"></div>`
-      : "";
-    return `
-      <div class="progress-row${hasTip ? " has-tip" : ""}${expanded ? " expanded" : ""}"${tipKey ? ` data-tip-key="${tipKey}"` : ""}>
-        <div class="detail-row">
-          <span class="detail-label">${label}</span>
-          <span class="detail-value">${value}</span>
-        </div>
-        <div class="progress-track">
-          <div class="progress-fill time-fill" style="width:${pct}%"></div>${marker}
-        </div>
-        ${hasTip ? `<div class="progress-tip">${tooltip}</div>` : ""}
-      </div>
-    `;
-  }
-
-  _socProgressBar(label, value, confirmedPct, projectedPct, fillClass, tooltip, tipKey) {
-    // Two-zone SoC bar: solid confirmed + semi-transparent projected.
-    // When only integer SoC is available, both are equal (no projected zone).
-    const hasTip = !!tooltip;
-    const expanded = hasTip && tipKey && this._expandedTips.has(tipKey);
-    const projectedWidth = Math.max(0, projectedPct - confirmedPct);
-    return `
-      <div class="progress-row${hasTip ? " has-tip" : ""}${expanded ? " expanded" : ""}"${tipKey ? ` data-tip-key="${tipKey}"` : ""}>
-        <div class="detail-row">
-          <span class="detail-label">${label}</span>
-          <span class="detail-value">${value}</span>
-        </div>
-        <div class="progress-track">
-          <div class="progress-fill ${fillClass}" style="width:${confirmedPct}%"></div>${projectedWidth > 0.2 ? `<div class="progress-fill ${fillClass} projected" style="width:${projectedWidth}%"></div>` : ""}
-        </div>
-        ${hasTip ? `<div class="progress-tip">${tooltip}</div>` : ""}
-      </div>
-    `;
-  }
-
-  _energyScheduleBar(label, value, actualPct, expectedPct, tooltip, tipKey) {
-    // Show energy progress with a coloured gap segment indicating
-    // whether discharge is ahead of or behind the ideal schedule.
-    const lo = Math.min(actualPct, expectedPct);
-    const hi = Math.max(actualPct, expectedPct);
-    const gapWidth = hi - lo;
-    const ahead = actualPct >= expectedPct;
-    const gapClass = ahead ? "energy-ahead" : "energy-behind";
-    const hasTip = !!tooltip;
-    const expanded = hasTip && tipKey && this._expandedTips.has(tipKey);
-
-    return `
-      <div class="progress-row${hasTip ? " has-tip" : ""}${expanded ? " expanded" : ""}"${tipKey ? ` data-tip-key="${tipKey}"` : ""}>
-        <div class="detail-row">
-          <span class="detail-label">${label}</span>
-          <span class="detail-value">${value}</span>
-        </div>
-        <div class="progress-track">
-          <div class="energy-fill" style="width:${lo}%"></div>${gapWidth > 0.5 ? `<div class="${gapClass}" style="width:${gapWidth}%"></div>` : ""}
-        </div>
-        ${hasTip ? `<div class="progress-tip">${tooltip}</div>` : ""}
-      </div>
-    `;
-  }
-
-  _timeProgress(startIso, endIso, now) {
-    const startTime = startIso ? new Date(startIso).getTime() : null;
-    const endTime = endIso ? new Date(endIso).getTime() : null;
-    if (!startTime || !endTime || endTime <= startTime) return { pct: 0, label: "", remaining: 0 };
-    const elapsed = now - startTime;
-    const total = endTime - startTime;
-    return {
-      pct: Math.min(100, Math.max(0, (elapsed / total) * 100)),
-      label: `${this._formatDuration(elapsed)} / ${this._formatDuration(total)}`,
-      remaining: Math.max(0, total - elapsed),
+  // Try to get unsafeHTML from Lit's directives for translation strings
+  // that contain HTML (e.g. idle_hint with <b> tags).
+  let unsafeHTML;
+  try {
+    const mod = await import("lit/directives/unsafe-html.js");
+    unsafeHTML = mod.unsafeHTML;
+  } catch {
+    // Fallback: render HTML string into a <span> via a simple directive-like
+    // function that returns a TemplateResult containing innerHTML.
+    unsafeHTML = (str) => {
+      const d = document.createElement("span");
+      d.innerHTML = str;
+      return d;
     };
   }
 
-  _renderProgress(a) {
-    const chargeActive = a.charge_active === true;
-    const dischargeActive = a.discharge_active === true;
-    if (!chargeActive && !dischargeActive) return "";
+  // -------------------------------------------------------------------------
+  // FoxESSControlCard
+  // -------------------------------------------------------------------------
 
-    const now = Date.now();
-    let bars = "";
-
-    if (chargeActive && a.charge_phase !== "deferred") {
-      const startSoc = a.charge_start_soc;
-      const current = a.charge_current_soc;
-      const confirmed = a.charge_confirmed_soc ?? current;
-      const target = a.charge_target_soc;
-
-      let socPct = 0;
-      let confirmedPct = 0;
-      if (startSoc != null && target != null && current != null && target > startSoc) {
-        socPct = Math.min(100, Math.max(0, ((current - startSoc) / (target - startSoc)) * 100));
-        confirmedPct = Math.min(100, Math.max(0, ((confirmed - startSoc) / (target - startSoc)) * 100));
-      }
-      const socChanged = confirmed != null && startSoc != null && Math.round(confirmed) !== Math.round(startSoc);
-      const curStr = current != null ? (socChanged ? current.toFixed(2) : Math.round(current)) + "%" : "?%";
-      const tgtStr = target != null ? target + "%" : "?%";
-      const socLabel = startSoc != null && Math.round(startSoc) !== Math.round(current ?? startSoc)
-        ? `${Math.round(startSoc)}% → ${curStr} → ${tgtStr}`
-        : `${curStr} → ${tgtStr}`;
-      const time = this._timeProgress(a.charge_start_time, a.charge_end_time, now);
-
-      const socTip = current != null && target != null
-        ? this._t("tip_soc_charge").replace("{0}", socChanged ? current.toFixed(2) : String(Math.round(current))).replace("{1}", target).replace("{2}", Math.max(0, target - current).toFixed(1))
-        : "";
-      const timeTip = time.label
-        ? this._t("tip_time").replace("{0}", this._formatDuration(now - new Date(a.charge_start_time).getTime())).replace("{1}", this._formatDuration(new Date(a.charge_end_time).getTime() - new Date(a.charge_start_time).getTime())).replace("{2}", this._formatDuration(time.remaining))
-        : "";
-
-      const chargePower = a.charge_power_w || 0;
-      const chargeMax = a.charge_max_power_w || 1;
-      const chargePowerPct = Math.min(100, Math.max(0, (chargePower / chargeMax) * 100));
-      const chargePhase = a.charge_phase;
-      const chargePowerTip = chargePhase === "deferred"
-        ? this._t("tip_power_charge_deferred")
-        : this._t("tip_power_active").replace("{0}", this._formatPower(chargePower)).replace("{1}", this._formatPower(chargeMax));
-
-      bars += this._socProgressBar(this._t("soc"), socLabel, confirmedPct, socPct, "charge-fill", socTip, "charge-soc");
-      bars += this._progressBar(this._t("power"), this._formatPower(chargePower), chargePowerPct, "charge-fill", chargePowerTip, "charge-power");
-      bars += this._progressBar(this._t("time"), time.label, time.pct, "time-fill", timeTip, "charge-time");
+  class FoxESSControlCard extends LitBase {
+    static get properties() {
+      return {
+        _config: { type: Object, attribute: false },
+        _hass: { type: Object, attribute: false },
+        _showForm: { type: String, attribute: false },
+        _cancelConfirm: { type: Boolean, attribute: false },
+        _entityMap: { type: Object, attribute: false },
+        _expandedTips: { type: Object, attribute: false },
+      };
     }
 
-    if (dischargeActive && a.discharge_phase !== "scheduled") {
-      const startSoc = a.discharge_start_soc;
-      const current = a.discharge_current_soc;
-      const confirmed = a.discharge_confirmed_soc ?? current;
-      const minSoc = a.discharge_min_soc;
-
-      let socPct = 0;
-      let confirmedPct = 0;
-      if (startSoc != null && minSoc != null && current != null && startSoc > minSoc) {
-        socPct = Math.min(100, Math.max(0, ((startSoc - current) / (startSoc - minSoc)) * 100));
-        confirmedPct = Math.min(100, Math.max(0, ((startSoc - confirmed) / (startSoc - minSoc)) * 100));
-      }
-      const socChanged = confirmed != null && startSoc != null && Math.round(confirmed) !== Math.round(startSoc);
-      const curStr = current != null ? (socChanged ? current.toFixed(2) : Math.round(current)) + "%" : "?%";
-      const minStr = minSoc != null ? minSoc + "%" : "?%";
-      const socLabel = startSoc != null && Math.round(startSoc) !== Math.round(current ?? startSoc)
-        ? `${Math.round(startSoc)}% → ${curStr} → ${minStr}`
-        : `${curStr} → ${minStr}`;
-
-      const socTip = current != null && minSoc != null
-        ? this._t("tip_soc_discharge").replace("{0}", socChanged ? current.toFixed(2) : String(Math.round(current))).replace("{1}", minSoc).replace("{2}", Math.max(0, current - minSoc).toFixed(1))
-        : "";
-      bars += this._socProgressBar(this._t("soc"), socLabel, confirmedPct, socPct, "discharge-fill", socTip, "discharge-soc");
-
-      const dischPower = a.discharge_power_w || 0;
-      const dischMax = a.discharge_max_power_w || 1;
-      const dischPowerPct = Math.min(100, Math.max(0, (dischPower / dischMax) * 100));
-      const dischPhase = a.discharge_phase;
-      let dischPowerTip;
-      if (dischPhase === "deferred") {
-        dischPowerTip = this._t("tip_power_deferred");
-      } else if (dischPhase === "suspended") {
-        dischPowerTip = this._t("tip_power_suspended");
-      } else {
-        dischPowerTip = this._t("tip_power_active").replace("{0}", this._formatPower(dischPower)).replace("{1}", this._formatPower(dischMax));
-      }
-      const dischPowerLabel = dischPhase === "deferred" ? this._t("self_use") : this._formatPower(dischPower);
-      bars += this._progressBar(this._t("power"), dischPowerLabel, dischPowerPct, "discharge-fill", dischPowerTip, "discharge-power");
-
-      const time = this._timeProgress(a.discharge_start_time, a.discharge_end_time, now);
-
-      const feedinLimit = a.discharge_feedin_limit_kwh;
-      if (feedinLimit != null && feedinLimit > 0) {
-        const used = a.discharge_feedin_used_kwh ?? 0;
-        const energyPct = Math.min(100, Math.max(0, (used / feedinLimit) * 100));
-        const remaining = Math.max(0, feedinLimit - used).toFixed(1);
-        let energyTip = this._t("tip_energy").replace("{0}", used.toFixed(1)).replace("{1}", feedinLimit.toFixed(1)).replace("{2}", remaining);
-        const diff = Math.abs(energyPct - time.pct) * feedinLimit / 100;
-        if (diff > 0.05) {
-          energyTip += " · " + (energyPct >= time.pct
-            ? this._t("tip_energy_ahead").replace("{0}", diff.toFixed(1))
-            : this._t("tip_energy_behind").replace("{0}", diff.toFixed(1)));
-        }
-        bars += this._energyScheduleBar(this._t("energy"), `${used} / ${feedinLimit} kWh`, energyPct, time.pct, energyTip, "discharge-energy");
-      }
-
-      const timeTip = time.label
-        ? this._t("tip_time").replace("{0}", this._formatDuration(now - new Date(a.discharge_start_time).getTime())).replace("{1}", this._formatDuration(new Date(a.discharge_end_time).getTime() - new Date(a.discharge_start_time).getTime())).replace("{2}", this._formatDuration(time.remaining))
-        : "";
-
-      // Schedule horizon marker — shows how far ahead the inverter
-      // schedule extends.  If HA goes down, the schedule expires at
-      // this point and the inverter reverts to self-use.
-      const horizon = a.discharge_schedule_horizon;
-      let horizonPct = null;
-      if (horizon) {
-        const hTime = new Date(horizon).getTime();
-        const startTime = new Date(a.discharge_start_time).getTime();
-        const endTime = new Date(a.discharge_end_time).getTime();
-        const total = endTime - startTime;
-        if (total > 0) {
-          horizonPct = Math.min(100, Math.max(0, ((hTime - startTime) / total) * 100));
-        }
-      }
-      bars += this._timeProgressBar(this._t("time"), time.label, time.pct, horizonPct, timeTip, "discharge-time");
-    }
-
-    if (!bars) return "";
-    return `
-      <div class="progress-section">
-        <div class="progress-label">${this._t("progress")}</div>
-        ${bars}
-      </div>
-    `;
-  }
-
-  // -- Styles ----------------------------------------------------------------
-
-  static _styles() {
-    return `
+    static get styles() {
+      return css`
       :host {
         --fc-charge: #4caf50;
         --fc-charge-bg: rgba(76, 175, 80, 0.08);
@@ -1504,31 +824,731 @@ class FoxESSControlCard extends HTMLElement {
         gap: 8px;
         margin-top: 8px;
       }
-    `;
+      `;
+    }
+
+    constructor() {
+      super();
+      this._config = {};
+      this._hass = null;
+      this._expandedTips = new Set();
+      this._cancelConfirm = false;
+      this._cancelTimer = null;
+      this._formValues = { start: "", end: "", soc: "" };
+      this._showForm = null;
+      this._entityMap = null;
+      this._fetchPending = false;
+    }
+
+    // -- Lovelace lifecycle --------------------------------------------------
+
+    setConfig(config) {
+      this._config = {
+        operations_entity:
+          config.operations_entity || "sensor.foxess_smart_operations",
+        soc_entity: config.soc_entity || "sensor.foxess_battery_soc",
+        ...config,
+      };
+      this._entityMap = null;
+      this._fetchPending = false;
+    }
+
+    set hass(hass) {
+      this._hass = hass;
+      if (!this._entityMap && !this._fetchPending) {
+        this._fetchPending = true;
+        this._fetchEntityMap();
+      }
+      // Always request update — HA may set the same hass object reference
+      // with mutated entity states, and tests verify re-render on every
+      // hass assignment (card.hass = card._hass).
+      this.requestUpdate();
+    }
+
+    async _fetchEntityMap() {
+      try {
+        this._entityMap = await this._hass.callWS({
+          type: "foxess_control/entity_map",
+        });
+      } catch (_e) {
+        this._entityMap = {};
+      }
+      this._fetchPending = false;
+      this.requestUpdate();
+    }
+
+    _getFreshnessEntityId() {
+      if (this._config.freshness_entity) return this._config.freshness_entity;
+      if (this._entityMap && this._entityMap.data_freshness)
+        return this._entityMap.data_freshness;
+      return null;
+    }
+
+    getCardSize() {
+      return 4;
+    }
+
+    static getStubConfig() {
+      return {};
+    }
+
+    static getConfigElement() {
+      return document.createElement("foxess-control-card-editor");
+    }
+
+    // -- Helpers -------------------------------------------------------------
+
+    _t(key) {
+      const lang = this._hass && (this._hass.language || (this._hass.locale && this._hass.locale.language));
+      const strings = _getStrings(lang);
+      return strings[key] || TRANSLATIONS.en[key] || key;
+    }
+
+    _entity(id) {
+      return this._hass && this._hass.states[id];
+    }
+
+    _attr(id) {
+      const e = this._entity(id);
+      return e ? e.attributes : {};
+    }
+
+    _state(id) {
+      const e = this._entity(id);
+      return e ? e.state : null;
+    }
+
+    /** Read the data_source attribute from the SoC entity. */
+    _getDataSource() {
+      const e = this._entity(this._config.soc_entity);
+      return e && e.attributes && e.attributes.data_source ? e.attributes.data_source : null;
+    }
+
+    _formatAge(seconds) {
+      if (seconds < 60) return `${seconds}s`;
+      const m = Math.floor(seconds / 60);
+      if (m < 60) return `${m}m`;
+      const h = Math.floor(m / 60);
+      return `${h}h${m % 60}m`;
+    }
+
+    _formatPower(watts) {
+      if (watts == null) return "";
+      const w = Number(watts);
+      if (Number.isNaN(w)) return "";
+      if (w >= 1000) {
+        const kw = w / 1000;
+        return kw === Math.floor(kw) ? `${kw} kW` : `${kw.toFixed(1)} kW`;
+      }
+      return `${w} W`;
+    }
+
+    _formatDuration(ms) {
+      if (ms <= 0) return this._t("dur_m").replace("{0}", "0");
+      const totalMin = Math.round(ms / 60000);
+      const h = Math.floor(totalMin / 60);
+      const m = totalMin % 60;
+      if (h === 0) return this._t("dur_m").replace("{0}", m);
+      if (m === 0) return this._t("dur_h").replace("{0}", h);
+      return this._t("dur_hm").replace("{0}", h).replace("{1}", m);
+    }
+
+    _translateRemaining(text) {
+      if (!text) return "";
+      const startsMatch = text.match(/^starts in (.+)$/);
+      if (startsMatch) {
+        const dur = this._translateDurationStr(startsMatch[1]);
+        return this._t("starts_in").replace("{0}", dur);
+      }
+      const defersMatch = text.match(/^defers (.+)$/);
+      if (defersMatch) {
+        const dur = this._translateDurationStr(defersMatch[1]);
+        return this._t("defers_in").replace("{0}", dur);
+      }
+      if (text === "ending") return this._t("ending");
+      const kwhMatch = text.match(/^([\d.]+) kWh left$/);
+      if (kwhMatch) return this._t("kwh_left").replace("{0}", kwhMatch[1]);
+      return this._translateDurationStr(text);
+    }
+
+    _translateDurationStr(text) {
+      const hm = text.match(/^(\d+)h (\d+)m$/);
+      if (hm) return this._t("dur_hm").replace("{0}", hm[1]).replace("{1}", hm[2]);
+      const ho = text.match(/^(\d+)h$/);
+      if (ho) return this._t("dur_h").replace("{0}", ho[1]);
+      const mo = text.match(/^(\d+)m$/);
+      if (mo) return this._t("dur_m").replace("{0}", mo[1]);
+      return text;
+    }
+
+    _timeProgress(startIso, endIso, now) {
+      const startTime = startIso ? new Date(startIso).getTime() : null;
+      const endTime = endIso ? new Date(endIso).getTime() : null;
+      if (!startTime || !endTime || endTime <= startTime) return { pct: 0, label: "", remaining: 0 };
+      const elapsed = now - startTime;
+      const total = endTime - startTime;
+      return {
+        pct: Math.min(100, Math.max(0, (elapsed / total) * 100)),
+        label: `${this._formatDuration(elapsed)} / ${this._formatDuration(total)}`,
+        remaining: Math.max(0, total - elapsed),
+      };
+    }
+
+    _getSoc() {
+      const s = this._state(this._config.soc_entity);
+      return s != null && s !== "unavailable" && s !== "unknown"
+        ? parseFloat(s)
+        : null;
+    }
+
+    // -- Event Handlers ------------------------------------------------------
+
+    _handleAction(action) {
+      if (!this._hass || !action) return;
+      if (action === "cancel") {
+        if (!this._cancelConfirm) {
+          this._cancelConfirm = true;
+          clearTimeout(this._cancelTimer);
+          this._cancelTimer = setTimeout(() => {
+            this._cancelConfirm = false;
+          }, 3000);
+          return;
+        }
+        this._cancelConfirm = false;
+        clearTimeout(this._cancelTimer);
+        this._hass.callService("foxess_control", "clear_overrides", {});
+        return;
+      }
+      if (action === "charge" || action === "discharge") {
+        this._showForm = action;
+        this._formValues = { start: "", end: "", soc: "" };
+      }
+      if (action === "submit-form") {
+        this._submitForm();
+      }
+      if (action === "close-form") {
+        this._showForm = null;
+        this._formValues = { start: "", end: "", soc: "" };
+      }
+    }
+
+    _submitForm() {
+      if (!this._hass || !this._showForm) return;
+      const root = this.shadowRoot;
+      const fv = this._formValues;
+      const start = root.getElementById("form-start")?.value || fv.start;
+      const end = root.getElementById("form-end")?.value || fv.end;
+      const soc = root.getElementById("form-soc")?.value || fv.soc;
+      if (!start || !end || !soc) return;
+      const service =
+        this._showForm === "charge" ? "smart_charge" : "smart_discharge";
+      const data =
+        this._showForm === "charge"
+          ? { start_time: start, end_time: end, target_soc: parseInt(soc, 10) }
+          : { start_time: start, end_time: end, min_soc: parseInt(soc, 10) };
+      this._hass.callService("foxess_control", service, data);
+      this._showForm = null;
+      this._formValues = { start: "", end: "", soc: "" };
+    }
+
+    _toggleTip(key) {
+      if (this._expandedTips.has(key)) {
+        this._expandedTips.delete(key);
+      } else {
+        this._expandedTips.add(key);
+      }
+      this.requestUpdate();
+    }
+
+    // -- Rendering -----------------------------------------------------------
+
+    render() {
+      if (!this._hass) return nothing;
+
+      const ops = this._config.operations_entity;
+      const a = this._attr(ops);
+      const soc = a.charge_current_soc ?? a.discharge_current_soc ?? this._getSoc();
+      const chargeActive = a.charge_active === true;
+      const dischargeActive = a.discharge_active === true;
+      const isActive = chargeActive || dischargeActive;
+
+      return html`
+        <ha-card>
+          ${this._renderHeader(soc)}
+          <div class="content">
+            ${chargeActive ? this._renderCharge(a) : nothing}
+            ${dischargeActive ? this._renderDischarge(a) : nothing}
+            ${!isActive ? this._renderIdle() : nothing}
+            ${this._renderProgress(a)}
+          </div>
+          ${this._showForm ? this._renderForm() : nothing}
+          <div class="action-row">
+            ${isActive
+              ? this._renderActiveActions()
+              : this._renderIdleActions()}
+          </div>
+        </ha-card>
+      `;
+    }
+
+    _renderActiveActions() {
+      const showCancel = this._config.show_cancel !== false;
+      if (!showCancel) return nothing;
+      return html`
+        <button class="action-btn cancel${this._cancelConfirm ? " confirming" : ""}"
+                data-action="cancel"
+                @click=${() => this._handleAction("cancel")}>
+          ${this._cancelConfirm ? this._t("btn_confirm_cancel") : this._t("btn_cancel")}
+        </button>
+      `;
+    }
+
+    _renderIdleActions() {
+      return html`
+        <button class="action-btn" data-action="charge"
+                @click=${() => this._handleAction("charge")}>
+          ${this._t("btn_charge")}
+        </button>
+        <button class="action-btn" data-action="discharge"
+                @click=${() => this._handleAction("discharge")}>
+          ${this._t("btn_discharge")}
+        </button>
+      `;
+    }
+
+    _renderHeader(soc) {
+      const socVal = soc != null ? Math.round(soc) : null;
+      const socPct = socVal != null ? Math.max(0, Math.min(100, socVal)) : 0;
+
+      let barColor = "var(--success-color, #4caf50)";
+      if (socPct <= 15) barColor = "var(--error-color, #f44336)";
+      else if (socPct <= 30) barColor = "var(--warning-color, #ff9800)";
+
+      const dataSource = this._getDataSource();
+      const freshnessId = this._getFreshnessEntityId();
+      const freshnessEntity = freshnessId && this._entity(freshnessId);
+      const lastUpdate = freshnessEntity && freshnessEntity.attributes && freshnessEntity.attributes.last_update;
+      const ageSeconds = lastUpdate ? Math.max(0, Math.round((Date.now() - new Date(lastUpdate).getTime()) / 1000)) : null;
+
+      return html`
+        <div class="header">
+          <div class="header-left">
+            <div class="title">${this._t("title")}${this._renderDataSourceBadge(dataSource, ageSeconds)}</div>
+          </div>
+          <div class="header-right">
+            <div class="soc-group">
+              <svg class="battery-icon" viewBox="0 0 24 14" width="32" height="18">
+                <rect x="0.5" y="0.5" width="20" height="13" rx="2" ry="2"
+                      fill="none" stroke="var(--primary-text-color)" stroke-width="1"/>
+                <rect x="20.5" y="4" width="3" height="6" rx="1" ry="1"
+                      fill="var(--primary-text-color)"/>
+                <rect x="2" y="2" width="${(socPct / 100) * 17}" height="10" rx="1" ry="1"
+                      fill="${barColor}"/>
+              </svg>
+              <span class="soc-text">${socVal != null ? socVal + "%" : "\u2014"}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    _renderDataSourceBadge(source, ageSeconds) {
+      if (!source) return nothing;
+      const labels = { ws: "WS", api: "API", modbus: "Modbus" };
+      const label = labels[source] || source;
+      const staleThreshold = 30;
+      const isStale = typeof ageSeconds === "number" && ageSeconds > staleThreshold;
+      const ageLabel = typeof ageSeconds === "number" ? this._formatAge(ageSeconds) : "";
+      const cls = isStale ? "data-source stale" : "data-source";
+      const title = ageLabel ? `Data: ${label} (${ageLabel} ago)` : `Data: ${label}`;
+      const text = isStale ? `${label} \u00b7 ${ageLabel}` : label;
+      return html`<span class="${cls}" title="${title}">${text}</span>`;
+    }
+
+    _renderCharge(a) {
+      const phase = a.charge_phase;
+      const deferred = phase === "deferred";
+      const power = a.charge_power_w || 0;
+      const target = a.charge_target_soc;
+      const current = a.charge_current_soc;
+      const remaining = a.charge_remaining || "";
+      const window = a.charge_window || "";
+
+      return html`
+        <div class="section charge">
+          <div class="section-header">
+            <div class="section-icon-group">
+              <span class="dot ${deferred ? "dot-waiting" : "dot-active"}"></span>
+              <span class="section-title">${deferred ? this._t("charge_scheduled") : this._t("smart_charge")}</span>
+            </div>
+            <span class="section-badge charge-badge">${this._translateRemaining(remaining)}</span>
+          </div>
+          <div class="section-body">
+            <div class="detail-row">
+              <span class="detail-label">${this._t("window")}</span>
+              <span class="detail-value">${window}</span>
+            </div>
+            ${!deferred ? html`
+            <div class="detail-row">
+              <span class="detail-label">${this._t("power")}</span>
+              <span class="detail-value">${this._formatPower(power)}</span>
+            </div>` : nothing}
+            <div class="detail-row">
+              <span class="detail-label">${this._t("target")}</span>
+              <span class="detail-value">${current != null ? Math.round(current) : "?"}% \u2192 ${target != null ? target : "?"}%</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    _renderDischarge(a) {
+      const power = a.discharge_power_w || 0;
+      const minSoc = a.discharge_min_soc;
+      const current = a.discharge_current_soc;
+      const remaining = a.discharge_remaining || "";
+      const window = a.discharge_window || "";
+      const beforeStart = remaining.startsWith && remaining.startsWith("starts");
+      const scheduled = beforeStart || remaining.startsWith("scheduled");
+      const opsState = this._state(this._config.operations_entity) || "";
+      const suspended = opsState.includes("suspended");
+      const deferred = opsState.includes("deferred");
+
+      const feedinLimit = a.discharge_feedin_limit_kwh;
+      const feedinUsed = a.discharge_feedin_used_kwh;
+      const feedinProjected = a.discharge_feedin_projected_kwh;
+
+      return html`
+        <div class="section discharge">
+          <div class="section-header">
+            <div class="section-icon-group">
+              <span class="dot ${scheduled || suspended || deferred ? "dot-waiting" : "dot-active dot-discharge"}"></span>
+              <span class="section-title">${scheduled ? this._t("discharge_scheduled") : deferred ? this._t("discharge_deferred") : suspended ? this._t("discharge_suspended") : this._t("smart_discharge")}</span>
+            </div>
+            <span class="section-badge discharge-badge">${this._translateRemaining(remaining)}</span>
+          </div>
+          <div class="section-body">
+            <div class="detail-row">
+              <span class="detail-label">${this._t("window")}</span>
+              <span class="detail-value">${window}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">${this._t("power")}</span>
+              <span class="detail-value">
+                ${deferred ? this._t("self_use") : scheduled ? "\u2014" : this._formatPower(power)}${!deferred && !scheduled && a.discharge_target_power_w != null && a.discharge_target_power_w !== power
+                  ? html` <span style="opacity:0.5">\u2192 ${this._formatPower(a.discharge_target_power_w)}</span>`
+                  : nothing}
+              </span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">${this._t("min_soc")}</span>
+              <span class="detail-value">${minSoc != null ? minSoc + "%" : "\u2014"}</span>
+            </div>
+            ${feedinLimit != null ? html`
+            <div class="detail-row">
+              <span class="detail-label">${this._t("feedin")}</span>
+              <span class="detail-value">${feedinUsed != null ? feedinUsed : "\u2014"} / ${feedinLimit} kWh${feedinProjected != null ? ` (\u2192${feedinProjected})` : ""}</span>
+            </div>` : nothing}
+          </div>
+        </div>
+      `;
+    }
+
+    _renderIdle() {
+      return html`
+        <div class="idle">
+          <svg class="idle-icon" viewBox="0 0 24 24" width="40" height="40">
+            <path fill="var(--secondary-text-color)"
+                  d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48
+                     10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10
+                     14.17l7.59-7.59L19 8l-9 9z"/>
+          </svg>
+          <div class="idle-text">${this._t("no_active")}</div>
+          <div class="idle-sub">${unsafeHTML(this._t("idle_hint"))}</div>
+        </div>
+      `;
+    }
+
+    _renderForm() {
+      const isCharge = this._showForm === "charge";
+      const socLabel = isCharge ? this._t("target") : this._t("min_soc");
+      const fv = this._formValues;
+      const socDefault = fv.soc || (isCharge ? "100" : "10");
+      return html`
+        <div class="form-overlay">
+          <div class="form-row">
+            <label>Start</label>
+            <input type="time" id="form-start"
+                   .value=${fv.start || ""}
+                   @input=${(e) => { this._formValues.start = e.target.value; }}>
+          </div>
+          <div class="form-row">
+            <label>End</label>
+            <input type="time" id="form-end"
+                   .value=${fv.end || ""}
+                   @input=${(e) => { this._formValues.end = e.target.value; }}>
+          </div>
+          <div class="form-row">
+            <label>${socLabel} (%)</label>
+            <input type="number" id="form-soc" min="0" max="100"
+                   .value=${socDefault}
+                   @input=${(e) => { this._formValues.soc = e.target.value; }}>
+          </div>
+          <div class="form-buttons">
+            <button class="action-btn" data-action="submit-form"
+                    @click=${() => this._handleAction("submit-form")}>
+              ${isCharge ? this._t("btn_charge") : this._t("btn_discharge")}
+            </button>
+            <button class="action-btn cancel" data-action="close-form"
+                    @click=${() => this._handleAction("close-form")}>
+              ${this._t("btn_cancel")}
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    // -- Progress bar helpers ------------------------------------------------
+
+    _renderProgressBar(label, value, pct, fillClass, tooltip, tipKey) {
+      const hasTip = !!tooltip;
+      const expanded = hasTip && tipKey && this._expandedTips.has(tipKey);
+      return html`
+        <div class="progress-row${hasTip ? " has-tip" : ""}${expanded ? " expanded" : ""}"
+             data-tip-key="${tipKey || ""}"
+             @click=${hasTip ? () => this._toggleTip(tipKey) : null}>
+          <div class="detail-row">
+            <span class="detail-label">${label}</span>
+            <span class="detail-value">${value}</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill ${fillClass}" style="width:${pct}%"></div>
+          </div>
+          ${hasTip ? html`<div class="progress-tip">${tooltip}</div>` : nothing}
+        </div>
+      `;
+    }
+
+    _renderTimeProgressBar(label, value, pct, horizonPct, tooltip, tipKey) {
+      const hasTip = !!tooltip;
+      const expanded = hasTip && tipKey && this._expandedTips.has(tipKey);
+      return html`
+        <div class="progress-row${hasTip ? " has-tip" : ""}${expanded ? " expanded" : ""}"
+             data-tip-key="${tipKey || ""}"
+             @click=${hasTip ? () => this._toggleTip(tipKey) : null}>
+          <div class="detail-row">
+            <span class="detail-label">${label}</span>
+            <span class="detail-value">${value}</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill time-fill" style="width:${pct}%"></div>
+            ${horizonPct != null
+              ? html`<div class="horizon-marker" style="left:${horizonPct}%" title="Schedule horizon"></div>`
+              : nothing}
+          </div>
+          ${hasTip ? html`<div class="progress-tip">${tooltip}</div>` : nothing}
+        </div>
+      `;
+    }
+
+    _renderSocProgressBar(label, value, confirmedPct, projectedPct, fillClass, tooltip, tipKey) {
+      const hasTip = !!tooltip;
+      const expanded = hasTip && tipKey && this._expandedTips.has(tipKey);
+      const projectedWidth = Math.max(0, projectedPct - confirmedPct);
+      return html`
+        <div class="progress-row${hasTip ? " has-tip" : ""}${expanded ? " expanded" : ""}"
+             data-tip-key="${tipKey || ""}"
+             @click=${hasTip ? () => this._toggleTip(tipKey) : null}>
+          <div class="detail-row">
+            <span class="detail-label">${label}</span>
+            <span class="detail-value">${value}</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill ${fillClass}" style="width:${confirmedPct}%"></div>
+            ${projectedWidth > 0.2
+              ? html`<div class="progress-fill ${fillClass} projected" style="width:${projectedWidth}%"></div>`
+              : nothing}
+          </div>
+          ${hasTip ? html`<div class="progress-tip">${tooltip}</div>` : nothing}
+        </div>
+      `;
+    }
+
+    _renderEnergyScheduleBar(label, value, actualPct, expectedPct, tooltip, tipKey) {
+      const lo = Math.min(actualPct, expectedPct);
+      const hi = Math.max(actualPct, expectedPct);
+      const gapWidth = hi - lo;
+      const ahead = actualPct >= expectedPct;
+      const gapClass = ahead ? "energy-ahead" : "energy-behind";
+      const hasTip = !!tooltip;
+      const expanded = hasTip && tipKey && this._expandedTips.has(tipKey);
+
+      return html`
+        <div class="progress-row${hasTip ? " has-tip" : ""}${expanded ? " expanded" : ""}"
+             data-tip-key="${tipKey || ""}"
+             @click=${hasTip ? () => this._toggleTip(tipKey) : null}>
+          <div class="detail-row">
+            <span class="detail-label">${label}</span>
+            <span class="detail-value">${value}</span>
+          </div>
+          <div class="progress-track">
+            <div class="energy-fill" style="width:${lo}%"></div>
+            ${gapWidth > 0.5
+              ? html`<div class="${gapClass}" style="width:${gapWidth}%"></div>`
+              : nothing}
+          </div>
+          ${hasTip ? html`<div class="progress-tip">${tooltip}</div>` : nothing}
+        </div>
+      `;
+    }
+
+    // -- Progress section ----------------------------------------------------
+
+    _renderProgress(a) {
+      const chargeActive = a.charge_active === true;
+      const dischargeActive = a.discharge_active === true;
+      if (!chargeActive && !dischargeActive) return nothing;
+
+      const now = Date.now();
+      const bars = [];
+
+      if (chargeActive && a.charge_phase !== "deferred") {
+        const startSoc = a.charge_start_soc;
+        const current = a.charge_current_soc;
+        const confirmed = a.charge_confirmed_soc ?? current;
+        const target = a.charge_target_soc;
+
+        let socPct = 0;
+        let confirmedPct = 0;
+        if (startSoc != null && target != null && current != null && target > startSoc) {
+          socPct = Math.min(100, Math.max(0, ((current - startSoc) / (target - startSoc)) * 100));
+          confirmedPct = Math.min(100, Math.max(0, ((confirmed - startSoc) / (target - startSoc)) * 100));
+        }
+        const socChanged = confirmed != null && startSoc != null && Math.round(confirmed) !== Math.round(startSoc);
+        const curStr = current != null ? (socChanged ? current.toFixed(2) : Math.round(current)) + "%" : "?%";
+        const tgtStr = target != null ? target + "%" : "?%";
+        const socLabel = startSoc != null && Math.round(startSoc) !== Math.round(current ?? startSoc)
+          ? `${Math.round(startSoc)}% \u2192 ${curStr} \u2192 ${tgtStr}`
+          : `${curStr} \u2192 ${tgtStr}`;
+        const time = this._timeProgress(a.charge_start_time, a.charge_end_time, now);
+
+        const socTip = current != null && target != null
+          ? this._t("tip_soc_charge").replace("{0}", socChanged ? current.toFixed(2) : String(Math.round(current))).replace("{1}", target).replace("{2}", Math.max(0, target - current).toFixed(1))
+          : "";
+        const timeTip = time.label
+          ? this._t("tip_time").replace("{0}", this._formatDuration(now - new Date(a.charge_start_time).getTime())).replace("{1}", this._formatDuration(new Date(a.charge_end_time).getTime() - new Date(a.charge_start_time).getTime())).replace("{2}", this._formatDuration(time.remaining))
+          : "";
+
+        const chargePower = a.charge_power_w || 0;
+        const chargeMax = a.charge_max_power_w || 1;
+        const chargePowerPct = Math.min(100, Math.max(0, (chargePower / chargeMax) * 100));
+        const chargePhase = a.charge_phase;
+        const chargePowerTip = chargePhase === "deferred"
+          ? this._t("tip_power_charge_deferred")
+          : this._t("tip_power_active").replace("{0}", this._formatPower(chargePower)).replace("{1}", this._formatPower(chargeMax));
+
+        bars.push(this._renderSocProgressBar(this._t("soc"), socLabel, confirmedPct, socPct, "charge-fill", socTip, "charge-soc"));
+        bars.push(this._renderProgressBar(this._t("power"), this._formatPower(chargePower), chargePowerPct, "charge-fill", chargePowerTip, "charge-power"));
+        bars.push(this._renderProgressBar(this._t("time"), time.label, time.pct, "time-fill", timeTip, "charge-time"));
+      }
+
+      if (dischargeActive && a.discharge_phase !== "scheduled") {
+        const startSoc = a.discharge_start_soc;
+        const current = a.discharge_current_soc;
+        const confirmed = a.discharge_confirmed_soc ?? current;
+        const minSoc = a.discharge_min_soc;
+
+        let socPct = 0;
+        let confirmedPct = 0;
+        if (startSoc != null && minSoc != null && current != null && startSoc > minSoc) {
+          socPct = Math.min(100, Math.max(0, ((startSoc - current) / (startSoc - minSoc)) * 100));
+          confirmedPct = Math.min(100, Math.max(0, ((startSoc - confirmed) / (startSoc - minSoc)) * 100));
+        }
+        const socChanged = confirmed != null && startSoc != null && Math.round(confirmed) !== Math.round(startSoc);
+        const curStr = current != null ? (socChanged ? current.toFixed(2) : Math.round(current)) + "%" : "?%";
+        const minStr = minSoc != null ? minSoc + "%" : "?%";
+        const socLabel = startSoc != null && Math.round(startSoc) !== Math.round(current ?? startSoc)
+          ? `${Math.round(startSoc)}% \u2192 ${curStr} \u2192 ${minStr}`
+          : `${curStr} \u2192 ${minStr}`;
+
+        const socTip = current != null && minSoc != null
+          ? this._t("tip_soc_discharge").replace("{0}", socChanged ? current.toFixed(2) : String(Math.round(current))).replace("{1}", minSoc).replace("{2}", Math.max(0, current - minSoc).toFixed(1))
+          : "";
+        bars.push(this._renderSocProgressBar(this._t("soc"), socLabel, confirmedPct, socPct, "discharge-fill", socTip, "discharge-soc"));
+
+        const dischPower = a.discharge_power_w || 0;
+        const dischMax = a.discharge_max_power_w || 1;
+        const dischPowerPct = Math.min(100, Math.max(0, (dischPower / dischMax) * 100));
+        const dischPhase = a.discharge_phase;
+        let dischPowerTip;
+        if (dischPhase === "deferred") {
+          dischPowerTip = this._t("tip_power_deferred");
+        } else if (dischPhase === "suspended") {
+          dischPowerTip = this._t("tip_power_suspended");
+        } else {
+          dischPowerTip = this._t("tip_power_active").replace("{0}", this._formatPower(dischPower)).replace("{1}", this._formatPower(dischMax));
+        }
+        const dischPowerLabel = dischPhase === "deferred" ? this._t("self_use") : this._formatPower(dischPower);
+        bars.push(this._renderProgressBar(this._t("power"), dischPowerLabel, dischPowerPct, "discharge-fill", dischPowerTip, "discharge-power"));
+
+        const time = this._timeProgress(a.discharge_start_time, a.discharge_end_time, now);
+
+        const feedinLimit = a.discharge_feedin_limit_kwh;
+        if (feedinLimit != null && feedinLimit > 0) {
+          const used = a.discharge_feedin_used_kwh ?? 0;
+          const energyPct = Math.min(100, Math.max(0, (used / feedinLimit) * 100));
+          const remaining = Math.max(0, feedinLimit - used).toFixed(1);
+          let energyTip = this._t("tip_energy").replace("{0}", used.toFixed(1)).replace("{1}", feedinLimit.toFixed(1)).replace("{2}", remaining);
+          const diff = Math.abs(energyPct - time.pct) * feedinLimit / 100;
+          if (diff > 0.05) {
+            energyTip += " \u00b7 " + (energyPct >= time.pct
+              ? this._t("tip_energy_ahead").replace("{0}", diff.toFixed(1))
+              : this._t("tip_energy_behind").replace("{0}", diff.toFixed(1)));
+          }
+          bars.push(this._renderEnergyScheduleBar(this._t("energy"), `${used} / ${feedinLimit} kWh`, energyPct, time.pct, energyTip, "discharge-energy"));
+        }
+
+        const timeTip = time.label
+          ? this._t("tip_time").replace("{0}", this._formatDuration(now - new Date(a.discharge_start_time).getTime())).replace("{1}", this._formatDuration(new Date(a.discharge_end_time).getTime() - new Date(a.discharge_start_time).getTime())).replace("{2}", this._formatDuration(time.remaining))
+          : "";
+
+        let horizonPct = null;
+        const horizon = a.discharge_schedule_horizon;
+        if (horizon) {
+          const hTime = new Date(horizon).getTime();
+          const startTime = new Date(a.discharge_start_time).getTime();
+          const endTime = new Date(a.discharge_end_time).getTime();
+          const total = endTime - startTime;
+          if (total > 0) {
+            horizonPct = Math.min(100, Math.max(0, ((hTime - startTime) / total) * 100));
+          }
+        }
+        bars.push(this._renderTimeProgressBar(this._t("time"), time.label, time.pct, horizonPct, timeTip, "discharge-time"));
+      }
+
+      if (bars.length === 0) return nothing;
+      return html`
+        <div class="progress-section">
+          <div class="progress-label">${this._t("progress")}</div>
+          ${bars}
+        </div>
+      `;
+    }
   }
 
-  static getConfigElement() {
-    return document.createElement("foxess-control-card-editor");
-  }
-}
+  // -------------------------------------------------------------------------
+  // FoxESSControlCardEditor
+  // -------------------------------------------------------------------------
 
-// -- Card editor -----------------------------------------------------------
+  class FoxESSControlCardEditor extends LitBase {
+    static get properties() {
+      return {
+        _config: { type: Object, attribute: false },
+      };
+    }
 
-class FoxESSControlCardEditor extends HTMLElement {
-  constructor() {
-    super();
-    this.attachShadow({ mode: "open" });
-    this._config = {};
-  }
-
-  setConfig(config) {
-    this._config = config || {};
-    this._render();
-  }
-
-  _render() {
-    this.shadowRoot.innerHTML = `
-      <style>
+    static get styles() {
+      return css`
         :host { display: block; padding: 8px 0; }
         .row { display: flex; flex-direction: column; margin-bottom: 12px; }
         label { font-size: 12px; font-weight: 500; margin-bottom: 4px;
@@ -1542,62 +1562,75 @@ class FoxESSControlCardEditor extends HTMLElement {
         .toggle-row { display: flex; align-items: center; gap: 8px;
                       margin-bottom: 12px; }
         .toggle-row label { margin-bottom: 0; }
-      </style>
-      <div class="row">
-        <label>Operations Entity</label>
-        <input type="text" id="operations_entity"
-               value="${this._config.operations_entity || ""}"
-               placeholder="sensor.foxess_smart_operations">
-        <span class="hint">Auto-discovered if left blank</span>
-      </div>
-      <div class="row">
-        <label>SoC Entity</label>
-        <input type="text" id="soc_entity"
-               value="${this._config.soc_entity || ""}"
-               placeholder="sensor.foxess_battery_soc">
-        <span class="hint">Auto-discovered if left blank</span>
-      </div>
-      <div class="row">
-        <label>Freshness Entity</label>
-        <input type="text" id="freshness_entity"
-               value="${this._config.freshness_entity || ""}"
-               placeholder="sensor.foxess_data_freshness">
-        <span class="hint">Auto-discovered if left blank</span>
-      </div>
-      <div class="toggle-row">
-        <input type="checkbox" id="show_cancel"
-               ${this._config.show_cancel !== false ? "checked" : ""}>
-        <label for="show_cancel">Show cancel button during active sessions</label>
-      </div>
-    `;
-    this.shadowRoot.querySelectorAll("input").forEach((input) => {
-      input.addEventListener("input", () => this._valueChanged());
-    });
-  }
-
-  _valueChanged() {
-    const cfg = { ...this._config };
-    for (const id of ["operations_entity", "soc_entity", "freshness_entity"]) {
-      const val = this.shadowRoot.getElementById(id)?.value?.trim();
-      if (val) cfg[id] = val;
-      else delete cfg[id];
+      `;
     }
-    const showCancel = this.shadowRoot.getElementById("show_cancel")?.checked;
-    if (showCancel === false) cfg.show_cancel = false;
-    else delete cfg.show_cancel;
-    this._config = cfg;
-    this.dispatchEvent(
-      new CustomEvent("config-changed", { detail: { config: cfg } })
-    );
+
+    constructor() {
+      super();
+      this._config = {};
+    }
+
+    setConfig(config) {
+      this._config = config || {};
+    }
+
+    render() {
+      return html`
+        <div class="row">
+          <label>Operations Entity</label>
+          <input type="text" id="operations_entity"
+                 .value=${this._config.operations_entity || ""}
+                 placeholder="sensor.foxess_smart_operations"
+                 @input=${() => this._valueChanged()}>
+          <span class="hint">Auto-discovered if left blank</span>
+        </div>
+        <div class="row">
+          <label>SoC Entity</label>
+          <input type="text" id="soc_entity"
+                 .value=${this._config.soc_entity || ""}
+                 placeholder="sensor.foxess_battery_soc"
+                 @input=${() => this._valueChanged()}>
+          <span class="hint">Auto-discovered if left blank</span>
+        </div>
+        <div class="row">
+          <label>Freshness Entity</label>
+          <input type="text" id="freshness_entity"
+                 .value=${this._config.freshness_entity || ""}
+                 placeholder="sensor.foxess_data_freshness"
+                 @input=${() => this._valueChanged()}>
+          <span class="hint">Auto-discovered if left blank</span>
+        </div>
+        <div class="toggle-row">
+          <input type="checkbox" id="show_cancel"
+                 .checked=${this._config.show_cancel !== false}
+                 @change=${() => this._valueChanged()}>
+          <label for="show_cancel">Show cancel button during active sessions</label>
+        </div>
+      `;
+    }
+
+    _valueChanged() {
+      const cfg = { ...this._config };
+      for (const id of ["operations_entity", "soc_entity", "freshness_entity"]) {
+        const val = this.shadowRoot.getElementById(id)?.value?.trim();
+        if (val) cfg[id] = val;
+        else delete cfg[id];
+      }
+      const showCancel = this.shadowRoot.getElementById("show_cancel")?.checked;
+      if (showCancel === false) cfg.show_cancel = false;
+      else delete cfg.show_cancel;
+      this._config = cfg;
+      this.dispatchEvent(
+        new CustomEvent("config-changed", { detail: { config: cfg } })
+      );
+    }
   }
-}
 
-customElements.define("foxess-control-card-editor", FoxESSControlCardEditor);
+  customElements.define("foxess-control-card", FoxESSControlCard);
+  customElements.define("foxess-control-card-editor", FoxESSControlCardEditor);
+})();
 
-// Register the card
-customElements.define("foxess-control-card", FoxESSControlCard);
-
-// Register with HA's card picker
+// Register with HA's card picker (must be synchronous)
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "foxess-control-card",
