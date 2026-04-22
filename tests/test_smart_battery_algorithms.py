@@ -691,6 +691,42 @@ class TestCalculateDischargeDeferredStart:
         )
         assert no_peak == with_peak
 
+    def test_tight_window_feedin_does_not_over_defer(self) -> None:
+        """Tight window with small feedin must not defer past start.
+
+        Reproduces the E2E failure in test_feedin_power_adjusts_over_time:
+        30-min window, 10.5 kW max, 80%->30% SoC (5 kWh to drain at
+        10 kW effective = 0.5h, longer than the 30-min window).  The SoC
+        deadline falls before the window start, meaning the window is
+        already tight.  A small feedin target (1 kWh) should NOT override
+        this and push the deadline past start -- the session must start
+        immediately so feedin pacing can spread the export across the
+        available window.
+        """
+        # 30-minute window matching the E2E test scenario
+        start = datetime.datetime(2026, 4, 22, 0, 3, 0)
+        end = datetime.datetime(2026, 4, 22, 0, 33, 0)
+        now = datetime.datetime(2026, 4, 22, 0, 5, 0)
+
+        deferred = calculate_discharge_deferred_start(
+            80.0,
+            30,
+            10.0,
+            10500,
+            end,
+            net_consumption_kw=0.5,
+            start=start,
+            feedin_energy_limit_kwh=1.0,
+        )
+        # The uncapped SoC deadline exceeds the window (5 kWh at 10 kW
+        # = 30 min buffered = 33 min, longer than the 30-min window).
+        # The deferred start should be clamped to the window start, not
+        # pushed to end - 7 min by the feedin cap.
+        assert deferred <= now, (
+            f"Deferred start {deferred} is after now {now}: "
+            f"feedin cap should not override tight-window SoC deadline"
+        )
+
     def test_small_feedin_defers_later_than_full_soc(self) -> None:
         """Small feedin target with large SoC headroom should defer much later.
 

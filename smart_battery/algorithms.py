@@ -527,13 +527,22 @@ def calculate_discharge_deferred_start(
         # When a feed-in energy limit constrains the session, the
         # session stops at the export target — not at min_soc.  Cap
         # discharge time so the SoC deadline reflects actual usage.
+        #
+        # However, only apply the cap when the uncapped SoC deadline
+        # falls within the window (after start).  When the uncapped
+        # deadline is before start, the window is already too short
+        # for the full SoC drain — forcing immediate start so that
+        # feedin pacing can spread the export across the available time.
         if (
             feedin_energy_limit_kwh is not None
             and feedin_energy_limit_kwh > 0
             and effective_kw > 0
         ):
-            feedin_hours = feedin_energy_limit_kwh / effective_kw
-            discharge_hours = min(discharge_hours, feedin_hours)
+            uncapped_buffered = discharge_hours / (1 - headroom)
+            uncapped_deadline = end - datetime.timedelta(hours=uncapped_buffered)
+            if start is None or uncapped_deadline >= start:
+                feedin_hours = feedin_energy_limit_kwh / effective_kw
+                discharge_hours = min(discharge_hours, feedin_hours)
 
         if discharge_hours > 0:
             buffered_hours = discharge_hours / (1 - headroom)
