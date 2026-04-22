@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.9-beta.3
+
+### Fixed
+- **Feedin-limited discharge started immediately instead of deferring**: large batteries with small feedin limits (e.g. 42 kWh battery, 1 kWh feedin, 51 min window) started forced discharge immediately at low paced power (~1.5 kW) for the entire window, creating sustained grid import risk. Now defers until the feedin deadline (~7 min before end) and discharges at full power, maximising headroom above household load (D-005, C-001).
+
 ## 1.0.9-beta.2
 
 ### Fixed

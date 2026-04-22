@@ -691,19 +691,14 @@ class TestCalculateDischargeDeferredStart:
         )
         assert no_peak == with_peak
 
-    def test_tight_window_feedin_does_not_over_defer(self) -> None:
-        """Tight window with small feedin must not defer past start.
+    def test_tight_window_small_battery_starts_immediately(self) -> None:
+        """Tight window with small battery and feedin must start at window start.
 
-        Reproduces the E2E failure in test_feedin_power_adjusts_over_time:
-        30-min window, 10.5 kW max, 80%->30% SoC (5 kWh to drain at
-        10 kW effective = 0.5h, longer than the 30-min window).  The SoC
-        deadline falls before the window start, meaning the window is
-        already tight.  A small feedin target (1 kWh) should NOT override
-        this and push the deadline past start -- the session must start
-        immediately so feedin pacing can spread the export across the
-        available window.
+        30-min window, 10.5 kW max, 80%->30% SoC, 10 kWh battery (5 kWh
+        to drain at 10 kW effective = 30 min buffered = 33 min, longer
+        than the window).  Feedin limit (6 kWh) exceeds the SoC energy,
+        so SoC drain is the binding constraint — starts immediately.
         """
-        # 30-minute window matching the E2E test scenario
         start = datetime.datetime(2026, 4, 22, 0, 3, 0)
         end = datetime.datetime(2026, 4, 22, 0, 33, 0)
         now = datetime.datetime(2026, 4, 22, 0, 5, 0)
@@ -716,15 +711,44 @@ class TestCalculateDischargeDeferredStart:
             end,
             net_consumption_kw=0.5,
             start=start,
-            feedin_energy_limit_kwh=1.0,
+            feedin_energy_limit_kwh=6.0,
         )
-        # The uncapped SoC deadline exceeds the window (5 kWh at 10 kW
-        # = 30 min buffered = 33 min, longer than the 30-min window).
-        # The deferred start should be clamped to the window start, not
-        # pushed to end - 7 min by the feedin cap.
         assert deferred <= now, (
             f"Deferred start {deferred} is after now {now}: "
-            f"feedin cap should not override tight-window SoC deadline"
+            f"tight window should start immediately"
+        )
+
+    def test_large_battery_feedin_defers_by_feedin_deadline(self) -> None:
+        """Large battery with small feedin limit should defer based on feedin.
+
+        Reproduces production bug: 42 kWh battery, SoC 98%->21%, 51 min
+        window, 1 kWh feedin limit.  The SoC deadline (draining 32 kWh)
+        falls hours before the window start, but the feedin target only
+        needs ~7 min of discharge.  The session should defer until ~7 min
+        before end, not start immediately at low paced power for the full
+        51 minutes (which creates sustained C-001 import risk).
+        """
+        start = datetime.datetime(2026, 4, 22, 16, 9, 0)
+        end = datetime.datetime(2026, 4, 22, 17, 0, 0)
+
+        deferred = calculate_discharge_deferred_start(
+            98.0,
+            21,
+            42.0,
+            10500,
+            end,
+            net_consumption_kw=0.2,
+            start=start,
+            feedin_energy_limit_kwh=1.0,
+        )
+        # Feedin deadline: 1 kWh at ~10.3 kW effective export = ~5.8 min,
+        # with 20% headroom = ~7.3 min.  Deferred start should be ~16:52,
+        # NOT at the window start (16:09).
+        minutes_before_end = (end - deferred).total_seconds() / 60
+        assert minutes_before_end < 15, (
+            f"Deferred start {deferred} is {minutes_before_end:.0f} min "
+            f"before end — should be <15 min for 1 kWh feedin, not "
+            f"the full {(end - start).total_seconds() / 60:.0f} min window"
         )
 
     def test_small_feedin_defers_later_than_full_soc(self) -> None:
