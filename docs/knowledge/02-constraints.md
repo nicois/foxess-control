@@ -108,10 +108,16 @@ floored at `max(paced_power, peak_consumption * 1.5)` to prevent the
 house drawing from the grid.
 **Rationale**: When paced discharge power drops below household load,
 the shortfall is imported from the grid. This defeats the purpose of
-discharge (self-consumption or feed-in) and incurs cost.
+discharge (self-consumption or feed-in) and incurs cost. Import risk
+scales with both the power gap (max_power - paced_power) and the
+duration of forced discharge — long sessions at low paced power are
+a primary risk vector. This is why feedin-limited sessions should
+defer until the feedin deadline, then discharge at higher power for a
+shorter burst, rather than starting immediately at low paced power
+(see D-002, D-005).
 **Violation consequence**: Unexpected grid import during discharge
 windows, inflating electricity costs.
-**Traces**: D-001, D-004;
+**Traces**: D-001, D-002, D-004, D-005;
 `tests/test_smart_battery_algorithms.py::TestCalculateDischargePower::test_consumption_exceeds_needed_floors_at_consumption`,
 `tests/test_smart_battery_algorithms.py::TestShouldSuspendDischarge`
 

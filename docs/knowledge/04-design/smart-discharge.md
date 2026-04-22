@@ -44,6 +44,11 @@ the grid supplies the shortfall. Self-use mode lets the inverter
 intelligently supply house load from battery without exporting.
 **Rationale**: Maximises the self-use period (avoiding grid import risk)
 while still hitting the discharge target by the end of the window.
+For feedin-limited sessions, the feedin deadline (not the SoC deadline)
+governs deferral because the session stops at the feedin target, not at
+min_soc — see D-005. This is critical because large batteries with
+small feedin limits would otherwise start immediately at low paced
+power, creating a long window of C-001 import risk.
 **Alternatives considered**:
 - Immediate forced discharge at window start: rejected because low
   paced power causes grid import when house load exceeds it
@@ -98,14 +103,17 @@ exhausted early. Additionally, track the observed export rate between
 polls and schedule a one-shot stop when the remaining budget will be
 exhausted before the next poll — preventing overshoot of the limit.
 
-The feedin cap is also used to adjust the deferred start calculation:
-when a small feedin limit constrains the session to less discharge time
-than the full SoC drain, the deferred start is computed from the feedin
-drain time. However, this cap is only applied when the uncapped SoC
-deadline falls within the window — when the window is already tight
-(uncapped deadline before start), the feedin cap is skipped so discharge
-starts immediately and feedin pacing can spread the export across the
-available time.
+When a feedin limit is set, the deferred start SoC deadline is always
+computed from the feedin drain time (not the full SoC drain), because
+the session will stop at the feedin target — the full SoC drain is not
+the binding constraint. This maximises self-use time (D-002) and
+minimises the forced-discharge window where paced power is below max,
+which is the primary import risk vector (C-001).
+
+The deferred start is re-evaluated on every listener tick (60s), so if
+conditions change during the deferred phase (e.g. a load spike causes
+the SoC drain to become the binding constraint), the system starts
+forced discharge earlier than originally planned.
 
 **Context**: Some tariffs limit export kWh per day. Without spreading,
 the session exhausts the limit in the first hour and stops, failing to
@@ -116,24 +124,30 @@ target are achievable within the window. The early-stop uses the
 observed rate (from the cumulative feed-in counter) rather than the
 configured discharge power, since actual export is reduced by house
 consumption and inverter grid-export limits. A one-shot timer at the
-projected completion time stops discharge precisely. The tight-window
-guard prevents the feedin cap from over-deferring in windows where the
-SoC drain already exceeds the window duration.
+projected completion time stops discharge precisely.
+
+Running at low paced power for a long window (e.g. 1.5 kW for 51 min)
+creates sustained import risk: any household load spike above the paced
+power draws from the grid for the entire spike duration. Running at
+full power for a short burst (e.g. 10.5 kW for 7 min) has massive
+headroom and much shorter exposure. Deferring until the feedin deadline
+and then discharging at higher power is therefore strictly safer than
+starting immediately at low paced power (C-001, D-001 P1 priority).
 **Alternatives considered**:
 - Export at max until limit hit, then switch to self-use: rejected
   because min_soc target would be missed
 - Stop at next poll after limit reached: rejected because up to
   5 minutes of excess export may incur penalties on capped tariffs
-- Always apply feedin cap to deferred start: rejected after
-  discovering that tight windows (where uncapped SoC deadline falls
-  before window start) caused the session to stay in
-  `discharge_deferred` for most of the window, never transitioning
-  to `discharging`
+- Skip feedin cap on SoC deadline for tight windows (pre-2026-04-22):
+  rejected — caused immediate start at low paced power for the full
+  window, creating sustained C-001 violation risk. The original
+  concern (over-deferring) was based on the uncapped SoC deadline,
+  which is irrelevant when feedin is the binding constraint
 The feed-in baseline (the coordinator's `feedin` value at session
 start) is captured on the listener's first tick rather than at session
 setup time, because the coordinator data may not be populated yet when
 the service call runs.
-**Traces**: C-001;
+**Traces**: C-001, D-002;
 `tests/test_smart_battery_algorithms.py::TestDischargePowerFeedinConstraint`,
 `tests/test_smart_battery_algorithms.py::TestCalculateDischargeDeferredStart::test_tight_window_feedin_does_not_over_defer`,
 `tests/test_services.py::TestFeedinEnergyLimit`,
