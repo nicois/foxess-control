@@ -1,20 +1,13 @@
 # Changelog
 
-## 1.0.9-beta.7
+## 1.0.9
+
+### Changed
+- **Control card migrated to LitElement**: `foxess-control-card` now uses LitElement (extracted from HA's global scope) instead of vanilla HTMLElement with `innerHTML` rendering. Lit's DOM diffing preserves form elements across re-renders, eliminating input value loss, picker popup dismissal, and the need for snapshot/restore workarounds (D-040).
 
 ### Fixed
-- **Discharge session lost after HA restart during deferred phase**: when HA restarted before a scheduled discharge window opened (e.g. session created at 07:50 for 07:59–10:01 window, restart at 07:57), session recovery looked for a ForceDischarge schedule on the inverter. Since the schedule isn't written until the window opens, recovery found nothing and discarded the valid session. Now correctly re-creates the session in deferred state, matching charge recovery behaviour (C-024, D-002).
-- **E2E feedin pacing test unreliable on CI**: tuned test parameters (1.6 kWh / 15-min window) so deferral fits within timeout and feedin budget survives the observation fast-forward (D-005).
-
-## 1.0.9-beta.4
-
-### Fixed
-- **Feedin-limited discharge started immediately instead of deferring**: large batteries with small feedin limits (e.g. 42 kWh battery, 1 kWh feedin, 51 min window) started forced discharge immediately at low paced power (~1.5 kW) for the entire window, creating sustained grid import risk. Now defers until the feedin deadline (~7 min before end) and discharges at full power, maximising headroom above household load (D-005, C-001).
-- **E2E feedin pacing test timed out after deferral fix**: the feedin pacing E2E test used a 30-min window that resulted in a long deferral under the corrected algorithm, exceeding the 120s test timeout. Reduced window to 10 min and updated assertions to match the new deferral behaviour.
-
-## 1.0.9-beta.2
-
-### Fixed
+- **Feedin-limited discharge started immediately instead of deferring**: large batteries with small feedin limits (e.g. 42 kWh battery, 1 kWh feedin, 51 min window) started forced discharge immediately at low paced power (~1.5 kW) for the entire window, creating sustained grid import risk. Now defers until the feedin deadline and discharges at full power, maximising headroom above household load (D-005, C-001).
+- **Discharge session lost after HA restart during deferred phase**: when HA restarted before a scheduled discharge window opened, session recovery looked for a ForceDischarge schedule on the inverter. Since the schedule isn't written until the window opens, recovery found nothing and discarded the valid session. Now correctly re-creates the session in deferred state, matching charge recovery behaviour (C-024, D-002).
 - **WebSocket connected before discharge window opened**: calling `smart_discharge` (or `smart_charge`) before the window start time caused WebSocket to connect immediately during the "scheduled" phase. WS now waits until the window actually opens. Also fixed the same issue for charge sessions in `smart_sessions` mode.
 - **Discharge deferred countdown not shown on card**: the badge next to "Discharge Deferred" showed a bare duration (e.g. "2h 15m") without indicating it was a countdown to discharge start. Now shows "discharges in 2h 15m" (localised in all 10 languages).
 
