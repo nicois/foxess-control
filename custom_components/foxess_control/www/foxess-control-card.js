@@ -11,7 +11,7 @@
  *   # soc_entity: sensor.foxess_battery_soc
  */
 
-const CARD_VERSION = "1.5.1";
+const CARD_VERSION = "1.5.2";
 
 // -- i18n --------------------------------------------------------------------
 
@@ -36,6 +36,7 @@ const TRANSLATIONS = {
     time: "Time",
     energy: "Energy",
     starts_in: "starts in {0}",
+    defers_in: "discharges in {0}",
     ending: "ending",
     kwh_left: "{0} kWh left",
     dur_hm: "{0}h {1}m",
@@ -77,6 +78,7 @@ const TRANSLATIONS = {
     time: "Zeit",
     energy: "Energie",
     starts_in: "startet in {0}",
+    defers_in: "Entladung in {0}",
     ending: "endet",
     kwh_left: "{0} kWh verbl.",
     dur_hm: "{0} Std. {1} Min.",
@@ -118,6 +120,7 @@ const TRANSLATIONS = {
     time: "Temps",
     energy: "Énergie",
     starts_in: "commence dans {0}",
+    defers_in: "décharge dans {0}",
     ending: "fin",
     kwh_left: "{0} kWh restants",
     dur_hm: "{0}h {1}min",
@@ -159,6 +162,7 @@ const TRANSLATIONS = {
     time: "Tijd",
     energy: "Energie",
     starts_in: "start over {0}",
+    defers_in: "ontlading over {0}",
     ending: "eindigt",
     kwh_left: "{0} kWh over",
     dur_hm: "{0}u {1}m",
@@ -200,6 +204,7 @@ const TRANSLATIONS = {
     time: "Tiempo",
     energy: "Energía",
     starts_in: "comienza en {0}",
+    defers_in: "descarga en {0}",
     ending: "finalizando",
     kwh_left: "{0} kWh restantes",
     dur_hm: "{0}h {1}min",
@@ -241,6 +246,7 @@ const TRANSLATIONS = {
     time: "Tempo",
     energy: "Energia",
     starts_in: "inizia tra {0}",
+    defers_in: "scarica tra {0}",
     ending: "in chiusura",
     kwh_left: "{0} kWh rimasti",
     dur_hm: "{0}h {1}min",
@@ -282,6 +288,7 @@ const TRANSLATIONS = {
     time: "Czas",
     energy: "Energia",
     starts_in: "start za {0}",
+    defers_in: "rozładowanie za {0}",
     ending: "kończy się",
     kwh_left: "{0} kWh pozostało",
     dur_hm: "{0} godz. {1} min",
@@ -323,6 +330,7 @@ const TRANSLATIONS = {
     time: "Tempo",
     energy: "Energia",
     starts_in: "começa em {0}",
+    defers_in: "descarga em {0}",
     ending: "terminando",
     kwh_left: "{0} kWh restantes",
     dur_hm: "{0}h {1}min",
@@ -364,6 +372,7 @@ const TRANSLATIONS = {
     time: "时间",
     energy: "电量",
     starts_in: "{0}后开始",
+    defers_in: "{0}后放电",
     ending: "即将结束",
     kwh_left: "剩余 {0} kWh",
     dur_hm: "{0}时{1}分",
@@ -405,6 +414,7 @@ const TRANSLATIONS = {
     time: "時間",
     energy: "電力量",
     starts_in: "{0}後に開始",
+    defers_in: "{0}後に放電",
     ending: "終了間近",
     kwh_left: "残り {0} kWh",
     dur_hm: "{0}時間{1}分",
@@ -651,6 +661,12 @@ class FoxESSControlCard extends HTMLElement {
     if (startsMatch) {
       const dur = this._translateDurationStr(startsMatch[1]);
       return this._t("starts_in").replace("{0}", dur);
+    }
+    // "defers Xh Ym" / "defers Xm"
+    const defersMatch = text.match(/^defers (.+)$/);
+    if (defersMatch) {
+      const dur = this._translateDurationStr(defersMatch[1]);
+      return this._t("defers_in").replace("{0}", dur);
     }
     // "ending"
     if (text === "ending") return this._t("ending");

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.9-beta.1
+
+### Fixed
+- **Discharge deferred countdown not shown on card**: the badge next to "Discharge Deferred" showed a bare duration (e.g. "2h 15m") without indicating it was a countdown to discharge start. Now shows "discharges in 2h 15m" (localised in all 10 languages).
+
 ## 1.0.8
 
 ### Added
