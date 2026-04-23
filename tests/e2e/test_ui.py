@@ -497,20 +497,22 @@ class TestOverviewCard:
         # uncaught TypeError when _renderBox tries to access box.type
         # on an entry that has flow_from instead.
         render_result = page.evaluate(
-            f"""{_JS_FIND_OVERVIEW_CARD}
-            const card = findCard(document);
-            if (!card) return 'card_not_found';
-            card._boxes = [
-                {{ type: 'solar' }},
-                {{ flow_from: ['sensor.test'] }},
-                null,
-                undefined,
-            ];
-            try {{
-                card._render();
-                return 'ok';
-            }} catch (e) {{
-                return 'error: ' + e.message;
+            f"""() => {{
+                {_JS_FIND_OVERVIEW_CARD}
+                var card = findCard(document);
+                if (!card) return 'card_not_found';
+                card._boxes = [
+                    {{ type: 'solar' }},
+                    {{ flow_from: ['sensor.test'] }},
+                    null,
+                    undefined,
+                ];
+                try {{
+                    card._render();
+                    return 'ok';
+                }} catch (e) {{
+                    return 'error: ' + e.message;
+                }}
             }}"""
         )
 
