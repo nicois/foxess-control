@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.10-beta.1
+## 1.0.10
 
 ### Added
 - **Grid export limit configuration**: new integration option (default 5 kW) for the net export cap set on the inverter. When configured, discharge deferral accounts for the capped export rate, and discharge power always uses maximum inverter power (firmware handles export capping). Set to 0 for legacy power-pacing behaviour.
