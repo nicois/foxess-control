@@ -56,6 +56,7 @@ pre-commit run --all-files                  # ruff + mypy + semgrep + module siz
 ## Process
 
 - **Bug fixes**: invoke `/regression-test` BEFORE writing any fix. The test must fail against the current code before the fix is applied.
+- **New features / parameters**: invoke `superpowers:test-driven-development` BEFORE writing implementation code. New parameters added to existing tested functions must have corresponding test cases in the same commit. If the function already has a test class, add cases there; if not, create one.
 - **smart_battery/ edits**: ONLY edit the canonical root `smart_battery/`. Never edit the vendored copy under `custom_components/foxess_control/smart_battery/` directly — the pre-commit hook syncs it automatically.
 - **Releases**: update `CHANGELOG.md` BEFORE bumping the version. The release workflow uses the changelog for release notes — an empty changelog means empty release notes.
 
