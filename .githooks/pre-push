@@ -19,7 +19,22 @@ while read -r local_ref local_oid remote_ref remote_oid; do
   esac
 
   tag="${local_ref#refs/tags/}"
+  version="${tag#v}"
   commit=$(git rev-list -n1 "$tag" 2>/dev/null || echo "$local_oid")
+
+  # New tag must be strictly greater than the latest existing tag
+  latest=$(git tag -l 'v*' | sort -V | tail -1)
+  if [ -n "$latest" ]; then
+    latest_version="${latest#v}"
+    # sort -V puts the higher version last; if our version isn't last, it's out of order
+    higher=$(printf '%s\n%s\n' "$latest_version" "$version" | sort -V | tail -1)
+    if [ "$higher" = "$latest_version" ] && [ "$version" != "$latest_version" ]; then
+      echo "❌ Tag $tag ($version) is not newer than existing $latest ($latest_version)"
+      echo "   Tags must be strictly increasing. Bump the version number."
+      exit 1
+    fi
+    echo "✅ Tag $tag is newer than $latest"
+  fi
 
   # Tag must point to a commit on main
   if ! git merge-base --is-ancestor "$commit" main 2>/dev/null; then
