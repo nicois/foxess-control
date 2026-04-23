@@ -974,15 +974,12 @@ class TestControlCard:
                 }
                 const card = findCard(document);
                 if (card) {
-                    card._config = {...card._config, show_cancel: false};
-                    card.requestUpdate();
+                    card.setConfig({...card._config, show_cancel: false});
                 }
             }"""
         )
 
-        page.wait_for_timeout(1000)
-
-        no_cancel = page.evaluate(
+        no_cancel = page.wait_for_function(
             """() => {
                 function findCard(root) {
                     const card = root.querySelector('foxess-control-card');
@@ -996,11 +993,11 @@ class TestControlCard:
                     return null;
                 }
                 const card = findCard(document);
-                if (!card || !card.shadowRoot) return null;
-                const btn = card.shadowRoot.querySelector('.cancel');
-                return btn === null;
-            }"""
-        )
+                if (!card || !card.shadowRoot) return false;
+                return card.shadowRoot.querySelector('.cancel') === null;
+            }""",
+            timeout=5000,
+        ).json_value()
         assert no_cancel is True, (
             "Cancel button should be hidden when show_cancel: false"
         )
