@@ -79,6 +79,7 @@ class SoakSample:
     load_kw: float
     bat_charge_kw: float
     bat_discharge_kw: float
+    grid_consumption_kwh: float = 0.0
     sim_time: str = ""
 
 
@@ -134,6 +135,7 @@ class SoakRecorder:
                     "load_kw",
                     "bat_charge_kw",
                     "bat_discharge_kw",
+                    "grid_consumption_kwh",
                     "sim_time",
                 ]
             )
@@ -151,6 +153,7 @@ class SoakRecorder:
                         f"{s.load_kw:.3f}",
                         f"{s.bat_charge_kw:.3f}",
                         f"{s.bat_discharge_kw:.3f}",
+                        f"{s.grid_consumption_kwh:.3f}",
                         s.sim_time,
                     ]
                 )
@@ -271,6 +274,7 @@ def _sample_from_ha_and_sim(
         load_kw=sim_state.get("load_kw", 0.0),
         bat_charge_kw=sim_state.get("bat_charge_kw", 0.0),
         bat_discharge_kw=sim_state.get("bat_discharge_kw", 0.0),
+        grid_consumption_kwh=sim_state.get("grid_consumption_total_kwh", 0.0),
         sim_time=sim_state.get("sim_time", ""),
     )
 
@@ -401,19 +405,32 @@ def run_scenario(
 
 def check_charge_invariants(recorder: SoakRecorder, config: ScenarioConfig) -> None:
     """Verify charge session invariants from recorded samples."""
-    grid_energy_above_target_kwh = 0.0
-    prev_elapsed = 0.0
+    overshoot_start: SoakSample | None = None
+    threshold = config.target_soc + 2
     for s in recorder.samples:
-        if s.soc > config.target_soc + 2 and s.grid_import_kw > 0.0:
-            dt_h = (s.elapsed_s - prev_elapsed) / 3600.0
-            grid_energy_above_target_kwh += s.grid_import_kw * dt_h
-        prev_elapsed = s.elapsed_s
-    if grid_energy_above_target_kwh > 0.05:
-        recorder.violate(
-            "CHARGE_OVERSHOOT",
-            f"SoC exceeded target {config.target_soc}% + 2% "
-            f"while drawing {grid_energy_above_target_kwh:.3f}kWh from grid",
-        )
+        if s.soc > threshold:
+            if overshoot_start is None:
+                overshoot_start = s
+        elif overshoot_start is not None:
+            grid_kwh = s.grid_consumption_kwh - overshoot_start.grid_consumption_kwh
+            if grid_kwh > 0.05:
+                recorder.violate(
+                    "CHARGE_OVERSHOOT",
+                    f"SoC above {threshold}% for "
+                    f"{s.elapsed_s - overshoot_start.elapsed_s:.0f}s "
+                    f"while drawing {grid_kwh:.3f}kWh from grid",
+                )
+            overshoot_start = None
+    if overshoot_start is not None and recorder.samples:
+        last = recorder.samples[-1]
+        grid_kwh = last.grid_consumption_kwh - overshoot_start.grid_consumption_kwh
+        if grid_kwh > 0.05:
+            recorder.violate(
+                "CHARGE_OVERSHOOT",
+                f"SoC above {threshold}% for "
+                f"{last.elapsed_s - overshoot_start.elapsed_s:.0f}s "
+                f"while drawing {grid_kwh:.3f}kWh from grid",
+            )
 
     charging_samples = [s for s in recorder.samples if s.state == "charging"]
     if len(charging_samples) >= 3:
