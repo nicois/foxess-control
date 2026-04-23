@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 import requests
 
+from .results_db import save_run
+
 if TYPE_CHECKING:
     from collections.abc import Generator
 
@@ -601,7 +603,18 @@ def ha_e2e(
 def soak_recorder(
     request: pytest.FixtureRequest,
 ) -> Generator[SoakRecorder, None, None]:
+    started_at = datetime.datetime.now(tz=datetime.UTC).isoformat()
     recorder = SoakRecorder(test_name=request.node.nodeid)
     yield recorder
     path = recorder.save()
     _log.warning("Soak artifacts saved to %s", path)
+    db_path = ARTIFACT_DIR / "soak_results.db"
+    scenario = request.node.name
+    passed = len(recorder.violations) == 0
+    run_id = save_run(db_path, recorder, scenario, started_at, passed)
+    _log.info(
+        "Soak DB: run_id=%d, scenario=%s, passed=%s",
+        run_id,
+        scenario,
+        passed,
+    )
