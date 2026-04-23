@@ -1,11 +1,12 @@
 # Changelog
 
-## 1.0.11-beta.3
+## 1.0.11-beta.4
 
 ### Added
 - **Soak test suite**: real-time scenario simulations that run full charge/discharge sessions through the HA integration and simulator, verifying invariants (SoC overshoot, grid import during discharge, target reach). 17 scenarios covering basic charge/discharge, solar interaction, load spikes, BMS taper, cold battery, large battery, tight windows, and combined cycles.
 - **Simulator auto-tick**: simulator now advances its model in real time (5s steps) via a background task, so SoC and power flows update without explicit fast-forward calls.
 - **Nightly soak service uses latest tag**: the systemd soak timer now checks out the most recent git tag instead of HEAD, avoiding wasted runs against WIP code on develop.
+- **SQLite inflection-point store**: soak test results are recorded in a `soak_results.db` with state transitions, SoC direction changes (2% deadband), and power step changes as discrete events, enabling cross-run comparison between tags.
 
 ## 1.0.11-beta.2
 
