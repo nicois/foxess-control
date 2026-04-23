@@ -797,6 +797,269 @@ class TestDischargeRemainingSensor:
         sensor = DischargeRemainingSensor(_make_hass(), _make_entry())
         assert sensor.native_value is None
 
+    def test_deferred_countdown_accounts_for_consumption(self) -> None:
+        """Deferred countdown must use consumption, not assume zero house load.
+
+        With a grid export limit of 5kW, a 6kW inverter, peak consumption
+        of 4kW, and a 2kWh feedin target:
+        - Correct (with consumption): effective_export = min(6-4, 5) = 2kW
+          feedin_hours = 2/2 = 1h, buffered = 1/0.8 = 1.25h
+          → deferred = end - 1.25h = start of window (clamped)
+        - Bug (without consumption): effective_export = min(6, 5) = 5kW
+          feedin_hours = 2/5 = 0.4h, buffered = 0.4/0.8 = 0.5h
+          → deferred = end - 30min (much later than correct)
+
+        The sensor was omitting net_consumption_kw and consumption_peak_kw,
+        causing a different deferred start than the listener computes.
+        """
+        from smart_battery.algorithms import calculate_discharge_deferred_start
+
+        start = datetime.datetime(2026, 4, 23, 16, 0, 0)
+        end = datetime.datetime(2026, 4, 23, 17, 0, 0)
+        now = datetime.datetime(2026, 4, 23, 16, 5, 0)  # 5 min into window
+
+        # Discharge state with deferred start, feedin limit, and tracked peak
+        ds = _discharge_state(
+            start=start,
+            end=end,
+            min_soc=10,
+            max_power_w=6000,
+            last_power_w=0,
+            discharging_started=False,
+            feedin_energy_limit_kwh=2.0,
+            consumption_peak_kw=4.0,
+            battery_capacity_kwh=10.0,
+        )
+
+        # Coordinator data: loads=4kW, pv=0 → net_consumption=4kW
+        hass = _make_hass(
+            smart_discharge_state=ds,
+            coordinator_soc=80.0,
+            coordinator_extra={"loadsPower": 4.0, "pvPower": 0.0},
+        )
+        mock_entry = MagicMock()
+        mock_entry.options = {
+            "battery_capacity_kwh": 10.0,
+            "grid_export_limit": 5000,
+            "charge_headroom": 10,
+        }
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        # Compute the correct deferred start (as the listener would)
+        correct_deferred = calculate_discharge_deferred_start(
+            80.0,
+            10,
+            10.0,
+            6000,
+            end,
+            net_consumption_kw=4.0,
+            start=start,
+            headroom=0.10,
+            feedin_energy_limit_kwh=2.0,
+            consumption_peak_kw=4.0,
+            grid_export_limit_w=5000,
+        )
+
+        sensor = DischargeRemainingSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=now,
+        ):
+            value = sensor.native_value
+
+        # The correct deferred start is at or before window start
+        # (clamped), so the sensor should NOT show a deferral countdown.
+        # With the bug (no consumption), the sensor shows "defers 25m"
+        # because it computes a later deferred start.
+        assert value is not None
+        if correct_deferred <= now:
+            # Listener would start discharging — sensor should show
+            # remaining window time, NOT a deferral countdown
+            assert "defers" not in value, (
+                f"Sensor shows '{value}' but listener would start "
+                f"immediately (deferred={correct_deferred}, now={now})"
+            )
+        else:
+            # Listener would defer — sensor should match
+            wait = (correct_deferred - now).total_seconds() / 60
+            correct_wait_min = int(wait)
+            assert value == f"defers {correct_wait_min}m", (
+                f"Sensor shows '{value}' but expected "
+                f"'defers {correct_wait_min}m' deferral"
+            )
+
+    def test_deferred_countdown_with_grid_export_limit_and_consumption(self) -> None:
+        """Grid export limit + consumption must both affect deferral calc.
+
+        With 5kW grid limit, 6kW inverter, 3kW peak consumption, and
+        2kWh feedin target:
+        - Correct: effective_export = min(6-3, 5) = 3kW
+          feedin_hours = 2/3 = 0.667h, buffered = 0.667/0.8 = 0.833h = 50min
+          → deferred = end - 50min = 16:10 (in a 60-min window)
+        - Bug (no consumption): effective_export = min(6, 5) = 5kW
+          feedin_hours = 2/5 = 0.4h, buffered = 0.4/0.8 = 0.5h = 30min
+          → deferred = end - 30min = 16:30
+
+        At 16:05, correct shows "defers 5m", bug shows "defers 25m".
+        """
+        from smart_battery.algorithms import calculate_discharge_deferred_start
+
+        start = datetime.datetime(2026, 4, 23, 16, 0, 0)
+        end = datetime.datetime(2026, 4, 23, 17, 0, 0)
+        now = datetime.datetime(2026, 4, 23, 16, 5, 0)
+
+        ds = _discharge_state(
+            start=start,
+            end=end,
+            min_soc=10,
+            max_power_w=6000,
+            last_power_w=0,
+            discharging_started=False,
+            feedin_energy_limit_kwh=2.0,
+            consumption_peak_kw=3.0,
+            battery_capacity_kwh=10.0,
+        )
+
+        hass = _make_hass(
+            smart_discharge_state=ds,
+            coordinator_soc=80.0,
+            coordinator_extra={"loadsPower": 2.0, "pvPower": 0.0},
+        )
+        mock_entry = MagicMock()
+        mock_entry.options = {
+            "battery_capacity_kwh": 10.0,
+            "grid_export_limit": 5000,
+            "charge_headroom": 10,
+        }
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        # Correct deferred start with all parameters (as listener would)
+        correct_deferred = calculate_discharge_deferred_start(
+            80.0,
+            10,
+            10.0,
+            6000,
+            end,
+            net_consumption_kw=2.0,
+            start=start,
+            headroom=0.10,
+            feedin_energy_limit_kwh=2.0,
+            consumption_peak_kw=3.0,
+            grid_export_limit_w=5000,
+        )
+
+        sensor = DischargeRemainingSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=now,
+        ):
+            value = sensor.native_value
+
+        # Sensor must show the same countdown as the listener's calculation
+        assert correct_deferred > now, (
+            "Setup error: correct deferred should be after now"
+        )
+        correct_wait_min = int((correct_deferred - now).total_seconds() / 60)
+        assert value == f"defers {correct_wait_min}m", (
+            f"Sensor shows '{value}' but expected 'defers {correct_wait_min}m' "
+            f"(correct deferred={correct_deferred})"
+        )
+
+    def test_deferred_sensor_matches_listener_calculation(self) -> None:
+        """The sensor's deferred countdown must match the listener's calc exactly.
+
+        This is the core bug: the sensor was calling calculate_discharge_deferred_start
+        without net_consumption_kw, consumption_peak_kw, taper_profile, bms_temp_c,
+        or start — producing a different result than the listener.
+        """
+        from smart_battery.algorithms import calculate_discharge_deferred_start
+
+        start = datetime.datetime(2026, 4, 23, 16, 0, 0)
+        end = datetime.datetime(2026, 4, 23, 16, 44, 0)  # 44-min window
+        now = datetime.datetime(2026, 4, 23, 16, 0, 0)  # at window start
+
+        # Moderate consumption that changes the effective export rate
+        ds = _discharge_state(
+            start=start,
+            end=end,
+            min_soc=10,
+            max_power_w=7000,
+            last_power_w=0,
+            discharging_started=False,
+            feedin_energy_limit_kwh=2.0,
+            consumption_peak_kw=3.0,
+            battery_capacity_kwh=10.0,
+        )
+
+        hass = _make_hass(
+            smart_discharge_state=ds,
+            coordinator_soc=80.0,
+            coordinator_extra={"loadsPower": 2.0, "pvPower": 0.0},
+        )
+        mock_entry = MagicMock()
+        mock_entry.options = {
+            "battery_capacity_kwh": 10.0,
+            "grid_export_limit": 5000,
+            "charge_headroom": 10,
+        }
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        # Listener's calculation (correct — all params)
+        listener_deferred = calculate_discharge_deferred_start(
+            80.0,
+            10,
+            10.0,
+            7000,
+            end,
+            net_consumption_kw=2.0,
+            start=start,
+            headroom=0.10,
+            feedin_energy_limit_kwh=2.0,
+            consumption_peak_kw=3.0,
+            grid_export_limit_w=5000,
+        )
+
+        # Sensor's calculation (broken — missing params)
+        sensor_buggy = calculate_discharge_deferred_start(
+            80.0,
+            10,
+            10.0,
+            7000,
+            end,
+            headroom=0.10,
+            feedin_energy_limit_kwh=2.0,
+            grid_export_limit_w=5000,
+        )
+
+        # Verify the two calculations differ (the bug exists)
+        assert listener_deferred != sensor_buggy, (
+            "Bug doesn't reproduce: listener and sensor compute the same result. "
+            "Adjust test parameters so consumption changes the deadline."
+        )
+
+        sensor = DischargeRemainingSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=now,
+        ):
+            value = sensor.native_value
+
+        # The sensor must produce the same countdown as the listener
+        assert value is not None
+        if listener_deferred > now:
+            wait = (listener_deferred - now).total_seconds() / 60
+            expected_min = int(wait)
+            assert value == f"defers {expected_min}m", (
+                f"Sensor shows '{value}' but expected "
+                f"'defers {expected_min}m' matching listener "
+                f"(deferred={listener_deferred})"
+            )
+        else:
+            # Listener says start now — no deferral
+            assert "defers" not in value, (
+                f"Sensor shows '{value}' but listener would start immediately"
+            )
+
 
 # ---------------------------------------------------------------------------
 # Battery Forecast sensor
