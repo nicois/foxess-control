@@ -505,3 +505,67 @@ def test_charge_then_discharge(
         f"{len(soak_recorder.violations)} violations: "
         + "; ".join(v.detail for v in soak_recorder.violations)
     )
+
+
+# ---------------------------------------------------------------------------
+# Edge-case scenarios
+# ---------------------------------------------------------------------------
+
+
+def test_charge_extreme_taper(
+    ha_e2e: HAClient,
+    foxess_sim: SimulatorHandle,
+    soak_recorder: SoakRecorder,
+) -> None:
+    """Charge from 92% to 100%: BMS taper region.
+
+    Starting near full exercises the taper model heavily. The BMS reduces
+    charge acceptance above ~90% SoC, so the pacing algorithm must
+    detect the deficit and burst to max power to reach the target.
+    """
+    config = ScenarioConfig(
+        name="charge_high_soc_taper",
+        session_type="charge",
+        window_minutes=120,
+        initial_soc=92.0,
+        target_soc=100,
+        load=LoadProfile(base_kw=0.3),
+        solar=SolarProfile(peak_kw=0.0),
+        charge_taper_soc=85.0,
+    )
+    run_scenario(ha_e2e, foxess_sim, config, soak_recorder)
+    check_charge_invariants(soak_recorder, config)
+    assert not soak_recorder.violations, (
+        f"{len(soak_recorder.violations)} violations: "
+        + "; ".join(v.detail for v in soak_recorder.violations)
+    )
+
+
+def test_charge_very_cold_battery(
+    ha_e2e: HAClient,
+    foxess_sim: SimulatorHandle,
+    soak_recorder: SoakRecorder,
+) -> None:
+    """Charge at 8°C: BMS current-limits to 80A (D-037).
+
+    Cold batteries accept less charge current. The simulator models
+    this via temperature-based power capping. The pacing algorithm
+    should account for reduced acceptance in its deferral and
+    trajectory calculations.
+    """
+    config = ScenarioConfig(
+        name="charge_cold_battery",
+        session_type="charge",
+        window_minutes=240,
+        initial_soc=20.0,
+        target_soc=80,
+        load=LoadProfile(base_kw=0.5),
+        solar=SolarProfile(peak_kw=0.0),
+        battery_temperature=8.0,
+    )
+    run_scenario(ha_e2e, foxess_sim, config, soak_recorder)
+    check_charge_invariants(soak_recorder, config)
+    assert not soak_recorder.violations, (
+        f"{len(soak_recorder.violations)} violations: "
+        + "; ".join(v.detail for v in soak_recorder.violations)
+    )

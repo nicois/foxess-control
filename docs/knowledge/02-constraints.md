@@ -366,6 +366,29 @@ normally when it is actually failing.
 **Traces**: C-020;
 `tests/test_services.py::TestErrorSurfacing`
 
+### C-038: Sensor-listener parameter parity
+**Statement**: Sensor display formulas that present operational timing
+or state information must call the same algorithm functions as
+listeners, with the same parameter lists. When a listener calls
+`calculate_deferred_start()` or `calculate_discharge_deferred_start()`,
+any sensor computing deferred start timing must pass identical
+parameters. Simplified formulas are only acceptable for display values
+that do not affect user understanding of timing.
+**Rationale**: Two incidents (charge 2026-04-23, discharge 2026-04-22)
+showed UI displaying incorrect phase and countdown values when sensor
+formulas omitted parameters the listener used (headroom, taper profile,
+net consumption, BMS temperature, grid export limit). The listener's
+full algorithm accounts for all these factors; sensors that omit them
+show a different deferred start time than the one the listener acts on,
+violating C-020 (operational transparency).
+**Violation consequence**: User sees "Scheduled" when the listener has
+transitioned to "Charging", or wrong countdown values in dashboard cards.
+Erodes trust and leads to unnecessary manual intervention.
+**Traces**: C-020 (operational transparency);
+`tests/test_charge_deferred_sensor.py` (7 tests),
+`tests/test_discharge_deferred_sensor.py` (4 tests);
+fixes: c70addae (charge), 8e10b9a (discharge)
+
 ## Invariants — Testing
 
 ### C-028: Simulator over mocks, with instance isolation
@@ -543,21 +566,60 @@ provides IDE autocomplete.
 pre-commit.
 **Traces**: `.semgrep/foxess-architecture.yaml::no-raw-hass-data-access`
 
-## Proposed
+### C-037: Grid export limit awareness in discharge timing
+**Statement**: When a hardware grid export limit is configured
+(`grid_export_limit_w > 0`), the discharge deferral calculation must
+cap the effective export rate at `grid_export_limit_w / 1000` kW in
+both the SoC deadline and feed-in energy deadline calculations.
+During active discharge, the system must request `max_power_w`
+directly instead of computing paced discharge power, allowing the
+inverter's built-in export limiter to enforce the constraint without
+double-limiting.
+**Rationale**: When a hardware export limit exists (DNO enforcement
+or inverter firmware config), actual grid export becomes
+`min(discharge_power, hardware_limit)`. Software pacing assumes
+`discharge ≈ export`, which is violated by the hardware limit.
+Uncapped deferral starts too late (insufficient time to export at the
+limited rate). Paced active discharge double-limits — the inverter
+delivers less export AND less house-load contribution than possible.
+**Violation consequence**: Deferral deadline too late — discharge
+session incomplete or SoC target missed. Paced active discharge
+under-utilises battery contribution to house load and export.
+**Traces**: C-001 (deferral timing affects no-import), D-002
+(deferred start), D-005 (feedin deadline), D-044;
+`smart_battery/algorithms.py::calculate_discharge_deferred_start`
+(lines 538–539 SoC cap, 566–567 feedin cap);
+`smart_battery/listeners.py::_discharge_listener` (max power path);
+`tests/test_smart_battery_algorithms.py::TestGridExportLimitDeferral`,
+`tests/test_sensor.py::test_deferred_countdown_with_grid_export_limit_and_consumption`
 
-Constraints identified from vision gap analysis but not yet implemented.
+## Invariants — Hardware Behaviour
 
-### C-023: Solar-aware charge reduction
-**Statement**: During smart charge, when solar generation exceeds
-household consumption, the system must reduce grid charge power to
-allow solar surplus to contribute to the battery.
+Constraints satisfied by inverter firmware behaviour, validated via
+the simulator model (C-028, C-033) and soak test scenarios.
+
+### C-023: Solar-first power routing during ForceCharge
+**Statement**: During forced charging, the inverter firmware routes
+solar generation to house load first, then to the battery, before
+drawing from the grid. The effective grid import is
+`grid_import = bat_charge - solar_to_bat + grid_to_load`, where
+`solar_to_bat = solar - min(solar, load)`.
 **Rationale**: Charging at full grid power while solar is producing
 wastes free energy — solar output goes to the grid at the feed-in
 rate (often zero or low) instead of into the battery for free.
+The inverter handles this at the hardware level; no software charge
+reduction is needed. D-043 (charge re-deferral) provides the
+software-side complement: when solar pushes SoC ahead of schedule,
+the listener switches to self-use to maximise free solar contribution.
+**Status**: Satisfied by hardware. Discharge observation (2026-04-15)
+confirmed `grid_export = discharge + solar - load`. Simulator model
+(`simulator/model.py` ForceCharge block) implements the same
+solar-first routing. Three soak test scenarios validate the
+end-to-end behaviour with solar present during charging.
 **Violation consequence**: User pays for grid energy that solar could
 have provided for free, directly reducing ROI.
-**Status**: Under investigation. Discharge observation (2026-04-15)
-confirmed the inverter manages power flow internally
-(`grid_export = discharge + solar - load`). Charge test pending to
-verify if the inverter also uses solar first during ForceCharge.
-**Traces**: -- (pending investigation)
+**Traces**: D-043 (charge re-deferral);
+`simulator/model.py::InverterModel.tick` (ForceCharge solar routing);
+`tests/soak/test_scenarios.py::test_charge_with_solar`,
+`tests/soak/test_scenarios.py::test_charge_solar_exceeds_target`,
+`tests/soak/test_scenarios.py::test_charge_solar_then_spike`

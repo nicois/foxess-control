@@ -118,16 +118,19 @@ analogue for charge).
   `_with_circuit_breaker`. With 5-minute ticks, tier 1 opens at 15 min,
   tier 2 aborts at 40 min.
 
-### C-023 Investigation: Solar-aware charge reduction
-**Status**: Under investigation.
-**Discharge observation (2026-04-15)**: During forced discharge with solar,
-the power balance is `grid_export = discharge + solar - load`. Solar
-and discharge are additive — the inverter manages the power flow
-internally without software intervention. If this holds for charge
-(i.e. `grid_import = charge - solar + load`), then the inverter
-already uses solar first and C-023 is satisfied by hardware.
-**Pending**: Empirical charge test with solar producing > 1 kW needed
-to confirm. Scheduled for 11am AEST 2026-04-15.
+### C-023: Solar-first during ForceCharge (hardware-satisfied)
+**Status**: Satisfied by hardware.
+**Discharge observation (2026-04-15)**: Confirmed
+`grid_export = discharge + solar - load` — the inverter manages
+power flow internally.
+**Charge behaviour**: The simulator model (`simulator/model.py`
+ForceCharge block) implements solar-first routing:
+`solar_to_load = min(solar, load)`, `solar_to_bat = solar - solar_to_load`,
+`grid_charge = bat_charge - solar_to_bat`. Three soak tests
+(`test_charge_with_solar`, `test_charge_solar_exceeds_target`,
+`test_charge_solar_then_spike`) validate end-to-end behaviour.
+D-043 (charge re-deferral) handles the software side: when solar
+pushes SoC ahead of schedule, the listener switches to self-use.
 
 ## Edge Cases
 

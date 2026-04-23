@@ -779,3 +779,118 @@ class TestCalculateDischargeDeferredStart:
         # Should be close to end (1 kWh at 5 kW = 0.2h, buffered ~0.22h)
         delta = (end - with_feedin).total_seconds() / 60
         assert delta < 20  # well under 20 minutes, not the ~67 min for full SoC
+
+
+class TestGridExportLimitDeferral:
+    """Tests for grid_export_limit_w effect on discharge deferral (C-037).
+
+    When a hardware export limit is configured, both the SoC deadline and
+    the feed-in energy deadline must cap the effective export rate at the
+    limit value, producing an earlier (more conservative) deferred start.
+    """
+
+    def _start(self) -> datetime.datetime:
+        return datetime.datetime(2026, 4, 24, 16, 0, 0)
+
+    def _end(self) -> datetime.datetime:
+        return datetime.datetime(2026, 4, 24, 18, 0, 0)
+
+    def test_soc_deadline_capped_by_export_limit(self) -> None:
+        """Export limit caps effective discharge rate → earlier SoC deadline."""
+        uncapped = calculate_discharge_deferred_start(
+            80.0,
+            10,
+            10.0,
+            10500,
+            self._end(),
+            net_consumption_kw=2.0,
+            start=self._start(),
+            feedin_energy_limit_kwh=3.0,
+        )
+        capped = calculate_discharge_deferred_start(
+            80.0,
+            10,
+            10.0,
+            10500,
+            self._end(),
+            net_consumption_kw=2.0,
+            start=self._start(),
+            feedin_energy_limit_kwh=3.0,
+            grid_export_limit_w=3000,
+        )
+        assert capped <= uncapped, (
+            f"Export limit should produce earlier or equal start: "
+            f"capped={capped}, uncapped={uncapped}"
+        )
+
+    def test_feedin_deadline_capped_by_export_limit(self) -> None:
+        """Export limit caps effective export rate → earlier feedin deadline."""
+        uncapped = calculate_discharge_deferred_start(
+            80.0,
+            10,
+            10.0,
+            10500,
+            self._end(),
+            start=self._start(),
+            feedin_energy_limit_kwh=5.0,
+        )
+        capped = calculate_discharge_deferred_start(
+            80.0,
+            10,
+            10.0,
+            10500,
+            self._end(),
+            start=self._start(),
+            feedin_energy_limit_kwh=5.0,
+            grid_export_limit_w=3000,
+        )
+        assert capped < uncapped, (
+            f"Feedin export limit should force earlier start: "
+            f"capped={capped}, uncapped={uncapped}"
+        )
+
+    def test_zero_limit_has_no_effect(self) -> None:
+        """grid_export_limit_w=0 means no limit — same result as omitted."""
+        without = calculate_discharge_deferred_start(
+            80.0,
+            10,
+            10.0,
+            10500,
+            self._end(),
+            start=self._start(),
+            feedin_energy_limit_kwh=3.0,
+        )
+        with_zero = calculate_discharge_deferred_start(
+            80.0,
+            10,
+            10.0,
+            10500,
+            self._end(),
+            start=self._start(),
+            feedin_energy_limit_kwh=3.0,
+            grid_export_limit_w=0,
+        )
+        assert with_zero == without
+
+    def test_limit_higher_than_max_power_has_no_effect(self) -> None:
+        """Export limit above max_power_w does not change the deadline."""
+        without = calculate_discharge_deferred_start(
+            80.0,
+            10,
+            10.0,
+            10500,
+            self._end(),
+            start=self._start(),
+            feedin_energy_limit_kwh=3.0,
+        )
+        with_high = calculate_discharge_deferred_start(
+            80.0,
+            10,
+            10.0,
+            10500,
+            self._end(),
+            start=self._start(),
+            feedin_energy_limit_kwh=3.0,
+            grid_export_limit_w=20000,
+        )
+        assert with_high == without

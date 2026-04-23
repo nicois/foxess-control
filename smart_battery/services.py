@@ -296,11 +296,23 @@ def register_services(
 
         start, end = resolve_start_end_explicit(start_time_val, end_time_val)
 
-        if _get_current_soc(hass, domain) is None:
+        current_soc = _get_current_soc(hass, domain)
+        if current_soc is None:
             raise ServiceValidationError(
                 "Battery SoC is not available",
                 translation_domain=domain,
                 translation_key="soc_unavailable",
+            )
+
+        if current_soc <= min_soc:
+            raise ServiceValidationError(
+                f"Current SoC ({current_soc}%) at or below min SoC ({min_soc}%)",
+                translation_domain=domain,
+                translation_key="soc_below_min",
+                translation_placeholders={
+                    "current_soc": str(current_soc),
+                    "min_soc": str(min_soc),
+                },
             )
 
         api_min_soc = int(
@@ -313,7 +325,6 @@ def register_services(
         pacing_enabled = battery_capacity_kwh > 0
 
         # Decide whether to start discharging now or defer (stay in self-use)
-        current_soc = _get_current_soc(hass, domain)
         now = dt_util.now()
         headroom_pct: int = _get_entry_option(
             hass, domain, CONF_SMART_HEADROOM, DEFAULT_SMART_HEADROOM

@@ -11,6 +11,13 @@ import datetime
 import logging
 from typing import TYPE_CHECKING
 
+from .const import (
+    FEEDIN_FALLBACK_RATIO,
+    MAX_FEEDIN_HEADROOM,
+    MIN_CHARGE_POWER_W,
+    MIN_DISCHARGE_POWER_W,
+)
+
 if TYPE_CHECKING:
     from .taper import TaperProfile
 
@@ -61,7 +68,7 @@ def calculate_charge_power(
         current_soc, battery_capacity_kwh
     )
     if energy_needed_kwh <= 0:
-        return 100
+        return MIN_CHARGE_POWER_W
     if remaining_hours <= 0:
         return max_power_w
 
@@ -148,7 +155,7 @@ def calculate_charge_power(
     # reaching the target.
     total_power_kw *= 1 + headroom
     power_w = total_power_kw * 1000
-    return max(100, min(int(power_w), max_power_w))
+    return max(MIN_CHARGE_POWER_W, min(int(power_w), max_power_w))
 
 
 def is_charge_target_reachable(
@@ -193,8 +200,8 @@ def is_charge_target_reachable(
     else:
         charge_hours = energy_needed_kwh / effective_charge_kw
 
-    # Add the same time buffer used by deferred start
-    buffered_hours = charge_hours / (1 - headroom)
+    denom = 1 - headroom
+    buffered_hours = charge_hours / denom if denom > 0 else charge_hours
     return buffered_hours <= remaining_hours
 
 
@@ -358,7 +365,7 @@ def calculate_discharge_power(
     """
     energy_kwh = soc_energy_kwh(current_soc - min_soc, battery_capacity_kwh)
     if energy_kwh <= 0:
-        return 100
+        return MIN_DISCHARGE_POWER_W
     if remaining_hours <= 0:
         return max_power_w
 
@@ -373,8 +380,7 @@ def calculate_discharge_power(
         and feedin_remaining_kwh >= 0
         and remaining_hours > 0
     )
-    if has_feedin_target:
-        assert feedin_remaining_kwh is not None  # narrowing for mypy
+    if has_feedin_target and feedin_remaining_kwh is not None:
         house_absorption_kwh = consumption * remaining_hours
         max_drain_kwh = feedin_remaining_kwh + house_absorption_kwh
         if max_drain_kwh < energy_kwh:
@@ -389,8 +395,8 @@ def calculate_discharge_power(
             energy_kwh = max_drain_kwh
             if energy_kwh <= 0:
                 if 0 < safety_floor_w <= max_power_w:
-                    return max(100, safety_floor_w)
-                return 100
+                    return max(MIN_DISCHARGE_POWER_W, safety_floor_w)
+                return MIN_DISCHARGE_POWER_W
 
     effective_hours = remaining_hours * (1 - headroom)
     if effective_hours <= 0:
@@ -408,7 +414,7 @@ def calculate_discharge_power(
     if 0 < safety_floor_w <= max_power_w:
         power_w = max(power_w, safety_floor_w)
 
-    return max(100, min(int(power_w), max_power_w))
+    return max(MIN_DISCHARGE_POWER_W, min(int(power_w), max_power_w))
 
 
 def calculate_deferred_start(
@@ -446,6 +452,8 @@ def calculate_deferred_start(
     effective_charge_kw = max_power_kw - headroom_kw
     if effective_charge_kw <= 0:
         effective_charge_kw = max_power_kw * headroom
+    if effective_charge_kw <= 0:
+        return start if start is not None else end
 
     if taper_profile is not None:
         charge_hours = taper_profile.estimate_charge_hours(
@@ -458,7 +466,8 @@ def calculate_deferred_start(
     else:
         charge_hours = energy_needed_kwh / effective_charge_kw
 
-    buffered_hours = charge_hours / (1 - headroom)
+    denom = 1 - headroom
+    buffered_hours = charge_hours / denom if denom > 0 else charge_hours
     deferred = end - datetime.timedelta(hours=buffered_hours)
     if start is not None and deferred < start:
         deferred = start
@@ -544,7 +553,8 @@ def calculate_discharge_deferred_start(
             discharge_hours = min(discharge_hours, feedin_hours)
 
         if discharge_hours > 0:
-            buffered_hours = discharge_hours / (1 - headroom)
+            denom = 1 - headroom
+            buffered_hours = discharge_hours / denom if denom > 0 else discharge_hours
             soc_deadline = end - datetime.timedelta(hours=buffered_hours)
 
     # --- Feed-in energy deadline ---
@@ -552,7 +562,7 @@ def calculate_discharge_deferred_start(
     # must come from forced discharge, so we start earlier to absorb
     # load spikes that reduce net grid export during the burst.
     feedin_deadline = end
-    feedin_headroom = min(headroom * 2, 0.40)
+    feedin_headroom = min(headroom * 2, MAX_FEEDIN_HEADROOM)
     if feedin_energy_limit_kwh is not None and feedin_energy_limit_kwh > 0:
         # Use peak consumption (if available) for a conservative export
         # rate estimate.  Volatile loads reduce the effective export rate
@@ -566,11 +576,14 @@ def calculate_discharge_deferred_start(
         if grid_export_limit_w > 0:
             effective_export_kw = min(effective_export_kw, grid_export_limit_w / 1000.0)
         if effective_export_kw <= 0:
-            # Can't export at all — need the full window.
-            effective_export_kw = max_power_kw * 0.1  # fallback
-        feedin_hours = feedin_energy_limit_kwh / effective_export_kw
-        buffered_hours = feedin_hours / (1 - feedin_headroom)
-        feedin_deadline = end - datetime.timedelta(hours=buffered_hours)
+            effective_export_kw = max_power_kw * FEEDIN_FALLBACK_RATIO
+        if effective_export_kw <= 0:
+            feedin_deadline = start if start is not None else end
+        else:
+            feedin_hours = feedin_energy_limit_kwh / effective_export_kw
+            denom = 1 - feedin_headroom
+            buffered_hours = feedin_hours / denom if denom > 0 else feedin_hours
+            feedin_deadline = end - datetime.timedelta(hours=buffered_hours)
 
     # Take the earlier deadline (whichever requires starting sooner).
     deferred = min(soc_deadline, feedin_deadline)

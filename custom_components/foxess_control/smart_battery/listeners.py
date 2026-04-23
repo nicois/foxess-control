@@ -25,6 +25,7 @@ from .algorithms import (
     calculate_deferred_start,
     calculate_discharge_deferred_start,
     calculate_discharge_power,
+    is_charge_target_reachable,
     should_suspend_discharge,
 )
 from .const import (
@@ -161,7 +162,9 @@ def _get_store(hass: HomeAssistant, domain: str) -> Store[dict[str, Any]] | None
     return get_domain_data(hass, domain).store
 
 
-def _record_error(hass: HomeAssistant, domain: str, message: str) -> None:
+def _record_error(
+    hass: HomeAssistant, domain: str, message: str, *, session_type: str = ""
+) -> None:
     """Record a session error for UI surfacing (C-026)."""
     if domain not in hass.data:
         return
@@ -172,14 +175,17 @@ def _record_error(hass: HomeAssistant, domain: str, message: str) -> None:
         "last_error_at": dt_util.now().isoformat(),
         "error_count": prev.get("error_count", 0) + 1,
     }
-    _create_session_issue(hass, domain, message)
+    _create_session_issue(hass, domain, message, session_type=session_type)
 
 
-def _create_session_issue(hass: HomeAssistant, domain: str, message: str) -> None:
+def _create_session_issue(
+    hass: HomeAssistant, domain: str, message: str, *, session_type: str = ""
+) -> None:
     """Surface a session abort as an HA Repair issue."""
     from homeassistant.helpers.issue_registry import IssueSeverity, async_create_issue
 
-    session_type = "charge" if "harge" in message else "discharge"
+    if not session_type:
+        session_type = "charge" if "harge" in message else "discharge"
     async_create_issue(
         hass,
         domain,
@@ -192,6 +198,36 @@ def _create_session_issue(hass: HomeAssistant, domain: str, message: str) -> Non
             "reason": message,
         },
     )
+
+
+def _create_unreachable_issue(hass: HomeAssistant, domain: str) -> None:
+    """Surface an unreachable charge target as an HA Repair issue (C-022)."""
+    try:
+        from homeassistant.helpers.issue_registry import (
+            IssueSeverity,
+            async_create_issue,
+        )
+
+        async_create_issue(
+            hass,
+            domain,
+            "charge_target_unreachable",
+            is_fixable=False,
+            severity=IssueSeverity.WARNING,
+            translation_key="charge_target_unreachable",
+        )
+    except Exception:
+        _LOGGER.debug("Failed to create unreachable issue (non-critical)")
+
+
+def _clear_unreachable_issue(hass: HomeAssistant, domain: str) -> None:
+    """Dismiss the unreachable charge target issue."""
+    try:
+        from homeassistant.helpers.issue_registry import async_delete_issue
+
+        async_delete_issue(hass, domain, "charge_target_unreachable")
+    except Exception:
+        _LOGGER.debug("Failed to clear unreachable issue (non-critical)")
 
 
 def _clear_session_issue(hass: HomeAssistant, domain: str) -> None:
@@ -236,6 +272,7 @@ async def _with_circuit_breaker(
                 hass,
                 domain,
                 f"{label} session aborted: adapter unreachable",
+                session_type=session_label,
             )
             _notify_replay(hass, domain, session_label, dict(cur_state))
             try:
@@ -288,6 +325,7 @@ async def _with_circuit_breaker(
             hass,
             domain,
             f"{label}: adapter errors, holding position (circuit breaker)",
+            session_type=session_label,
         )
 
 
@@ -440,9 +478,11 @@ def setup_smart_charge_listeners(
     from .types import WorkMode
 
     _clear_session_issue(hass, domain)
+    _clear_unreachable_issue(hass, domain)
     dd = get_domain_data(hass, domain)
     state = dd.smart_charge_state
-    assert state is not None, "smart_charge_state must be set before calling listeners"
+    if state is None:
+        raise RuntimeError("smart_charge_state must be set before calling listeners")
     end: datetime.datetime = state["end"]
     end_utc = dt_util.as_utc(end)
     my_session_id: str = state["session_id"]
@@ -467,6 +507,7 @@ def setup_smart_charge_listeners(
         if not _is_my_session():
             return
         _LOGGER.info("Smart charge: window ended, removing override")
+        _clear_unreachable_issue(hass, domain)
         cur = get_domain_data(hass, domain).smart_charge_state
         charging_started = (cur or {}).get("charging_started", False)
         ws_stop = cancel_smart_charge(hass, domain)
@@ -480,6 +521,7 @@ def setup_smart_charge_listeners(
             "charging_started", False
         )
         if _is_my_session():
+            _clear_unreachable_issue(hass, domain)
             ws_stop = cancel_smart_charge(hass, domain)
             if charging_started:
                 await _remove_charge_override()
@@ -514,7 +556,10 @@ def setup_smart_charge_listeners(
                     cur_state["soc_unavailable_count"],
                 )
                 _record_error(
-                    hass, domain, "Charge aborted: SoC unavailable for 15 min"
+                    hass,
+                    domain,
+                    "Charge aborted: SoC unavailable for 15 min",
+                    session_type="charge",
                 )
                 charging_started = cur_state.get("charging_started", False)
                 if _is_my_session():
@@ -630,7 +675,8 @@ def setup_smart_charge_listeners(
             if not _is_my_session():
                 return
             _cs = get_domain_data(hass, domain).smart_charge_state
-            assert _cs is not None
+            if _cs is None:
+                return
             cur_state = _cs
 
             cur_state["groups"] = []
@@ -678,7 +724,8 @@ def setup_smart_charge_listeners(
             if not _is_my_session():
                 return
             _cs = get_domain_data(hass, domain).smart_charge_state
-            assert _cs is not None
+            if _cs is None:
+                return
             _cs["charging_started"] = False
             _cs["charging_started_at"] = None
             await save_session(
@@ -748,6 +795,30 @@ def setup_smart_charge_listeners(
                 remaining,
             )
 
+        reachable = is_charge_target_reachable(
+            cur_soc,
+            cur_state["target_soc"],
+            cur_state["battery_capacity_kwh"],
+            remaining,
+            effective_max,
+            net_consumption_kw=net_consumption,
+            headroom=headroom,
+            taper_profile=taper,
+            bms_temp_c=bms_temp,
+        )
+        if not reachable and not cur_state.get("unreachable_issued"):
+            _LOGGER.warning(
+                "Smart charge: target %d%% unreachable (SoC=%.1f%%, remaining=%.2fh)",
+                cur_state["target_soc"],
+                cur_soc,
+                remaining,
+            )
+            _create_unreachable_issue(hass, domain)
+            cur_state["unreachable_issued"] = True
+        elif reachable and cur_state.get("unreachable_issued"):
+            _clear_unreachable_issue(hass, domain)
+            cur_state["unreachable_issued"] = False
+
         cur_state["last_power_w"] = new_power
         await adapter.apply_mode(hass, WorkMode.FORCE_CHARGE, new_power, fd_soc=100)
 
@@ -786,9 +857,8 @@ def setup_smart_discharge_listeners(
     _clear_session_issue(hass, domain)
     dd = get_domain_data(hass, domain)
     state = dd.smart_discharge_state
-    assert state is not None, (
-        "smart_discharge_state must be set before calling listeners"
-    )
+    if state is None:
+        raise RuntimeError("smart_discharge_state must be set before calling listeners")
     end: datetime.datetime = state["end"]
     end_utc = dt_util.as_utc(end)
     my_session_id: str = state["session_id"]
@@ -918,7 +988,8 @@ def setup_smart_discharge_listeners(
         if not _is_my_session():
             return True
         _ds = get_domain_data(hass, domain).smart_discharge_state
-        assert _ds is not None
+        if _ds is None:
+            return True
         cur_state = _ds
         cur_state["last_power_w"] = new_power
         cur_state["target_power_w"] = new_power
@@ -997,8 +1068,7 @@ def setup_smart_discharge_listeners(
         feedin_prev: float | None = cur_state.get("feedin_prev_kwh")
         has_observed = feedin_prev is not None and feedin_now != feedin_prev
         observed_rate_kw = 0.0
-        if has_observed:
-            assert feedin_prev is not None
+        if has_observed and feedin_prev is not None:
             observed_rate_kw = (feedin_now - feedin_prev) / poll_hours
         cur_state["feedin_prev_kwh"] = feedin_now
 
@@ -1046,7 +1116,12 @@ def setup_smart_discharge_listeners(
             "Smart discharge: SoC unavailable for %d checks, aborting",
             cur_state["soc_unavailable_count"],
         )
-        _record_error(hass, domain, "Discharge aborted: SoC unavailable")
+        _record_error(
+            hass,
+            domain,
+            "Discharge aborted: SoC unavailable",
+            session_type="discharge",
+        )
         discharging_started = cur_state.get("discharging_started", False)
         if _is_my_session():
             ws_stop = cancel_smart_discharge(hass, domain)
@@ -1092,7 +1167,8 @@ def setup_smart_discharge_listeners(
             if not _is_my_session():
                 return was_suspended, True
             _ds = get_domain_data(hass, domain).smart_discharge_state
-            assert _ds is not None
+            if _ds is None:
+                return was_suspended, True
             await save_session(
                 _get_store(hass, domain),
                 "smart_discharge",
@@ -1159,7 +1235,8 @@ def setup_smart_discharge_listeners(
             if not _is_my_session():
                 return
             _ds = get_domain_data(hass, domain).smart_discharge_state
-            assert _ds is not None
+            if _ds is None:
+                return
             await save_session(
                 _get_store(hass, domain),
                 "smart_discharge",
@@ -1209,7 +1286,8 @@ def setup_smart_discharge_listeners(
         if not _is_my_session():
             return
         _ds = get_domain_data(hass, domain).smart_discharge_state
-        assert _ds is not None
+        if _ds is None:
+            return
         if should_update:
             await save_session(
                 _get_store(hass, domain),

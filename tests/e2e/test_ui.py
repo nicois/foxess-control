@@ -914,6 +914,97 @@ class TestControlCard:
         assert has_marker, "Horizon marker not found in control card"
         assert has_marker["left"], "Horizon marker has no position"
 
+    def test_show_cancel_false_hides_button(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """Cancel button hidden when card config has show_cancel: false (D-039)."""
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=80, load_kw=0.5)
+        start, end = _tight_window(10)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        _robust_reload(page, settle_ms=3000)
+
+        has_cancel = page.wait_for_function(
+            """() => {
+                function findCard(root) {
+                    const card = root.querySelector('foxess-control-card');
+                    if (card) return card;
+                    for (const el of root.querySelectorAll('*')) {
+                        if (el.shadowRoot) {
+                            const f = findCard(el.shadowRoot);
+                            if (f) return f;
+                        }
+                    }
+                    return null;
+                }
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return null;
+                const btn = card.shadowRoot.querySelector('.cancel');
+                return btn !== null;
+            }""",
+            timeout=15000,
+        ).json_value()
+        assert has_cancel is True, "Cancel button should be visible by default"
+
+        page.evaluate(
+            """() => {
+                function findCard(root) {
+                    const card = root.querySelector('foxess-control-card');
+                    if (card) return card;
+                    for (const el of root.querySelectorAll('*')) {
+                        if (el.shadowRoot) {
+                            const f = findCard(el.shadowRoot);
+                            if (f) return f;
+                        }
+                    }
+                    return null;
+                }
+                const card = findCard(document);
+                if (card) {
+                    card._config = {...card._config, show_cancel: false};
+                    card.requestUpdate();
+                }
+            }"""
+        )
+
+        page.wait_for_timeout(1000)
+
+        no_cancel = page.evaluate(
+            """() => {
+                function findCard(root) {
+                    const card = root.querySelector('foxess-control-card');
+                    if (card) return card;
+                    for (const el of root.querySelectorAll('*')) {
+                        if (el.shadowRoot) {
+                            const f = findCard(el.shadowRoot);
+                            if (f) return f;
+                        }
+                    }
+                    return null;
+                }
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return null;
+                const btn = card.shadowRoot.querySelector('.cancel');
+                return btn === null;
+            }"""
+        )
+        assert no_cancel is True, (
+            "Cancel button should be hidden when show_cancel: false"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Form input persistence tests (C-020: operational transparency)

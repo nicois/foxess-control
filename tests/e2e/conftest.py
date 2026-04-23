@@ -446,8 +446,10 @@ def event_stream(
 ) -> Generator[HAEventStream, None, None]:
     """Function-scoped WebSocket event stream — fresh per container."""
     stream = HAEventStream(f"http://localhost:{ha_port}", E2E_TOKEN)
-    yield stream
-    stream.close()
+    try:
+        yield stream
+    finally:
+        stream.close()
 
 
 @pytest.fixture

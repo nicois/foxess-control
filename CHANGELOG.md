@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.11-beta.6
+
+### Added
+- **Unreachable charge target repair issue (C-022)**: when the pacing algorithm detects the charge target cannot be reached in the remaining window, an HA Repair issue is created. Automatically dismissed when the target becomes reachable again, or when the session ends.
+- **Named algorithm constants**: extracted magic numbers (`MIN_CHARGE_POWER_W`, `MIN_DISCHARGE_POWER_W`, `FEEDIN_FALLBACK_RATIO`, `MAX_FEEDIN_HEADROOM`) from inline literals in algorithms.py into `const.py`.
+- **Soak tests**: `test_charge_extreme_taper` (92%→100% BMS taper region) and `test_charge_very_cold_battery` (8°C current-limiting).
+- **E2E test**: `test_show_cancel_false_hides_button` verifies the cancel button is hidden when `show_cancel: false` is set.
+
+### Fixed
+- **Division-by-zero in deferred start**: zero-guards added to `calculate_deferred_start`, `is_charge_target_reachable`, and `calculate_discharge_deferred_start` for edge cases where effective charge/export power or headroom denominator is zero.
+- **Production asserts replaced with RuntimeError**: 10 `assert` statements in listeners.py, config_flow.py, and services.py replaced with explicit `RuntimeError` raises or early returns, preventing silent `AssertionError` in optimised builds.
+- **Narrowed exception handling in config_flow.py**: three `except Exception` catches narrowed to `(OSError, requests.RequestException)` or `(FoxESSApiError, requests.RequestException, OSError)` to avoid masking unexpected errors.
+- **Cross-field config validation**: discharge now rejects start when current SoC is at or below min SoC, with a descriptive `ServiceValidationError`.
+- **E2E event_stream fixture**: added `try/finally` to ensure WebSocket cleanup on test failure.
+
 ## 1.0.11-beta.5
 
 ### Added

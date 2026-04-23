@@ -150,7 +150,7 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
         except FoxESSWebAuthError as err:
             _LOGGER.warning("FoxESS web login failed: %s", err)
             errors["base"] = "web_auth_failed"
-        except Exception as err:
+        except (OSError, requests.RequestException) as err:
             _LOGGER.warning("FoxESS web login error: %s", err)
             errors["base"] = "web_auth_failed"
 
@@ -160,7 +160,7 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
                 client = FoxESSClient(self._api_data[CONF_API_KEY])
                 inverter = Inverter(client, self._api_data[CONF_DEVICE_SERIAL])
                 plant_id = await self.hass.async_add_executor_job(inverter.get_plant_id)
-            except Exception as err:
+            except (FoxESSApiError, requests.RequestException, OSError) as err:
                 _LOGGER.warning("Could not discover plantId: %s", err)
                 errors["base"] = "ws_connect_failed"
 
@@ -173,7 +173,7 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             try:
                 await ws.async_connect()
-            except Exception as err:
+            except (OSError, requests.RequestException) as err:
                 _LOGGER.warning("WebSocket test connection failed: %s", err)
                 errors["base"] = "ws_connect_failed"
             finally:
@@ -270,7 +270,8 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
                 entry = self.hass.config_entries.async_get_entry(
                     self.context["entry_id"]
                 )
-                assert entry is not None
+                if entry is None:
+                    raise RuntimeError("Config entry not found during reauth")
                 updated_data = {**entry.data, CONF_API_KEY: new_key}
                 return self.async_update_reload_and_abort(entry, data=updated_data)
 
@@ -285,7 +286,8 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Allow updating web credentials on an existing entry."""
         entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
-        assert entry is not None
+        if entry is None:
+            raise RuntimeError("Config entry not found during reconfigure")
         self._api_data = dict(entry.data)
         return await self.async_step_web_credentials(user_input)
 
