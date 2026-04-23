@@ -469,6 +469,73 @@ class TestOverviewCard:
             f"Expected order ['solar', 'house', 'grid', 'battery'], got {types}"
         )
 
+    def test_render_survives_corrupted_boxes_config(
+        self,
+        page: Page,
+        foxess_sim: SimulatorHandle | None,
+        ha_e2e: HAClient,
+        connection_mode: str,
+    ) -> None:
+        """Overview card degrades gracefully when boxes config is corrupted.
+
+        Verifies the card's try/catch wrapper in _render() catches
+        TypeErrors from malformed config (e.g. HA energy-dashboard
+        patterns like flow_from/flow_to accidentally passed to our card).
+        Before the fix, corrupted internal state could produce uncaught
+        TypeErrors like ``t.flow_from is undefined`` that crash the card.
+        """
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
+        _robust_reload(page, settle_ms=2000)
+        assert _find_card(page, "foxess-overview-card"), "Overview card not found"
+
+        js_errors: list[str] = []
+        page.on("pageerror", lambda exc: js_errors.append(str(exc)))
+
+        # Corrupt the card's internal _boxes to simulate a state where
+        # box entries have unexpected shape (e.g. from energy-dashboard
+        # config patterns).  Before the fix, this would produce an
+        # uncaught TypeError when _renderBox tries to access box.type
+        # on an entry that has flow_from instead.
+        render_result = page.evaluate(
+            f"""{_JS_FIND_OVERVIEW_CARD}
+            const card = findCard(document);
+            if (!card) return 'card_not_found';
+            card._boxes = [
+                {{ type: 'solar' }},
+                {{ flow_from: ['sensor.test'] }},
+                null,
+                undefined,
+            ];
+            try {{
+                card._render();
+                return 'ok';
+            }} catch (e) {{
+                return 'error: ' + e.message;
+            }}"""
+        )
+
+        # The card's _render() must not throw — it should handle
+        # corrupted box entries gracefully.
+        assert render_result == "ok", f"Overview card _render() threw: {render_result}"
+
+        # The card should still show ha-card (graceful degradation)
+        has_card = page.wait_for_function(
+            f"""() => {{
+                {_JS_FIND_OVERVIEW_CARD}
+                const card = findCard(document);
+                if (!card || !card.shadowRoot) return false;
+                return !!card.shadowRoot.querySelector('ha-card');
+            }}""",
+            timeout=10000,
+        )
+        assert has_card, (
+            "Overview card should render ha-card even with corrupted config"
+        )
+
+        assert not js_errors, (
+            f"JavaScript errors during overview card render: {js_errors}"
+        )
+
     def test_shows_soc(
         self,
         page: Page,

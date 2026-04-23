@@ -16,7 +16,7 @@
  *   # etc.
  */
 
-const OVERVIEW_VERSION = "2.7.0";
+const OVERVIEW_VERSION = "2.7.1";
 
 // -- i18n --------------------------------------------------------------------
 
@@ -345,7 +345,9 @@ class FoxESSOverviewCard extends HTMLElement {
   }
 
   _renderBox(box, eid, dataSource) {
+    if (!box || typeof box !== "object") return "";
     const t = box.type;
+    if (!t) return "";
     if (t === "solar") {
       const solar = this._num(eid.solar_entity);
       const pv1 = this._num(eid.pv1_entity);
@@ -409,6 +411,25 @@ class FoxESSOverviewCard extends HTMLElement {
   _render() {
     if (!this._hass) return;
 
+    try {
+      this._renderInner();
+    } catch (e) {
+      console.warn("FoxESS Overview: render error", e);
+      this.shadowRoot.innerHTML = `
+        <style>${FoxESSOverviewCard._styles()}</style>
+        <ha-card>
+          <div class="header">
+            <div class="title">${this._t("title")}</div>
+          </div>
+          <div style="padding:16px;text-align:center;opacity:0.5;font-size:13px">
+            Render error — check card configuration
+          </div>
+        </ha-card>
+      `;
+    }
+  }
+
+  _renderInner() {
     // Resolve entity IDs
     const eid = {};
     for (const key of Object.keys(_ROLE_MAP)) {
@@ -422,7 +443,8 @@ class FoxESSOverviewCard extends HTMLElement {
     const lastUpdate = freshnessEntity && freshnessEntity.attributes && freshnessEntity.attributes.last_update;
     const ageSeconds = lastUpdate ? Math.max(0, Math.round((Date.now() - new Date(lastUpdate).getTime()) / 1000)) : null;
 
-    const boxCount = this._boxes.length;
+    const boxes = Array.isArray(this._boxes) ? this._boxes : _DEFAULT_BOXES;
+    const boxCount = boxes.length;
     let gridCls = "flow-grid";
     if (boxCount === 1) gridCls = "flow-grid cols-1";
     else if (boxCount === 3) gridCls = "flow-grid cols-3";
@@ -435,7 +457,7 @@ class FoxESSOverviewCard extends HTMLElement {
           ${workMode && workMode !== "SelfUse" ? `<span class="work-mode">${this._formatWorkMode(workMode)}</span>` : ""}
         </div>
         <div class="${gridCls}">
-          ${this._boxes.map(b => this._renderBox(b, eid, dataSource)).join("")}
+          ${boxes.map(b => this._renderBox(b, eid, dataSource)).join("")}
         </div>
       </ha-card>
     `;
