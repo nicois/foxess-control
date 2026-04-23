@@ -54,6 +54,19 @@ simulator and Playwright browser automation.
 | `TestCalculateDeferredStart::test_taper_consumption_affects_deferral` | Taper path consumption headroom | C-014 |
 | `TestCalculateDeferredStart::test_taper_starts_earlier_than_linear` | Taper ratios extend charge time | C-014 |
 
+## Smart Charge Re-deferral (D-043)
+
+**Constraints**: D-043, D-006
+**Source**: `tests/test_charge_redeferral.py`
+
+| Test | Verifies | Constraint |
+|---|---|---|
+| `TestChargeRedeferral::test_ahead_of_schedule_switches_to_self_use` | Re-defer when SoC ahead of schedule | D-043 |
+| `TestChargeRedeferral::test_at_or_behind_schedule_keeps_charging` | No re-deferral when on track | D-043, D-006 |
+| `TestChargeRedeferral::test_redeferral_clears_charging_started` | `charging_started` cleared on re-defer | D-043 |
+| `TestChargeRedeferral::test_redeferral_saves_session` | Session persisted after re-defer | D-043 |
+| `TestChargeRedeferral::test_resumes_charging_after_redeferral` | Forced charge resumes when deadline arrives | D-043 |
+
 ## WebSocket Data Mapping
 
 **Constraints**: C-004, C-005, C-006

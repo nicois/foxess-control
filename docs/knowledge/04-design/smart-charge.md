@@ -72,6 +72,32 @@ the entity count low and avoids lifecycle complexity.
 **Traces**: C-022, C-020;
 `tests/test_smart_battery_algorithms.py::TestIsChargeTargetReachable`
 
+### D-043: Re-deferral when ahead of schedule
+**Decision**: Once forced charging has started, if the current SoC is
+far enough ahead that `calculate_deferred_start()` says "not yet",
+switch back to self-use and clear `charging_started`. Resume forced
+charging when the deferred start deadline arrives again.
+**Context**: During paced charging, solar generation charges the battery
+on top of the grid power the listener requested. The BMS accepts power
+from all sources up to its limit regardless of the paced request. This
+causes SoC to advance faster than the pacing algorithm predicted.
+Without re-deferral, the listener keeps reducing power (bottoming out
+at 100W) but can never pause — the target is reached well before the
+window ends, wasting cheap-rate self-use time.
+**Rationale**: Re-deferral reuses the existing `calculate_deferred_start`
+logic (no new algorithm needed) and mirrors the discharge side where
+deferral is re-evaluated every tick. Switching to self-use during the
+surplus period lets the inverter supply house load from solar/battery
+without grid import — the same benefit as initial deferral (D-002
+analogue for charge).
+**Alternatives considered**:
+- Reduce paced power to near-zero: rejected because 100W floor still
+  causes ForceCharge mode to draw from grid; self-use is cleaner
+- Subtract solar from power request: rejected because solar forecast
+  is unavailable and instantaneous solar is volatile
+**Traces**: D-006 (trajectory tracking still applies after re-deferral);
+`tests/test_smart_battery_algorithms.py::TestCalculateChargePower`
+
 ## Key Behaviours
 
 - Charge power adjustment interval is 5 minutes (vs 1 minute for
@@ -106,7 +132,13 @@ to confirm. Scheduled for 11am AEST 2026-04-15.
 ## Edge Cases
 
 - **Already at target SoC**: Returns minimum power (100W), effectively
-  idling until the window ends.
+  idling until the window ends. (With D-043, the listener switches to
+  self-use before reaching this state.)
+- **Ahead of schedule (D-043)**: When SoC is ahead enough that
+  `calculate_deferred_start` says forced charging isn't needed yet,
+  the listener clears `charging_started` and reverts to self-use. The
+  next tick re-evaluates deferral. This prevents reaching the target
+  30+ minutes early when solar supplements grid charging.
 - **Zero remaining time**: Returns max power (best effort).
 - **Taper corruption**: Plausibility check auto-resets corrupted profiles
   that would cause permanent max-power burst.

@@ -653,6 +653,41 @@ def setup_smart_charge_listeners(
             )
             return
 
+        # D-043: re-defer when ahead of schedule (solar supplement)
+        deferred = calculate_deferred_start(
+            cur_soc,
+            cur_state["target_soc"],
+            cur_state["battery_capacity_kwh"],
+            effective_max,
+            cur_state["end"],
+            net_consumption_kw=net_consumption,
+            start=cur_state["start"],
+            headroom=headroom,
+            taper_profile=taper,
+            bms_temp_c=bms_temp,
+        )
+        if now_dt < deferred:
+            _LOGGER.info(
+                "Smart charge: ahead of schedule (SoC=%.1f%%), "
+                "re-deferring until ~%02d:%02d",
+                cur_soc,
+                deferred.hour,
+                deferred.minute,
+            )
+            await _remove_charge_override()
+            if not _is_my_session():
+                return
+            _cs = get_domain_data(hass, domain).smart_charge_state
+            assert _cs is not None
+            _cs["charging_started"] = False
+            _cs["charging_started_at"] = None
+            await save_session(
+                _get_store(hass, domain),
+                "smart_charge",
+                session_data_from_charge_state(_cs),
+            )
+            return
+
         # Already charging — adjust power as needed
         if cur_state.get("full_power"):
             new_power = effective_max

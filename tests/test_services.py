@@ -2952,10 +2952,11 @@ class TestHandleSmartCharge:
         # Reset set_schedule call count from initial setup
         inv.set_schedule.reset_mock()
 
-        # At 60% with 2h left + 3kW load: 60kWh*20%/2h + 3kW = 6000+3000 = 9000W
-        # vs initial ~12kW → delta well above 100W threshold
+        # At 40% with 2h left + 3kW load: 60kWh*40%/2h + 3kW = ~16.5kW (clamped to max)
+        # vs initial ~12kW → delta well above 100W threshold.
+        # SoC 40% keeps deferred start at ~02:27, so no D-043 re-deferral at 04:00.
         hass.data[DOMAIN].entries["entry1"].coordinator.data = {
-            "SoC": 60.0,
+            "SoC": 40.0,
             "loadsPower": 3.0,
             "pvPower": 0.0,
         }
@@ -3790,7 +3791,7 @@ class TestRecoverSessions:
         }
         hass = _make_hass(
             inverter=inv,
-            battery_capacity_kwh=10.0,
+            battery_capacity_kwh=60.0,
             coordinator_data={"SoC": 50.0, "loadsPower": 0.0, "pvPower": 0.0},
         )
         store = hass.data[DOMAIN].store
@@ -3804,7 +3805,7 @@ class TestRecoverSessions:
                     "end_minute": 0,
                     "target_soc": 80,
                     "max_power_w": 10500,
-                    "battery_capacity_kwh": 10.0,
+                    "battery_capacity_kwh": 60.0,
                     "min_soc_on_grid": 15,
                     "min_power_change": 500,
                     "force": False,

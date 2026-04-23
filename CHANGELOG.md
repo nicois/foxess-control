@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.11-beta.2
+
+### Added
+- **Charge re-deferral when ahead of schedule (D-043)**: when solar generation supplements grid charging and pushes SoC ahead of the pacing trajectory, the charge listener now switches back to self-use and clears `charging_started`. Each subsequent tick re-evaluates `calculate_deferred_start()` and resumes forced charging only when the deadline requires it. Prevents reaching the target 30+ minutes early and wasting cheap-rate self-use time.
+
 ## 1.0.11-beta.1
 
 ### Fixed
