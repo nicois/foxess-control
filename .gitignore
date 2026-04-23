@@ -7,4 +7,5 @@ build/
 .pytest_cache/
 *.pyc
 tests/e2e/screenshots/
+test-artifacts/
 .e2e-build.lock
