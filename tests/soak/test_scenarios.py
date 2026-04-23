@@ -149,7 +149,7 @@ def test_charge_cold_battery(
     config = ScenarioConfig(
         name="charge_cold_battery",
         session_type="charge",
-        window_minutes=300,
+        window_minutes=240,
         initial_soc=20.0,
         target_soc=80,
         battery_temperature=5.0,
@@ -173,7 +173,7 @@ def test_charge_large_battery(
     config = ScenarioConfig(
         name="charge_large_battery",
         session_type="charge",
-        window_minutes=300,
+        window_minutes=240,
         initial_soc=20.0,
         target_soc=80,
         battery_capacity_kwh=42.0,
@@ -450,7 +450,7 @@ def test_discharge_large_battery(
     config = ScenarioConfig(
         name="discharge_large_battery",
         session_type="discharge",
-        window_minutes=360,
+        window_minutes=240,
         initial_soc=90.0,
         target_soc=15,
         battery_capacity_kwh=42.0,

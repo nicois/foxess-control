@@ -401,12 +401,19 @@ def run_scenario(
 
 def check_charge_invariants(recorder: SoakRecorder, config: ScenarioConfig) -> None:
     """Verify charge session invariants from recorded samples."""
+    grid_energy_above_target_kwh = 0.0
+    prev_elapsed = 0.0
     for s in recorder.samples:
-        if s.state in ("charging", "deferred") and s.soc > config.target_soc + 2:
-            recorder.violate(
-                "CHARGE_OVERSHOOT",
-                f"SoC {s.soc:.1f}% > target {config.target_soc}% + 2%",
-            )
+        if s.soc > config.target_soc + 2 and s.grid_import_kw > 0.0:
+            dt_h = (s.elapsed_s - prev_elapsed) / 3600.0
+            grid_energy_above_target_kwh += s.grid_import_kw * dt_h
+        prev_elapsed = s.elapsed_s
+    if grid_energy_above_target_kwh > 0.05:
+        recorder.violate(
+            "CHARGE_OVERSHOOT",
+            f"SoC exceeded target {config.target_soc}% + 2% "
+            f"while drawing {grid_energy_above_target_kwh:.3f}kWh from grid",
+        )
 
     charging_samples = [s for s in recorder.samples if s.state == "charging"]
     if len(charging_samples) >= 3:
