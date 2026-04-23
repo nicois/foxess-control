@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.9-beta.9
+
+### Fixed
+- **Overview card crash on corrupted box entries**: card threw an uncaught `TypeError` when the internal `_boxes` array contained entries with unexpected shape (e.g. `{flow_from: [...]}` from energy-dashboard config patterns or corrupted state). `_renderBox()` now skips null/undefined/typeless entries, and `_render()` catches exceptions with a graceful error fallback UI.
+
 ## 1.0.9-beta.8
 
 ### Added
