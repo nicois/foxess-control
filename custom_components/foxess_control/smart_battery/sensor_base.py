@@ -146,6 +146,22 @@ def get_coordinator_value(hass: HomeAssistant, domain: str, key: str) -> float |
     return None
 
 
+def _get_net_consumption(hass: HomeAssistant, domain: str) -> float:
+    """Return net site consumption (loads minus solar) in kW.
+
+    Mirrors the listener's ``_get_net_consumption`` so the sensor and
+    listener use the same data when computing deferred start times.
+    """
+    loads = get_coordinator_value(hass, domain, "loadsPower")
+    pv = get_coordinator_value(hass, domain, "pvPower")
+    return (loads or 0.0) - (pv or 0.0)
+
+
+def _get_bms_temp(hass: HomeAssistant, domain: str) -> float | None:
+    """Return the BMS battery temperature in degrees C, or None."""
+    return get_coordinator_value(hass, domain, "bmsBatteryTemperature")
+
+
 def get_actual_discharge_power_w(
     hass: HomeAssistant, domain: str, requested_w: int
 ) -> int:
@@ -274,14 +290,23 @@ def estimate_discharge_remaining(
         if soc is not None:
             capacity = get_battery_capacity_kwh(hass, domain)
             headroom = get_smart_headroom_fraction(hass, domain)
+            net_consumption = _get_net_consumption(hass, domain)
+            peak = ds.get("consumption_peak_kw", 0.0)
+            taper = get_domain_data(hass, domain).taper_profile
+            bms_temp = _get_bms_temp(hass, domain)
             deferred = calculate_discharge_deferred_start(
                 soc,
                 ds.get("min_soc", 10),
                 capacity,
                 ds.get("max_power_w", 0),
                 end,
+                net_consumption_kw=net_consumption,
+                start=ds.get("start"),
                 headroom=headroom,
+                taper_profile=taper,
                 feedin_energy_limit_kwh=ds.get("feedin_energy_limit_kwh"),
+                consumption_peak_kw=peak,
+                bms_temp_c=bms_temp,
                 grid_export_limit_w=_get_grid_export_limit(hass, domain),
             )
             if now < deferred:
