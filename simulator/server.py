@@ -335,6 +335,17 @@ async def handle_ws(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
+async def _auto_tick_loop(app: web.Application) -> None:
+    """Background task: tick the model forward in real time (5s steps)."""
+    model: InverterModel = app["model"]
+    try:
+        while True:
+            await asyncio.sleep(5)
+            model.tick(5)
+    except asyncio.CancelledError:
+        pass
+
+
 async def _ws_push_loop(app: web.Application) -> None:
     """Background task: push WS messages every 5 seconds.
 
@@ -506,12 +517,14 @@ def create_app() -> web.Application:
     app.router.add_post("/sim/ws_stale", handle_sim_ws_stale)
     app.router.add_post("/sim/reset", handle_sim_reset)
 
-    # Background WS push task
     async def start_background(app: web.Application) -> None:
+        app["auto_tick_task"] = asyncio.create_task(_auto_tick_loop(app))
         app["ws_push_task"] = asyncio.create_task(_ws_push_loop(app))
 
     async def stop_background(app: web.Application) -> None:
+        app["auto_tick_task"].cancel()
         app["ws_push_task"].cancel()
+        await app["auto_tick_task"]
         await app["ws_push_task"]
 
     app.on_startup.append(start_background)
