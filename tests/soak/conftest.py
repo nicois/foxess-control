@@ -513,7 +513,7 @@ def ha_e2e(
 ) -> Generator[HAClient, None, None]:
     ha_port = _worker_ports["ha"]
     wid = _worker_id()
-    name = f"ha-soak-{wid}"
+    name = f"ha-soak-{os.getpid()}-{wid}"
     _stop_container(name)
 
     tmpdir = tempfile.mkdtemp(prefix="ha-soak-")
