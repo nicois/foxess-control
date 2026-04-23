@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.11-beta.1
+
+### Fixed
+- **Taper profile blind to BMS curtailment during paced charging**: `_record_taper_observation` used the paced power request (`last_power_w`) as the denominator instead of the inverter maximum (`max_power_w`). When pacing reduced the request below the BMS limit (e.g. 4552W paced vs 6380W actual at 81% SoC), the ratio exceeded 1.0, was clamped, and the profile recorded "no taper". Subsequent sessions had no taper data for high SoC, producing inaccurate time estimates and deferred start calculations. Now uses `max_power_w` so the profile correctly captures the BMS acceptance fraction (e.g. 6380/10500 = 0.607).
+
 ## 1.0.10
 
 ### Added
