@@ -975,6 +975,7 @@ class TestControlCard:
                 const card = findCard(document);
                 if (card) {
                     card.setConfig({...card._config, show_cancel: false});
+                    card._render();
                 }
             }"""
         )
