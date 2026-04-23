@@ -1,8 +1,9 @@
 # Changelog
 
-## 1.0.9-beta.9
+## 1.0.9-beta.10
 
 ### Fixed
+- **Discharge deferral countdown wrong with grid export limit**: the card's deferred countdown badge showed wrong values (e.g. "0m" or "39m" instead of ~24m for 2kWh at 5kW export). The sensor's `estimate_discharge_remaining()` was calling `calculate_discharge_deferred_start()` without `net_consumption_kw`, `consumption_peak_kw`, `taper_profile`, `bms_temp_c`, or `start` — parameters the listener passes — causing the sensor and listener to compute different deferred start times (C-020).
 - **Overview card crash on corrupted box entries**: card threw an uncaught `TypeError` when the internal `_boxes` array contained entries with unexpected shape (e.g. `{flow_from: [...]}` from energy-dashboard config patterns or corrupted state). `_renderBox()` now skips null/undefined/typeless entries, and `_render()` catches exceptions with a graceful error fallback UI.
 
 ## 1.0.9-beta.8
