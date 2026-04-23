@@ -162,6 +162,11 @@ def _get_bms_temp(hass: HomeAssistant, domain: str) -> float | None:
     return get_coordinator_value(hass, domain, "bmsBatteryTemperature")
 
 
+def _get_taper_profile(hass: HomeAssistant, domain: str) -> TaperProfile | None:
+    """Return the taper profile from domain data, or None."""
+    return get_domain_data(hass, domain).taper_profile
+
+
 def get_actual_discharge_power_w(
     hass: HomeAssistant, domain: str, requested_w: int
 ) -> int:
@@ -243,24 +248,35 @@ def is_effectively_charging(
 ) -> bool:
     """Return True if the charge session should be considered active.
 
-    Bridges the gap between the calculated deferred start time and the
-    next 5-minute callback.
+    Uses the full ``calculate_deferred_start()`` with taper profile,
+    net consumption, headroom, and BMS temperature — the same parameters
+    the listener passes — so the sensor-side phase matches the listener's
+    actual transition point.
     """
     if cs.get("charging_started", True):
         return True
     soc = get_soc_value(hass, domain)
     capacity_kwh = get_battery_capacity_kwh(hass, domain)
     target_soc: int = cs.get("target_soc", 100)
-    max_power_w: int = cs.get("max_power_w", 0)
+    max_power_w: int = cs.get("effective_max_power_w", cs.get("max_power_w", 0))
     end: datetime.datetime = cs["end"]
     start: datetime.datetime | None = cs.get("start")
     if soc is not None and capacity_kwh > 0 and max_power_w > 0 and soc < target_soc:
-        energy_kwh = (target_soc - soc) / 100.0 * capacity_kwh
-        charge_kw = max_power_w * deferred_power_fraction(hass, domain) / 1000.0
-        charge_hours = energy_kwh / charge_kw
-        deferred_start = end - datetime.timedelta(hours=charge_hours)
-        if start is not None and deferred_start < start:
-            deferred_start = start
+        from .algorithms import calculate_deferred_start
+
+        headroom = get_smart_headroom_fraction(hass, domain)
+        deferred_start = calculate_deferred_start(
+            soc,
+            target_soc,
+            capacity_kwh,
+            max_power_w,
+            end,
+            net_consumption_kw=_get_net_consumption(hass, domain),
+            start=start,
+            headroom=headroom,
+            taper_profile=_get_taper_profile(hass, domain),
+            bms_temp_c=_get_bms_temp(hass, domain),
+        )
         now = dt_util.now()
         if end.tzinfo is None and now.tzinfo is not None:
             now = now.replace(tzinfo=None)
@@ -352,19 +368,28 @@ def estimate_charge_remaining(
     if is_effectively_charging(hass, domain, cs):
         return format_duration(window_remaining)
 
-    # Deferred — estimate when charging will begin
+    # Deferred — estimate when charging will begin using the full algorithm
+    from .algorithms import calculate_deferred_start
+
     soc = get_soc_value(hass, domain)
     capacity_kwh = get_battery_capacity_kwh(hass, domain)
     target_soc: int = cs.get("target_soc", 100)
     max_power_w: int = cs.get("effective_max_power_w", cs.get("max_power_w", 0))
     start: datetime.datetime | None = cs.get("start")
     if soc is not None and capacity_kwh > 0 and max_power_w > 0 and soc < target_soc:
-        energy_kwh = (target_soc - soc) / 100.0 * capacity_kwh
-        charge_kw = max_power_w * deferred_power_fraction(hass, domain) / 1000.0
-        charge_hours = energy_kwh / charge_kw
-        deferred_start = end - datetime.timedelta(hours=charge_hours)
-        if start is not None and deferred_start < start:
-            deferred_start = start
+        headroom = get_smart_headroom_fraction(hass, domain)
+        deferred_start = calculate_deferred_start(
+            soc,
+            target_soc,
+            capacity_kwh,
+            max_power_w,
+            end,
+            net_consumption_kw=_get_net_consumption(hass, domain),
+            start=start,
+            headroom=headroom,
+            taper_profile=_get_taper_profile(hass, domain),
+            bms_temp_c=_get_bms_temp(hass, domain),
+        )
         wait = deferred_start - now
         if wait.total_seconds() <= 0:
             return format_duration(window_remaining)
