@@ -347,13 +347,20 @@ def _record_taper_observation(
         return
 
     actual_w = actual_kw * 1000
-    requested_w = cur_state["last_power_w"]
+    # Use max_power_w (inverter maximum) as the denominator, not
+    # last_power_w (paced request).  The taper ratio represents "what
+    # fraction of maximum power does the BMS actually accept at this
+    # SoC", not "what fraction of the paced request was delivered".
+    # When pacing reduces last_power_w below the BMS limit, using it
+    # as the denominator yields actual/paced > 1.0, clamped to 1.0,
+    # hiding the taper entirely.
+    max_power_w = cur_state.get("max_power_w", cur_state["last_power_w"])
 
     # Always record SoC-based taper (existing behavior, no stability gate)
-    getattr(taper, record_fn_name)(soc, requested_w, actual_w)
+    getattr(taper, record_fn_name)(soc, max_power_w, actual_w)
 
     # Temperature recording: require sustained deficit for TEMP_STABILITY_SECONDS
-    if actual_w < requested_w * TEMP_DEFICIT_THRESHOLD:
+    if actual_w < max_power_w * TEMP_DEFICIT_THRESHOLD:
         cur_state["taper_deficit_streak"] = cur_state.get("taper_deficit_streak", 0) + 1
     else:
         cur_state["taper_deficit_streak"] = 0
@@ -365,7 +372,7 @@ def _record_taper_observation(
             # record_fn_name is "record_charge" or "record_discharge"
             # temp method is "record_charge_temp" or "record_discharge_temp"
             temp_fn_name = record_fn_name + "_temp"
-            getattr(taper, temp_fn_name)(bms_temp, soc, requested_w, actual_w)
+            getattr(taper, temp_fn_name)(bms_temp, soc, max_power_w, actual_w)
 
     cur_state["taper_tick"] = cur_state.get("taper_tick", 0) + 1
     if cur_state["taper_tick"] % save_every == 0:
