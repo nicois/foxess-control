@@ -1,8 +1,8 @@
 ---
 project: FoxESS Control
 created: 2026-04-14
-last_updated: 2026-04-21
-last_reflection: 2026-04-22T12:00:00+10:00
+last_updated: 2026-04-24
+last_reflection: 2026-04-24T12:00:00+10:00
 ---
 # Knowledge Tree Meta
 
@@ -435,3 +435,123 @@ last_reflection: 2026-04-22T12:00:00+10:00
   `async_track_time_interval` cannot be accelerated; the circuit
   breaker test requires 3×60s discharge ticks to trip the breaker
   (C-024).
+
+### 2026-04-24 — Automated reflection (170 interactions, 2026-04-22 to 2026-04-24)
+
+**Major work streams across 5 sessions:**
+
+- **Force→smart unification (v1.0.8)**: Force charge/discharge operations
+  now delegate to smart session internals with `full_power=True`. `power`
+  parameter removed from force ops. `_start_force_op_ws` infrastructure
+  deleted. Full release v1.0.8 created.
+
+- **Production bug fixes (v1.0.9–v1.0.10)**:
+  - WS connecting during `discharge_scheduled` phase before window opens.
+    Fixed by adding `now < start` guard in `_should_start_realtime_ws`.
+  - Session recovery discarding deferred sessions after HA restart.
+    Recovery code required a matching schedule group on the inverter,
+    but during deferred phase no schedule exists yet. Fixed by mirroring
+    charge recovery pattern: `if has_group or not discharging_started`.
+  - Feedin-limited discharge starting immediately instead of deferring.
+    Root cause: tight-window guard in D-005 skipped feedin cap when
+    uncapped SoC deadline fell before window start. With 42kWh battery
+    and 1kWh feedin limit, this caused 51-min active discharge at 1469W
+    instead of deferring to ~7 min before end. Fixed by always applying
+    feedin cap. D-005 updated.
+  - Overview card crash on corrupted `box_config` entries (`flow_from`
+    undefined TypeError).
+
+- **Grid export limit feature (v1.0.9-beta.8+)**: User identified that
+  a 5kW net grid export limit wasn't factored into deferral timing.
+  New `grid_export_limit` config option (W) added across config flow,
+  algorithms, listeners, services, and UI. When configured: deferral
+  uses export-limited rate for timing, discharge always requests max
+  inverter power (firmware handles export capping), pacing skipped.
+  Key insight from user: "the export limit is nett: a 5kW export limit
+  and a 2kW household load implies a 7kW feed in limit."
+
+- **LitElement migration attempt and revert (v1.0.9)**: Card migrated
+  from vanilla HTMLElement to LitElement to solve form value preservation.
+  Failed because HA bundles Lit into hashed webpack chunks with no import
+  map — `import("lit")` fails, prototype extraction can't reach
+  `html`/`css`/`nothing` (module-scope exports, not class properties).
+  Reverted. D-041 documents the vanilla HTMLElement constraint and upgrade
+  paths (bundled Lit via Rollup, or morphdom). D-040 expanded with
+  `_formValues` snapshot mechanism as the working solution.
+
+- **Charge re-deferral (D-043, v1.0.11-beta.2)**: User identified that
+  smart charge reached target 30+ minutes early. Root cause: once
+  `charging_started=True`, listener only adjusts power (min 100W), never
+  switches back to self-use. User corrected my initial analysis that
+  solar needed to be in pacing calculation — the real fix is re-evaluating
+  deferral each tick and reverting to self-use when ahead of schedule.
+  Implemented with `calculate_deferred_start()` check after charging
+  starts.
+
+- **Taper recording denominator fix (v1.0.11-beta.1)**: User observed
+  taper profile recorded ratio 1.0 at 81% SoC despite BMS limiting
+  charge to 6380W. Root cause: `_record_taper_observation` used paced
+  `last_power_w` (4552W) as denominator instead of `max_power_w`
+  (10500W). Ratio 6380/4552=1.40 clamped to 1.0, making real taper
+  invisible.
+
+- **Sensor-listener parameter parity fixes (v1.0.9-beta.9+)**: Discharge
+  deferral countdown and charge "Scheduled" display used simplified
+  formulas in `sensor_base.py` that didn't match the full algorithm in
+  listeners. Fixed by using `calculate_deferred_start()` /
+  `calculate_discharge_deferred_start()` with all parameters.
+
+- **Soak test suite (v1.0.11-beta.3+)**: 17 real-time charge/discharge
+  scenarios through containerised HA + simulator. Simulator auto-tick
+  added (`_auto_tick_loop`, 5s). PID-prefixed container names for
+  concurrent run isolation. SQLite inflection-point store for cross-run
+  comparison (state transitions, SoC direction changes, power steps).
+  Monotonic energy counters (`grid_consumption_total_kwh`) for charge
+  overshoot detection. Systemd timer/service added to repo.
+
+- **Regression-test skill improvements**: User strongly corrected
+  dismissal of CI failures as intermittent ("no flake is acceptable!!!").
+  Skill updated with: Phase 1 hard stop (no source code reading before
+  reporting), Phase 2→3 gate (dispatch immediately after reporting),
+  two-commit verification (test-only must fail, fix makes it pass),
+  production type verification, knowledge tree compliance check.
+  CLAUDE.md updated with TDD process rule and `superpowers:test-driven-
+  development` skill created.
+
+**User corrections captured:**
+1. "the force operations should no longer allow a power limit to be
+   specified; it is not compatible with the concept of forcing full
+   power" — removed `power` param from force ops entirely.
+2. "why does solar need to be incorporated into the pacing calculation?"
+   — corrected my analysis; re-deferral is the right approach, not
+   solar-aware pacing.
+3. "wait shouldn't it be checking energy and not power?" — shifted
+   charge overshoot check from instantaneous power to accumulated energy.
+4. "does the foxess simulator expose the same variables as the real
+   inverter? there are monotonic variables" — led to using
+   `grid_consumption_total_kwh` for exact energy measurement.
+5. "no flake is acceptable. remember this!!!" — saved as memory; never
+   dismiss CI failures as intermittent.
+6. "the regression test skill is supposed to ensure tests get written
+   first. The parent agent is supposed to review the result. Neither of
+   those things happened properly" — led to skill hardening with
+   concrete verification steps.
+
+**Test counts updated**: 786 unit + 130 E2E + 17 soak = 933 total
+(was 736 + 140 = 876). Growth from: taper observation tests, session
+recovery tests, charge re-deferral tests, sensor parity tests,
+soak scenarios (17), inflection-point DB tests (6). E2E count dropped
+from 140 to 130 (deselection of invalid parametrisation combos).
+
+**Knowledge tree updates needed** (recommend `/project-overview update`):
+- `02-constraints.md`: No C-NNN for grid export limit awareness, no
+  C-NNN for sensor-listener parameter parity.
+- `04-design/smart-discharge.md`: D-005 needs the tight-window guard
+  REMOVAL documented (previous update added it; it was then removed).
+  Grid export limit interaction needs D-NNN.
+- `04-design/smart-charge.md`: D-043 was added but may need traces
+  updated after implementation.
+- `06-tests.md`: Test counts stale (933 vs documented ~876). Soak
+  test section missing entirely. Inflection-point DB tests missing.
+- `05-coverage.md`: Matrix stale — D-043, taper denominator fix,
+  grid export limit feature not cross-referenced.

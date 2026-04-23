@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: Adaptive BMS Taper Model
-last_verified: 2026-04-21
+last_verified: 2026-04-24
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -19,11 +19,17 @@ improving time estimates and power pacing.
 
 ### D-011: SoC-indexed histogram with EMA smoothing
 **Decision**: Maintain a per-SoC-percent histogram of observed
-`actual_power / requested_power` ratios, smoothed with EMA
-(alpha = 0.3).
-**Context**: At SoC > 90%, the BMS may accept only 60-80% of requested
+`actual_power / max_power_w` ratios, smoothed with EMA (alpha = 0.3).
+The denominator is the inverter's maximum power (`max_power_w`), not
+the paced request (`last_power_w`). This ensures the ratio represents
+"what fraction of maximum does the BMS accept at this SoC" rather than
+"what fraction of the paced request was delivered".
+**Context**: At SoC > 90%, the BMS may accept only 60-80% of maximum
 charge power. At SoC < 15%, discharge is similarly limited. Without
-this knowledge, time estimates are wrong.
+this knowledge, time estimates are wrong. Using the paced request as
+denominator masks real taper: when pacing reduces `last_power_w` below
+the BMS limit, the ratio `actual/paced` exceeds 1.0, gets clamped to
+1.0, and taper is invisible.
 **Rationale**: EMA adapts in 3-5 observations per SoC bin. The per-SoC
 granularity captures the non-linear taper curve. Alpha 0.3 balances
 responsiveness vs noise.
@@ -32,15 +38,19 @@ responsiveness vs noise.
   age, temperature, and cell chemistry
 - Machine learning model: rejected as over-engineered for the available
   data rate (one observation per SoC per session)
+- Paced request as denominator (original approach): rejected because
+  it yields actual/paced > 1.0 at low paced power, clamped to 1.0,
+  making taper invisible when pacing is active
 **Traces**: C-014;
 `tests/test_taper.py::TestRecordCharge`
 
 ### D-012: Quality gates on taper observations
-**Decision**: Ignore observations where `requested < 500W` (transients),
+**Decision**: Ignore observations where `max_power_w < 500W` (transients),
 `actual < 50W` (sensor errors), or `count < 2` (insufficient trust).
-The listener layer pre-filters at the same 500W threshold and also
-skips recording during suspended discharge (where actual power is
-zero). The taper profile is persisted to HA Store every
+The listener layer pre-filters at the same 500W threshold on
+`last_power_w` (ensuring the inverter is actively requesting power)
+and also skips recording during suspended discharge (where actual
+power is zero). The taper profile is persisted to HA Store every
 `_TAPER_SAVE_EVERY_N` (5) observations in both charge and discharge
 paths.
 **Context**: During ramp-up/ramp-down, power readings are noisy. Sensor
@@ -86,7 +96,7 @@ that multiply naturally. A 2D model (SoC × temp) would have O(100 × 40)
 bins with extremely sparse data. The multiplicative model keeps the existing
 SoC profile useful day-one while temperature converges independently in
 ~10-15 integer °C bins. The temperature factor is isolated by dividing out
-the SoC ratio: `temp_factor = (actual/requested) / soc_ratio`.
+the SoC ratio: `temp_factor = (actual/max_power) / soc_ratio`.
 **Alternatives considered**:
 - Temperature-bucketed profiles (separate profile per range): 4× convergence
   time, data sparsity at uncommon temperatures

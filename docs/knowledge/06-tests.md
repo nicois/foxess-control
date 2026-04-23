@@ -1,16 +1,18 @@
 ---
 project: FoxESS Control
 level: 6
-last_verified: 2026-04-22
+last_verified: 2026-04-24
 traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-736 unit + 140 E2E = 876 total.
+786 unit + 130 E2E + 17 soak = 933 total.
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
-simulator and Playwright browser automation.
+simulator and Playwright browser automation. Soak tests run real-time
+charge/discharge scenarios through containerised HA + simulator
+(marked `slow`, run nightly via systemd timer).
 
 > **Note**: This inventory covers the major constraint-mapped tests.
 > Many tests (particularly in `test_services.py`, `test_sensor.py`, and
@@ -115,6 +117,17 @@ simulator and Playwright browser automation.
 | `TestTempFactor::*` | Temperature factor query + nearest-neighbour | C-014 |
 | `TestEstimateChargeHours::*` | Taper-aware time estimation | C-014 |
 
+## Taper Observation Recording
+
+**Constraints**: C-014
+**Source**: `tests/test_taper_observation.py`
+
+| Test | Verifies | Constraint |
+|---|---|---|
+| `TestTaperObservation::test_records_ratio_using_max_power_denominator` | max_power_w denominator (not paced) | C-014 |
+| `TestTaperObservation::test_full_power_charge_records_correct_ratio` | Correct ratio at full power | C-014 |
+| `TestTaperObservation::test_temp_recording_uses_max_power_denominator` | Temperature factor uses max_power_w | C-014 |
+
 ## Schedule Merging (FoxESS API)
 
 **Constraints**: C-008, C-009, C-010, C-011
@@ -180,6 +193,9 @@ Key tests:
 - Override status formatting (charge/discharge/deferred/idle)
 - Progress bar trajectory (charge rises, discharge falls)
 - Deferred start display (time until start, clamped to window)
+- Grid export limit: 3 tests verifying deferred countdown accounts for
+  `grid_export_limit_w` (D-044) — capped export rate, consumption
+  interaction, feedin deadline
 - Graceful degradation when data missing
 
 ## Entity Mode (Modbus Interop)
@@ -269,7 +285,7 @@ Key tests:
 
 ## E2E Tests (Containerised HA + Simulator + Playwright)
 
-**Source**: `tests/e2e/test_e2e.py` (62 tests), `tests/e2e/test_ui.py` (78 tests)
+**Source**: `tests/e2e/test_e2e.py` (62 tests), `tests/e2e/test_ui.py` (80 tests)
 **Infrastructure**: Podman HA container, FoxESS simulator, Playwright Chromium
 
 | Test | Verifies | Constraint |
@@ -318,8 +334,41 @@ Key tests:
 
 Tests are parametrized across `[cloud, entity]` connection modes and
 `[api, ws, entity]` data sources. The `ws_refuse` simulator fault blocks
-WS connections for API-only mode. Total E2E count is 140 (62 + 78,
-with cloud/entity parametrization).
+WS connections for API-only mode. Invalid parametrisation combos
+(`entity-api`, `entity-ws`, `cloud-entity`) are deselected at collection
+time. Total E2E count is 130.
+
+## Soak Tests (Real-Time Charge/Discharge Scenarios)
+
+**Source**: `tests/soak/test_scenarios.py` (17 tests)
+**Infrastructure**: Podman HA container, FoxESS simulator with auto-tick (5s),
+per-worker PID-prefixed containers, systemd nightly timer.
+
+| Test | Verifies | Constraint |
+|---|---|---|
+| `test_charge_basic` | 20%→80%, 4h, flat load, no solar | C-001 |
+| `test_charge_with_solar` | Charge + 4kW solar, D-043 re-deferral | C-001, D-043 |
+| `test_charge_spiky_load` | Charge + intermittent high load spikes | C-001 |
+| `test_charge_high_soc_taper` | 70%→100%, BMS taper above 90% | C-014 |
+| `test_charge_cold_battery` | Charge at 5°C, BMS current limiting | C-014 |
+| `test_charge_large_battery` | 42kWh battery, extended charging | C-001 |
+| `test_charge_solar_exceeds_target` | Solar alone meets target, session idles | D-043 |
+| `test_charge_solar_then_spike` | Solar meets target, spike drops below, resume | D-043 |
+| `test_charge_heavy_load_during_deferral` | 3kW load drains SoC during deferral | C-001 |
+| `test_charge_tight_window` | 45-min window barely fits 20%→80% charge | C-022 |
+| `test_discharge_basic` | 80%→20%, 4h, flat load | C-001, C-002 |
+| `test_discharge_with_solar` | Discharge + 3kW solar extends battery | C-001 |
+| `test_discharge_solar_exceeds_load` | 5kW solar > 1.5kW load, SoC rises | C-001 |
+| `test_discharge_spiky_load` | Load spikes exceeding inverter max | C-001 |
+| `test_discharge_near_min_soc` | Start near min_soc, end-of-discharge guard | C-002, C-017 |
+| `test_discharge_large_battery` | 42kWh battery, extended discharge | C-001 |
+| `test_charge_then_discharge` | Full cycle: charge to 90%, discharge to 20% | C-001, C-002 |
+
+Soak tests use `SoakRecorder` to capture samples every 10s, check
+invariants (monotonic SoC progress, no charge overshoot via monotonic
+energy counters, no grid import during discharge). SQLite inflection-point
+store (`tests/soak/results_db.py`) records state transitions and SoC
+direction changes for cross-run comparison.
 
 ## Test Quality Rules
 

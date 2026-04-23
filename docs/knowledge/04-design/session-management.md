@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: Session Management
-last_verified: 2026-04-21
+last_verified: 2026-04-24
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -96,6 +96,38 @@ Modbus is already faster than the cloud WS.
   integration with adapter-pattern branching
 **Traces**: C-021;
 `tests/test_entity_mode.py`
+
+### D-045: Force→smart unification via full_power flag
+**Decision**: `force_charge` and `force_discharge` service handlers
+delegate to `_do_smart_charge` and `_do_smart_discharge` with
+`full_power=True`. The `full_power` flag is persisted in session state
+and affects behaviour at multiple levels:
+- **No SoC requirement**: Force operations skip the SoC-availability
+  check (`if not full_power and _get_current_soc(hass) is None`)
+- **No pacing**: `pacing_enabled = not full_power and capacity > 0`
+- **No deferral**: Force operations start immediately at max power
+- **Shared session lifecycle**: Force sessions get the same listeners,
+  circuit breaker, recovery, WS lifecycle, and cancellation logic as
+  smart sessions
+**Context**: Force charge/discharge were originally separate code paths
+with their own schedule management. This duplicated session lifecycle
+logic (cancel, persist, recover, timer cleanup) and created divergence
+risk where bug fixes to smart sessions didn't apply to force sessions.
+**Rationale**: A single code path with a boolean flag is simpler to
+maintain and test. The `full_power` flag cleanly separates the two
+concerns: session lifecycle (shared) and pacing strategy (conditional).
+All session infrastructure (D-017 identity tokens, D-018 synchronous
+cancellation, D-025 circuit breaker, D-032 restart recovery) applies
+uniformly to both force and smart sessions.
+**Alternatives considered**:
+- Separate force/smart code paths: rejected due to duplication and
+  divergence risk
+- Separate session types: rejected because the lifecycle is identical;
+  only the power strategy differs
+**Traces**: C-024 (safe state — force sessions get circuit breaker),
+C-025 (session boundary — force sessions get proper cleanup);
+`tests/test_services.py::TestForceCharge` (verifies `full_power=True`),
+`tests/test_services.py::TestForceDischarge` (verifies `full_power=True`)
 
 ### D-025: Two-tier circuit breaker for adapter errors
 **Decision**: Adapter errors are handled by a shared `_with_circuit_breaker`

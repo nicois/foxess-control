@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 3
-last_verified: 2026-04-22
+last_verified: 2026-04-24
 traces_up: [02-constraints.md]
 traces_down: [04-design/]
 ---
@@ -70,7 +70,10 @@ accessors consolidated into frozen `IntegrationConfig` dataclass in
 **Path**: `custom_components/foxess_control/_services.py`
 **Responsibility**: All six HA service handlers (clear_overrides,
 force_charge, force_discharge, feedin, smart_charge, smart_discharge)
-plus error translation decorator and registration function.
+plus error translation decorator and registration function. Force
+operations (`force_charge`, `force_discharge`) delegate to the shared
+`_do_smart_charge` / `_do_smart_discharge` with `full_power=True`
+(D-045), unifying session lifecycle across force and smart operations.
 **Why separate**: Extracted from `__init__.py` to reduce its size from
 ~2500 to ~1600 lines. Uses late imports to break circular dependencies.
 
@@ -213,6 +216,31 @@ to minimise deviations from production behaviour (C-033):
   data for testing graceful degradation.
 - **fdSoc enforcement**: Simulator validates `fdSoc >= 11` on schedule
   writes, matching the real API constraint (C-008).
+## Soak Test Infrastructure
+
+The soak test suite (`tests/soak/`) runs real-time charge/discharge
+sessions through the full HA integration + simulator stack, verifying
+invariants throughout multi-hour simulated scenarios.
+
+- **17 scenarios**: 11 charge (basic, solar, spiky load, high-SoC
+  taper, cold battery, large battery, solar exceeds target, solar then
+  spike, heavy load during deferral, tight window) + 6 discharge
+  (basic, solar, solar exceeds load, spiky load, near min SoC, large
+  battery) + 1 combined (charge then discharge cycle).
+- **ScenarioConfig**: Declarative scenario definition (session type,
+  window, initial SoC, target SoC, load/solar profiles, battery
+  capacity, temperature).
+- **SoakRecorder**: Captures time-series data and violations during
+  scenario execution for post-hoc invariant checking.
+- **SQLite results store** (`results_db.py`): Persists inflection
+  points (SoC, power, timestamps) across runs for cross-run comparison
+  and regression detection.
+- **PID-prefixed containers**: Each soak run uses PID-prefixed Docker
+  container names to avoid collisions when multiple runs execute
+  concurrently.
+- **Nightly execution**: Triggered by systemd timer or CI workflow on
+  tag-based schedules.
+
 | `aiohttp` | WebSocket client | Standard async HTTP/WS library; HA already uses it |
 | `requests` | REST API client (sync) | Used in the FoxESS client for synchronous API calls within HA's executor |
 | `voluptuous` | Schema validation | Used for service call and config flow schemas; ships with HA but used directly |

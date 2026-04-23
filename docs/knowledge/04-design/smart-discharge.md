@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: Smart Discharge
-last_verified: 2026-04-22
+last_verified: 2026-04-24
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -176,6 +176,41 @@ on every tick — only when `apply_mode` is already called.
 **Traces**: C-024, C-027;
 `smart_battery/algorithms.py::compute_safe_schedule_end`,
 `tests/test_smart_battery_algorithms.py` (via `compute_safe_schedule_end`)
+
+### D-044: Grid export limit awareness
+**Decision**: When a `grid_export_limit_w` is configured (> 0), the
+discharge system adapts in two ways:
+1. **Deferral**: `calculate_discharge_deferred_start` caps the
+   effective export rate at `grid_export_limit_w / 1000` kW in both
+   the SoC deadline and feed-in energy deadline calculations, producing
+   a more conservative (earlier) deferred start.
+2. **Active discharge**: The listener uses `max_power_w` directly
+   instead of computing a paced power value. The inverter's own
+   grid-export limiter constrains actual export, so pacing would
+   double-limit — requesting less than the inverter can deliver while
+   the grid-export limiter independently caps export, resulting in
+   under-utilisation.
+**Context**: Some inverter installations have grid export limits
+enforced by the DNO or configured in the inverter firmware. The
+software must account for this when estimating how long discharge
+will take and when to start, but must not fight the hardware limiter
+during active discharge.
+**Rationale**: Software pacing assumes discharge_power ≈ grid_export.
+With a hardware export limit, actual export is `min(discharge, limit)`,
+making pacing calculations incorrect. Running at max power and letting
+the hardware limit handle export produces the correct export rate
+while maximising the battery's contribution to house load.
+**Alternatives considered**:
+- Software pacing to the export limit: rejected because it would
+  reduce both export AND house-load contribution, when only export
+  needs limiting
+- Ignoring the limit in deferral: rejected because the deferred
+  start would be too late — the session would run out of time to
+  export the required energy at the limited rate
+**Traces**: C-001 (no-import), D-002 (deferred start), D-005 (feedin budget);
+`tests/test_sensor.py::TestDischargeDeferredCountdown::test_deferred_countdown_with_grid_export_limit_and_consumption`,
+`tests/test_sensor.py::TestDischargeDeferredCountdown::test_deferred_countdown_grid_export_limit_caps_export_rate`,
+`tests/test_sensor.py::TestDischargeDeferredCountdown::test_deferred_countdown_grid_export_limit_feedin_deadline`
 
 ## Key Behaviours
 
