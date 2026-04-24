@@ -136,6 +136,82 @@ class TestInstallRemove:
             logger.removeHandler(handler)
             remove_session_filter(logger, f)
 
+    def test_debug_log_handlers_enrich_child_logger_records(self) -> None:
+        """Regression: setup_debug_log's handlers must see session context
+        even when records come from child loggers.
+
+        Before the fix, `install_session_filter` attached the filter to
+        the parent `custom_components.foxess_control` logger, which
+        Python's logging module does not run on descendant records. As a
+        result, every event from `smart_battery.listeners` landed in the
+        debug buffer with `session: None`.
+        """
+        import collections as _coll
+
+        from custom_components.foxess_control.sensor import _DebugLogHandler
+
+        parent = logging.getLogger("test.structured.debug_log_child.parent_domain")
+        child = logging.getLogger(
+            "test.structured.debug_log_child.parent_domain.smart_battery.listeners"
+        )
+        parent.setLevel(logging.DEBUG)
+        charge = _make_charge_state()
+
+        buf: _coll.deque[dict[str, Any]] = _coll.deque(maxlen=100)
+        handler = _DebugLogHandler(buf)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        handler.addFilter(SessionContextFilter(lambda: (charge, None)))
+        parent.addHandler(handler)
+        try:
+            child.info("event from smart_battery.listeners")
+            assert len(buf) == 1
+            assert "session" in buf[0], (
+                "child-logger record landed in debug buffer without session "
+                "context — handler-level filter attachment is required"
+            )
+            assert buf[0]["session"]["session_id"] == "charge-uuid-1234"
+        finally:
+            parent.removeHandler(handler)
+
+    def test_filter_enriches_child_logger_records(self) -> None:
+        """Records emitted through a child logger must also be enriched.
+
+        Python's logging module quirk: filters attached to a parent logger
+        do NOT run on records emitted from child loggers. Only the parent's
+        handlers fire. So installing SessionContextFilter at the logger
+        level misses every record from child loggers like
+        ``custom_components.foxess_control.smart_battery.listeners``.
+
+        The fix must attach the filter at the **handler** level (or
+        install it on every descendant logger) so session context lands
+        on records regardless of emission point.
+        """
+        parent = logging.getLogger("test.structured.parent_child")
+        child = logging.getLogger("test.structured.parent_child.leaf")
+        parent.setLevel(logging.DEBUG)
+        charge = _make_charge_state()
+
+        captured: list[logging.LogRecord] = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                captured.append(record)
+
+        handler = _Capture()
+        # Attach filter to the *handler* — this is the fix.
+        handler.addFilter(SessionContextFilter(lambda: (charge, None)))
+        parent.addHandler(handler)
+        try:
+            child.info("from child logger")
+            assert len(captured) == 1
+            assert getattr(captured[0], "session", None), (
+                "child-logger record missing session context — "
+                "filter must be at handler level, not logger level"
+            )
+            assert captured[0].session["session_id"] == "charge-uuid-1234"  # type: ignore[attr-defined]
+        finally:
+            parent.removeHandler(handler)
+
 
 class TestDebugLogHandlerWithSession:
     def test_handler_includes_session_in_buffer(self) -> None:

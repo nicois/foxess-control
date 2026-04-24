@@ -20,6 +20,7 @@ from homeassistant.util import dt as dt_util  # noqa: F401 — test patching tar
 from ._helpers import _dd
 from .const import CONF_DEVICE_SERIAL, CONF_WEB_USERNAME, DOMAIN
 from .coordinator import FoxESSDataCoordinator
+from .smart_battery.logging import SessionContextFilter
 from .smart_battery.sensor_base import (
     BatteryForecastSensor as _BatteryForecastSensor,
 )
@@ -878,12 +879,27 @@ def setup_debug_log(
     sensors: list[SensorEntity] = []
     handlers: list[logging.Handler] = []
 
+    # Session context must be attached at the handler level, not the
+    # logger level: Python's logging module does NOT run parent-logger
+    # filters on records emitted from child loggers (e.g.
+    # smart_battery.listeners), so a logger-level filter would miss
+    # every structured event.
+    def _session_context() -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        if DOMAIN not in hass.data:
+            return (None, None)
+        dd = _dd(hass)
+        return (dd.smart_charge_state, dd.smart_discharge_state)
+
+    def _attach_session_filter(h: logging.Handler) -> None:
+        h.addFilter(SessionContextFilter(_session_context))
+
     buf: collections.deque[dict[str, Any]] = collections.deque(
         maxlen=_DEBUG_LOG_BUFFER_SIZE
     )
     handler = _DebugLogHandler(buf, original_level=original_level)
     handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
     handler.setLevel(logging.DEBUG)
+    _attach_session_filter(handler)
     logger.addHandler(handler)
     sensors.append(DebugLogSensor(entry, buf))
     handlers.append(handler)
@@ -894,6 +910,7 @@ def setup_debug_log(
     info_handler = _DebugLogHandler(info_buf, original_level=original_level)
     info_handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
     info_handler.setLevel(logging.INFO)
+    _attach_session_filter(info_handler)
     logger.addHandler(info_handler)
     sensors.append(InfoLogSensor(entry, info_buf))
     handlers.append(info_handler)
@@ -904,6 +921,7 @@ def setup_debug_log(
     )
     init_handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
     init_handler.setLevel(logging.DEBUG)
+    _attach_session_filter(init_handler)
     logger.addHandler(init_handler)
     sensors.append(InitDebugLogSensor(entry, init_buf, _DEBUG_LOG_BUFFER_SIZE))
     handlers.append(init_handler)

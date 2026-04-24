@@ -125,10 +125,8 @@ class FoxESSControlData(SmartBatteryDomainData):
     ws_discharge_callback: Callable[..., Any] | None = None
     ws_last_trigger: float = 0.0
 
-    # Session logging
-    session_log_filter: Any = None
-
-    # Debug log handlers
+    # Debug log handlers (session context filter is attached directly
+    # to each handler — see sensor.setup_debug_log for the rationale)
     debug_log_handlers: list[Any] = field(default_factory=list)
 
     # BMS battery compound ID (batteryId@batSn from WS or discovery)

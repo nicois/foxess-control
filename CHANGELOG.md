@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.11-beta.8
+
+### Fixed
+- **Session context missing from debug log records** (pre-existing bug, uncovered during beta.7 live validation): `SessionContextFilter` was installed on the `custom_components.foxess_control` logger, but Python's logging module does not run parent-logger filters on records emitted from child loggers (e.g. `custom_components.foxess_control.smart_battery.listeners`). As a result, every record from the listeners — including all of beta.7's new structured events (`algo_decision`, `tick_snapshot`, `session_transition`, `schedule_write`, `taper_update`, `service_call`) — landed in the debug-log sensors with `session: None` instead of the active session context. Fixed by attaching the filter at the **handler** level in `setup_debug_log`, so every record seen by those handlers — regardless of its emitting logger — gets enriched with the current charge/discharge state. Added a regression test that exercises a child logger to prevent this from reappearing.
+
 ## 1.0.11-beta.7
 
 ### Added

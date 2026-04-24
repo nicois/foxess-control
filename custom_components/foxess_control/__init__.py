@@ -1190,22 +1190,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     dd.on_session_cancel = _on_session_cancel
 
-    # Install structured session logging filter (enriches log records
-    # with session_id, session_type, etc. for debug log / E2E capture).
-    if dd.session_log_filter is None:
-        from .smart_battery.logging import install_session_filter
-
-        def _session_context() -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-            if DOMAIN not in hass.data:
-                return (None, None)
-            _dd_inner = _dd(hass)
-            return (
-                _dd_inner.smart_charge_state,
-                _dd_inner.smart_discharge_state,
-            )
-
-        fox_logger = logging.getLogger("custom_components.foxess_control")
-        dd.session_log_filter = install_session_filter(fox_logger, _session_context)
+    # Session context enrichment is attached at the handler level in
+    # setup_debug_log() — not at this logger level. Python's logging
+    # module does not run parent-logger filters on records emitted
+    # from child loggers, so a logger-level filter here would miss
+    # every event from smart_battery.listeners.
 
     # Load adaptive taper profile from persistent storage
     if dd.taper_profile is None:
@@ -1554,16 +1543,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         dd.web_session = None
         if web_session is not None:
             await web_session.async_close()
-        # Detach session context filter
-        from .smart_battery.logging import remove_session_filter
 
+        # Detach debug log handlers (their session filters are held
+        # by the handlers themselves and are garbage-collected when
+        # the handler is removed).
         fox_logger = logging.getLogger("custom_components.foxess_control")
-        session_filter = dd.session_log_filter
-        dd.session_log_filter = None
-        if session_filter is not None:
-            remove_session_filter(fox_logger, session_filter)
-
-        # Detach debug log handlers and restore logger level
         for handler in dd.debug_log_handlers:
             fox_logger.removeHandler(handler)
             original = getattr(handler, "original_level", logging.NOTSET)
