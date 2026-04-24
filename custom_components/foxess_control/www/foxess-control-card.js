@@ -861,9 +861,20 @@ class FoxESSControlCard extends HTMLElement {
     const power = a.charge_power_w || 0;
     const target = a.charge_target_soc;
     const current = a.charge_current_soc;
+    const startSoc = a.charge_start_soc;
     const remaining = a.charge_remaining || "";
     const window = a.charge_window || "";
     const slackS = a.charge_time_slack_s;
+    // Match the progress-bar's SoC precision: show two decimals once the
+    // interpolated value has drifted from the last confirmed integer, so
+    // the deferred-phase target row tracks the same number the progress
+    // bar would show during active charging.
+    const socChanged =
+      current != null && startSoc != null &&
+      Math.round(current) !== Math.round(startSoc);
+    const curStr = current != null
+      ? (socChanged ? current.toFixed(2) : String(Math.round(current))) + "%"
+      : "?%";
     const title = scheduled
       ? this._t("charge_scheduled")
       : deferred
@@ -896,7 +907,7 @@ class FoxESSControlCard extends HTMLElement {
           </div>` : ""}
           <div class="detail-row">
             <span class="detail-label">${this._t("target")}</span>
-            <span class="detail-value">${current != null ? Math.round(current) : "?"}% → ${target != null ? target : "?"}%</span>
+            <span class="detail-value">${curStr} → ${target != null ? target : "?"}%</span>
           </div>
         </div>
       </div>
