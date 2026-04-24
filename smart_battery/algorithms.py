@@ -640,11 +640,28 @@ def calculate_discharge_deferred_start(
             soc_deadline = end - datetime.timedelta(hours=buffered_hours)
 
     # --- Feed-in energy deadline ---
-    # Use doubled headroom: house consumption is variable and all export
-    # must come from forced discharge, so we start earlier to absorb
-    # load spikes that reduce net grid export during the burst.
+    # Headroom policy: the feed-in deadline defaults to DOUBLED headroom
+    # because house consumption is variable and all export must come from
+    # forced discharge — load spikes reduce net grid export during the
+    # burst, so we start earlier to absorb them.
+    #
+    # Exception: when a hardware export clamp is configured BELOW
+    # max_power (``grid_export_limit_w > 0`` and ``< max_power_w``), the
+    # clamp slack ``max_power_kw - grid_export_limit_kw`` absorbs load
+    # spikes up to its size before export rate degrades.  For example,
+    # a 5 kW clamp on a 10.5 kW inverter absorbs 5.5 kW of load variation
+    # before a single watt of export is affected — residential load
+    # volatility well below the slack makes the doubled headroom dead
+    # time at the end of the window.  When the projected household load
+    # (``max(net_consumption_kw, consumption_peak_kw)``) fits within the
+    # slack, use single (``headroom``) instead.
+    #
+    # Observed live 2026-04-24: max_power 10.5 kW, clamp 5 kW, feed-in
+    # 1 kWh, peak 0 kW — the system deferred to 15 min before end when
+    # the raw need was 12 min; the doubled headroom was protecting
+    # against a physically impossible load-spike regime (>5.5 kW spikes
+    # at <0.2 kW baseline).
     feedin_deadline = end
-    feedin_headroom = min(headroom * 2, MAX_FEEDIN_HEADROOM)
     if feedin_energy_limit_kwh is not None and feedin_energy_limit_kwh > 0:
         # Use peak consumption (if available) for a conservative export
         # rate estimate.  Volatile loads reduce the effective export rate
@@ -657,6 +674,23 @@ def calculate_discharge_deferred_start(
         effective_export_kw = max_power_kw - consumption
         if grid_export_limit_w > 0:
             effective_export_kw = min(effective_export_kw, grid_export_limit_w / 1000.0)
+
+        # Decide which feed-in headroom to apply.  The doubled headroom
+        # is only justified when load spikes can reduce export rate.
+        clamp_active = 0 < grid_export_limit_w < max_power_w
+        if clamp_active:
+            clamp_slack_kw = max_power_kw - grid_export_limit_w / 1000.0
+            projected_load_kw = consumption  # already max(net, peak)
+            if projected_load_kw <= clamp_slack_kw:
+                # Slack absorbs projected load spikes → single headroom.
+                feedin_headroom = min(headroom, MAX_FEEDIN_HEADROOM)
+            else:
+                # Projected load exceeds slack → spikes reduce export → doubled.
+                feedin_headroom = min(headroom * 2, MAX_FEEDIN_HEADROOM)
+        else:
+            # No clamp (or clamp >= max_power): spikes reduce export 1:1 → doubled.
+            feedin_headroom = min(headroom * 2, MAX_FEEDIN_HEADROOM)
+
         if effective_export_kw <= 0:
             effective_export_kw = max_power_kw * FEEDIN_FALLBACK_RATIO
         if effective_export_kw <= 0:
