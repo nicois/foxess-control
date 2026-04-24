@@ -16,7 +16,7 @@
 - **Replay regression gate**: `tests/test_replay.py::test_committed_trace_replays_clean` parametrises over any JSONL file in `tests/replay_traces/` so hand-crafted or recorded traces become locked-in protection against algorithm output drift. A sample discharge trace is included.
 
 ### Improved
-- **Info log and init debug log entity IDs** now follow the same naming pattern as the debug log sensor, resulting in stable `sensor.foxess_control_info_log` / `sensor.foxess_control_init_debug_log` entity IDs. The explicit `_attr_name` overrides were redundant with the translation-driven naming and caused inconsistent slugs.
+- **Info log and init debug log entity IDs** now follow the same naming pattern as the debug log sensor, resulting in stable `sensor.foxess_info_log` / `sensor.foxess_init_debug_log` entity IDs. The explicit `_attr_name` overrides were redundant with the translation-driven naming and caused inconsistent slugs. (Note: beta.7 shipped this change without the corresponding translation entries — see the beta.8 fix below.)
 
 ## 1.0.11-beta.6
 
