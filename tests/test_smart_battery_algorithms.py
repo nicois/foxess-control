@@ -10,10 +10,12 @@ import datetime
 from typing import Any
 
 from custom_components.foxess_control.smart_battery.algorithms import (
+    DISCHARGE_SAFETY_FACTOR,
     calculate_charge_power,
     calculate_deferred_start,
     calculate_discharge_deferred_start,
     calculate_discharge_power,
+    clamp_export_limit_w,
     is_charge_target_reachable,
     should_suspend_discharge,
     soc_energy_kwh,
@@ -1075,3 +1077,186 @@ class TestGridExportLimitDeferral:
             grid_export_limit_w=20000,
         )
         assert with_high == without
+
+
+class TestFeedinHeadroomAccountsForExportClamp:
+    """Regression tests: feed-in headroom doubling is over-conservative when
+    a hardware export limit is well below inverter max power.
+
+    Observed live 2026-04-24: with max_power_w=10500, grid_export_limit_w=5000,
+    feedin_energy_limit_kwh=1.0, min_soc=21, current_soc=92, the system
+    deferred start to 16:30 (15 min before end).  Raw need was 12 min of
+    forced discharge (1 kWh / 5 kW clamped).  The extra 3 min was all
+    doubled-headroom safety margin, protecting against a load spike above
+    5.5 kW (max_power 10.5 - clamp 5 = 5.5 kW of "slack" before a spike
+    degrades export rate).  On residential loads this headroom is dead
+    time at the tail of the window.
+
+    The fix: when the export clamp's slack
+    (``max_power_kw - grid_export_limit_kw``) exceeds the projected house
+    load (``max(net_consumption_kw, consumption_peak_kw)``), load spikes
+    below the slack do not reduce export — so the doubled feed-in headroom
+    is unnecessary.  Use single (``headroom``) instead.  For unlimited
+    export or limit >= max_power, current doubled-headroom behaviour is
+    preserved.
+    """
+
+    # Live-symptom parameters from 2026-04-24 observation.
+    _END = datetime.datetime(2026, 4, 24, 16, 45, 0)
+    _START = datetime.datetime(2026, 4, 24, 16, 4, 0)
+
+    def _common_kwargs(self) -> dict[str, Any]:
+        return {
+            "current_soc": 92.0,
+            "min_soc": 21,
+            "battery_capacity_kwh": 20.7,
+            "max_power_w": 10500,
+            "end": self._END,
+            "net_consumption_kw": 0.0,
+            "start": self._START,
+            "feedin_energy_limit_kwh": 1.0,
+            "consumption_peak_kw": 0.0,
+        }
+
+    def test_live_2026_04_24_export_limit_single_headroom(self) -> None:
+        """Live symptom: 5 kW clamp on 10.5 kW inverter, peak 0, feed-in 1 kWh.
+
+        Raw feed-in hours = 1.0 / 5.0 = 12 min.  With single headroom
+        (0.10), buffered = 12 / 0.9 = 13.33 min → deferred start 16:31:40.
+        With the current (broken) doubled headroom the result is 16:30.
+        """
+        result = calculate_discharge_deferred_start(
+            **self._common_kwargs(),
+            grid_export_limit_w=5000,
+        )
+        # Must be strictly later than the current broken 16:30.
+        broken = datetime.datetime(2026, 4, 24, 16, 30, 0)
+        assert result > broken, (
+            f"Deferred start {result} should be strictly later than "
+            f"{broken} — the doubled-headroom buffer is unjustified when "
+            f"the clamp slack (5.5 kW) exceeds the projected peak load (0 kW)."
+        )
+        # Single-headroom target: 16:31:40 ± a few seconds.  Assert
+        # result is at or after 16:31 and before the raw-need floor
+        # (16:33 = 12 min before end).
+        assert result >= datetime.datetime(2026, 4, 24, 16, 31, 0)
+        assert result < datetime.datetime(2026, 4, 24, 16, 33, 0)
+
+    def test_unlimited_export_keeps_doubled_headroom(self) -> None:
+        """Regression guard: with unlimited export, doubled headroom is
+        still applied (load spikes DO reduce export 1:1 here).
+
+        Raw feed-in hours = 1.0 / 10.5 = ~5.71 min.  Doubled headroom
+        (0.20), buffered = 5.71 / 0.8 = 7.14 min → deferred ~16:37:51.
+        """
+        kwargs = self._common_kwargs()
+        result = calculate_discharge_deferred_start(
+            **kwargs,
+            grid_export_limit_w=0,
+        )
+        # Expected deferred start (doubled headroom): 16:37:51.428.
+        expected = self._END - datetime.timedelta(hours=(1.0 / 10.5) / 0.8)
+        # Allow a 2-second tolerance for the float arithmetic.
+        assert abs((result - expected).total_seconds()) < 2.0, (
+            f"Unlimited-export result {result} should equal doubled-headroom "
+            f"expected {expected}"
+        )
+
+    def test_export_limit_at_max_power_equals_unlimited(self) -> None:
+        """Boundary: grid_export_limit_w == max_power_w should behave
+        identically to grid_export_limit_w=0 (no clamp protection against
+        load spikes when slack is zero)."""
+        kwargs = self._common_kwargs()
+        unlimited = calculate_discharge_deferred_start(
+            **kwargs,
+            grid_export_limit_w=0,
+        )
+        at_max = calculate_discharge_deferred_start(
+            **kwargs,
+            grid_export_limit_w=10500,
+        )
+        assert at_max == unlimited, (
+            f"grid_export_limit_w=max_power should behave like unlimited; "
+            f"got at_max={at_max}, unlimited={unlimited}"
+        )
+
+    def test_peak_load_above_clamp_slack_keeps_doubled_headroom(self) -> None:
+        """When consumption_peak_kw > (max_power_kw - grid_export_limit_kw),
+        load spikes DO reduce export rate and the doubled headroom is
+        justified.
+
+        max_power 10.5 kW, clamp 5 kW → slack 5.5 kW.  Peak 6 kW > 5.5 kW.
+        effective_export = 10.5 - 6 = 4.5 kW (clamped to min(4.5, 5) = 4.5).
+        Raw feedin = 1.0 / 4.5 = 13.33 min.  Doubled headroom 0.20,
+        buffered = 13.33 / 0.8 = 16.67 min → deferred 16:28:20.
+        """
+        kwargs = self._common_kwargs()
+        kwargs["consumption_peak_kw"] = 6.0
+        result = calculate_discharge_deferred_start(
+            **kwargs,
+            grid_export_limit_w=5000,
+        )
+        # Doubled-headroom expected: 16:28:20.
+        expected = self._END - datetime.timedelta(hours=(1.0 / 4.5) / 0.8)
+        assert abs((result - expected).total_seconds()) < 2.0, (
+            f"Peak {kwargs['consumption_peak_kw']} kW > slack 5.5 kW — "
+            f"doubled headroom must still apply.  got={result}, "
+            f"expected≈{expected}"
+        )
+
+    def test_net_consumption_above_clamp_slack_keeps_doubled_headroom(
+        self,
+    ) -> None:
+        """net_consumption_kw above the clamp slack also forces doubled
+        headroom even without a peak — net load is a direct export-rate
+        reducer here.
+        """
+        kwargs = self._common_kwargs()
+        kwargs["net_consumption_kw"] = 6.0
+        kwargs["consumption_peak_kw"] = 0.0
+        result = calculate_discharge_deferred_start(
+            **kwargs,
+            grid_export_limit_w=5000,
+        )
+        # effective_export = 10.5 - 6 = 4.5; clamp to min(4.5, 5) = 4.5.
+        # feedin_hours = 1.0 / 4.5 = 13.33 min; doubled headroom 0.20,
+        # buffered = 16.67 min → 16:28:20.
+        expected = self._END - datetime.timedelta(hours=(1.0 / 4.5) / 0.8)
+        assert abs((result - expected).total_seconds()) < 2.0, (
+            f"net_consumption above slack → doubled headroom; "
+            f"got={result}, expected≈{expected}"
+        )
+
+    def test_c001_safety_floor_unaffected_by_deferral_change(self) -> None:
+        """C-001 safety floor (clamp_export_limit_w) is preserved.
+
+        The deferred-start fix must NOT reduce the inverter's fdMax below
+        ``peak_consumption_kw × DISCHARGE_SAFETY_FACTOR``.
+        """
+        # Target below safety floor → clamped up to floor.
+        # peak = 2 kW, floor = 2 * 1.5 * 1000 = 3000 W.
+        result = clamp_export_limit_w(
+            target_w=1000,
+            grid_export_limit_w=5000,
+            peak_consumption_kw=2.0,
+        )
+        assert result == 3000, (
+            f"C-001: target below peak*1.5 floor must be raised to floor; "
+            f"got {result} W (expected 3000 W)"
+        )
+        # Target above floor and below hardware limit → pass through.
+        result2 = clamp_export_limit_w(
+            target_w=4000,
+            grid_export_limit_w=5000,
+            peak_consumption_kw=2.0,
+        )
+        assert result2 == 4000
+        # Target above hardware limit → clamped down to limit.
+        result3 = clamp_export_limit_w(
+            target_w=7000,
+            grid_export_limit_w=5000,
+            peak_consumption_kw=2.0,
+        )
+        assert result3 == 5000
+        # DISCHARGE_SAFETY_FACTOR unchanged at 1.5.
+        assert DISCHARGE_SAFETY_FACTOR == 1.5
