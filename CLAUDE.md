@@ -8,6 +8,20 @@ pytest tests/ -m "not slow" --tb=short      # unit tests only (skip E2E)
 pre-commit run --all-files                  # ruff + mypy + semgrep + module size
 ```
 
+## Priorities (strict order — lower ID wins when goals conflict)
+
+- **P-001**: No grid import during forced discharge
+- **P-002**: Respect minimum state of charge
+- **P-003**: Meet the user's energy target
+- **P-004**: Maximise feed-in revenue
+- **P-005**: Operational transparency
+- **P-006**: Brand portability
+- **P-007**: Engineering process integrity
+
+See `docs/knowledge/01-vision.md` for full P-NNN definitions. Every
+C-NNN cites the P-NNN it enforces; every D-NNN cites the P-NNN it
+serves and any lower-priority goal it trades against.
+
 ## Key Constraints
 
 ### Safety
@@ -17,6 +31,7 @@ pre-commit run --all-files                  # ruff + mypy + semgrep + module siz
 - **C-024**: Safe state on failure: 3 consecutive adapter errors open circuit breaker (hold position). 5 more ticks without recovery → abort session → self-use
 - **C-025**: Session boundary cleanliness: all overrides removed before new session starts
 - **C-027**: Schedule end time set to safe horizon (SoC/rate/safety_factor), not full window
+- **C-037**: Grid export limit awareness: deferral caps effective export rate at the configured hardware limit; active discharge requests max power and lets the hardware actuator enforce (D-047)
 
 ### Data Integrity
 - **C-003**: Session identity tokens prevent stale callback races
@@ -29,6 +44,7 @@ pre-commit run --all-files                  # ruff + mypy + semgrep + module siz
 - **C-020**: User must determine system state from UI alone — no log inspection required
 - **C-022**: Unreachable charge target surfaced to user
 - **C-026**: Persistent errors surfaced via sensor state, not just logs
+- **C-038**: Sensor display formulas must call the same algorithm functions as listeners, with the same parameter lists (prevents UI/listener phase divergence)
 
 ### FoxESS API
 - **C-008**: FoxESS API: fdSoc >= 11 and minSocOnGrid <= fdSoc
