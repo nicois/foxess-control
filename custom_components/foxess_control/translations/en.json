@@ -134,6 +134,9 @@
       },
       "battery_forecast": {
         "name": "Battery Forecast"
+      },
+      "discharge_export_limit": {
+        "name": "Discharge Export Limit"
       }
     },
     "binary_sensor": {
@@ -340,6 +343,7 @@
           "bat_discharge_power_entity": "Battery discharge power entity (sensor)",
           "grid_consumption_power_entity": "Grid consumption power entity (sensor)",
           "feedin_power_entity": "Grid feed-in power entity (sensor)",
+          "export_limit_entity": "Max grid export limit entity (number, optional — enables hardware-actuator tapering)",
           "inverter_power": "Inverter rated power (W)"
         }
       }

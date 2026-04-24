@@ -23,6 +23,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_BATTERY_CAPACITY_KWH,
+    CONF_EXPORT_LIMIT_ENTITY,
     CONF_GRID_EXPORT_LIMIT,
     CONF_SMART_HEADROOM,
     DEFAULT_GRID_EXPORT_LIMIT,
@@ -750,6 +751,7 @@ class SmartOperationsOverviewSensor(RestoreSensor):
             "discharge_remaining",
             "discharge_feedin_used_kwh",
             "discharge_feedin_projected_kwh",
+            "discharge_export_limit_w",
             "has_error",
             "last_error",
             "last_error_at",
@@ -969,6 +971,7 @@ class SmartOperationsOverviewSensor(RestoreSensor):
                     "discharge_feedin_limit_kwh": feedin_limit,
                     "discharge_feedin_used_kwh": feedin_used,
                     "discharge_feedin_projected_kwh": feedin_projected,
+                    "discharge_export_limit_w": ds.get("last_export_limit_written_w"),
                 }
             )
             if ds.get("circuit_open"):
@@ -1231,6 +1234,81 @@ class DischargeRemainingSensor(SensorEntity):
         if ds is None:
             return _STATE_UNAVAILABLE
         return estimate_discharge_remaining(self.hass, self._domain, ds)
+
+
+class SmartDischargeExportLimitSensor(SensorEntity):
+    """Current modulated hardware export-limit during smart discharge.
+
+    When a session is active, ``native_value`` is the last value the
+    listener wrote to the export-limit entity.  When idle, it falls
+    back to the configured ``grid_export_limit`` (the revert-to value)
+    so the card always shows a meaningful number.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = True
+    _attr_icon = ICON_POWER
+    _attr_native_unit_of_measurement = "W"
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        domain: str,
+        device_info: DeviceInfo,
+    ) -> None:
+        self._entry = entry
+        self._domain = domain
+        self._attr_unique_id = f"{entry.entry_id}_discharge_export_limit"
+        self._attr_translation_key = "discharge_export_limit"
+        self._attr_device_info = device_info
+        self.hass = hass
+
+    def _get_option(self, key: str, default: Any) -> Any:
+        """Read an entry option from domain_data, falling back to entry.options.
+
+        Mirrors the helper pattern used in listeners so tests can populate
+        either source and get consistent behaviour.
+        """
+        dd = get_domain_data(self.hass, self._domain)
+        for entry_data in dd.entries.values():
+            entry = getattr(entry_data, "entry", None)
+            if entry is not None:
+                return entry.options.get(key, default)
+        opts = getattr(self._entry, "options", None)
+        if isinstance(opts, dict):
+            return opts.get(key, default)
+        return default
+
+    def _configured_max(self) -> int:
+        return int(self._get_option(CONF_GRID_EXPORT_LIMIT, DEFAULT_GRID_EXPORT_LIMIT))
+
+    def _entity_id(self) -> str | None:
+        val = self._get_option(CONF_EXPORT_LIMIT_ENTITY, None)
+        return val or None
+
+    @property
+    def native_value(self) -> int | None:
+        ds = get_discharge_state(self.hass, self._domain)
+        if ds is not None:
+            value = ds.get("last_export_limit_written_w")
+            if value is not None:
+                return int(value)
+        return self._configured_max()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        ds = get_discharge_state(self.hass, self._domain)
+        modulated = None
+        if ds is not None:
+            val = ds.get("last_export_limit_written_w")
+            if val is not None:
+                modulated = int(val)
+        return {
+            "configured_max": self._configured_max(),
+            "modulated": modulated,
+            "entity": self._entity_id(),
+        }
 
 
 class BatteryForecastSensor(SensorEntity):

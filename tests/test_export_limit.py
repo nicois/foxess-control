@@ -547,6 +547,108 @@ class TestListenerOverwriteExternalChanges:
         spy.set_export_limit_w.assert_awaited_with(hass, 4300)
 
 
+class TestSmartOperationsOverviewAttribute:
+    """SmartOperationsOverview exposes the modulated export limit."""
+
+    def test_attribute_reflects_last_written(self) -> None:
+        from custom_components.foxess_control.sensor import (
+            SmartOperationsOverviewSensor,
+        )
+
+        hass = MagicMock()
+        dd = FoxESSControlData()
+        dd.smart_discharge_state = {
+            "start": datetime.datetime(2026, 4, 7, 17, 0),
+            "end": datetime.datetime(2026, 4, 7, 20, 0),
+            "min_soc": 30,
+            "max_power_w": 10500,
+            "last_power_w": 10500,
+            "target_power_w": 4200,
+            "battery_capacity_kwh": 60.0,
+            "consumption_peak_kw": 0.6,
+            "discharging_started": True,
+            "last_export_limit_written_w": 4200,
+        }
+        hass.data = {DOMAIN: dd}
+        entry = MagicMock()
+        entry.entry_id = "entry1"
+        entry.runtime_data = None
+        sensor = SmartOperationsOverviewSensor(hass, entry)
+
+        attrs = sensor.extra_state_attributes
+        assert attrs.get("discharge_export_limit_w") == 4200
+
+
+class TestSmartDischargeExportLimitSensor:
+    """Dedicated sensor for the export-limit actuator state."""
+
+    def test_sensor_exposes_modulated_and_max(self) -> None:
+        from custom_components.foxess_control.sensor import (
+            SmartDischargeExportLimitSensor,
+        )
+
+        hass = MagicMock()
+        state = MagicMock()
+        state.state = "4200"
+        hass.states.get = MagicMock(return_value=state)
+        dd = FoxESSControlData()
+        dd.smart_discharge_state = {
+            "start": datetime.datetime(2026, 4, 7, 17, 0),
+            "end": datetime.datetime(2026, 4, 7, 20, 0),
+            "min_soc": 30,
+            "max_power_w": 10500,
+            "last_power_w": 10500,
+            "target_power_w": 4200,
+            "battery_capacity_kwh": 60.0,
+            "consumption_peak_kw": 0.6,
+            "discharging_started": True,
+            "last_export_limit_written_w": 4200,
+        }
+        options = {
+            CONF_GRID_EXPORT_LIMIT: 5000,
+            CONF_EXPORT_LIMIT_ENTITY: "number.foxess_max_grid_export_limit",
+        }
+        mock_entry = MagicMock()
+        mock_entry.options = options
+        entry_data = FoxESSEntryData()
+        entry_data.entry = mock_entry
+        dd.entries["entry1"] = entry_data
+        dd.config = build_config(options)
+        hass.data = {DOMAIN: dd}
+        entry = MagicMock()
+        entry.entry_id = "entry1"
+
+        sensor = SmartDischargeExportLimitSensor(hass, entry)
+        assert sensor.native_value == 4200
+        attrs = sensor.extra_state_attributes
+        assert attrs is not None
+        assert attrs["configured_max"] == 5000
+        assert attrs["modulated"] == 4200
+        assert attrs["entity"] == "number.foxess_max_grid_export_limit"
+
+    def test_sensor_unavailable_when_no_session(self) -> None:
+        from custom_components.foxess_control.sensor import (
+            SmartDischargeExportLimitSensor,
+        )
+
+        hass = MagicMock()
+        dd = FoxESSControlData()
+        options = {CONF_GRID_EXPORT_LIMIT: 5000}
+        mock_entry = MagicMock()
+        mock_entry.options = options
+        entry_data = FoxESSEntryData()
+        entry_data.entry = mock_entry
+        dd.entries["entry1"] = entry_data
+        dd.config = build_config(options)
+        hass.data = {DOMAIN: dd}
+        entry = MagicMock()
+        entry.entry_id = "entry1"
+        sensor = SmartDischargeExportLimitSensor(hass, entry)
+        # When no session is active, native_value reflects the configured
+        # max (the revert-to value) so the card always shows a number.
+        assert sensor.native_value == 5000
+
+
 class TestListenerNoEntityUnchangedBehaviour:
     """When export_limit_entity is unset, the listener uses fdPwr only."""
 

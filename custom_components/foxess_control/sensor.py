@@ -46,6 +46,9 @@ from .smart_battery.sensor_base import (
     OverrideStatusSensor as _OverrideStatusSensor,
 )
 from .smart_battery.sensor_base import (
+    SmartDischargeExportLimitSensor as _SmartDischargeExportLimitSensor,
+)
+from .smart_battery.sensor_base import (
     SmartOperationsOverviewSensor as _SmartOperationsOverviewSensor,
 )
 from .smart_battery.sensor_base import (
@@ -162,6 +165,13 @@ class BatteryForecastSensor(_BatteryForecastSensor):
         super().__init__(hass, entry, DOMAIN, _device_info(entry))
 
 
+class SmartDischargeExportLimitSensor(_SmartDischargeExportLimitSensor):
+    """FoxESS smart discharge export-limit sensor."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        super().__init__(hass, entry, DOMAIN, _device_info(entry))
+
+
 # ---------------------------------------------------------------------------
 # Re-export helpers used by tests
 # ---------------------------------------------------------------------------
@@ -198,6 +208,7 @@ async def async_setup_entry(
         DischargeWindowSensor(hass, entry),
         DischargeRemainingSensor(hass, entry),
         BatteryForecastSensor(hass, entry),
+        SmartDischargeExportLimitSensor(hass, entry),
     ]
 
     entry_data = entry.runtime_data
