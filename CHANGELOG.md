@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.11-beta.14
+
+### Fixed
+- **Deferred-start feed-in headroom over-defers on export-limited sites** (surfaced by live session monitoring 2026-04-24): `calculate_discharge_deferred_start` applied the doubled feed-in headroom (`min(headroom × 2, 0.40) = 0.20`) unconditionally whenever a `feedin_energy_limit_kwh` was set. The doubled margin is justified when household load volatility can erode effective export — but when `grid_export_limit_w` is configured well below the inverter's max power, load must exceed `max_power_kw − grid_export_limit_kw` before net export degrades at all. On the example site (5 kW clamp, 10.5 kW inverter) that threshold is 5.5 kW — well above typical residential baseline — so the doubled buffer was protecting against a scenario the hardware made physically impossible, eating ~3 min of self-use time per session. Fixed by making the feed-in headroom conditional on whether `max(net_consumption_kw, consumption_peak_kw)` exceeds the clamp slack: when the clamp actively shields export rate from load volatility, single headroom (10%) is used; otherwise the doubled headroom still applies. Added six-test regression suite `TestFeedinHeadroomAccountsForExportClamp` covering the live-session parameters and neighbourhood cases (unlimited export, boundary `limit == max_power`, peak above/below slack, net-consumption variant, C-001 floor preservation). Traces C-001, C-037, D-044 (rationale updated).
+
+### Documentation
+- **Priority hierarchy introduced across the knowledge tree** (`docs/knowledge/`): added an ordered `## Priorities` section to `01-vision.md` with stable IDs P-001..P-007 (no grid import > min SoC > energy target > feed-in > operational transparency > brand portability > engineering process integrity). Every C-NNN now cites the P-NNN it enforces; every D-NNN cites the P-NNN it serves, any lower-priority goal it trades against, and a safety/pacing/other classification. This makes priority inversions visible at review time: the audit caught one pre-existing inversion (D-005 was claimed to serve P-004 while trading against P-003 — corrected to serve P-003 with no trade-off) and forced an honest re-examination of D-044's rationale. `05-coverage.md` gained a priority-enforcement matrix and trade-off audit table. `CLAUDE.md` surfaces the priority list as a top-level section.
+- **D-047 Hardware export-limit actuator for discharge pacing**: documented the two-channel control scheme introduced in beta.11 (cloud schedule pinned at max; hardware export-limit actuator modulated each tick with threshold-gated writes, clamped to the C-001 safety floor). Traces to C-001, C-037 and 24 tests in `test_export_limit.py`. The `InverterAdapter` protocol section in `03-architecture.md` now documents `set_export_limit_w` / `get_export_limit_w`.
+- **03-architecture.md structural repair**: a prior pass had inserted the Soak Test Infrastructure block mid-External-Dependencies table; the table is now intact and the soak section has its own heading. Also corrected a stale BMS-temperature endpoint reference (`/generic/v0/device/battery/info` → `/dew/v0/device/detail`).
+- **06-tests.md and 05-coverage.md refreshed** to the authoritative `pytest --co -q` counts: 863 unit + 136 E2E + 19 soak = 1018 total.
+- **CLAUDE.md surfaces the new C-037 (grid export limit awareness) and C-038 (sensor-listener parameter parity)** constraints, which had been added to `02-constraints.md` earlier but not yet propagated to the top-level entry file.
+
 ## 1.0.11-beta.13
 
 ### Fixed
