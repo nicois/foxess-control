@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.11-beta.10
 
 ### Fixed
 - **Spurious "unreachable charge target" repair issue caused by outlier taper observations** (user-reported live 2026-04-24): during a smart charge with plentiful solar surplus and ~1h 5m remaining for a 15% uplift on a 42 kWh battery, `is_charge_target_reachable` returned False, firing an HA Repair issue even though the BMS was empirically accepting ~10.2 kW (linear estimate: 40 min needed in 65 min window). The taper-integrated estimate summed several isolated outlier observations (bins 81:0.05 count=1, 83:0.41 count=3, 85:0.16 count=2, 90:0.21 count=7) surrounded by 0.87-1.0 neighbours, producing 1.04h of taper-weighted charge hours — pushed over 1.09h once the 10% headroom buffer was applied. Fixed by blending the taper-integrated estimate with a median-ratio linear estimate across the traversed SoC range and taking the minimum. The feasibility check (C-022) now returns False only when no plausible scenario reaches the target, not when a few outlier observations skew the integrated estimate. Uniformly low taper ratios (genuine unreachability) still correctly produce False because the median is also low. Added four regression tests in `TestIsChargeTargetReachable` covering the exact live inputs, a house-load variant, a short-window guard against over-fix, and a fresh-profile sanity check. Traces: C-022 (unreachable target surfaced), C-020 (no false alarms), D-028 (reachability check design).
