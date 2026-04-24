@@ -2,6 +2,11 @@
 Description=FoxESS Control HA session collector (events + observations)
 After=network-online.target
 Wants=network-online.target
+# Disable the start rate limiter so the service retries forever — even
+# if the HA instance is down for hours at a time. (StartLimit* lives
+# under [Unit], not [Service].)
+StartLimitIntervalSec=0
+StartLimitBurst=0
 
 [Service]
 Type=simple
@@ -10,8 +15,11 @@ EnvironmentFile=%h/.config/foxess-collect-ha.env
 ExecStart=/usr/bin/python3 %h/git/fox/scripts/collect_ha_session.py live \
     --out %h/git/fox/test-artifacts/ha-sessions \
     --interval 5
-Restart=on-failure
-RestartSec=30
+# Restart forever — on clean exit, on crash, and on any failure mode.
+# A 10-minute cooldown avoids hammering the API during sustained
+# outages (network down, token rotation, HA restart, DNS flap).
+Restart=always
+RestartSec=10min
 Nice=15
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7

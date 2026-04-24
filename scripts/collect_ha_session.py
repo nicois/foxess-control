@@ -272,7 +272,14 @@ class TimelineWriter:
 
 
 def run_live(args: argparse.Namespace, client: HAClient) -> int:
-    event_sensor = _pick_event_sensor(client, args.event_sensor)
+    try:
+        event_sensor = _pick_event_sensor(client, args.event_sensor)
+    except requests.RequestException as exc:
+        # Startup can't even reach HA — exit immediately so the
+        # supervisor applies its backoff. The process will try again
+        # on the next schedule.
+        print(f"startup failed: {exc}", file=sys.stderr)
+        return 1
     if event_sensor:
         print(f"using event sensor: {event_sensor}", file=sys.stderr)
     else:
@@ -291,6 +298,12 @@ def run_live(args: argparse.Namespace, client: HAClient) -> int:
 
     signal.signal(signal.SIGINT, _sig_handler)
     signal.signal(signal.SIGTERM, _sig_handler)
+
+    # Consecutive HA-connection failures. When this crosses the
+    # threshold we exit non-zero so the process supervisor (systemd,
+    # etc.) can apply its own backoff — far more appropriate than
+    # in-process busy-waiting at the poll interval.
+    consecutive_failures = 0
 
     while not stop:
         try:
@@ -319,8 +332,22 @@ def run_live(args: argparse.Namespace, client: HAClient) -> int:
                     f"session={writer._current_session}",
                     file=sys.stderr,
                 )
+            # Reset the failure counter on any successful poll.
+            consecutive_failures = 0
         except requests.RequestException as exc:
-            print(f"poll failed: {exc}", file=sys.stderr)
+            consecutive_failures += 1
+            print(
+                f"poll failed ({consecutive_failures}/"
+                f"{args.max_consecutive_failures}): {exc}",
+                file=sys.stderr,
+            )
+            if consecutive_failures >= args.max_consecutive_failures:
+                print(
+                    "too many consecutive failures — exiting so the "
+                    "service supervisor can apply its backoff",
+                    file=sys.stderr,
+                )
+                return 1
 
         if args.once:
             return 0
@@ -490,6 +517,17 @@ def main() -> int:
         "--once",
         action="store_true",
         help="Poll once and exit (useful for ad-hoc capture)",
+    )
+    p_live.add_argument(
+        "--max-consecutive-failures",
+        default=3,
+        type=int,
+        help=(
+            "Exit non-zero after this many consecutive poll failures "
+            "so the service supervisor applies its own backoff "
+            "(default: 3 — with the default 5 s interval, the process "
+            "exits after ~15 s of unreachable HA)."
+        ),
     )
 
     p_hist = sub.add_parser(
