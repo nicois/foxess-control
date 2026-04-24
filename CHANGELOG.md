@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Export-limit actuator for smart discharge tapering**: when a `foxess_modbus` "Max Grid Export Limit" number entity is configured in the entity mapping, smart discharge now controls feed-in power by varying the inverter's hardware export cap instead of modulating the cloud schedule's `fdPwr`. The cloud schedule is pinned at hardware maximum; the export-limit entity is written each tick with the paced target, clamped to `[peak_consumption × 1.5, grid_export_limit]` — C-001's safety floor is preserved as the lower bound. Sub-threshold deltas are suppressed to avoid chatty modbus writes. The configured `grid_export_limit` acts as both the default (applied outside smart sessions) and the upper bound (smart discharge may only reduce it). Every session exit path (timer expire, circuit-breaker abort, SoC threshold, feed-in limit, manual cancel) reverts the entity to the configured maximum (C-024, C-025). Opt-in: when no export-limit entity is configured, behaviour is unchanged.
+- **`SmartDischargeExportLimitSensor`** surfaces the current export-limit value with `{configured_max, modulated, entity}` attributes (C-020). The existing discharge overview sensor gains a `discharge_export_limit_w` attribute.
+- **Simulator**: `max_grid_export_limit_w` field with curtailment physics (battery discharge backs off when the cap is hit; no dump-to-load) and a `number.set_value` backchannel for E2E tests.
+
 ## 1.0.11-beta.10
 
 ### Fixed
