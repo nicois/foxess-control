@@ -35,9 +35,12 @@ def get_coordinator_soc(hass: HomeAssistant) -> float | None:
 class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Fetch real-time variables from the FoxESS Cloud API."""
 
-    # BMS temperature is fetched from the web portal on a separate
-    # schedule because WS injections (async_set_updated_data) continuously
-    # reset the REST poll timer, starving _async_update_data.
+    # BMS temperature is fetched from the web portal on its own cadence.
+    # Historically this avoided a starvation bug where WS injections called
+    # async_set_updated_data() and reset the REST poll timer; the injection
+    # path now updates self.data in place without touching the refresh timer,
+    # so this separate schedule is no longer strictly required but is kept
+    # as a safety net and to throttle portal-side requests.
     _BMS_REDISCOVERY_BACKOFF = 300.0
 
     def __init__(
@@ -509,12 +512,19 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         merged = dict(self.data)
         merged.update(ws_data)
-        self.async_set_updated_data(merged)
+        # NOTE: deliberately NOT calling self.async_set_updated_data(merged).
+        # That helper cancels and reschedules the DataUpdateCoordinator's
+        # refresh timer, so WS messages arriving faster than update_interval
+        # would starve the REST poll indefinitely and leave ~25 REST-only
+        # fields (cumulative energy, PV string power, voltages/currents,
+        # temps, freq, meter, EPS) stale while WS is active.
+        # Instead, update self.data in place and notify listeners directly;
+        # the refresh timer continues to fire on its configured cadence.
+        self.data = merged
+        self.last_update_success = True
+        self.async_update_listeners()
 
-        # BMS temperature polling.  _fetch_bms_temperature normally runs
-        # during _async_update_data (REST poll), but WS injections calling
-        # async_set_updated_data continuously reset the poll timer so REST
-        # polls are starved.  Schedule BMS fetch as a background task here.
+        # BMS temperature polling on its own cadence (see class docstring).
         self._maybe_schedule_bms_fetch()
 
     def _maybe_schedule_bms_fetch(self) -> None:
