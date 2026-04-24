@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.11-beta.13
+
+### Fixed
+- **E2E page fixture flake: stage Lovelace-panel wait on slow shards** (surfaced when the beta.12 trigger change made Flaky Test Detection actually run against each prerelease): beta.12's context-destruction retry was incomplete — it covered navigation-induced churn but not the "panel legitimately takes longer than 30s on a slow GH-runner" variant. Observed in run 24872997253 (gw2 shard 12, `test_time_input_survives_multiple_rerenders[cloud]`): setup spent 40.3s before the monolithic 30s `wait_for_function` cap fired, while another test on the same shard ran 90.9s — so the container was alive, just slow to boot. Fixed by splitting `_wait_for_lovelace_panel` into three staged waits with per-stage bounded timeouts: `home-assistant` attached → `home-assistant-main` inside its shadowRoot → `ha-panel-lovelace` inside main's shadowRoot. Each stage retries on context destruction (beta.12 retry semantics preserved), uses `min(remaining_budget, 30s)`, and logs a debug line on completion. Page fixture budget raised from 30s to 75s (justified by observed 90s test times on the same slow shard). Worst-case total remains bounded; stage names appear in logs so future flakes identify which DOM milestone stuck.
+
 ## 1.0.11-beta.12
 
 ### Fixed
