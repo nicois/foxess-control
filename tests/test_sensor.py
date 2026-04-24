@@ -1710,3 +1710,70 @@ class TestDebugLog:
         assert len(info_sensors) == 1
         init_sensors = [e for e in added if isinstance(e, InitDebugLogSensor)]
         assert len(init_sensors) == 1
+
+    def test_log_sensors_have_resolvable_names(self) -> None:
+        """Each log sensor must have a name resolvable in HA.
+
+        A sensor with ``_attr_has_entity_name = True`` and no ``_attr_name``
+        must have its ``_attr_translation_key`` present in
+        ``translations/en.json``. If it's absent, HA falls back to the
+        device name and generates ``sensor.foxess_2`` / ``sensor.foxess_3``
+        instead of the expected ``sensor.foxess_info_log`` /
+        ``sensor.foxess_init_debug_log``.
+
+        Regression: beta.7 removed the explicit ``_attr_name`` override
+        from InfoLogSensor and InitDebugLogSensor with the intention that
+        translation-driven naming would take over, but the translation
+        keys were never added to ``translations/*.json`` — only to
+        ``strings.json``. On the live system this caused both sensors to
+        register under auto-generated entity IDs, making them effectively
+        invisible to users looking for them by their expected names.
+        """
+        import json
+        import logging
+        from pathlib import Path
+
+        hass = MagicMock()
+        state = MagicMock()
+        state.state = "on"
+        hass.states.get.return_value = state
+        sensors, handlers = setup_debug_log(hass, _make_entry())  # type: ignore[misc]
+        logger = logging.getLogger("custom_components.foxess_control")
+        try:
+            translations_path = (
+                Path(__file__).parent.parent
+                / "custom_components"
+                / "foxess_control"
+                / "translations"
+                / "en.json"
+            )
+            translations = json.loads(translations_path.read_text())
+            sensor_translations = translations.get("entity", {}).get("sensor", {})
+
+            missing: list[str] = []
+            for sensor in sensors:
+                # Entities that set has_entity_name=True have two name paths:
+                # (a) explicit _attr_name; or
+                # (b) _attr_translation_key resolving in translations/en.json.
+                if not getattr(sensor, "_attr_has_entity_name", False):
+                    continue
+                if getattr(sensor, "_attr_name", None) is not None:
+                    continue
+                key = getattr(sensor, "_attr_translation_key", None)
+                assert key is not None, (
+                    f"{type(sensor).__name__} has has_entity_name=True but no "
+                    f"_attr_name or _attr_translation_key"
+                )
+                entry = sensor_translations.get(key)
+                if not entry or "name" not in entry:
+                    missing.append(f"{type(sensor).__name__}.{key}")
+
+            assert not missing, (
+                "Log sensors rely on translation-driven naming but these keys "
+                "are missing from translations/en.json: "
+                f"{missing}. HA will fall back to the device name and "
+                "generate sensor.foxess_2/3 instead of the expected entity IDs."
+            )
+        finally:
+            for h in handlers:
+                logger.removeHandler(h)
