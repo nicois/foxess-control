@@ -26,6 +26,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_CHARGE_POWER_ENTITY,
     CONF_DISCHARGE_POWER_ENTITY,
+    CONF_EXPORT_LIMIT_ENTITY,
     CONF_MIN_SOC_ENTITY,
     CONF_WORK_MODE_ENTITY,
     DEFAULT_API_MIN_SOC,
@@ -344,6 +345,7 @@ class FoxESSCloudAdapter:
         force: bool = False,
         capacity_kwh: float = 0,
         soc_getter: Any = None,
+        export_limit_entity: str | None = None,
     ) -> None:
         self._hass = hass
         self._inverter = inverter
@@ -355,6 +357,9 @@ class FoxESSCloudAdapter:
         self._capacity_kwh = capacity_kwh
         self._soc_getter = soc_getter
         self._groups: list[ScheduleGroup] = []
+        self._export_limit_entity = export_limit_entity
+        self._warned_missing_export_limit = False
+        self._first_export_write_logged = False
 
     def get_max_power_w(self) -> int:
         return self._inverter.max_power_w
@@ -475,6 +480,60 @@ class FoxESSCloudAdapter:
         )
         self._groups = []
 
+    async def set_export_limit_w(
+        self,
+        hass: HomeAssistant,
+        value_w: int,
+    ) -> None:
+        """Set the hardware Max Grid Export Limit (cross-integration)."""
+        entity_id = self._export_limit_entity
+        if not entity_id:
+            if not self._warned_missing_export_limit:
+                _LOGGER.debug(
+                    "Smart discharge: export-limit entity unconfigured; "
+                    "hardware-actuator writes disabled."
+                )
+                self._warned_missing_export_limit = True
+            return
+        domain = _entity_service_domain(entity_id, "number")
+        try:
+            await hass.services.async_call(
+                domain,
+                "set_value",
+                {"entity_id": entity_id, "value": int(value_w)},
+                blocking=True,
+            )
+            if not self._first_export_write_logged:
+                _LOGGER.info(
+                    "Export-limit write OK: %s ← %d W",
+                    entity_id,
+                    value_w,
+                )
+                self._first_export_write_logged = True
+        except Exception:
+            _LOGGER.warning(
+                "Export-limit write FAILED: %s ← %d W",
+                entity_id,
+                value_w,
+            )
+            raise
+
+    async def get_export_limit_w(
+        self,
+        hass: HomeAssistant,
+    ) -> int | None:
+        """Read the current hardware Max Grid Export Limit."""
+        entity_id = self._export_limit_entity
+        if not entity_id:
+            return None
+        state = hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable", "", None):
+            return None
+        try:
+            return int(float(state.state))
+        except (TypeError, ValueError):
+            return None
+
 
 def _entity_service_domain(entity_id: str, default: str) -> str:
     """Derive service domain from entity ID (input_select → input_select)."""
@@ -497,6 +556,7 @@ class FoxESSEntityAdapter:
         self._opts = entry_options
         self._max_power_w = max_power_w
         self._first_write: dict[str, bool] = {}
+        self._warned_missing_export_limit = False
 
     def get_max_power_w(self) -> int:
         return self._max_power_w
@@ -596,3 +656,47 @@ class FoxESSEntityAdapter:
     ) -> None:
         """Revert to self-use mode."""
         await self.apply_mode(hass, WorkMode.SELF_USE)
+
+    async def set_export_limit_w(
+        self,
+        hass: HomeAssistant,
+        value_w: int,
+    ) -> None:
+        """Set the hardware Max Grid Export Limit (foxess_modbus)."""
+        entity_id = self._opts.get(CONF_EXPORT_LIMIT_ENTITY)
+        if not entity_id:
+            if not self._warned_missing_export_limit:
+                _LOGGER.warning(
+                    "Smart discharge: export-limit entity unconfigured; "
+                    "skipping hardware write."
+                )
+                self._warned_missing_export_limit = True
+            return
+        domain = _entity_service_domain(entity_id, "number")
+        try:
+            await hass.services.async_call(
+                domain,
+                "set_value",
+                {"entity_id": entity_id, "value": int(value_w)},
+                blocking=True,
+            )
+            self._log_first_write(entity_id, "set_value", value_w)
+        except Exception as err:
+            self._log_first_write(entity_id, "set_value", value_w, err)
+            raise
+
+    async def get_export_limit_w(
+        self,
+        hass: HomeAssistant,
+    ) -> int | None:
+        """Read the current hardware Max Grid Export Limit."""
+        entity_id = self._opts.get(CONF_EXPORT_LIMIT_ENTITY)
+        if not entity_id:
+            return None
+        state = hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable", "", None):
+            return None
+        try:
+            return int(float(state.state))
+        except (TypeError, ValueError):
+            return None

@@ -43,6 +43,18 @@ CONF_BAT_DISCHARGE_POWER_ENTITY = "bat_discharge_power_entity"
 CONF_GRID_CONSUMPTION_POWER_ENTITY = "grid_consumption_power_entity"
 CONF_FEEDIN_POWER_ENTITY = "feedin_power_entity"
 
+# Hardware export-limit actuator.  When set, the brand adapter controls the
+# inverter's physical export cap via this entity to taper discharge in
+# real time (instead of modulating the cloud schedule's fdPwr field).
+# Left unset → brand-specific default control path is used unchanged.
+CONF_EXPORT_LIMIT_ENTITY = "export_limit_entity"
+
+# Sub-threshold writes to the export-limit entity are skipped to avoid
+# chattering Modbus holding registers.  Separate from CONF_MIN_POWER_CHANGE
+# so the cloud-schedule threshold and the hardware-actuator threshold can
+# evolve independently.
+DEFAULT_EXPORT_LIMIT_MIN_CHANGE = 50  # watts
+
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
 
 # --- Service names ---

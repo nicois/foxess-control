@@ -37,6 +37,7 @@ class IntegrationConfig:
     bms_polling_interval: float
     ws_mode: str
     entity_mode: bool
+    export_limit_entity: str | None = None
 
 
 def build_config(
@@ -48,6 +49,7 @@ def build_config(
         CONF_API_MIN_SOC,
         CONF_BATTERY_CAPACITY_KWH,
         CONF_BMS_POLLING_INTERVAL,
+        CONF_EXPORT_LIMIT_ENTITY,
         CONF_GRID_EXPORT_LIMIT,
         CONF_INVERTER_POWER,
         CONF_MIN_POWER_CHANGE,
@@ -84,6 +86,8 @@ def build_config(
 
     headroom_pct: int = entry_options.get(CONF_SMART_HEADROOM, DEFAULT_SMART_HEADROOM)
 
+    export_limit_entity = entry_options.get(CONF_EXPORT_LIMIT_ENTITY) or None
+
     return IntegrationConfig(
         min_soc_on_grid=entry_options.get(
             CONF_MIN_SOC_ON_GRID, DEFAULT_MIN_SOC_ON_GRID
@@ -103,6 +107,7 @@ def build_config(
         ),
         ws_mode=ws_mode,
         entity_mode=bool(entry_options.get(CONF_WORK_MODE_ENTITY)),
+        export_limit_entity=export_limit_entity,
     )
 
 

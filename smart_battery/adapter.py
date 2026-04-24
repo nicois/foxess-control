@@ -48,6 +48,30 @@ class InverterAdapter(Protocol):
         """Return the inverter's maximum power in watts."""
         ...
 
+    async def set_export_limit_w(
+        self,
+        hass: HomeAssistant,
+        value_w: int,
+    ) -> None:
+        """Set the inverter hardware export-limit actuator.
+
+        Used by smart discharge to taper feed-in power quickly at the
+        hardware layer instead of modulating the cloud schedule's fdPwr.
+        Adapters without a configured export-limit entity should no-op.
+        """
+        ...
+
+    async def get_export_limit_w(
+        self,
+        hass: HomeAssistant,
+    ) -> int | None:
+        """Read the current value of the export-limit actuator in watts.
+
+        Returns ``None`` when no actuator is configured or the underlying
+        entity is unavailable.
+        """
+        ...
+
 
 class EntityAdapter:
     """Control an inverter via HA select/number entities.
@@ -165,3 +189,17 @@ class EntityAdapter:
     ) -> None:
         """Revert to self-use mode."""
         await self.apply_mode(hass, WorkMode.SELF_USE)
+
+    async def set_export_limit_w(
+        self,
+        hass: HomeAssistant,
+        value_w: int,
+    ) -> None:
+        """Default no-op — brands without a hardware export-limit actuator."""
+
+    async def get_export_limit_w(
+        self,
+        hass: HomeAssistant,
+    ) -> int | None:
+        """Default no-op — brands without a hardware export-limit actuator."""
+        return None

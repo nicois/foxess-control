@@ -36,6 +36,7 @@ from .const import (
     CONF_BMS_POLLING_INTERVAL,
     CONF_CHARGE_POWER_ENTITY,
     CONF_DISCHARGE_POWER_ENTITY,
+    CONF_EXPORT_LIMIT_ENTITY,
     CONF_FEEDIN_ENERGY_ENTITY,
     CONF_FEEDIN_POWER_ENTITY,
     CONF_GRID_CONSUMPTION_POWER_ENTITY,
@@ -94,6 +95,7 @@ ENTITY_KEYS = (
     CONF_BAT_DISCHARGE_POWER_ENTITY,
     CONF_GRID_CONSUMPTION_POWER_ENTITY,
     CONF_FEEDIN_POWER_ENTITY,
+    CONF_EXPORT_LIMIT_ENTITY,
     CONF_INVERTER_POWER,
 )
 
@@ -268,6 +270,10 @@ def entity_mapping_schema(
                 CONF_FEEDIN_POWER_ENTITY,
                 default=_default(CONF_FEEDIN_POWER_ENTITY),
             ): sensor_selector,
+            vol.Optional(
+                CONF_EXPORT_LIMIT_ENTITY,
+                default=_default(CONF_EXPORT_LIMIT_ENTITY),
+            ): number_selector,
             vol.Optional(
                 CONF_INVERTER_POWER,
                 default=opts.get(CONF_INVERTER_POWER, default_inverter_power),
