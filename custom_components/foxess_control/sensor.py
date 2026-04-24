@@ -728,6 +728,11 @@ class _DebugLogHandler(logging.Handler):
             session: dict[str, Any] = getattr(record, "session", {})
             if session:
                 entry["session"] = session
+            event = getattr(record, "event", None)
+            if event is not None:
+                entry["event"] = event
+                entry["payload"] = getattr(record, "payload", {})
+                entry["schema_version"] = getattr(record, "schema_version", None)
             self._buffer.append(entry)
         except Exception:  # noqa: BLE001
             self.handleError(record)
@@ -781,7 +786,6 @@ class InfoLogSensor(SensorEntity):
         self._buffer = buffer
         self._attr_unique_id = f"{entry.entry_id}_info_log"
         self._attr_translation_key = "info_log"
-        self._attr_name = "Info Log"
         self._attr_device_info = _device_info(entry)
 
     @property
@@ -821,6 +825,11 @@ class _InitDebugLogHandler(logging.Handler):
             session: dict[str, Any] = getattr(record, "session", {})
             if session:
                 entry["session"] = session
+            event = getattr(record, "event", None)
+            if event is not None:
+                entry["event"] = event
+                entry["payload"] = getattr(record, "payload", {})
+                entry["schema_version"] = getattr(record, "schema_version", None)
             self._buffer.append(entry)
         except Exception:  # noqa: BLE001
             self.handleError(record)
@@ -844,7 +853,6 @@ class InitDebugLogSensor(SensorEntity):
         self._maxlen = maxlen
         self._attr_unique_id = f"{entry.entry_id}_init_debug_log"
         self._attr_translation_key = "init_debug_log"
-        self._attr_name = "Init Debug Log"
         self._attr_device_info = _device_info(entry)
 
     @property

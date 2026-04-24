@@ -37,6 +37,14 @@ from .const import (
     SMART_DISCHARGE_CHECK_SECONDS,
 )
 from .domain_data import get_domain_data, get_first_coordinator
+from .events import (
+    SESSION_TRANSITION,
+    TAPER_UPDATE,
+    TICK_SNAPSHOT,
+    call_algo,
+    emit_event,
+    emit_schedule_write,
+)
 from .session import (
     cancel_smart_session,
     save_session,
@@ -160,6 +168,41 @@ def _get_bms_temperature(hass: HomeAssistant, domain: str) -> float | None:
 def _get_store(hass: HomeAssistant, domain: str) -> Store[dict[str, Any]] | None:
     """Return the session Store from domain data."""
     return get_domain_data(hass, domain).store
+
+
+_TICK_SNAPSHOT_FIELDS = (
+    "SoC",
+    "loadsPower",
+    "pvPower",
+    "batChargePower",
+    "batDischargePower",
+    "feedinPower",
+    "gridConsumptionPower",
+    "generationPower",
+    "bmsBatteryTemperature",
+    "feedin",
+    "data_source",
+    "_work_mode",
+)
+
+
+def _emit_tick_snapshot(hass: HomeAssistant, domain: str, phase: str) -> None:
+    """Emit a tick_snapshot event capturing coordinator state.
+
+    *phase* names the callback that fired (``charge_tick`` /
+    ``discharge_tick``).  Replay uses snapshots to drive the simulator
+    clock and cross-check per-tick state against recorded reality.
+    """
+    coordinator = get_first_coordinator(hass, domain)
+    if coordinator is None or not coordinator.data:
+        return
+    state = {k: coordinator.data.get(k) for k in _TICK_SNAPSHOT_FIELDS}
+    emit_event(
+        _LOGGER,
+        TICK_SNAPSHOT,
+        phase=phase,
+        state=state,
+    )
 
 
 def _record_error(
@@ -396,6 +439,14 @@ def _record_taper_observation(
 
     # Always record SoC-based taper (existing behavior, no stability gate)
     getattr(taper, record_fn_name)(soc, max_power_w, actual_w)
+    emit_event(
+        _LOGGER,
+        TAPER_UPDATE,
+        kind=record_fn_name,
+        soc=soc,
+        requested_w=max_power_w,
+        actual_w=actual_w,
+    )
 
     # Temperature recording: require sustained deficit for TEMP_STABILITY_SECONDS
     if actual_w < max_power_w * TEMP_DEFICIT_THRESHOLD:
@@ -488,6 +539,9 @@ def setup_smart_charge_listeners(
     my_session_id: str = state["session_id"]
 
     async def _remove_charge_override() -> None:
+        emit_schedule_write(
+            _LOGGER, WorkMode.FORCE_CHARGE, call_site="remove_charge_override"
+        )
         try:
             await adapter.remove_override(hass, WorkMode.FORCE_CHARGE)
         except Exception:
@@ -545,6 +599,7 @@ def setup_smart_charge_listeners(
     async def _adjust_charge_power_inner(
         cur_state: dict[str, Any],
     ) -> None:
+        _emit_tick_snapshot(hass, domain, "charge_tick")
         cur_soc = _get_current_soc(hass, domain)
         if cur_soc is None:
             cur_state["soc_unavailable_count"] = (
@@ -630,12 +685,15 @@ def setup_smart_charge_listeners(
 
         if not cur_state["charging_started"]:
             # Check if it's time to start deferred charging
-            deferred = calculate_deferred_start(
-                cur_soc,
-                cur_state["target_soc"],
-                cur_state["battery_capacity_kwh"],
-                effective_max,
-                cur_state["end"],
+            deferred = call_algo(
+                _LOGGER,
+                calculate_deferred_start,
+                "pre_start",
+                current_soc=cur_soc,
+                target_soc=cur_state["target_soc"],
+                battery_capacity_kwh=cur_state["battery_capacity_kwh"],
+                max_power_w=effective_max,
+                end=cur_state["end"],
                 net_consumption_kw=net_consumption,
                 start=cur_state["start"],
                 headroom=headroom,
@@ -658,16 +716,26 @@ def setup_smart_charge_listeners(
                 return
 
             # Time to start charging
-            new_power = calculate_charge_power(
-                cur_soc,
-                cur_state["target_soc"],
-                cur_state["battery_capacity_kwh"],
-                remaining,
-                effective_max,
+            new_power = call_algo(
+                _LOGGER,
+                calculate_charge_power,
+                "initial",
+                current_soc=cur_soc,
+                target_soc=cur_state["target_soc"],
+                battery_capacity_kwh=cur_state["battery_capacity_kwh"],
+                remaining_hours=remaining,
+                max_power_w=effective_max,
                 net_consumption_kw=net_consumption,
                 headroom=headroom,
                 taper_profile=taper,
                 bms_temp_c=bms_temp,
+            )
+            emit_schedule_write(
+                _LOGGER,
+                WorkMode.FORCE_CHARGE,
+                power_w=new_power,
+                fd_soc=100,
+                call_site="charge_deferred_start",
             )
             await adapter.apply_mode(hass, WorkMode.FORCE_CHARGE, new_power, fd_soc=100)
 
@@ -692,6 +760,13 @@ def setup_smart_charge_listeners(
                 cur_soc,
                 new_power,
             )
+            emit_event(
+                _LOGGER,
+                SESSION_TRANSITION,
+                session_type="charge",
+                state="started",
+                reason="deferred_end",
+            )
             await save_session(
                 _get_store(hass, domain),
                 "smart_charge",
@@ -700,12 +775,15 @@ def setup_smart_charge_listeners(
             return
 
         # D-043: re-defer when ahead of schedule (solar supplement)
-        deferred = calculate_deferred_start(
-            cur_soc,
-            cur_state["target_soc"],
-            cur_state["battery_capacity_kwh"],
-            effective_max,
-            cur_state["end"],
+        deferred = call_algo(
+            _LOGGER,
+            calculate_deferred_start,
+            "redefer_check",
+            current_soc=cur_soc,
+            target_soc=cur_state["target_soc"],
+            battery_capacity_kwh=cur_state["battery_capacity_kwh"],
+            max_power_w=effective_max,
+            end=cur_state["end"],
             net_consumption_kw=net_consumption,
             start=cur_state["start"],
             headroom=headroom,
@@ -748,12 +826,15 @@ def setup_smart_charge_listeners(
             else:
                 elapsed_since_start = 0.0
                 window_from_start = 0.0
-            new_power = calculate_charge_power(
-                cur_soc,
-                cur_state["target_soc"],
-                cur_state["battery_capacity_kwh"],
-                remaining,
-                effective_max,
+            new_power = call_algo(
+                _LOGGER,
+                calculate_charge_power,
+                "adjust",
+                current_soc=cur_soc,
+                target_soc=cur_state["target_soc"],
+                battery_capacity_kwh=cur_state["battery_capacity_kwh"],
+                remaining_hours=remaining,
+                max_power_w=effective_max,
                 net_consumption_kw=net_consumption,
                 headroom=headroom,
                 charging_started_energy_kwh=cur_state.get(
@@ -795,12 +876,15 @@ def setup_smart_charge_listeners(
                 remaining,
             )
 
-        reachable = is_charge_target_reachable(
-            cur_soc,
-            cur_state["target_soc"],
-            cur_state["battery_capacity_kwh"],
-            remaining,
-            effective_max,
+        reachable = call_algo(
+            _LOGGER,
+            is_charge_target_reachable,
+            "post_adjust",
+            current_soc=cur_soc,
+            target_soc=cur_state["target_soc"],
+            battery_capacity_kwh=cur_state["battery_capacity_kwh"],
+            remaining_hours=remaining,
+            max_power_w=effective_max,
             net_consumption_kw=net_consumption,
             headroom=headroom,
             taper_profile=taper,
@@ -820,6 +904,13 @@ def setup_smart_charge_listeners(
             cur_state["unreachable_issued"] = False
 
         cur_state["last_power_w"] = new_power
+        emit_schedule_write(
+            _LOGGER,
+            WorkMode.FORCE_CHARGE,
+            power_w=new_power,
+            fd_soc=100,
+            call_site="charge_adjust",
+        )
         await adapter.apply_mode(hass, WorkMode.FORCE_CHARGE, new_power, fd_soc=100)
 
         # Re-check state after await
@@ -864,6 +955,9 @@ def setup_smart_discharge_listeners(
     my_session_id: str = state["session_id"]
 
     async def _remove_discharge_override() -> None:
+        emit_schedule_write(
+            _LOGGER, WorkMode.FORCE_DISCHARGE, call_site="remove_discharge_override"
+        )
         try:
             await adapter.remove_override(hass, WorkMode.FORCE_DISCHARGE)
         except Exception:
@@ -890,6 +984,13 @@ def setup_smart_discharge_listeners(
                     total = feedin_now - feedin_start
                     feedin_str = f", fed in {total:.2f} kWh"
         _LOGGER.info("Smart discharge: %s%s", reason, feedin_str)
+        emit_event(
+            _LOGGER,
+            SESSION_TRANSITION,
+            session_type="discharge",
+            state="ended",
+            reason=reason,
+        )
 
     async def _on_timer_expire(_now: datetime.datetime) -> None:
         if not _is_my_session():
@@ -940,12 +1041,15 @@ def setup_smart_discharge_listeners(
         taper = _get_taper_profile(hass, domain)
         bms_temp = _get_bms_temperature(hass, domain)
         peak = cur_state.get("consumption_peak_kw", 0.0)
-        deferred = calculate_discharge_deferred_start(
-            soc_value,
-            cur_state["min_soc"],
-            cur_state["battery_capacity_kwh"],
-            cur_state["max_power_w"],
-            cur_state["end"],
+        deferred = call_algo(
+            _LOGGER,
+            calculate_discharge_deferred_start,
+            "pre_start",
+            current_soc=soc_value,
+            min_soc=cur_state["min_soc"],
+            battery_capacity_kwh=cur_state["battery_capacity_kwh"],
+            max_power_w=cur_state["max_power_w"],
+            end=cur_state["end"],
             net_consumption_kw=_get_net_consumption(hass, domain),
             start=cur_state.get("start"),
             headroom=_get_smart_headroom(hass, domain),
@@ -969,16 +1073,26 @@ def setup_smart_discharge_listeners(
         if _get_grid_export_limit(hass, domain) > 0:
             new_power = cur_state["max_power_w"]
         else:
-            new_power = calculate_discharge_power(
-                soc_value,
-                cur_state["min_soc"],
-                cur_state["battery_capacity_kwh"],
-                remaining_h,
-                cur_state["max_power_w"],
+            new_power = call_algo(
+                _LOGGER,
+                calculate_discharge_power,
+                "deferred_start",
+                current_soc=soc_value,
+                min_soc=cur_state["min_soc"],
+                battery_capacity_kwh=cur_state["battery_capacity_kwh"],
+                remaining_hours=remaining_h,
+                max_power_w=cur_state["max_power_w"],
                 net_consumption_kw=_get_net_consumption(hass, domain),
                 headroom=_get_smart_headroom(hass, domain),
                 consumption_peak_kw=peak,
             )
+        emit_schedule_write(
+            _LOGGER,
+            WorkMode.FORCE_DISCHARGE,
+            power_w=new_power,
+            fd_soc=cur_state.get("min_soc", 11),
+            call_site="discharge_deferred_start",
+        )
         await adapter.apply_mode(
             hass,
             WorkMode.FORCE_DISCHARGE,
@@ -1000,6 +1114,13 @@ def setup_smart_discharge_listeners(
             "Smart discharge: deferred discharge started (SoC=%.1f%%, power=%dW)",
             soc_value,
             new_power,
+        )
+        emit_event(
+            _LOGGER,
+            SESSION_TRANSITION,
+            session_type="discharge",
+            state="started",
+            reason="deferred_end",
         )
         await save_session(
             _get_store(hass, domain),
@@ -1140,12 +1261,15 @@ def setup_smart_discharge_listeners(
         peak: float,
     ) -> tuple[bool, bool]:
         """Handle suspend/resume logic. Returns (was_suspended, should_return)."""
-        should_suspend_now = remaining_h > 0 and should_suspend_discharge(
-            soc_value,
-            cur_state["min_soc"],
-            cur_state["battery_capacity_kwh"],
-            remaining_h,
-            net_consumption,
+        should_suspend_now = remaining_h > 0 and call_algo(
+            _LOGGER,
+            should_suspend_discharge,
+            "adjust",
+            current_soc=soc_value,
+            min_soc=cur_state["min_soc"],
+            battery_capacity_kwh=cur_state["battery_capacity_kwh"],
+            remaining_hours=remaining_h,
+            net_consumption_kw=net_consumption,
             headroom=headroom,
             consumption_peak_kw=peak,
         )
@@ -1202,12 +1326,15 @@ def setup_smart_discharge_listeners(
         if _get_grid_export_limit(hass, domain) > 0:
             new_power = cur_state["max_power_w"]
         else:
-            new_power = calculate_discharge_power(
-                soc_value,
-                cur_state["min_soc"],
-                cur_state["battery_capacity_kwh"],
-                remaining_h,
-                cur_state["max_power_w"],
+            new_power = call_algo(
+                _LOGGER,
+                calculate_discharge_power,
+                "adjust",
+                current_soc=soc_value,
+                min_soc=cur_state["min_soc"],
+                battery_capacity_kwh=cur_state["battery_capacity_kwh"],
+                remaining_hours=remaining_h,
+                max_power_w=cur_state["max_power_w"],
                 net_consumption_kw=net_consumption,
                 headroom=headroom,
                 feedin_remaining_kwh=feedin_remaining,
@@ -1229,6 +1356,13 @@ def setup_smart_discharge_listeners(
                 min_change,
             )
             cur_state["last_power_w"] = 0
+            emit_schedule_write(
+                _LOGGER,
+                WorkMode.SELF_USE,
+                power_w=0,
+                fd_soc=cur_state.get("min_soc", 11),
+                call_site="discharge_feedin_self_use",
+            )
             await adapter.apply_mode(
                 hass, WorkMode.SELF_USE, 0, fd_soc=cur_state.get("min_soc", 11)
             )
@@ -1277,6 +1411,13 @@ def setup_smart_discharge_listeners(
                 remaining_h,
             )
 
+        emit_schedule_write(
+            _LOGGER,
+            WorkMode.FORCE_DISCHARGE,
+            power_w=cur_state["last_power_w"],
+            fd_soc=cur_state.get("min_soc", 11),
+            call_site="discharge_adjust",
+        )
         await adapter.apply_mode(
             hass,
             WorkMode.FORCE_DISCHARGE,
@@ -1328,6 +1469,7 @@ def setup_smart_discharge_listeners(
     async def _check_discharge_soc_inner(
         cur_state: dict[str, Any],
     ) -> None:
+        _emit_tick_snapshot(hass, domain, "discharge_tick")
         # Update peak consumption tracker
         current_consumption = max(0.0, _get_net_consumption(hass, domain))
         old_peak = cur_state.get("consumption_peak_kw", 0.0)

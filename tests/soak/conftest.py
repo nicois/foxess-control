@@ -602,6 +602,26 @@ def ha_e2e(
 
     yield ha
 
+    # Collect structured events from the info-log sensor for replay.
+    # Info-log retains INFO+ for longer than the DEBUG ring buffer —
+    # all our structured events are emitted at INFO level.
+    try:
+        attrs = ha.get_attributes("sensor.foxess_control_info_log")
+        events = [
+            e for e in attrs.get("entries", []) if isinstance(e, dict) and "event" in e
+        ]
+        if events:
+            trace_dir = ARTIFACT_DIR / "traces"
+            trace_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            trace_path = trace_dir / f"trace_{wid}_{ts}.jsonl"
+            with open(trace_path, "w") as f:
+                for e in events:
+                    f.write(json.dumps(e) + "\n")
+            _log.info("Captured %d replay events -> %s", len(events), trace_path)
+    except (requests.RequestException, KeyError, OSError) as exc:
+        _log.debug("Event trace collection skipped: %s", exc)
+
     try:
         logs = subprocess.run(
             ["podman", "logs", "--tail", "500", name],

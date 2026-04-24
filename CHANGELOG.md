@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.11-beta.7
+
+### Added
+- **Structured event emission for session replay** (`smart_battery/events.py`): algorithm decisions, tick snapshots, service calls, session transitions, schedule writes, and taper updates now emit structured records through the existing logging pipeline. Events carry normalised JSON-serialisable payloads (datetime, time, timedelta, and taper profile types round-trip cleanly), captured by the info/debug log sensors and surfaced via the HA REST API for out-of-process collection.
+- **Replay harness** (`smart_battery/replay.py`): loads JSONL traces of recorded events, replays each `algo_decision` by re-invoking the named pure algorithm with its recorded inputs, and reports divergences when outputs do not match. The `_REPLAY_FUNCS` registry covers all six pacing algorithms (`calculate_discharge_power`, `calculate_charge_power`, `calculate_deferred_start`, `calculate_discharge_deferred_start`, `should_suspend_discharge`, `is_charge_target_reachable`).
+- **Event collector script** (`scripts/collect_events.py`): external poller that reads the info-log sensor via the HA REST API, deduplicates events, and writes per-session JSONL files to `test-artifacts/traces/` — suitable for ad-hoc capture from live systems.
+- **Nightly soak trace capture**: the soak test teardown now dumps accumulated events to `test-artifacts/soak/traces/` after each scenario, giving cross-run replay data alongside the existing `soak_results.db` inflection-point store.
+- **Replay regression gate**: `tests/test_replay.py::test_committed_trace_replays_clean` parametrises over any JSONL file in `tests/replay_traces/` so hand-crafted or recorded traces become locked-in protection against algorithm output drift. A sample discharge trace is included.
+
+### Improved
+- **Info log and init debug log entity IDs** now follow the same naming pattern as the debug log sensor, resulting in stable `sensor.foxess_control_info_log` / `sensor.foxess_control_init_debug_log` entity IDs. The explicit `_attr_name` overrides were redundant with the translation-driven naming and caused inconsistent slugs.
+
 ## 1.0.11-beta.6
 
 ### Added

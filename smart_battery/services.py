@@ -49,6 +49,7 @@ from .const import (
     SERVICE_SMART_DISCHARGE,
 )
 from .domain_data import get_domain_data
+from .events import SERVICE_CALL, emit_event, emit_schedule_write, normalise_inputs
 from .listeners import (
     _get_current_soc,
     _get_net_consumption,
@@ -229,16 +230,27 @@ def register_services(
     def _get_store() -> Store[dict[str, Any]] | None:
         return get_domain_data(hass, domain).store
 
+    def _emit_service_call(service: str, data: dict[str, Any]) -> None:
+        emit_event(
+            _LOGGER,
+            SERVICE_CALL,
+            service=service,
+            data=normalise_inputs(data),
+        )
+
     async def handle_clear_overrides(call: ServiceCall) -> None:
+        _emit_service_call(SERVICE_CLEAR_OVERRIDES, dict(call.data))
         mode_filter: str | None = call.data.get("mode")
         if mode_filter is None or mode_filter == WorkMode.FORCE_CHARGE.value:
             cancel_smart_charge(hass, domain)
         if mode_filter is None or mode_filter == WorkMode.FORCE_DISCHARGE.value:
             cancel_smart_discharge(hass, domain)
         _LOGGER.info("Clearing overrides, setting SelfUse")
+        emit_schedule_write(_LOGGER, WorkMode.SELF_USE, call_site="clear_overrides")
         await adapter.apply_mode(hass, WorkMode.SELF_USE)
 
     async def handle_force_charge(call: ServiceCall) -> None:
+        _emit_service_call(SERVICE_FORCE_CHARGE, dict(call.data))
         duration: datetime.timedelta = call.data["duration"]
         start_time: datetime.time | None = call.data.get("start_time")
         start, end = resolve_start_end(duration, start_time)
@@ -251,9 +263,13 @@ def register_services(
             end.minute,
         )
         cancel_smart_charge(hass, domain)
+        emit_schedule_write(
+            _LOGGER, WorkMode.FORCE_CHARGE, call_site="force_charge_service"
+        )
         await adapter.apply_mode(hass, WorkMode.FORCE_CHARGE)
 
     async def handle_force_discharge(call: ServiceCall) -> None:
+        _emit_service_call(SERVICE_FORCE_DISCHARGE, dict(call.data))
         duration: datetime.timedelta = call.data["duration"]
         start_time: datetime.time | None = call.data.get("start_time")
         start, end = resolve_start_end(duration, start_time)
@@ -269,9 +285,16 @@ def register_services(
         api_min_soc = int(
             _get_entry_option(hass, domain, CONF_API_MIN_SOC, DEFAULT_API_MIN_SOC)
         )
+        emit_schedule_write(
+            _LOGGER,
+            WorkMode.FORCE_DISCHARGE,
+            fd_soc=api_min_soc,
+            call_site="force_discharge_service",
+        )
         await adapter.apply_mode(hass, WorkMode.FORCE_DISCHARGE, fd_soc=api_min_soc)
 
     async def handle_feedin(call: ServiceCall) -> None:
+        _emit_service_call(SERVICE_FEEDIN, dict(call.data))
         duration: datetime.timedelta = call.data["duration"]
         power: int | None = call.data.get("power")
         start_time: datetime.time | None = call.data.get("start_time")
@@ -285,9 +308,16 @@ def register_services(
             end.minute,
             f"{power}W" if power else "max",
         )
+        emit_schedule_write(
+            _LOGGER,
+            WorkMode.FEEDIN,
+            power_w=power,
+            call_site="feedin_service",
+        )
         await adapter.apply_mode(hass, WorkMode.FEEDIN, power)
 
     async def handle_smart_discharge(call: ServiceCall) -> None:
+        _emit_service_call(SERVICE_SMART_DISCHARGE, dict(call.data))
         start_time_val: datetime.time = call.data["start_time"]
         end_time_val: datetime.time = call.data["end_time"]
         power: int | None = call.data.get("power")
@@ -394,6 +424,13 @@ def register_services(
             cancel_smart_charge(hass, domain)
 
         if not should_defer:
+            emit_schedule_write(
+                _LOGGER,
+                WorkMode.FORCE_DISCHARGE,
+                power_w=initial_power,
+                fd_soc=api_min_soc,
+                call_site="smart_discharge_immediate_start",
+            )
             await adapter.apply_mode(
                 hass, WorkMode.FORCE_DISCHARGE, initial_power, fd_soc=api_min_soc
             )
@@ -458,6 +495,7 @@ def register_services(
         )
 
     async def handle_smart_charge(call: ServiceCall) -> None:
+        _emit_service_call(SERVICE_SMART_CHARGE, dict(call.data))
         start_time_val: datetime.time = call.data["start_time"]
         end_time_val: datetime.time = call.data["end_time"]
         max_power: int | None = call.data.get("power")
@@ -559,6 +597,12 @@ def register_services(
                     net_consumption_kw=net_consumption,
                     headroom=headroom,
                 )
+            emit_schedule_write(
+                _LOGGER,
+                WorkMode.FORCE_CHARGE,
+                power_w=initial_power,
+                call_site="smart_charge_immediate_start",
+            )
             await adapter.apply_mode(hass, WorkMode.FORCE_CHARGE, initial_power)
 
         min_power_change = int(
