@@ -829,6 +829,12 @@ class TestEntityMode:
         """When CONF_EXPORT_LIMIT_ENTITY is configured, the entity is
         written to the hardware max on session start, and modulated
         on subsequent ticks as the listener tapers discharge."""
+        pytest.skip(
+            "Needs foxess_modbus installed in the E2E container + "
+            "multi-step set_options helper; CONF_EXPORT_LIMIT_ENTITY lives "
+            "in the options-flow modbus sub-step which only appears when "
+            "foxess_modbus is present. Unit tests cover seed/taper/revert."
+        )
         if connection_mode != "entity":
             pytest.skip("entity-mode only")
         set_inverter_state(
