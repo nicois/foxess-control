@@ -1,0 +1,20 @@
+[Unit]
+Description=FoxESS Control HA session collector (events + observations)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/git/fox
+EnvironmentFile=%h/.config/foxess-collect-ha.env
+ExecStart=/usr/bin/python3 %h/git/fox/scripts/collect_ha_session.py live \
+    --out %h/git/fox/test-artifacts/ha-sessions \
+    --interval 5
+Restart=on-failure
+RestartSec=30
+Nice=15
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+[Install]
+WantedBy=default.target
