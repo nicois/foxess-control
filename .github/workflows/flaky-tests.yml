@@ -1,13 +1,43 @@
 name: Flaky Test Detection
 
 on:
-  workflow_run:
-    workflows: ["Release"]
-    types: [completed]
+  push:
+    tags:
+      - "v*"
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Wait for Release workflow to succeed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="${{ github.sha }}"
+          repo="${{ github.repository }}"
+          echo "Waiting for Release workflow on $sha"
+
+          for i in $(seq 1 75); do
+            status=$(gh api "repos/$repo/actions/runs?head_sha=$sha&event=push" \
+              --jq '.workflow_runs[] | select(.name == "Release") | .conclusion' \
+              2>/dev/null | head -1)
+            if [ "$status" = "success" ]; then
+              echo "✓ Release passed"
+              exit 0
+            elif [ "$status" = "failure" ] || [ "$status" = "cancelled" ]; then
+              echo "✗ Release ($status) — skipping flaky test detection"
+              exit 1
+            else
+              echo "· Release (pending)"
+            fi
+            sleep 20
+          done
+          echo "Timed out waiting for Release"
+          exit 1
+
   e2e-tests:
-    if: github.event.workflow_run.conclusion == 'success'
+    needs: [gate]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -16,8 +46,6 @@ jobs:
         run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
     steps:
       - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
