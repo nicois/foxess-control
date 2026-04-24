@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.11-beta.12
+
+### Fixed
+- **E2E page fixture flake: retry on navigation-induced context destruction**: the nightly Flaky Test Detection workflow surfaced a ~29% failure rate on GH-hosted runners where the `page` fixture's `wait_for_function(...)` waiting for the `ha-panel-lovelace` shadow-DOM element intermittently timed out after 30s. Root cause: HA's frontend triggers navigations (WS reconnect, panel router rebuild, sidebar load) during the initial page boot; each navigation destroys the JS execution context mid-poll, and sustained navigation churn during the 30s budget exhausted Playwright's internal retry — producing a generic `TimeoutError` even though the panel would render a few seconds later. Extracted the wait into `_wait_for_lovelace_panel()` with a deadline-bounded retry loop that catches only `PlaywrightError` with "Execution context was destroyed" or "navigating" in the message, settles on `networkidle`, then retries with the remaining budget. Timeout stays at 30s (no timeout bump). Mirrors the prior `_find_card` fix (commit aa25b10). Traces C-031 (no flaky tests), C-029 (E2E).
+- **REST poll cadence preserved during WS injections** (landed during the same work window): prevents WebSocket-driven data updates from resetting the coordinator's REST poll timer, so scheduled polls fire on their intended cadence regardless of WS activity.
+
+### Improved
+- **Flaky Test Detection workflow triggers on tag push**: the workflow previously ran on `workflow_run` of whatever pushed to `main`, so nightly detection repeatedly exercised stale commits from before the session. Switching to `push: tags: [v*]` makes the workflow run against each released prerelease instead.
+
+### Testing
+- **Discharge sensor countdown uses tracked peak consumption, not instant**: follow-up regression test covering the corner of the C-038 sensor-listener parameter-parity bug (fixed in `8e10b9a`) where tracked peak consumption differs substantially from the instantaneous load sample. The listener pessimistically sizes around peak to avoid grid import during spikes between polls, so a sensor that ignored `consumption_peak_kw` drifted from the listener's deferred start. Verified pre-fix: at `b8d1405` the sensor reports "defers 1h 33m" vs. the listener's "defers 1h 14m" — the exact mismatch `8e10b9a` fixed.
+
 ## 1.0.11-beta.11
 
 ### Improved
