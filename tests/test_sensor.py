@@ -33,6 +33,7 @@ from custom_components.foxess_control.sensor import (
     async_setup_entry,
     setup_debug_log,
 )
+from smart_battery.sensor_base import format_duration
 from smart_battery.taper import TaperProfile
 
 
@@ -1306,6 +1307,85 @@ class TestDischargeRemainingSensor:
             assert "defers" not in value, (
                 f"Sensor shows '{value}' but listener would start immediately"
             )
+
+    def test_deferred_countdown_uses_peak_consumption_not_just_instant(
+        self,
+    ) -> None:
+        """Peak consumption (not just the instantaneous sample) must flow
+        through to the sensor's deferred calculation.
+
+        Covers the corner of the C-038 parameter-parity bug that the
+        other two tests only exercise incidentally: when peak and instant
+        consumption differ, the sensor must use peak (as the listener
+        does), because the listener pessimistically sizes around the
+        tracked peak to avoid grid import during spikes between polls.
+
+        With instant load = 1 kW but tracked peak = 5 kW, an effective
+        export rate computed off peak yields a substantially earlier
+        deferred start than one computed off the instantaneous value.
+        Before the fix, the sensor passed neither, so the deferred
+        countdown drifted away from what the listener actually did.
+        """
+        from smart_battery.algorithms import calculate_discharge_deferred_start
+
+        start = datetime.datetime(2026, 4, 24, 16, 0, 0)
+        end = datetime.datetime(2026, 4, 24, 18, 0, 0)
+        now = datetime.datetime(2026, 4, 24, 16, 5, 0)
+
+        ds = _discharge_state(
+            start=start,
+            end=end,
+            min_soc=10,
+            max_power_w=10500,
+            last_power_w=0,
+            discharging_started=False,
+            feedin_energy_limit_kwh=3.0,
+            consumption_peak_kw=5.0,  # tracked peak — much higher than instant
+            battery_capacity_kwh=10.0,
+        )
+
+        # Instant net_consumption = 1 kW (low); peak = 5 kW (high).
+        # The listener uses peak to protect against spikes; the sensor
+        # must do the same so its countdown matches.
+        hass = _make_hass(
+            smart_discharge_state=ds,
+            coordinator_soc=80.0,
+            coordinator_extra={"loadsPower": 1.0, "pvPower": 0.0},
+        )
+        mock_entry = MagicMock()
+        mock_entry.options = {
+            "battery_capacity_kwh": 10.0,
+            "grid_export_limit": 0,
+            "charge_headroom": 10,
+        }
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        correct_deferred = calculate_discharge_deferred_start(
+            80.0,
+            10,
+            10.0,
+            10500,
+            end,
+            net_consumption_kw=1.0,
+            start=start,
+            headroom=0.10,
+            feedin_energy_limit_kwh=3.0,
+            consumption_peak_kw=5.0,
+        )
+
+        sensor = DischargeRemainingSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=now,
+        ):
+            value = sensor.native_value
+
+        assert correct_deferred > now
+        expected = f"defers {format_duration(correct_deferred - now)}"
+        assert value == expected, (
+            f"Sensor shows '{value}' but listener would show "
+            f"'{expected}' (deferred={correct_deferred})"
+        )
 
 
 # ---------------------------------------------------------------------------
