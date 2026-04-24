@@ -20,6 +20,7 @@ const TRANSLATIONS = {
     title: "FoxESS Control",
     smart_charge: "Smart Charge",
     charge_scheduled: "Charge Scheduled",
+    charge_deferred: "Charge Deferred",
     smart_discharge: "Smart Discharge",
     discharge_scheduled: "Discharge Scheduled",
     discharge_suspended: "Discharge Suspended",
@@ -62,6 +63,7 @@ const TRANSLATIONS = {
     title: "FoxESS Steuerung",
     smart_charge: "Intelligentes Laden",
     charge_scheduled: "Laden geplant",
+    charge_deferred: "Laden verzögert",
     smart_discharge: "Intelligente Entladung",
     discharge_scheduled: "Entladung geplant",
     discharge_suspended: "Entladung pausiert",
@@ -104,6 +106,7 @@ const TRANSLATIONS = {
     title: "FoxESS Contrôle",
     smart_charge: "Charge intelligente",
     charge_scheduled: "Charge programmée",
+    charge_deferred: "Charge différée",
     smart_discharge: "Décharge intelligente",
     discharge_scheduled: "Décharge programmée",
     discharge_suspended: "Décharge suspendue",
@@ -146,6 +149,7 @@ const TRANSLATIONS = {
     title: "FoxESS Besturing",
     smart_charge: "Slim laden",
     charge_scheduled: "Laden gepland",
+    charge_deferred: "Laden uitgesteld",
     smart_discharge: "Slim ontladen",
     discharge_scheduled: "Ontladen gepland",
     discharge_suspended: "Ontladen gepauzeerd",
@@ -188,6 +192,7 @@ const TRANSLATIONS = {
     title: "FoxESS Control",
     smart_charge: "Carga inteligente",
     charge_scheduled: "Carga programada",
+    charge_deferred: "Carga diferida",
     smart_discharge: "Descarga inteligente",
     discharge_scheduled: "Descarga programada",
     discharge_suspended: "Descarga suspendida",
@@ -230,6 +235,7 @@ const TRANSLATIONS = {
     title: "FoxESS Controllo",
     smart_charge: "Ricarica intelligente",
     charge_scheduled: "Ricarica programmata",
+    charge_deferred: "Ricarica differita",
     smart_discharge: "Scarica intelligente",
     discharge_scheduled: "Scarica programmata",
     discharge_suspended: "Scarica sospesa",
@@ -272,6 +278,7 @@ const TRANSLATIONS = {
     title: "FoxESS Sterowanie",
     smart_charge: "Inteligentne ładowanie",
     charge_scheduled: "Ładowanie zaplanowane",
+    charge_deferred: "Ładowanie odroczone",
     smart_discharge: "Inteligentne rozładowanie",
     discharge_scheduled: "Rozładowanie zaplanowane",
     discharge_suspended: "Rozładowanie wstrzymane",
@@ -314,6 +321,7 @@ const TRANSLATIONS = {
     title: "FoxESS Controlo",
     smart_charge: "Carga inteligente",
     charge_scheduled: "Carga agendada",
+    charge_deferred: "Carga adiada",
     smart_discharge: "Descarga inteligente",
     discharge_scheduled: "Descarga agendada",
     discharge_suspended: "Descarga suspensa",
@@ -356,6 +364,7 @@ const TRANSLATIONS = {
     title: "FoxESS 控制",
     smart_charge: "智能充电",
     charge_scheduled: "充电已计划",
+    charge_deferred: "充电延迟",
     smart_discharge: "智能放电",
     discharge_scheduled: "放电已计划",
     discharge_suspended: "放电暂停",
@@ -398,6 +407,7 @@ const TRANSLATIONS = {
     title: "FoxESS コントロール",
     smart_charge: "スマート充電",
     charge_scheduled: "充電予定",
+    charge_deferred: "充電遅延中",
     smart_discharge: "スマート放電",
     discharge_scheduled: "放電予定",
     discharge_suspended: "放電一時停止",
@@ -832,19 +842,29 @@ class FoxESSControlCard extends HTMLElement {
 
   _renderCharge(a) {
     const phase = a.charge_phase;
+    const scheduled = phase === "scheduled";
     const deferred = phase === "deferred";
+    // Treat anything that isn't actively charging as "not charging" for
+    // the power-row suppression below.  Scheduled (pre-window) and
+    // deferred (window open, waiting) both hide the power row.
+    const notCharging = scheduled || deferred;
     const power = a.charge_power_w || 0;
     const target = a.charge_target_soc;
     const current = a.charge_current_soc;
     const remaining = a.charge_remaining || "";
     const window = a.charge_window || "";
+    const title = scheduled
+      ? this._t("charge_scheduled")
+      : deferred
+      ? this._t("charge_deferred")
+      : this._t("smart_charge");
 
     return `
       <div class="section charge">
         <div class="section-header">
           <div class="section-icon-group">
-            <span class="dot ${deferred ? "dot-waiting" : "dot-active"}"></span>
-            <span class="section-title">${deferred ? this._t("charge_scheduled") : this._t("smart_charge")}</span>
+            <span class="dot ${notCharging ? "dot-waiting" : "dot-active"}"></span>
+            <span class="section-title">${title}</span>
           </div>
           <span class="section-badge charge-badge">${this._translateRemaining(remaining)}</span>
         </div>
@@ -853,7 +873,7 @@ class FoxESSControlCard extends HTMLElement {
             <span class="detail-label">${this._t("window")}</span>
             <span class="detail-value">${window}</span>
           </div>
-          ${!deferred ? `
+          ${!notCharging ? `
           <div class="detail-row">
             <span class="detail-label">${this._t("power")}</span>
             <span class="detail-value">${this._formatPower(power)}</span>
@@ -1038,7 +1058,7 @@ class FoxESSControlCard extends HTMLElement {
     const now = Date.now();
     let bars = "";
 
-    if (chargeActive && a.charge_phase !== "deferred") {
+    if (chargeActive && a.charge_phase !== "deferred" && a.charge_phase !== "scheduled") {
       const startSoc = a.charge_start_soc;
       const current = a.charge_current_soc;
       const confirmed = a.charge_confirmed_soc ?? current;

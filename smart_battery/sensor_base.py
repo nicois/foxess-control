@@ -391,7 +391,12 @@ def estimate_charge_remaining(
             bms_temp_c=_get_bms_temp(hass, domain),
         )
         wait = deferred_start - now
-        if wait.total_seconds() <= 0:
+        # Treat any sub-minute wait as "transition imminent" -- format_duration
+        # rounds down to "0m", so "starts in 0m" would be the resulting string,
+        # which is meaningless to the user.  Fall through to window-remaining
+        # (same display as when the deferred start has just passed, matching
+        # the tick-rate granularity of the listener).
+        if wait.total_seconds() < 60:
             return format_duration(window_remaining)
         return f"starts in {format_duration(wait)}"
     return format_remaining(end)
@@ -805,6 +810,12 @@ class SmartOperationsOverviewSensor(RestoreSensor):
         if cs is not None:
             if cs.get("target_reached"):
                 return "target_reached"
+            now = dt_util.now()
+            cs_start = cs.get("start", now)
+            if cs_start.tzinfo is None and now.tzinfo is not None:
+                now = now.replace(tzinfo=None)
+            if now < cs_start:
+                return "scheduled"
             if not is_effectively_charging(self.hass, self._domain, cs):
                 return "deferred"
             return "charging"
@@ -863,9 +874,19 @@ class SmartOperationsOverviewSensor(RestoreSensor):
         if cs is not None:
             charging = is_effectively_charging(self.hass, self._domain, cs)
             soc = get_interpolated_soc(self.hass, self._domain)
+            now = dt_util.now()
+            cs_start = cs.get("start", now)
+            if cs_start.tzinfo is None and now.tzinfo is not None:
+                now = now.replace(tzinfo=None)
+            if now < cs_start:
+                charge_phase = "scheduled"
+            elif charging:
+                charge_phase = "charging"
+            else:
+                charge_phase = "deferred"
             attrs.update(
                 {
-                    "charge_phase": "charging" if charging else "deferred",
+                    "charge_phase": charge_phase,
                     "charge_power_w": (
                         cs.get("last_power_w", 0)
                         or (cs.get("max_power_w", 0) if charging else 0)
