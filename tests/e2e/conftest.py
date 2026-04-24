@@ -465,7 +465,39 @@ _CONTEXT_DESTROYED_SIGNALS = (
 )
 
 
-_PANEL_READY_JS = """() => {
+# The Lovelace panel lives three shadow-DOM hops deep:
+#   <home-assistant> (document root)
+#     #shadow-root
+#       <home-assistant-main>
+#         #shadow-root
+#           <ha-panel-lovelace>
+#
+# Each stage has its own JS predicate and its own budget.  Staging is a
+# slow-shard fix: beta.12 escape (run 24872997253) showed a monolithic
+# 30s wait_for_function time out at 40.3s while other tests on the same
+# shard ran 90.9s — the container was alive, just slow to boot.
+#
+# By splitting the wait we:
+#   - Bound the worst-case legitimate budget to ~75s (3 stages x 25s),
+#     so slow runners don't falsely fail.
+#   - Produce observable per-stage failures: a timeout in stage 1 tells
+#     us HA's frontend never attached; stage 2 means the main layout
+#     didn't render; stage 3 means the dashboard router didn't mount
+#     Lovelace.  Stage names appear in log output for diagnosis.
+
+_STAGE_HOME_ASSISTANT = """() => {
+    const el = document.querySelector('home-assistant');
+    return !!(el && el.shadowRoot);
+}"""
+
+_STAGE_HOME_ASSISTANT_MAIN = """() => {
+    const main = document.querySelector('home-assistant');
+    if (!main || !main.shadowRoot) return false;
+    const ham = main.shadowRoot.querySelector('home-assistant-main');
+    return !!(ham && ham.shadowRoot);
+}"""
+
+_STAGE_HA_PANEL_LOVELACE = """() => {
     const main = document.querySelector('home-assistant');
     if (!main || !main.shadowRoot) return false;
     const ham = main.shadowRoot.querySelector('home-assistant-main');
@@ -475,52 +507,110 @@ _PANEL_READY_JS = """() => {
 }"""
 
 
-def _wait_for_lovelace_panel(page: Any, timeout_ms: int = 30000) -> None:
-    """Wait for the Lovelace panel to render in the shadow DOM.
+# Kept as a module-level constant for tests that still reference it
+# (and in case a future consumer wants the monolithic predicate).
+_PANEL_READY_JS = _STAGE_HA_PANEL_LOVELACE
 
-    Retries on Playwright "Execution context was destroyed" errors,
-    which occur when HA's frontend triggers a navigation (WS reconnect,
-    dashboard router refresh, sidebar load) during the initial page
-    load.  Without retry logic, a single navigation burst causes the
-    fixture to time out after 30s even though the panel would render
-    a few seconds later once navigation settles.
 
-    Mirrors the retry pattern in
-    ``tests/e2e/test_ui.py::_find_card`` (commit aa25b10).
+_LOVELACE_PANEL_STAGES: tuple[tuple[str, str], ...] = (
+    ("home-assistant", _STAGE_HOME_ASSISTANT),
+    ("home-assistant-main", _STAGE_HOME_ASSISTANT_MAIN),
+    ("ha-panel-lovelace", _STAGE_HA_PANEL_LOVELACE),
+)
 
-    Genuine ``TimeoutError`` (panel never rendered) is propagated.
-    Non-context-destruction Playwright errors are also propagated.
+
+def _wait_for_stage(
+    page: Any,
+    stage_name: str,
+    predicate: str,
+    deadline: float,
+    max_stage_ms: int = 30000,
+) -> None:
+    """Wait for one DOM milestone with retry-on-context-destroyed.
+
+    Each stage uses ``min(remaining_budget, max_stage_ms)`` as its
+    ``wait_for_function`` timeout — bounded per-stage, bounded overall.
+
+    Retries when Playwright reports context destruction (HA navigation
+    churn).  Genuine ``TimeoutError`` and unrelated ``PlaywrightError``
+    propagate to the caller.
     """
     from playwright._impl._errors import Error as PlaywrightError  # noqa: PLC0415
-    from playwright._impl._errors import TimeoutError as PwTimeoutError  # noqa: PLC0415
-
-    deadline = time.monotonic() + timeout_ms / 1000
-    remaining_ms = timeout_ms
+    from playwright._impl._errors import (  # noqa: PLC0415
+        TimeoutError as PwTimeoutError,
+    )
 
     while True:
+        remaining_ms = int((deadline - time.monotonic()) * 1000)
+        if remaining_ms <= 0:
+            msg = (
+                f"_wait_for_lovelace_panel: overall deadline exceeded before "
+                f"stage '{stage_name}' could start"
+            )
+            raise PwTimeoutError(msg)
+        stage_ms = min(remaining_ms, max_stage_ms)
         try:
-            page.wait_for_function(_PANEL_READY_JS, timeout=remaining_ms)
+            page.wait_for_function(predicate, timeout=stage_ms)
             return
         except PwTimeoutError:
-            # Genuine timeout — panel truly did not render in budget.
+            # Per-stage timeout — propagate.  The stage name is in the
+            # helper log line, so CI output identifies the stuck stage.
             raise
         except PlaywrightError as exc:
             if not any(s in str(exc) for s in _CONTEXT_DESTROYED_SIGNALS):
                 # Unrelated playwright failure — propagate.
                 raise
             # Navigation destroyed the context.  Settle on networkidle
-            # (best effort) and retry with whatever budget remains.
-            remaining_ms = int((deadline - time.monotonic()) * 1000)
-            if remaining_ms <= 0:
+            # (best effort) and retry within the remaining budget.
+            settle_budget = int((deadline - time.monotonic()) * 1000)
+            if settle_budget <= 0:
                 raise
             with contextlib.suppress(PlaywrightError):
                 page.wait_for_load_state(
                     "networkidle",
-                    timeout=min(remaining_ms, 15000),
+                    timeout=min(settle_budget, 15000),
                 )
-            remaining_ms = int((deadline - time.monotonic()) * 1000)
-            if remaining_ms <= 0:
-                raise
+            # Loop back and retry wait_for_function with refreshed budget.
+
+
+def _wait_for_lovelace_panel(page: Any, timeout_ms: int = 75000) -> None:
+    """Wait for the Lovelace panel to render via staged DOM milestones.
+
+    Stages (each bounded by its own wait_for_function):
+      1. ``home-assistant`` element exists and has shadowRoot.
+      2. ``home-assistant-main`` exists inside that shadowRoot and has
+         its own shadowRoot.
+      3. ``ha-panel-lovelace`` exists inside the main's shadowRoot.
+
+    Each stage retries on Playwright "Execution context was destroyed"
+    errors (HA navigation churn — WS reconnect, dashboard router
+    refresh, sidebar load).  Pattern mirrors ``tests/e2e/test_ui.py
+    ::_find_card`` (commit aa25b10).
+
+    **Budget**: default 75s is the upper bound on slow-shard HA-boot
+    time, justified by observed test timings (run 24872997253, gw2
+    shard 12): setup failed at 40.3s with the old 30s cap, yet other
+    tests on the same shard ran 90.9s proving the container was merely
+    slow to bootstrap.  A total of 75s allows HA's custom-element
+    registry and dashboard router to finish on the slowest runners
+    without masking genuine hangs.
+
+    Raises ``TimeoutError`` if any stage fails within its bounded
+    budget (stage name appears in the error message).  Unrelated
+    Playwright errors propagate unchanged.
+    """
+    deadline = time.monotonic() + timeout_ms / 1000
+
+    for stage_name, predicate in _LOVELACE_PANEL_STAGES:
+        stage_start = time.monotonic()
+        _wait_for_stage(page, stage_name, predicate, deadline)
+        stage_dur = time.monotonic() - stage_start
+        _log.debug(
+            "[%s] lovelace panel stage '%s' ready in %.1fs",
+            _worker_id(),
+            stage_name,
+            stage_dur,
+        )
 
 
 @pytest.fixture
@@ -535,11 +625,12 @@ def page(
     p.goto(f"http://localhost:{ha_port}/lovelace/0", timeout=60000)
     p.wait_for_url("**/lovelace/**", timeout=60000)
     p.wait_for_load_state("networkidle", timeout=30000)
-    # Wait for the HA Lovelace panel to render inside the shadow DOM.
-    # Uses _wait_for_lovelace_panel which retries on
-    # "Execution context was destroyed" errors caused by navigation
-    # churn under CI load (mirrors _find_card's pattern, aa25b10).
-    _wait_for_lovelace_panel(p, timeout_ms=30000)
+    # Wait for the HA Lovelace panel via staged DOM milestones.  Each
+    # stage has its own bounded budget and retries on context-destroyed
+    # errors (HA navigation churn under CI load).  The 75s overall cap
+    # is justified in the helper docstring: slow GH-runners can spend
+    # 60s+ legitimately booting HA's custom-element registry.
+    _wait_for_lovelace_panel(p, timeout_ms=75000)
     _log.warning("[%s] page ready: %.1fs", _worker_id(), time.monotonic() - t0)
     yield p
     p.close()
