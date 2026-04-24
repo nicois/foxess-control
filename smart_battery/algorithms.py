@@ -335,6 +335,30 @@ def safety_floor_w(peak_kw: float) -> int:
     return int(peak_kw * DISCHARGE_SAFETY_FACTOR * 1000)
 
 
+def clamp_export_limit_w(
+    target_w: int,
+    grid_export_limit_w: int,
+    peak_consumption_kw: float,
+) -> int:
+    """Clamp a requested export limit to the safe range.
+
+    Used by smart discharge when the hardware export-limit actuator is
+    configured: the paced target is bounded by:
+
+    * upper — the configured ``grid_export_limit_w`` (hardware max)
+    * lower — ``peak_consumption_kw × DISCHARGE_SAFETY_FACTOR`` (C-001 floor)
+
+    The C-001 lower bound guarantees the inverter never exports less than
+    the house-load safety floor, preventing grid import when the actuator
+    is used to taper feed-in.  If the safety floor exceeds the hardware
+    max (rare), the upper bound wins.
+    """
+    upper = max(0, int(grid_export_limit_w))
+    floor = safety_floor_w(max(0.0, peak_consumption_kw))
+    value = max(int(target_w), floor)
+    return min(value, upper) if upper > 0 else value
+
+
 def should_suspend_discharge(
     current_soc: float,
     min_soc: int,

@@ -25,11 +25,13 @@ from .algorithms import (
     calculate_deferred_start,
     calculate_discharge_deferred_start,
     calculate_discharge_power,
+    clamp_export_limit_w,
     is_charge_target_reachable,
     should_suspend_discharge,
 )
 from .const import (
     CIRCUIT_BREAKER_TICKS_BEFORE_ABORT,
+    DEFAULT_EXPORT_LIMIT_MIN_CHANGE,
     DEFAULT_MIN_POWER_CHANGE,
     MAX_CONSECUTIVE_ADAPTER_ERRORS,
     MAX_SOC_UNAVAILABLE_COUNT,
@@ -148,6 +150,18 @@ def _get_grid_export_limit(hass: HomeAssistant, domain: str) -> int:
                 entry.options.get(CONF_GRID_EXPORT_LIMIT, DEFAULT_GRID_EXPORT_LIMIT)
             )
     return DEFAULT_GRID_EXPORT_LIMIT
+
+
+def _has_export_limit_entity(hass: HomeAssistant, domain: str) -> bool:
+    """Return True when the hardware export-limit actuator is configured."""
+    from .const import CONF_EXPORT_LIMIT_ENTITY
+
+    dd = get_domain_data(hass, domain)
+    for entry_data in dd.entries.values():
+        entry = getattr(entry_data, "entry", None)
+        if entry is not None and entry.options.get(CONF_EXPORT_LIMIT_ENTITY):
+            return True
+    return False
 
 
 def _get_polling_interval_seconds(hass: HomeAssistant, domain: str) -> int:
@@ -954,6 +968,24 @@ def setup_smart_discharge_listeners(
     end_utc = dt_util.as_utc(end)
     my_session_id: str = state["session_id"]
 
+    async def _restore_export_limit() -> None:
+        """Restore the export-limit actuator to the configured hardware max.
+
+        Called on every session exit path (timer expire, abort, SoC
+        threshold reached, feed-in limit hit, SoC unavailable, early
+        stop).  No-ops when the actuator is unconfigured.  Session
+        boundary cleanliness (C-025).
+        """
+        if not _has_export_limit_entity(hass, domain):
+            return
+        try:
+            await adapter.set_export_limit_w(hass, _get_grid_export_limit(hass, domain))
+        except Exception:
+            _LOGGER.warning(
+                "Smart discharge: export-limit restore failed: %s",
+                _exc_summary(),
+            )
+
     async def _remove_discharge_override() -> None:
         emit_schedule_write(
             _LOGGER, WorkMode.FORCE_DISCHARGE, call_site="remove_discharge_override"
@@ -968,6 +1000,11 @@ def setup_smart_discharge_listeners(
             get_domain_data(hass, domain).pending_override_cleanup = {
                 "mode": WorkMode.FORCE_DISCHARGE.value,
             }
+        # Always revert the export-limit actuator to its configured max
+        # (C-025: session boundary cleanliness).  Runs even if the
+        # override removal failed — the hardware cap must not be left
+        # at a modulated value for the next session.
+        await _restore_export_limit()
 
     def _is_my_session() -> bool:
         cur = get_domain_data(hass, domain).smart_discharge_state
@@ -1070,7 +1107,11 @@ def setup_smart_discharge_listeners(
             return True
 
         remaining_h = (cur_state["end"] - now_dt).total_seconds() / 3600.0
+        use_export_actuator = _has_export_limit_entity(hass, domain)
         if _get_grid_export_limit(hass, domain) > 0:
+            # Hardware-actuator path: fdPwr stays pinned at the HW max so
+            # the cloud schedule never restricts discharge; feed-in is
+            # modulated later via adapter.set_export_limit_w.
             new_power = cur_state["max_power_w"]
         else:
             new_power = call_algo(
@@ -1099,6 +1140,12 @@ def setup_smart_discharge_listeners(
             new_power,
             fd_soc=cur_state.get("min_soc", 11),
         )
+        if use_export_actuator:
+            # Start at the configured hardware max; taper on subsequent
+            # ticks via _apply_discharge_power.
+            hw_max = _get_grid_export_limit(hass, domain)
+            await adapter.set_export_limit_w(hass, hw_max)
+            cur_state["last_export_limit_written_w"] = hw_max
         if not _is_my_session():
             return True
         _ds = get_domain_data(hass, domain).smart_discharge_state
@@ -1323,6 +1370,73 @@ def setup_smart_discharge_listeners(
         was_suspended: bool,
     ) -> None:
         """Calculate and apply discharge power."""
+        use_export_actuator = _has_export_limit_entity(hass, domain)
+        if use_export_actuator:
+            # Hardware-actuator path: fdPwr stays pinned at the inverter
+            # max, and the paced target drives the export-limit entity.
+            # The algorithm still computes the paced feed-in target, then
+            # clamp_export_limit_w enforces [peak × 1.5, grid_export_limit].
+            paced = calculate_discharge_power(
+                soc_value,
+                cur_state["min_soc"],
+                cur_state["battery_capacity_kwh"],
+                remaining_h,
+                cur_state["max_power_w"],
+                net_consumption_kw=net_consumption,
+                headroom=headroom,
+                feedin_remaining_kwh=feedin_remaining,
+                consumption_peak_kw=peak,
+            )
+            clamped = clamp_export_limit_w(
+                paced,
+                _get_grid_export_limit(hass, domain),
+                peak,
+            )
+            export_min_change = int(
+                cur_state.get(
+                    "export_limit_min_change_w", DEFAULT_EXPORT_LIMIT_MIN_CHANGE
+                )
+            )
+            last_written = cur_state.get("last_export_limit_written_w")
+            should_write = (
+                last_written is None
+                or abs(clamped - int(last_written)) >= export_min_change
+                or (was_suspended and not cur_state.get("suspended"))
+            )
+            if should_write:
+                await adapter.set_export_limit_w(hass, clamped)
+                cur_state["last_export_limit_written_w"] = clamped
+                _LOGGER.info(
+                    "Smart discharge: export limit %dW -> %dW (paced=%dW, peak=%.2fkW)",
+                    int(last_written) if last_written is not None else -1,
+                    clamped,
+                    paced,
+                    peak,
+                )
+            else:
+                _LOGGER.debug(
+                    "Smart discharge: export limit delta %dW -> %dW below "
+                    "threshold %dW, skipping",
+                    int(last_written) if last_written is not None else -1,
+                    clamped,
+                    export_min_change,
+                )
+            # fdPwr stays at the HW max; keep last_power_w in sync so the
+            # sensor attribute reflects the modulated target.
+            cur_state["target_power_w"] = clamped
+            cur_state["last_power_w"] = cur_state["max_power_w"]
+            if not _is_my_session():
+                return
+            _ds = get_domain_data(hass, domain).smart_discharge_state
+            assert _ds is not None
+            if should_write:
+                await save_session(
+                    _get_store(hass, domain),
+                    "smart_discharge",
+                    session_data_from_discharge_state(_ds),
+                )
+            return
+
         if _get_grid_export_limit(hass, domain) > 0:
             new_power = cur_state["max_power_w"]
         else:
@@ -1552,4 +1666,31 @@ def setup_smart_discharge_listeners(
         async_track_point_in_time(hass, _on_timer_expire, end_utc),
     ]
     dd.smart_discharge_unsubs = unsubs
+
+    # Seed the hardware export-limit actuator to the configured HW max
+    # at session start.  The listener tapers it on subsequent ticks.
+    # No-op when no export-limit entity is configured.  We do this via
+    # the adapter so the actuator layer is unified across cloud/entity
+    # back-ends and so spy adapters observe the write in tests.
+    if (
+        state.get("discharging_started", False)
+        and _has_export_limit_entity(hass, domain)
+        and state.get("last_export_limit_written_w") is None
+    ):
+        hw_max = _get_grid_export_limit(hass, domain)
+
+        async def _seed_export_limit() -> None:
+            try:
+                await adapter.set_export_limit_w(hass, hw_max)
+                if _is_my_session():
+                    ds = get_domain_data(hass, domain).smart_discharge_state
+                    if ds is not None:
+                        ds["last_export_limit_written_w"] = hw_max
+            except Exception:
+                _LOGGER.warning(
+                    "Smart discharge: export-limit seed failed: %s",
+                    _exc_summary(),
+                )
+
+        hass.async_create_task(_seed_export_limit())
     return _check_discharge_soc

@@ -272,6 +272,7 @@ def _build_foxess_adapter(
         force=state.get("force", False),
         capacity_kwh=state.get("battery_capacity_kwh", 0),
         soc_getter=lambda: coordinator.data.get("SoC") if coordinator.data else None,
+        export_limit_entity=_cfg(hass).export_limit_entity,
     )
     # Seed the adapter with groups built by the service handler
     if state.get("groups"):
@@ -1167,6 +1168,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ws_stop: Coroutine[Any, Any, None] | None = None
         if not _should_start_realtime_ws(hass):
             ws_stop = _stop_realtime_ws(hass)
+        # Revert the hardware export-limit actuator to its configured
+        # maximum on every session cancel path (C-025: session boundary
+        # cleanliness).  No-op when the actuator is unconfigured.
+        if _cfg(hass).export_limit_entity:
+            from ._helpers import _write_export_limit
+
+            hass.async_create_task(
+                _write_export_limit(hass, _cfg(hass).grid_export_limit_w),
+                name="foxess_revert_export_limit_on_cancel",
+            )
         # Clear work mode immediately so the overview card drops the
         # label without waiting for the next REST poll.
         # During unload the entry data is already removed, so guard access.

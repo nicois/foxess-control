@@ -213,6 +213,35 @@ async def _apply_mode_via_entities(
     await adapter.apply_mode(hass, mode, power_w, fd_soc)
 
 
+async def _write_export_limit(hass: HomeAssistant, value_w: int) -> None:
+    """Write a value to the configured hardware export-limit entity.
+
+    No-op when CONF_EXPORT_LIMIT_ENTITY is unset.  Used both for the
+    session-start seed and for the on-session-cancel revert path.
+    """
+    entity_id = _cfg(hass).export_limit_entity
+    if not entity_id:
+        return
+    # Derive the service domain (number / input_number).
+    from .foxess_adapter import _entity_service_domain
+
+    domain_svc = _entity_service_domain(entity_id, "number")
+    try:
+        await hass.services.async_call(
+            domain_svc,
+            "set_value",
+            {"entity_id": entity_id, "value": int(value_w)},
+            blocking=True,
+        )
+    except Exception as err:
+        _LOGGER.warning(
+            "Export-limit write FAILED: %s ← %d W: %s",
+            entity_id,
+            value_w,
+            err,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Coordinator value readers
 # ---------------------------------------------------------------------------

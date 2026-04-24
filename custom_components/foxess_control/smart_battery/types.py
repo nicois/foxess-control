@@ -97,6 +97,11 @@ class DischargeSessionState(TypedDict, total=False):
     target_power_w: int
     schedule_horizon: str | None
     full_power: bool
+    # Hardware export-limit actuator (C-001 floor is enforced via clamp).
+    # last_export_limit_written_w is the integration's last write value,
+    # used for write-suppression (overwriting external changes is explicit).
+    last_export_limit_written_w: int | None
+    export_limit_min_change_w: int
 
 
 def create_charge_session(
