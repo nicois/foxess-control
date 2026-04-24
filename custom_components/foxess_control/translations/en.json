@@ -91,6 +91,12 @@
       "debug_log": {
         "name": "Debug Log"
       },
+      "info_log": {
+        "name": "Info Log"
+      },
+      "init_debug_log": {
+        "name": "Init Debug Log"
+      },
       "override_status": {
         "name": "Status"
       },
