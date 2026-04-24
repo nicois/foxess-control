@@ -7,6 +7,7 @@ identical results to the original foxess_control implementations.
 from __future__ import annotations
 
 import datetime
+from typing import Any
 
 from custom_components.foxess_control.smart_battery.algorithms import (
     calculate_charge_power,
@@ -263,6 +264,186 @@ class TestIsChargeTargetReachable:
                 50.0, 80, 10.0, 1.5, 5000, taper_profile=tp, bms_temp_c=5.0
             )
             is False
+        )
+
+    def _live_2026_04_24_taper(self) -> TaperProfile:
+        """Live taper profile captured during the 2026-04-24 02:53 UTC event.
+
+        Contains several outlier observations (81:0.05/1, 83:0.41/3, 85:0.16/2,
+        90:0.21/7) surrounded by 0.87-1.0 neighbours, which skew the
+        taper-integrated charge-hours estimate upward.
+        """
+        data: dict[str, Any] = {
+            "charge": {
+                "33": [0.1991118124436429, 2],
+                "34": [0.8112584791103095, 3],
+                "35": [0.9194285714285715, 1],
+                "36": [0.8118390501953712, 3],
+                "37": [0.8111457168620378, 2],
+                "38": [0.8118390501953712, 3],
+                "39": [0.8116123835287046, 2],
+                "40": [0.8038057142857141, 3],
+                "41": [0.8036190476190476, 2],
+                "42": [0.9249619047619047, 2],
+                "43": [0.8037523809523809, 2],
+                "44": [0.6243393893466402, 4],
+                "45": [0.8170122076515414, 3],
+                "46": [0.9258599999999999, 3],
+                "47": [0.9445139723801788, 2],
+                "48": [0.9262857142857142, 3],
+                "49": [0.9265657142857141, 3],
+                "50": [0.9269580952380951, 3],
+                "51": [0.9269238095238095, 3],
+                "52": [0.9487333333333332, 2],
+                "53": [0.9283158095238093, 4],
+                "54": [0.9438857142857142, 2],
+                "55": [0.9289761904761904, 3],
+                "56": [0.9448190476190476, 2],
+                "57": [0.9451485714285713, 3],
+                "58": [0.9942857142857142, 2],
+                "59": [0.979542857142857, 2],
+                "60": [0.9357523809523809, 2],
+                "61": [0.9430285714285713, 2],
+                "62": [1.0, 1],
+                "63": [0.8106666666666666, 1],
+                "64": [1.0, 1],
+                "65": [0.9763140817650875, 2],
+                "66": [0.9762491888384166, 2],
+                "67": [0.9809523809523809, 1],
+                "68": [0.976346528228423, 2],
+                "69": [0.9809523809523809, 1],
+                "70": [0.976541207008436, 2],
+                "71": [1.0, 2],
+                "72": [0.9218040233614536, 1],
+                "73": [0.9836015574302399, 4],
+                "75": [0.9885687865022712, 5],
+                "77": [0.96068, 4],
+                "79": [0.9606599999999998, 3],
+                "80": [0.8747999999999998, 3],
+                "81": [0.05, 1],
+                "82": [0.8747999999999998, 4],
+                "83": [0.4093, 3],
+                "84": [0.8747999999999998, 4],
+                "85": [0.15642857142857142, 2],
+                "86": [0.875, 4],
+                "87": [0.5833333333333333, 2],
+                "88": [1.0, 3],
+                "90": [0.20963817927242218, 7],
+                "91": [0.4051333333333333, 3],
+                "92": [0.4058, 3],
+                "93": [0.4063809523809524, 1],
+                "94": [0.40723809523809523, 1],
+                "95": [0.4080952380952381, 1],
+                "96": [0.41019999999999995, 2],
+            }
+        }
+        return TaperProfile.from_dict(data)
+
+    def test_outlier_taper_does_not_falsely_fail_live_2026_04_24(self) -> None:
+        """Outlier taper observations must not flip a feasible target to unreachable.
+
+        Reproduces the 2026-04-24 02:53 UTC live event: during a smart
+        charge with solar surplus, the taper-integrated estimate summed
+        several isolated outlier observations (bins 81, 83, 85, 87, 90
+        with ratios 0.05-0.58) that were surrounded by 0.87-1.0
+        neighbours.  The integration produced 1.04h of taper-weighted
+        charge hours, which after the 10% headroom buffer exceeded the
+        remaining 1.09h window — so the algorithm returned False despite
+        the inverter empirically charging at ~10.2 kW and needing only
+        6.3 kWh in 65 minutes.
+
+        The feasibility check (C-022) must remain a plausibility bound
+        rather than a pessimistic point estimate: isolated outlier bins
+        should not cause a spurious HA Repair issue when a typical
+        taper-aware scenario comfortably reaches the target.
+        """
+        tp = self._live_2026_04_24_taper()
+        # Exact live inputs from the algo_decision event.
+        assert (
+            is_charge_target_reachable(
+                current_soc=75.0,
+                target_soc=90,
+                battery_capacity_kwh=42.0,
+                remaining_hours=1.0939019616666668,
+                max_power_w=10500,
+                net_consumption_kw=-1.09,  # solar surplus
+                headroom=0.1,
+                taper_profile=tp,
+                bms_temp_c=18.9,
+            )
+            is True
+        )
+
+    def test_live_2026_04_24_taper_with_house_load_still_reachable(self) -> None:
+        """Same live inputs but with modest house load — still reachable.
+
+        Solar surplus was incidental to the bug: the root cause was the
+        outlier-dominated taper integration, not the consumption sign.
+        Switching net_consumption_kw to +1.0 kW must still return True —
+        median-smoothed estimate: 6.3 kWh / (9.45 kW * 0.87) = 0.77h,
+        buffered = 0.85h, comfortably under 1.09h.
+        """
+        tp = self._live_2026_04_24_taper()
+        assert (
+            is_charge_target_reachable(
+                current_soc=75.0,
+                target_soc=90,
+                battery_capacity_kwh=42.0,
+                remaining_hours=1.0939019616666668,
+                max_power_w=10500,
+                net_consumption_kw=1.0,  # modest house load
+                headroom=0.1,
+                taper_profile=tp,
+                bms_temp_c=18.9,
+            )
+            is True
+        )
+
+    def test_live_2026_04_24_taper_with_short_window_still_unreachable(self) -> None:
+        """Same live inputs but half the remaining time — genuinely unreachable.
+
+        Guard against over-fix that would make everything reachable.
+        With only 33 minutes remaining (0.547h), even the linear estimate
+        with the median ratio (0.77h) exceeds the window, so the fix
+        must still return False.
+        """
+        tp = self._live_2026_04_24_taper()
+        assert (
+            is_charge_target_reachable(
+                current_soc=75.0,
+                target_soc=90,
+                battery_capacity_kwh=42.0,
+                remaining_hours=0.5469509808333334,  # half of the live value
+                max_power_w=10500,
+                net_consumption_kw=-1.09,
+                headroom=0.1,
+                taper_profile=tp,
+                bms_temp_c=18.9,
+            )
+            is False
+        )
+
+    def test_live_2026_04_24_inputs_with_fresh_taper_trivially_reachable(self) -> None:
+        """Same live inputs but empty TaperProfile — trivially reachable.
+
+        Sanity check: without any taper data, the linear calculation
+        says 6.3 kWh / 9.45 kW = 0.67h needed, buffered 0.74h, well
+        within 1.09h.
+        """
+        tp = TaperProfile()
+        assert (
+            is_charge_target_reachable(
+                current_soc=75.0,
+                target_soc=90,
+                battery_capacity_kwh=42.0,
+                remaining_hours=1.0939019616666668,
+                max_power_w=10500,
+                net_consumption_kw=-1.09,
+                headroom=0.1,
+                taper_profile=tp,
+                bms_temp_c=18.9,
+            )
+            is True
         )
 
 
