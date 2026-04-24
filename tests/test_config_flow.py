@@ -403,3 +403,31 @@ class TestDetectFoxessModbusEntities:
             CONF_SOC_ENTITY: "sensor.foxess_inv1_battery_soc",
             CONF_CHARGE_POWER_ENTITY: "number.foxess_inv1_force_charge_power",
         }
+
+    def test_detects_max_grid_export_limit(self) -> None:
+        """_MODBUS_NAME_MAP maps 'Max Grid Export Limit' to the config key."""
+        from custom_components.foxess_control.const import CONF_EXPORT_LIMIT_ENTITY
+
+        hass = MagicMock()
+        modbus_entry = MagicMock()
+        modbus_entry.entry_id = "modbus1"
+        hass.config_entries.async_entries = MagicMock(return_value=[modbus_entry])
+
+        export_limit = MagicMock()
+        export_limit.original_name = "Max Grid Export Limit"
+        export_limit.entity_id = "number.foxess_inv1_max_grid_export_limit"
+
+        with (
+            patch(
+                "custom_components.foxess_control.smart_battery.config_flow_base.er.async_get"
+            ),
+            patch(
+                "custom_components.foxess_control.smart_battery.config_flow_base.er.async_entries_for_config_entry",
+                return_value=[export_limit],
+            ),
+        ):
+            result = _detect_foxess_modbus_entities(hass)
+
+        assert result == {
+            CONF_EXPORT_LIMIT_ENTITY: ("number.foxess_inv1_max_grid_export_limit"),
+        }

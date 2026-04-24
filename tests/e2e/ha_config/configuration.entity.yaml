@@ -55,3 +55,9 @@ input_number:
     max: 20000
     step: 1
     mode: box
+  foxess_max_grid_export_limit:
+    min: 0
+    max: 20000
+    step: 50
+    initial: 10500
+    mode: box

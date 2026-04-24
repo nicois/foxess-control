@@ -89,6 +89,13 @@ class InverterModel:
     battery_capacity_kwh: float = 10.0
     max_power_w: int = 10500
 
+    # Hardware Max Grid Export Limit (watts).  Modelled as the
+    # foxess_modbus "Max Grid Export Limit" number entity — the
+    # inverter refuses to export more than this and curtails battery
+    # discharge accordingly.  Defaults high so existing tests are
+    # unaffected.
+    max_grid_export_limit_w: int = 10500
+
     # External power (set via backchannel)
     solar_kw: float = 0.0
     load_kw: float = 0.5
@@ -290,6 +297,16 @@ class InverterModel:
         # Clamp charge at 100%
         if self.soc >= 100.0 and self.bat_charge_kw > 0:
             self.bat_charge_kw = 0.0
+
+        # Hardware Max Grid Export Limit: inverter curtails export at
+        # the configured cap.  Battery discharge is reduced to match
+        # (no dumping to load — the inverter just exports less).
+        cap_kw = self.max_grid_export_limit_w / 1000.0
+        if self.grid_export_kw > cap_kw:
+            overshoot = self.grid_export_kw - cap_kw
+            self.grid_export_kw = cap_kw
+            if self.bat_discharge_kw > 0:
+                self.bat_discharge_kw = max(0.0, self.bat_discharge_kw - overshoot)
 
         # Update SoC (apply efficiency: charging stores less, discharging draws more)
         net_bat_kw = self.bat_charge_kw - self.bat_discharge_kw

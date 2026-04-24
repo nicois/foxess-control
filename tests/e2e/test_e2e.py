@@ -819,6 +819,56 @@ class TestEntityMode:
         )
         assert power > 0, "Discharge power entity should be set"
 
+    def test_export_limit_entity_written_at_start(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+        event_stream: HAEventStream,
+    ) -> None:
+        """When CONF_EXPORT_LIMIT_ENTITY is configured, the entity is
+        written to the hardware max on session start, and modulated
+        on subsequent ticks as the listener tapers discharge."""
+        if connection_mode != "entity":
+            pytest.skip("entity-mode only")
+        set_inverter_state(
+            connection_mode,
+            foxess_sim,
+            ha_e2e,
+            event_stream=event_stream,
+            soc=80,
+            load_kw=0.5,
+        )
+
+        # Enable the export-limit actuator via options flow.
+        ha_e2e.set_options(
+            export_limit_entity="input_number.foxess_max_grid_export_limit",
+            grid_export_limit=5000,
+        )
+
+        start, end = _tight_window(10)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+
+        # Listener seeds the actuator at grid_export_limit=5000 W.
+        value = ha_e2e.wait_for_numeric_state(
+            "input_number.foxess_max_grid_export_limit",
+            "eq",
+            5000,
+            timeout_s=60,
+            poll_interval=2.0,
+        )
+        assert value == 5000
+
     def test_self_use_on_clear(
         self,
         ha_e2e: HAClient,

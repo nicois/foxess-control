@@ -205,3 +205,53 @@ class TestTemperatureTaper:
         expected_charge = fd_pwr_kw * combined_taper
 
         assert m.bat_charge_kw == pytest.approx(expected_charge, abs=0.01)
+
+
+class TestMaxGridExportLimit:
+    """Hardware Max Grid Export Limit curtails battery discharge."""
+
+    def test_force_discharge_clamps_grid_export(self) -> None:
+        m = _model_with_schedule(
+            "ForceDischarge",
+            fd_soc=10,
+            soc=50.0,
+            solar_kw=0.0,
+            load_kw=0.5,
+        )
+        # Target 5 kW discharge; load 0.5 kW; uncapped export would be
+        # 4.5 kW.  With HW limit 2 kW, export is clamped to 2 kW and
+        # discharge is reduced by the 2.5 kW overshoot.
+        m.max_grid_export_limit_w = 2000
+        m.tick(60)
+
+        assert m.grid_export_kw == pytest.approx(2.0, abs=0.01)
+        # Original discharge 5 kW, minus 2.5 kW curtailment = 2.5 kW.
+        assert m.bat_discharge_kw == pytest.approx(2.5, abs=0.01)
+
+    def test_cap_does_not_affect_under_limit(self) -> None:
+        m = _model_with_schedule(
+            "ForceDischarge",
+            fd_soc=10,
+            soc=50.0,
+            solar_kw=0.0,
+            load_kw=0.5,
+        )
+        m.max_grid_export_limit_w = 10000  # well above the 5 kW target
+        m.tick(60)
+
+        # No clamp applied — discharge full, export unchanged.
+        assert m.grid_export_kw == pytest.approx(4.5, abs=0.01)
+        assert m.bat_discharge_kw == pytest.approx(5.0, abs=0.01)
+
+    def test_cap_applies_in_feedin_mode(self) -> None:
+        m = _model_with_schedule(
+            "Feedin",
+            fd_soc=10,
+            soc=50.0,
+            solar_kw=0.0,
+            load_kw=0.5,
+        )
+        m.max_grid_export_limit_w = 3000
+        m.tick(60)
+
+        assert m.grid_export_kw == pytest.approx(3.0, abs=0.01)
