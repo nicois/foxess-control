@@ -403,6 +403,104 @@ def estimate_charge_remaining(
     return format_remaining(end)
 
 
+def charge_time_slack_seconds(
+    hass: HomeAssistant, domain: str, cs: dict[str, Any]
+) -> int | None:
+    """Return (deferred_start - now) in seconds, or None when not applicable.
+
+    Returns a non-negative integer during the deferred phase — the
+    algorithm's internal threshold countdown.  The listener recomputes
+    deferred_start each tick from live consumption, so this value shrinks
+    on house load and grows under solar surplus, giving dashboards a
+    legible view of why the session is or isn't acting yet.
+
+    Returns ``None`` when the session is actively charging, scheduled
+    before the window, or when the inputs needed to compute
+    ``deferred_start`` are missing.
+    """
+    if is_effectively_charging(hass, domain, cs):
+        return None
+    now = dt_util.now()
+    start: datetime.datetime | None = cs.get("start")
+    end: datetime.datetime = cs["end"]
+    if end.tzinfo is None and now.tzinfo is not None:
+        now = now.replace(tzinfo=None)
+    if start is not None and now < start:
+        return None  # scheduled, not deferred
+
+    soc = get_soc_value(hass, domain)
+    capacity_kwh = get_battery_capacity_kwh(hass, domain)
+    target_soc: int = cs.get("target_soc", 100)
+    max_power_w: int = cs.get("effective_max_power_w", cs.get("max_power_w", 0))
+    if soc is None or capacity_kwh <= 0 or max_power_w <= 0 or soc >= target_soc:
+        return None
+
+    from .algorithms import calculate_deferred_start
+
+    headroom = get_smart_headroom_fraction(hass, domain)
+    deferred_start = calculate_deferred_start(
+        soc,
+        target_soc,
+        capacity_kwh,
+        max_power_w,
+        end,
+        net_consumption_kw=_get_net_consumption(hass, domain),
+        start=start,
+        headroom=headroom,
+        taper_profile=_get_taper_profile(hass, domain),
+        bms_temp_c=_get_bms_temp(hass, domain),
+    )
+    return max(0, int((deferred_start - now).total_seconds()))
+
+
+def discharge_time_slack_seconds(
+    hass: HomeAssistant, domain: str, ds: dict[str, Any]
+) -> int | None:
+    """Return (deferred_start - now) in seconds, or None when not applicable.
+
+    Mirror of :func:`charge_time_slack_seconds` for the discharge side.
+    Returns ``None`` when actively discharging, suspended, scheduled
+    before the window, or when inputs are missing.
+    """
+    if ds.get("discharging_started", True):
+        return None
+    if ds.get("suspended"):
+        return None
+    now = dt_util.now()
+    start: datetime.datetime | None = ds.get("start")
+    end: datetime.datetime = ds["end"]
+    if end.tzinfo is None and now.tzinfo is not None:
+        now = now.replace(tzinfo=None)
+    if start is not None and now < start:
+        return None
+
+    soc = get_soc_value(hass, domain)
+    if soc is None:
+        return None
+
+    from .algorithms import calculate_discharge_deferred_start
+
+    capacity = get_battery_capacity_kwh(hass, domain)
+    headroom = get_smart_headroom_fraction(hass, domain)
+    peak = ds.get("consumption_peak_kw", 0.0)
+    deferred = calculate_discharge_deferred_start(
+        soc,
+        ds.get("min_soc", 10),
+        capacity,
+        ds.get("max_power_w", 0),
+        end,
+        net_consumption_kw=_get_net_consumption(hass, domain),
+        start=start,
+        headroom=headroom,
+        taper_profile=get_domain_data(hass, domain).taper_profile,
+        feedin_energy_limit_kwh=ds.get("feedin_energy_limit_kwh"),
+        consumption_peak_kw=peak,
+        bms_temp_c=_get_bms_temp(hass, domain),
+        grid_export_limit_w=_get_grid_export_limit(hass, domain),
+    )
+    return max(0, int((deferred - now).total_seconds()))
+
+
 # ---------------------------------------------------------------------------
 # Forecast projection
 # ---------------------------------------------------------------------------
@@ -906,6 +1004,9 @@ class SmartOperationsOverviewSensor(RestoreSensor):
                     "charge_remaining": estimate_charge_remaining(
                         self.hass, self._domain, cs
                     ),
+                    "charge_time_slack_s": charge_time_slack_seconds(
+                        self.hass, self._domain, cs
+                    ),
                     "charge_start_time": cs["start"].isoformat(),
                     "charge_end_time": cs["end"].isoformat(),
                     "charge_start_soc": cs.get("start_soc", soc),
@@ -962,6 +1063,9 @@ class SmartOperationsOverviewSensor(RestoreSensor):
                         f"{format_time(ds['start'])} – {format_time(ds['end'])}"
                     ),
                     "discharge_remaining": estimate_discharge_remaining(
+                        self.hass, self._domain, ds
+                    ),
+                    "discharge_time_slack_s": discharge_time_slack_seconds(
                         self.hass, self._domain, ds
                     ),
                     "discharge_start_time": ds["start"].isoformat(),

@@ -373,6 +373,99 @@ class TestSmartOperationsOverviewSensor:
                 f"Expected 'deferred' within open window, got {attrs['charge_phase']!r}"
             )
 
+    def test_charge_time_slack_s_during_deferred(self) -> None:
+        """While deferred, charge_time_slack_s exposes (deferred_start - now) secs.
+
+        The listener recomputes deferred_start every tick from the current
+        consumption, taper profile and BMS temperature; this attribute
+        surfaces the algorithm's internal countdown so users can see that
+        the session defers until slack reaches zero.  Solar surplus grows
+        the slack; a load spike shrinks it.
+        """
+        hass = _make_hass(
+            smart_charge_state=_charge_state(
+                last_power_w=0,
+                charging_started=False,
+                max_power_w=10500,
+                target_soc=80,
+                start=datetime.datetime(2026, 4, 8, 11, 0, 0),
+                end=datetime.datetime(2026, 4, 8, 14, 0, 0),
+            )
+        )
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 70.0}
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        with patch(
+            "smart_battery.sensor_base.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 12, 15, 0),
+        ):
+            attrs = sensor.extra_state_attributes
+            # Deferred within window → slack must be a non-negative integer.
+            slack = attrs.get("charge_time_slack_s")
+            assert isinstance(slack, int), (
+                f"Expected int seconds, got {type(slack).__name__}: {slack!r}"
+            )
+            assert slack > 0, f"Expected positive slack while deferred, got {slack}"
+
+    def test_charge_time_slack_s_absent_when_charging(self) -> None:
+        """While actively charging, charge_time_slack_s is None (not shown)."""
+        hass = _make_hass(
+            smart_charge_state=_charge_state(
+                last_power_w=8000,
+                charging_started=True,
+                max_power_w=10500,
+            )
+        )
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        with patch(
+            "smart_battery.sensor_base.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 11, 30, 0),
+        ):
+            attrs = sensor.extra_state_attributes
+        assert (
+            "charge_time_slack_s" not in attrs or attrs["charge_time_slack_s"] is None
+        )
+
+    def test_discharge_time_slack_s_during_deferred(self) -> None:
+        """Discharge side exposes the same attribute when deferred."""
+        hass = _make_hass(
+            smart_discharge_state=_discharge_state(
+                last_power_w=0,
+                discharging_started=False,
+                max_power_w=5000,
+                min_soc=30,
+                start=datetime.datetime(2026, 4, 8, 17, 0, 0),
+                end=datetime.datetime(2026, 4, 8, 20, 0, 0),
+            )
+        )
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 90.0}
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        with patch(
+            "smart_battery.sensor_base.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 17, 30, 0),
+        ):
+            attrs = sensor.extra_state_attributes
+            slack = attrs.get("discharge_time_slack_s")
+            assert isinstance(slack, int), (
+                f"Expected int seconds, got {type(slack).__name__}: {slack!r}"
+            )
+            assert slack > 0, f"Expected positive slack while deferred, got {slack}"
+
     def test_discharging(self) -> None:
         hass = _make_hass(smart_discharge_state=_discharge_state())
         sensor = SmartOperationsOverviewSensor(hass, _make_entry())

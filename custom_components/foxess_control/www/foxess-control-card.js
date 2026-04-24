@@ -38,6 +38,7 @@ const TRANSLATIONS = {
     energy: "Energy",
     starts_in: "starts in {0}",
     defers_in: "discharges in {0}",
+    slack: "slack",
     ending: "ending",
     kwh_left: "{0} kWh left",
     dur_hm: "{0}h {1}m",
@@ -81,6 +82,7 @@ const TRANSLATIONS = {
     energy: "Energie",
     starts_in: "startet in {0}",
     defers_in: "Entladung in {0}",
+    slack: "Puffer",
     ending: "endet",
     kwh_left: "{0} kWh verbl.",
     dur_hm: "{0} Std. {1} Min.",
@@ -124,6 +126,7 @@ const TRANSLATIONS = {
     energy: "Énergie",
     starts_in: "commence dans {0}",
     defers_in: "décharge dans {0}",
+    slack: "marge",
     ending: "fin",
     kwh_left: "{0} kWh restants",
     dur_hm: "{0}h {1}min",
@@ -167,6 +170,7 @@ const TRANSLATIONS = {
     energy: "Energie",
     starts_in: "start over {0}",
     defers_in: "ontlading over {0}",
+    slack: "speling",
     ending: "eindigt",
     kwh_left: "{0} kWh over",
     dur_hm: "{0}u {1}m",
@@ -210,6 +214,7 @@ const TRANSLATIONS = {
     energy: "Energía",
     starts_in: "comienza en {0}",
     defers_in: "descarga en {0}",
+    slack: "margen",
     ending: "finalizando",
     kwh_left: "{0} kWh restantes",
     dur_hm: "{0}h {1}min",
@@ -253,6 +258,7 @@ const TRANSLATIONS = {
     energy: "Energia",
     starts_in: "inizia tra {0}",
     defers_in: "scarica tra {0}",
+    slack: "margine",
     ending: "in chiusura",
     kwh_left: "{0} kWh rimasti",
     dur_hm: "{0}h {1}min",
@@ -296,6 +302,7 @@ const TRANSLATIONS = {
     energy: "Energia",
     starts_in: "start za {0}",
     defers_in: "rozładowanie za {0}",
+    slack: "zapas",
     ending: "kończy się",
     kwh_left: "{0} kWh pozostało",
     dur_hm: "{0} godz. {1} min",
@@ -339,6 +346,7 @@ const TRANSLATIONS = {
     energy: "Energia",
     starts_in: "começa em {0}",
     defers_in: "descarga em {0}",
+    slack: "folga",
     ending: "terminando",
     kwh_left: "{0} kWh restantes",
     dur_hm: "{0}h {1}min",
@@ -382,6 +390,7 @@ const TRANSLATIONS = {
     energy: "电量",
     starts_in: "{0}后开始",
     defers_in: "{0}后放电",
+    slack: "余量",
     ending: "即将结束",
     kwh_left: "剩余 {0} kWh",
     dur_hm: "{0}时{1}分",
@@ -425,6 +434,7 @@ const TRANSLATIONS = {
     energy: "電力量",
     starts_in: "{0}後に開始",
     defers_in: "{0}後に放電",
+    slack: "余裕",
     ending: "終了間近",
     kwh_left: "残り {0} kWh",
     dur_hm: "{0}時間{1}分",
@@ -853,6 +863,7 @@ class FoxESSControlCard extends HTMLElement {
     const current = a.charge_current_soc;
     const remaining = a.charge_remaining || "";
     const window = a.charge_window || "";
+    const slackS = a.charge_time_slack_s;
     const title = scheduled
       ? this._t("charge_scheduled")
       : deferred
@@ -873,6 +884,11 @@ class FoxESSControlCard extends HTMLElement {
             <span class="detail-label">${this._t("window")}</span>
             <span class="detail-value">${window}</span>
           </div>
+          ${Number.isFinite(slackS) && slackS > 0 ? `
+          <div class="detail-row">
+            <span class="detail-label">${this._t("slack")}</span>
+            <span class="detail-value">${this._formatDuration(slackS * 1000)}</span>
+          </div>` : ""}
           ${!notCharging ? `
           <div class="detail-row">
             <span class="detail-label">${this._t("power")}</span>
@@ -893,6 +909,7 @@ class FoxESSControlCard extends HTMLElement {
     const current = a.discharge_current_soc;
     const remaining = a.discharge_remaining || "";
     const window = a.discharge_window || "";
+    const slackS = a.discharge_time_slack_s;
     const beforeStart = remaining.startsWith && remaining.startsWith("starts");
     const scheduled = beforeStart || remaining.startsWith("scheduled");
     const opsState = this._state(this._config.operations_entity) || "";
@@ -918,6 +935,11 @@ class FoxESSControlCard extends HTMLElement {
             <span class="detail-label">${this._t("window")}</span>
             <span class="detail-value">${window}</span>
           </div>
+          ${Number.isFinite(slackS) && slackS > 0 ? `
+          <div class="detail-row">
+            <span class="detail-label">${this._t("slack")}</span>
+            <span class="detail-value">${this._formatDuration(slackS * 1000)}</span>
+          </div>` : ""}
           <div class="detail-row">
             <span class="detail-label">${this._t("power")}</span>
             <span class="detail-value">${deferred ? this._t("self_use") : scheduled ? "—" : this._formatPower(power)}${
