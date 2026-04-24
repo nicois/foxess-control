@@ -127,6 +127,9 @@ FoxESSDataCoordinator.data  <--- FoxESSRealtimeWS (WS, 5-sec pushes)
                     v
               Inverter.set_work_mode() / EntityAdapter.apply_mode()
                     |
+                    + (discharge with export-limit actuator configured)
+                    |  adapter.set_export_limit_w()  ← D-047
+                    |  modulates hardware export each tick
                     v
               FoxESS Cloud API / HA entity writes
 ```
@@ -134,12 +137,26 @@ FoxESSDataCoordinator.data  <--- FoxESSRealtimeWS (WS, 5-sec pushes)
 ## Key Abstractions
 
 ### InverterAdapter (Protocol)
-**What**: Interface for controlling an inverter's work mode and power.
+**What**: Interface for controlling an inverter's work mode, power,
+and hardware export limit.
 **Why**: Decouples smart session logic from brand-specific API calls.
 The same `listeners.py` state machine works with any brand that
-implements `apply_mode()`, `remove_override()`, `get_max_power_w()`.
-**Implemented by**: `EntityAdapter` (generic, entity-based),
-FoxESS `__init__.py` (cloud API, wraps `Inverter` class).
+implements the protocol's methods.
+**Methods**:
+- `apply_mode(hass, mode, power_w=None, fd_soc=11)` — set work mode
+  and optional forced-discharge/charge power and SoC floor.
+- `remove_override(hass, mode)` — revert to self-use.
+- `get_max_power_w()` — report the inverter's maximum power (W).
+- `set_export_limit_w(hass, value_w)` — write to the hardware
+  export-limit actuator; used by smart discharge to modulate feed-in
+  at the hardware layer instead of mutating the cloud schedule's
+  `fdPwr` field (see D-047). Adapters without a configured
+  export-limit entity should no-op.
+- `get_export_limit_w(hass)` — read current actuator value (W), or
+  `None` when no actuator is configured.
+**Implemented by**: `EntityAdapter` (generic, entity-based, including
+export-limit entity wiring), FoxESS `foxess_adapter.py` (cloud API,
+wraps `Inverter` class + optional FoxESS Modbus export-limit entity).
 
 ### TaperProfile
 **What**: SoC-indexed histogram of observed charge/discharge acceptance
@@ -172,7 +189,8 @@ via `async_set_updated_data()`, giving sensors immediate updates.
 **Path**: `custom_components/foxess_control/foxess/web_session.py`
 **Responsibility**: Web portal authentication (username/password), device
 discovery via `/generic/v0/device/list`, BMS battery temperature retrieval
-via `/generic/v0/device/battery/info` (D-033), WASM signature generation.
+via `/dew/v0/device/detail?id=<compound_id>&category=battery` (D-033),
+WASM signature generation.
 **Lifecycle**: Accepts an optional HA-managed `aiohttp.ClientSession` from
 `async_get_clientsession()` for SSL/proxy/cleanup integration (D-034). When
 HA provides the session, `_owns_session=False` — the session is not closed
@@ -186,6 +204,10 @@ not available through the Open API.
 | Dependency | Role | Why chosen |
 |---|---|---|
 | `wasmtime` | WASM runtime for signature generation | FoxESS web portal requires a specific signature algorithm; WASM is the only available implementation (reverse-engineered from JS) |
+| `aiohttp` | WebSocket client | Standard async HTTP/WS library; HA already uses it |
+| `requests` | REST API client (sync) | Used in the FoxESS client for synchronous API calls within HA's executor |
+| `voluptuous` | Schema validation | Used for service call and config flow schemas; ships with HA but used directly |
+| `homeassistant` | HA framework | Target platform |
 
 ## Simulator Fidelity
 
@@ -216,17 +238,22 @@ to minimise deviations from production behaviour (C-033):
   data for testing graceful degradation.
 - **fdSoc enforcement**: Simulator validates `fdSoc >= 11` on schedule
   writes, matching the real API constraint (C-008).
+- **Hardware export-limit actuator**: Simulator models a per-instance
+  export-limit value that clamps net grid export each tick, letting
+  E2E tests exercise D-044 pacing and D-047 actuator writes without
+  real hardware.
+
 ## Soak Test Infrastructure
 
 The soak test suite (`tests/soak/`) runs real-time charge/discharge
 sessions through the full HA integration + simulator stack, verifying
 invariants throughout multi-hour simulated scenarios.
 
-- **17 scenarios**: 11 charge (basic, solar, spiky load, high-SoC
+- **19 scenarios**: charge (basic, solar, spiky load, high-SoC
   taper, cold battery, large battery, solar exceeds target, solar then
-  spike, heavy load during deferral, tight window) + 6 discharge
+  spike, heavy load during deferral, tight window) + discharge
   (basic, solar, solar exceeds load, spiky load, near min SoC, large
-  battery) + 1 combined (charge then discharge cycle).
+  battery) + combined (charge then discharge cycle).
 - **ScenarioConfig**: Declarative scenario definition (session type,
   window, initial SoC, target SoC, load/solar profiles, battery
   capacity, temperature).
@@ -240,8 +267,3 @@ invariants throughout multi-hour simulated scenarios.
   concurrently.
 - **Nightly execution**: Triggered by systemd timer or CI workflow on
   tag-based schedules.
-
-| `aiohttp` | WebSocket client | Standard async HTTP/WS library; HA already uses it |
-| `requests` | REST API client (sync) | Used in the FoxESS client for synchronous API calls within HA's executor |
-| `voluptuous` | Schema validation | Used for service call and config flow schemas; ships with HA but used directly |
-| `homeassistant` | HA framework | Target platform |

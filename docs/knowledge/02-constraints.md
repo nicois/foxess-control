@@ -361,7 +361,10 @@ the same calendar day. This is a FoxESS API limitation.
 **Rationale**: The FoxESS schedule API uses `startHour/startMinute` and
 `endHour/endMinute` without a date component.
 **Violation consequence**: Undefined schedule behaviour on the inverter.
-**Traces**: D-011;
+**Traces**: enforced directly by
+`smart_battery/services.py::resolve_start_end` (raises
+`ServiceValidationError` when the window would cross midnight) — no
+dedicated D-NNN (simple validator);
 `tests/test_init.py::TestResolveStartEnd::test_crosses_midnight_rejected`
 
 ### C-010: Placeholder schedule groups must be filtered
@@ -445,7 +448,10 @@ violating C-020 (operational transparency).
 **Violation consequence**: User sees "Scheduled" when the listener has
 transitioned to "Charging", or wrong countdown values in dashboard cards.
 Erodes trust and leads to unnecessary manual intervention.
-**Traces**: C-020 (operational transparency);
+**Traces**: (no dedicated D-NNN — enforced by code review + the
+sensor-parity regression tests. Related:  D-002 / D-043 / D-044 all
+depend on the listener algorithm and any sensor that displays their
+phase/timing must use the same formula);
 `tests/test_charge_deferred_sensor.py` (7 tests),
 `tests/test_discharge_deferred_sensor.py` (4 tests);
 fixes: c70addae (charge), 8e10b9a (discharge)

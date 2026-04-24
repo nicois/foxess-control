@@ -79,7 +79,8 @@ power floor constraint.
 **Alternatives considered**:
 - Continue forced discharge to the end: rejected because the last
   10 minutes of grid import offset the feed-in revenue
-**Traces**: C-001;
+**Traces**: C-001, C-017 (end-of-discharge guard is the specific
+10-min enforcement of C-001 near window end);
 `tests/test_smart_battery_algorithms.py::TestShouldSuspendDischarge`
 
 ### D-004: Peak consumption tracking with exponential decay
@@ -271,6 +272,77 @@ D-002 (deferred start), D-005 (feedin budget);
 `tests/test_sensor.py::TestDischargeDeferredCountdown::test_deferred_countdown_grid_export_limit_caps_export_rate`,
 `tests/test_sensor.py::TestDischargeDeferredCountdown::test_deferred_countdown_grid_export_limit_feedin_deadline`,
 `tests/test_smart_battery_algorithms.py::TestFeedinHeadroomAccountsForExportClamp` (6 tests)
+
+### D-047: Hardware export-limit actuator for discharge pacing
+**Decision**: When the integration is configured with an export-limit
+entity (e.g. the FoxESS Modbus `number.*_export_limit` control),
+smart discharge uses a two-channel control scheme:
+1. **Cloud schedule (`fdPwr`)** is pinned at the inverter's maximum
+   power for the entire session — the schedule provides the
+   forced-discharge envelope and nothing more.
+2. **Hardware export-limit actuator** (`adapter.set_export_limit_w`)
+   is written each discharge tick with the paced feed-in target,
+   after passing through `clamp_export_limit_w` to enforce the C-001
+   safety floor of `peak_consumption × 1.5`. The inverter firmware
+   enforces the written value instantaneously, with far lower
+   latency than a schedule mutation.
+Tick writes are gated by `export_limit_min_change_w` (default
+configurable) to avoid actuator churn on sub-threshold changes.
+After resumption from suspension, the next write always fires
+regardless of delta, so the actuator is never left at a stale
+value after the pacing logic re-engages.
+**Context**: FoxESS inverters expose a Modbus register for net
+grid export limit (`fdPwr` on the cloud schedule is a lagging
+control — changes take minutes to apply). On installations with a
+DNO or firmware export cap, the user needs pacing responses to
+occur within seconds, not minutes. Modulating the hardware
+actuator gives near-instant control while the cloud schedule
+continues to provide the forced-discharge envelope.
+**Rationale**: `fdPwr` is coarse: schedule writes take effect at the
+next scheduler evaluation (~1 minute) and propagate through cloud
+eventual-consistency. By contrast the export-limit actuator is a
+direct hardware register write — responses are effectively instant.
+Separating "what mode is the inverter in" (schedule) from "what is
+the current paced feed-in target" (actuator) also avoids the
+double-limit pathology where the paced schedule value and the
+hardware clamp each reduce the effective export, producing an
+under-utilised battery. See D-044 for how pacing in the algorithm
+interacts with this actuator.
+**Priority served**: P-001 (No grid import during forced discharge
+— the actuator is the real-time enforcement of the C-001 floor on
+export-limited sites)
+**Trades against**: none — fast hardware-layer control strictly
+dominates slow schedule-layer control for the specific case where
+an export-limit entity exists
+**Classification**: safety — the actuator enforces the peak-load
+safety floor (C-001) each tick; when a higher power than the floor
+is written, it is a pacing write, but the floor itself is an
+invariant enforcement
+**Alternatives considered**:
+- Modulate `fdPwr` on the cloud schedule every tick: rejected
+  because schedule writes are slow, eventually-consistent, and
+  stress the cloud API (rate limits, errno 40257 risk)
+- Ignore the actuator and only pace via `fdPwr`: rejected because
+  response latency during load spikes would allow sustained
+  import windows before the new schedule propagates
+- Write the actuator on every tick regardless of delta: rejected
+  because it creates unnecessary actuator churn (each write is an
+  HA service call and a Modbus round-trip); the
+  `export_limit_min_change_w` threshold suppresses no-op writes
+**Traces**: C-001 (no-import — floor enforcement), C-037 (grid
+export limit awareness), D-044 (deferral pacing);
+`smart_battery/adapter.py::InverterAdapter.set_export_limit_w`,
+`smart_battery/listeners.py::_discharge_listener` (actuator write
+path, lines ~1373–1414),
+`smart_battery/algorithms.py::clamp_export_limit_w` (C-001 floor),
+`tests/test_export_limit.py::TestClampExportLimitW` (6),
+`tests/test_export_limit.py::TestListenerWriteSuppression` (2),
+`tests/test_export_limit.py::TestListenerStartsAtHardwareMax`,
+`tests/test_export_limit.py::TestListenerOverwriteExternalChanges`,
+`tests/test_export_limit.py::TestSmartDischargeExportLimitSensor` (2),
+`tests/test_export_limit.py::TestAdapterExportLimitInterface`,
+`tests/test_export_limit.py::TestSmartOperationsOverviewAttribute`,
+`tests/test_export_limit.py::TestExportLimitThreshold` (24 total)
 
 ## Key Behaviours
 

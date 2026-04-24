@@ -20,7 +20,7 @@ serving it.
 
 | Priority | Enforced by (C-NNN) | Served by (D-NNN) | Status |
 |---|---|---|---|
-| P-001 No grid import during forced discharge | C-001, C-003, C-013, C-016, C-017, C-024, C-025, C-027 | D-001, D-002, D-003, D-004, D-017, D-018, D-023, D-025, D-026 | ENFORCED |
+| P-001 No grid import during forced discharge | C-001, C-003, C-013, C-016, C-017, C-024, C-025, C-027 | D-001, D-002, D-003, D-004, D-017, D-018, D-023, D-025, D-026, D-047 | ENFORCED |
 | P-002 Respect minimum state of charge | C-002, C-003, C-012, C-013, C-016, C-018, C-019, C-024, C-025, C-027 | D-001, D-016 | ENFORCED |
 | P-003 Meet the user's energy target | C-007, C-008, C-009, C-010, C-011, C-014, C-022, C-023, C-037 | D-005, D-006, D-007, D-011, D-012, D-013, D-014, D-015 (taper), D-028, D-032, D-033, D-037, D-042, D-043, D-044, D-046 | ENFORCED |
 | P-004 Maximise feed-in revenue | (aspirational — no C-NNN) | (no D-NNN currently declares P-004 as primary; D-044 serves P-003 but advances P-004 as a secondary effect) | ASPIRATIONAL |
@@ -63,14 +63,15 @@ declaration.
 
 ## Classification Summary
 
-Of 45 design decisions (D-001..D-046, D-024 retired, D-041 used for
-both `websocket-realtime.md` and `lovelace-cards.md`):
+Across 49 decision entries (IDs D-001..D-047, D-024 retired; D-014 and
+D-041 each reuse the same ID for two distinct decisions in different
+design files — collisions tracked in META.md):
 
 | Classification | Count | Meaning |
 |---|---|---|
-| safety   | ~18 | Enforces a C-NNN invariant; non-negotiable without changing the C-NNN |
-| pacing   | ~13 | Optimises a target; tunable, reviewable when assumptions change |
-| other    | ~14 | Infrastructure / observability / architectural decisions |
+| safety   | 15 | Enforces a C-NNN invariant; non-negotiable without changing the C-NNN |
+| pacing   | 13 | Optimises a target; tunable, reviewable when assumptions change |
+| other    | 21 | Infrastructure / observability / architectural decisions |
 
 Pacing decisions are the ones most vulnerable to priority
 inversion — their language often borrows from safety, but they
@@ -83,26 +84,26 @@ against a scenario that the system couldn't actually reach.
 
 | Constraint | Design | Tests | Status |
 |---|---|---|---|
-| C-001 No grid import during discharge | D-001, D-002, D-003, D-004, D-005, D-007, D-037, D-044 | `TestCalculateDischargePower` (6), `TestDischargePowerFeedinConstraint` (2), `TestShouldSuspendDischarge::test_high_consumption_suspends`, `TestCalculateDischargeDeferredStart` (14, incl. `test_tight_window_feedin_does_not_over_defer`), E2E: `test_discharge_starts`, `test_ws_connects_after_deferred_start`, `test_feedin_power_adjusts_over_time` | COVERED |
+| C-001 No grid import during discharge | D-001, D-002, D-003, D-004, D-005, D-007, D-037, D-044, D-047 | `TestCalculateDischargePower` (6), `TestDischargePowerFeedinConstraint` (2), `TestShouldSuspendDischarge::test_high_consumption_suspends`, `TestCalculateDischargeDeferredStart` (14, incl. `test_tight_window_feedin_does_not_over_defer`), `TestClampExportLimitW` (6), `TestFeedinHeadroomAccountsForExportClamp` (6), E2E: `test_discharge_starts`, `test_ws_connects_after_deferred_start`, `test_feedin_power_adjusts_over_time` | COVERED |
 | C-002 Never discharge below min SoC | D-001 | `TestCalculateDischargePower::test_soc_at_min`, `test_soc_below_min`, `TestShouldSuspendDischarge::test_soc_at_min_suspends`, `test_soc_below_min_suspends`, `TestSocStabilityCounters` (4), E2E: `test_discharge_drains_battery` | COVERED |
 | C-003 Session identity prevents races | D-017, D-018 | `TestSessionPersistence` (3), `TestRecoverSessions` (13), E2E: `test_ws_connects_on_second_session` | COVERED |
 | C-004 WS watts / coordinator kW | D-010, D-041 | `TestMapWsToCoordinator::test_real_world_sample`, `test_basic_mapping_export`, `TestIsPlausible` (11), `TestWsPlausibilityFilter` (3), E2E: `test_ws_unit_mismatch_handled` | COVERED |
 | C-005 WS stale message filter | D-008, D-041 | `TestStaleness::test_stale_messages_skipped`, `TestIsPlausible` (11), `TestWsPlausibilityFilter` (3) | COVERED |
 | C-006 Grid direction from power balance | D-010 | `TestMapWsToCoordinator::test_grid_importing_from_balance`, `test_grid_exporting_from_balance`, `test_grid_fallback_to_gridstatus`, `test_grid_balance_unreliable_unmeasured_generation`, `test_grid_balance_unreliable_importing` | COVERED |
 | C-007 REST resets WS integration state | D-009 | `TestInjectRealtimeData::test_rest_poll_resets_integration_state`, `test_feedin_trapezoidal_integration`, `test_feedin_not_integrated_on_first_ws_update`, E2E: `test_ws_linger_captures_post_discharge_data` | COVERED |
-| C-008 fdSoc >= 11, minSocOnGrid <= fdSoc | D-011, D-014 | `TestSanitizeGroup::test_clamps_fd_soc_to_api_minimum` | COVERED |
-| C-009 No midnight-crossing schedules | D-011 | `TestResolveStartEnd::test_crosses_midnight_rejected` | COVERED |
-| C-010 Placeholder groups filtered | D-011, D-014 | `TestIsPlaceholder` (2+) | COVERED |
-| C-011 Extra fields stripped | D-011, D-014 | `TestSanitizeGroup::test_strips_unknown_keys` | COVERED |
+| C-008 fdSoc >= 11, minSocOnGrid <= fdSoc | D-014 (foxess-api) | `TestSanitizeGroup::test_clamps_fd_soc_to_api_minimum` | COVERED |
+| C-009 No midnight-crossing schedules | -- | `TestResolveStartEnd::test_crosses_midnight_rejected` | ACCEPTED |
+| C-010 Placeholder groups filtered | D-014 (foxess-api) | `TestIsPlaceholder` (2+) | COVERED |
+| C-011 Extra fields stripped | D-014 (foxess-api) | `TestSanitizeGroup::test_strips_unknown_keys` | COVERED |
 | C-012 SoC unavailability cancels session | D-019 | `TestHandleSmartCharge::test_soc_unavailable_aborts_after_threshold`, `test_soc_available_resets_unavailable_count` | COVERED |
 | C-013 4-hour max override duration | -- | `TestResolveStartEnd::test_exceeds_max_hours`, `test_zero_duration_rejected` | ACCEPTED |
-| C-014 Taper profile plausibility | D-006, D-011, D-012, D-013, D-014, D-015 | `TestIsPlausible` (1+), `TestRecordCharge` (4), `TestRecordChargeTemp`, `TestTempFactor`, `TestEstimateChargeHours`, `TestSerialization::test_from_dict_clamps_ratios`, `TestCalculateChargePower::test_trajectory_behind_triggers_max_power`, `test_trajectory_ahead_resumes_normal`, `TestCalculateDeferredStart::test_taper_*` (2) | COVERED |
+| C-014 Taper profile plausibility | D-006, D-011, D-012, D-013, D-014 (taper), D-015 (taper) | `TestIsPlausible` (1+), `TestRecordCharge` (4), `TestRecordChargeTemp`, `TestTempFactor`, `TestEstimateChargeHours`, `TestSerialization::test_from_dict_clamps_ratios`, `TestCalculateChargePower::test_trajectory_behind_triggers_max_power`, `test_trajectory_ahead_resumes_normal`, `TestCalculateDeferredStart::test_taper_*` (2) | COVERED |
 | C-015 Vendored smart_battery matches canonical | -- | `test_vendored_copy_matches_canonical` | ACCEPTED |
 | C-016 Cancel listeners before awaits | D-018 | `test_cancel_smart_session_is_synchronous` | COVERED |
 | C-017 End-of-discharge guard | D-003 | `TestShouldSuspendDischarge::test_high_consumption_suspends` | COVERED |
 | C-018 Unmanaged work mode protection | D-016 | `TestCheckScheduleSafe` (7), `test_rejects_schedule_with_backup_mode` | COVERED |
 | C-019 Discharge SoC unavailability abort | D-019 | `TestDischargeSocUnavailability` (2) | COVERED |
-| C-020 Operational transparency | D-008, D-009, D-021, D-027, D-028, D-029, D-030, D-033, D-035, D-036, D-038, D-039, D-040 | `TestSessionContextFilter` (7), `TestInstallRemove` (2), `TestDebugLogHandlerWithSession` (3), `TestBMSBatteryTemperature` (3 mapped), `TestBatteryDetailEndpoint` (2 mapped), `TestCompoundIdFromWebSocket` (1 mapped), E2E: `test_data_source_badge_matches_mode` (3), `test_stale_badge_shown_for_old_api_data` (3), `test_api_source_when_idle`, `test_ws_always_connects_without_session`, `test_ws_mode_persists_via_options_flow`, `test_ws_linger_captures_post_discharge_data`, `test_house_load_never_greyed`, `test_pv_values_consistent_with_solar_total` (3), `test_node_click_opens_more_info`, `test_default_config_renders_all_four_boxes`, `test_custom_boxes_*` (3), `test_progress_hidden_when_idle`, `test_progress_visible_during_discharge` (3), `TestFormInputPersistence` (5) | COVERED |
+| C-020 Operational transparency | D-008, D-009, D-021, D-027, D-028, D-029, D-030, D-033, D-035, D-036, D-038, D-039, D-040 | `TestSessionContextFilter` (7), `TestInstallRemove` (2), `TestDebugLogHandlerWithSession` (3), `TestBMSBatteryTemperature` (3 mapped), `TestBatteryDetailEndpoint` (2 mapped), `TestCompoundIdFromWebSocket` (1 mapped), `TestSmartDischargeExportLimitSensor` (2), `TestSmartOperationsOverviewAttribute`, E2E: `test_data_source_badge_matches_mode` (3), `test_stale_badge_shown_for_old_api_data` (3), `test_api_source_when_idle`, `test_ws_always_connects_without_session`, `test_ws_mode_persists_via_options_flow`, `test_ws_linger_captures_post_discharge_data`, `test_house_load_never_greyed`, `test_pv_values_consistent_with_solar_total` (3), `test_node_click_opens_more_info`, `test_default_config_renders_all_four_boxes`, `test_custom_boxes_*` (3), `test_progress_hidden_when_idle`, `test_progress_visible_during_discharge` (3), `TestFormInputPersistence` (5) | COVERED |
 | C-021 Brand-agnostic code in common package | D-022 | `test_smart_battery_has_no_brand_imports`, `test_vendored_copy_matches_canonical` | COVERED |
 | C-022 Unreachable charge target surfaced | D-028 | `TestIsChargeTargetReachable` (7) | COVERED |
 | C-024 Safe state on failure | D-023, D-025, D-026, D-031, D-032, D-034, D-042, D-045 | `TestTransientApiErrorResilience` (3), `TestStaleWorkModeAfterCleanupFailure` (2), `TestRecoverSessions` (13), E2E: `test_ws_recovers_after_stream_stolen`, `test_ws_reconnects_after_reload_at_max_power`, `TestReloadRecovery` (7), `test_deferred_to_discharging_triggers_ws` | COVERED |
@@ -110,7 +111,7 @@ against a scenario that the system couldn't actually reach.
 | C-026 Proactive error surfacing | D-029, D-038 | `TestErrorSurfacing` (2) | COVERED |
 | C-027 Progressive schedule extension | D-023 | `TestRecoverSessions` (13, schedule horizon verification), E2E: `test_schedule_horizon_during_discharge` | COVERED |
 | C-028 Simulator over mocks | -- | `test_client.py` (9), `test_inverter.py` (10) use simulator | ACCEPTED |
-| C-029 E2E for HA-dependent behaviour | -- | `tests/e2e/test_e2e.py` (62), `tests/e2e/test_ui.py` (80) = 130 E2E (after deselection); `tests/soak/` (17 soak scenarios) | ACCEPTED |
+| C-029 E2E for HA-dependent behaviour | -- | 136 E2E (`tests/e2e/test_e2e.py` + `tests/e2e/test_ui.py`, parametrized across cloud/entity/data sources); 19 soak (`tests/soak/`) | ACCEPTED |
 | C-030 E2E parallel before tagging | -- | `.githooks/pre-push` enforces gate | ACCEPTED |
 | C-031 No flaky tests | -- | -- (meta-constraint; traces to C-028, C-029) | ACCEPTED |
 | C-032 Reproduce failure before fixing | -- | `TestSocInterpolationDuringDischarge`; `/regression-test` skill | ACCEPTED |
@@ -121,7 +122,7 @@ against a scenario that the system couldn't actually reach.
 | C-036 Typed domain data access | -- | -- (enforced by semgrep `no-raw-hass-data-access`) | ACCEPTED |
 
 | C-038 Sensor-listener parameter parity | D-002, D-005, D-043 | `test_charge_deferred_sensor.py` (7), `test_discharge_deferred_sensor.py` (4) | COVERED |
-| C-037 Grid export limit awareness | D-002, D-005, D-044 | `TestGridExportLimitDeferral` (4), `TestFeedinHeadroomAccountsForExportClamp` (6 — clamp-slack-aware headroom, 2026-04-24), `test_deferred_countdown_with_grid_export_limit_and_consumption` | COVERED |
+| C-037 Grid export limit awareness | D-002, D-005, D-044, D-047 | `TestGridExportLimitDeferral` (4), `TestFeedinHeadroomAccountsForExportClamp` (6 — clamp-slack-aware headroom, 2026-04-24), `TestListenerWriteSuppression` (2), `TestListenerStartsAtHardwareMax`, `TestListenerOverwriteExternalChanges`, `TestAdapterExportLimitInterface`, `TestExportLimitThreshold`, `test_deferred_countdown_with_grid_export_limit_and_consumption` | COVERED |
 | C-023 Solar-first during ForceCharge | D-043 | `tests/soak/test_scenarios.py::test_charge_with_solar`, `test_charge_solar_exceeds_target`, `test_charge_solar_then_spike` | ACCEPTED |
 
 ## Gaps
@@ -142,8 +143,16 @@ against a scenario that the system couldn't actually reach.
 - **C-028**: Simulator over mocks with instance isolation — testing
   methodology enforced by infrastructure (simulator exists, tests use
   it, per-app state isolation). No D-NNN expected.
+- **C-009**: No midnight-crossing schedules — simple validator in
+  `smart_battery/services.py::resolve_start_end` (raises
+  `ServiceValidationError`). No D-NNN needed; tested directly.
 - **C-029**: E2E for HA-dependent behaviour — enforced by E2E test
-  suite existence (128 tests). No D-NNN expected.
+  suite existence (136 tests). No D-NNN expected.
+- **C-038**: Sensor-listener parameter parity — enforced by
+  discipline + regression tests (`test_charge_deferred_sensor.py`,
+  `test_discharge_deferred_sensor.py`). The algorithms being called
+  are D-002 / D-005 / D-043 / D-044; no separate D-NNN for
+  "sensors must call the same function as listeners".
 - **C-030**: E2E parallel before tagging — enforced by `.githooks/
   pre-push`. No D-NNN expected.
 - **C-031**: No flaky tests — meta-constraint enforced by discipline,
@@ -194,13 +203,16 @@ against a scenario that the system couldn't actually reach.
 
 - **Priorities**: 7 (P-001..P-007, introduced 2026-04-24)
 - **Total constraints**: 38 (all active; C-023 reclassified as hardware-satisfied)
-- **Design decisions**: 45 (D-001..D-046, D-024 retired; D-014 and D-041
-  each refer to two different entries in different design files — these
-  ID collisions are carried over from earlier passes and tracked in
-  META.md for a separate fix)
-- **Fully covered**: 27 (71%)
+- **Design decisions**: 46 unique (D-001..D-047, D-024 retired; D-014 and
+  D-041 each refer to two different entries in different design files —
+  ID collisions carried over from earlier passes, tracked in META.md
+  for a separate fix)
+- **Fully covered**: 25 (66%)
 - **Partial (actionable)**: 0
-- **Accepted (non-actionable)**: 12 (33%) — C-013, C-015, C-023, C-028–C-036
+- **Accepted (non-actionable)**: 13 (34%) — C-009, C-013, C-015, C-023,
+  C-028–C-036 (C-038 kept as COVERED via its related D-NNN even
+  though it has no *dedicated* design decision — see the
+  Non-actionable section for the reasoning)
 - **Gaps**: 0
 - **Unjustified design decisions**: 2 (D-015, D-043 — no C-NNN; D-020
   reclassified to implicit C-020 trace)
@@ -208,14 +220,13 @@ against a scenario that the system couldn't actually reach.
 - **Priority inversions**: 0
 - **Unconstrained priorities**: 1 (P-004 — aspirational by design)
 - **Unprioritised constraints**: 0 (all 38 C-NNN name P-NNN)
-- **Unprioritised decisions**: 0 (all 45 D-NNN name P-NNN + classification)
+- **Unprioritised decisions**: 0 (all 46 D-NNN name P-NNN + classification)
 - **Active regression**: none
 - **Orphan tests**: ~160 unit (display, plumbing, lifecycle tests)
-- **Unit tests**: 792 (786 prior + 6 from
-  `TestFeedinHeadroomAccountsForExportClamp`, 2026-04-24)
-- **E2E tests**: 130 (62 `test_e2e.py` + 80 `test_ui.py`, parametrized across cloud/entity, 12 invalid combos deselected)
-- **Soak tests**: 17 (real-time charge/discharge scenarios, nightly)
-- **Total**: 939
+- **Unit tests**: 863 (authoritative `pytest --co -q` 2026-04-24)
+- **E2E tests**: 136 (parametrized across cloud/entity/data sources)
+- **Soak tests**: 19 (real-time charge/discharge scenarios, nightly)
+- **Total**: 1018
 
 ## HA Integration Quality Scale
 

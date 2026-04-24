@@ -2,7 +2,7 @@
 project: FoxESS Control
 created: 2026-04-14
 last_updated: 2026-04-24
-last_reflection: 2026-04-24T16:45:00+10:00
+last_reflection: 2026-04-24T19:00:00+10:00
 ---
 # Knowledge Tree Meta
 
@@ -620,3 +620,48 @@ none so far.
 - The fix commit pair (`ad624da` Test + `2dee100` Fix) is the
   concrete example of how a priority-inversion discovery leads to
   tightened tests and a tighter algorithm.
+
+### 2026-04-24 — Update pass (export-limit actuator + stale architecture)
+
+**Changes detected** (post-priority-introduction `/project-overview update`):
+- Source commits since `c0b1327` (last 03-architecture touch)
+  introduced an export-limit actuator on the `InverterAdapter`
+  protocol (`set_export_limit_w` / `get_export_limit_w`, commits
+  5861af7..5195a64, d2fcd19, 52f4ea0) and the 2026-04-24
+  export-limit-clamp headroom fix (`2dee100`). Test count grew
+  786 → 863 unit, 130 → 136 E2E, 17 → 19 soak = 1018 total.
+- `03-architecture.md` had a structural defect: a "Soak Test
+  Infrastructure" block was inserted mid-External Dependencies
+  table, breaking the markdown. The BMS-temperature endpoint
+  reference on line 175 was also stale (`/generic/v0/device/
+  battery/info` instead of `/dew/v0/device/detail`).
+
+**Actions taken**:
+- `03-architecture.md`: repaired the External Dependencies table,
+  moved Soak Test Infrastructure to its own section, corrected the
+  BMS endpoint, added `set_export_limit_w` / `get_export_limit_w`
+  to the InverterAdapter method list, and extended the data-flow
+  diagram to show the export-limit write path.
+- `04-design/smart-discharge.md`: added **D-047 Hardware
+  export-limit actuator for discharge pacing**, classified safety
+  (serves P-001 via C-001 floor enforcement). Describes the
+  two-channel control scheme (cloud schedule at max, hardware
+  actuator modulated each tick with threshold-gated writes).
+- `06-tests.md`: refreshed counts to 863 / 136 / 19 / 1018; added
+  sections for the `TestFeedinHeadroomAccountsForExportClamp` (6)
+  and `tests/test_export_limit.py::*` (24) groups.
+- `05-coverage.md`: added D-047 to P-001, C-001, C-020, C-037
+  rows; updated summary counts; corrected classification tallies
+  to measured values (15 safety / 13 pacing / 21 other — the
+  previous ~18/~13/~14 estimate was a hand-wave).
+
+**Observations**:
+- The `/update` workflow correctly surfaced the
+  `set_export_limit_w` adapter change as an architecture gap and
+  flagged the D-044 textual staleness — both are exactly the kinds
+  of issues the tree is meant to catch.
+- The Soak Test Infrastructure insertion bug illustrates why
+  architecture docs benefit from headings (`## Soak Test
+  Infrastructure`) rather than being slipped into mid-table. A
+  future skill-level improvement could add a markdown structural
+  sanity check (tables intact, no orphan rows after blank lines).

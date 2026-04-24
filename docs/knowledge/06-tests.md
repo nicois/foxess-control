@@ -6,7 +6,8 @@ traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-786 unit + 130 E2E + 17 soak = 933 total.
+863 unit + 136 E2E + 19 soak = 1018 total (authoritative count via
+`pytest --co -q` 2026-04-24).
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
@@ -39,6 +40,24 @@ charge/discharge scenarios through containerised HA + simulator
 | `TestShouldSuspendDischarge::test_high_consumption_suspends` | End-guard suspension | C-001 |
 | `TestCalculateDischargeDeferredStart::*` (14 tests) | Deferred start timing | C-001 |
 | `TestCalculateDischargeDeferredStart::test_tight_window_feedin_does_not_over_defer` | Feedin cap skipped in tight windows | C-001 |
+| `TestFeedinHeadroomAccountsForExportClamp::*` (6 tests) | Doubled feed-in headroom skipped when export clamp slack exceeds peak load (D-044 2026-04-24 refinement) | C-037 |
+
+## Export-Limit Actuator (D-047)
+
+**Constraints**: C-001, C-037
+**Source**: `tests/test_export_limit.py` (24 tests)
+
+| Test | Verifies | Constraint |
+|---|---|---|
+| `TestClampExportLimitW::*` (6 tests) | C-001 floor enforcement and hardware-max upper clamp | C-001 |
+| `TestListenerWriteSuppression::test_small_delta_suppressed` | Sub-threshold changes suppressed to avoid actuator churn | D-047 |
+| `TestListenerWriteSuppression::test_large_delta_written` | Over-threshold changes do write | D-047 |
+| `TestListenerStartsAtHardwareMax::test_start_writes_hw_max` | Session start pins actuator at hardware max | D-047 |
+| `TestListenerOverwriteExternalChanges::test_external_change_overwritten` | External changes to the actuator are reasserted | D-047 |
+| `TestSmartDischargeExportLimitSensor::*` (2 tests) | Sensor surfaces modulated + max; unavailable when no session | C-020 |
+| `TestAdapterExportLimitInterface::test_get_unavailable_returns_none` | Adapters without entity return None | D-047 |
+| `TestSmartOperationsOverviewAttribute::*` | Overview attribute reflects last written | C-020 |
+| `TestExportLimitThreshold::test_default_threshold_is_50w` | Default `export_limit_min_change_w` | D-047 |
 
 ## Smart Charge Pacing
 

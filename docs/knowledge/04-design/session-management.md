@@ -65,7 +65,8 @@ state is small (one dict per session type).
 **Alternatives considered**:
 - No persistence (require manual restart): rejected because an
   unmanaged forced-mode inverter is a safety risk
-**Traces**: C-012;
+**Traces**: C-012, C-019 (discharge-path SoC unavailability abort
+reuses the same persistence + session-abort machinery);
 `tests/test_services.py` (session lifecycle)
 
 ### D-020: start_soc persistence for progress display
