@@ -25,6 +25,9 @@ session before taking action.
 active, the old session's timers may not have been cancelled yet.
 **Rationale**: Identity check is a simple, reliable guard against stale
 callbacks interfering with the new session.
+**Priority served**: P-001 (No grid import during forced discharge)
+**Trades against**: none
+**Classification**: safety
 **Alternatives considered**:
 - Cancel all timers synchronously: insufficient because HA event loop
   may have already queued callback invocations
@@ -39,6 +42,9 @@ synchronously (no `await` between the decision and the unsubscription).
 actually unsubscribing, a stale timer callback can fire in between.
 **Rationale**: Prevents a race where a stale callback re-enables an
 override that the cancellation is trying to remove.
+**Priority served**: P-001 (No grid import during forced discharge)
+**Trades against**: none
+**Classification**: safety
 **Alternatives considered**:
 - Rely on session_id check only: insufficient because some callbacks
   have side effects before the session_id check
@@ -53,6 +59,9 @@ lose the active charge/discharge state, leaving the inverter in forced
 mode with no management.
 **Rationale**: HA Store is the standard persistence mechanism. Session
 state is small (one dict per session type).
+**Priority served**: P-003 (Meet the user's energy target)
+**Trades against**: none
+**Classification**: other
 **Alternatives considered**:
 - No persistence (require manual restart): rejected because an
   unmanaged forced-mode inverter is a safety risk
@@ -66,6 +75,9 @@ store so the progress bar can show accurate progress after restart.
 but start SoC is lost. Without it, the progress bar shows current SoC
 as both start and current (no progress visible).
 **Rationale**: Small addition to persisted state, large UX improvement.
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: other
 **Traces**:
 `tests/test_sensor.py::TestBatteryForecastSensor`
 
@@ -83,6 +95,9 @@ Modbus responds in milliseconds vs seconds for cloud API, enabling
 more responsive pacing; (2) no cloud dependency — smart operations
 continue to function during internet outages. Both directly support
 the vision of maximum value and maximum reliability.
+**Priority served**: P-006 (Brand portability)
+**Trades against**: none
+**Classification**: other
 **Trade-offs**: Entity mode bypasses schedule-group validation (C-008,
 C-009, C-010, C-011) since Modbus control doesn't use the FoxESS
 schedule API. It also cannot detect unmanaged modes (C-018) via
@@ -119,6 +134,9 @@ concerns: session lifecycle (shared) and pacing strategy (conditional).
 All session infrastructure (D-017 identity tokens, D-018 synchronous
 cancellation, D-025 circuit breaker, D-032 restart recovery) applies
 uniformly to both force and smart sessions.
+**Priority served**: P-007 (Engineering process integrity)
+**Trades against**: none
+**Classification**: other
 **Alternatives considered**:
 - Separate force/smart code paths: rejected due to duplication and
   divergence risk
@@ -162,6 +180,9 @@ tolerance (3 errors × 5 min + 5 ticks × 5 min). With discharge ticks at
 1 min, ~8 min (3 + 5 min). This covers most transient cloud outages.
 The replay mechanism ensures that even when a session does abort, the
 user's scheduled operation is retried rather than silently lost.
+**Priority served**: P-001 (No grid import during forced discharge)
+**Trades against**: none
+**Classification**: safety
 **Alternatives considered**:
 - Single-tier abort after N errors: replaced because it was too
   aggressive for longer cloud outages
@@ -192,6 +213,9 @@ best-effort. The REST poll cycle already runs every 60s, so
 piggybacking the retry adds no new timers. The cleanup is idempotent
 — retrying a removal that already succeeded is harmless (the group
 is already gone).
+**Priority served**: P-001 (No grid import during forced discharge)
+**Trades against**: none
+**Classification**: safety
 **Alternatives considered**:
 - Single delayed retry (60s timer): insufficient — the API outage
   could last longer than one retry
@@ -218,6 +242,9 @@ properties without parsing log message text.
 changes to existing `_LOGGER.info/debug/warning` call sites. The
 filter is brand-agnostic (lives in `smart_battery/`) and receives
 session state via a context getter callback injected at setup time.
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: other
 **Alternatives considered**:
 - Wrapper logger class: rejected because it requires changing every
   call site
@@ -246,6 +273,9 @@ persisting across sessions.
 (3 failures), session abort from `MAX_SOC_UNAVAILABLE_COUNT` (3 checks
 / 15 minutes). Single transient errors are not surfaced — they are
 retried silently per D-025.
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: safety
 **Alternatives considered**:
 - HA persistent notification: rejected because it is hard to clear
   programmatically when the next session starts
@@ -274,6 +304,9 @@ bridge layer (`__getitem__`, `__contains__`, `get`) on
 IDE autocomplete, and aligns with HA's direction. The migration was
 completed incrementally (dict → bridge → typed attributes → bridge
 removal) to avoid a risky big-bang rewrite.
+**Priority served**: P-007 (Engineering process integrity)
+**Trades against**: none
+**Classification**: other
 **Alternatives considered**:
 - Big-bang migration (remove all dict access at once): rejected
   because the integration had ~30 dict access sites; incremental is
@@ -301,6 +334,9 @@ the horizon adjusts the schedule end dynamically.
 overhead. Three-layer validation prevents stale or corrupted sessions
 from crashing the integration. Work-mode-only matching accommodates
 dynamic schedule horizons.
+**Priority served**: P-003 (Meet the user's energy target)
+**Trades against**: none
+**Classification**: other
 **Alternatives considered**:
 - Continuous state writes: rejected for I/O overhead during active
   sessions

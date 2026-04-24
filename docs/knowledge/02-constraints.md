@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 2
-last_verified: 2026-04-21
+last_verified: 2026-04-24
 traces_up: [01-vision.md]
 traces_down: [03-architecture.md, 04-design/]
 ---
@@ -22,6 +22,7 @@ multiple invariants and design decisions below it.
 **Statement**: The user must be able to determine the system's current
 state, what it is doing, and why, from the UI alone — without
 inspecting logs, developer tools, or source code.
+**Priority enforced**: P-005 (operational transparency)
 **Rationale**: Smart battery operations involve time-dependent pacing,
 deferred starts, session recovery, and multiple data sources. When
 something unexpected happens (e.g. discharge not starting, values
@@ -38,6 +39,7 @@ C-022 (unreachable target surfaced), C-026 (error surfacing)
 directly relate to a specific inverter brand must be placed in the
 `smart_battery/` common package, not in brand-specific integration
 directories.
+**Priority enforced**: P-006 (brand portability)
 **Rationale**: The strategic direction is multi-brand support. Code
 that lives in `custom_components/foxess_control/` but has no FoxESS
 dependency becomes an obstacle — it must be duplicated or extracted
@@ -53,7 +55,9 @@ brand integration and risking divergence between copies.
 in a session callback, API becoming unresponsive, or integration
 unload — the system must ensure that forced charge/discharge
 overrides do not persist long enough to cause serious inconvenience
-to the user. Transient errors (single API timeout, brief DNS outage)
+to the user.
+**Priority enforced**: P-001 (no grid import) and P-002 (min SoC) —
+an abandoned forced mode can violate both Transient errors (single API timeout, brief DNS outage)
 must be tolerated and retried on the next timer tick. After
 `MAX_CONSECUTIVE_ADAPTER_ERRORS` (3) consecutive failures, a circuit
 breaker opens: the session holds its current position (no adapter
@@ -82,7 +86,10 @@ adds further tolerance: a brief API outage (< 25 min for charge,
 **Statement**: When a smart session ends (normally, by cancellation,
 or by failure), all inverter overrides created by that session must
 be fully removed and the inverter returned to self-use before a new
-session can start. Transient state from the previous session (peak
+session can start.
+**Priority enforced**: P-001 (no grid import) and P-002 (min SoC) —
+stale state from the previous session can cause a new session to
+violate either invariant Transient state from the previous session (peak
 consumption tracking, taper tick counters, feed-in baselines) must
 not leak into the next session.
 **Rationale**: Back-to-back sessions are a supported use case (C-013).
@@ -106,6 +113,7 @@ and the user's configuration.
 **Statement**: During forced discharge, inverter output power must be
 floored at `max(paced_power, peak_consumption * 1.5)` to prevent the
 house drawing from the grid.
+**Priority enforced**: P-001 (no grid import)
 **Rationale**: When paced discharge power drops below household load,
 the shortfall is imported from the grid. This defeats the purpose of
 discharge (self-consumption or feed-in) and incurs cost. Import risk
@@ -122,6 +130,7 @@ windows, inflating electricity costs.
 `tests/test_smart_battery_algorithms.py::TestShouldSuspendDischarge`
 
 ### C-002: Never discharge below minimum SoC
+**Priority enforced**: P-002 (respect minimum SoC)
 **Statement**: Discharge must suspend when battery SoC reaches or drops
 below the configured `min_soc`. Two mechanisms enforce this:
 (a) `should_suspend_discharge()` (pure function) returns True when
@@ -139,6 +148,9 @@ no backup reserve.
 `tests/test_services.py::TestSocStabilityCounters`
 
 ### C-003: Session identity prevents stale callback races
+**Priority enforced**: P-001 (no grid import) and P-002 (min SoC) —
+stale callbacks corrupt state and can cause either invariant to
+silently fail
 **Statement**: Every smart session receives a unique `session_id`.
 Periodic callbacks verify `cur_state["session_id"] == my_session_id`
 before taking any action. Stale callbacks from cancelled sessions are
@@ -152,6 +164,8 @@ session's power setting or cancels it.
 `tests/test_init.py` (session lifecycle tests)
 
 ### C-012: SoC unavailability cancels session after 15 minutes
+**Priority enforced**: P-002 (min SoC) — operating blind risks
+over-discharge past the floor
 **Statement**: If the SoC entity is unavailable for 3 consecutive checks
 (3 x 5 min = 15 min), the smart session is cancelled.
 **Rationale**: Operating blind without SoC data risks over-charging or
@@ -160,6 +174,8 @@ over-discharging.
 **Traces**: D-019; `smart_battery/const.py:52`
 
 ### C-013: Maximum override duration is 4 hours
+**Priority enforced**: P-001 (no grid import) and P-002 (min SoC) —
+bounded override duration caps the blast radius of any runaway session
 **Statement**: Service calls for force charge/discharge/feedin are
 capped at 4 hours (`MAX_OVERRIDE_HOURS`).
 **Rationale**: Prevents accidental indefinite forced operations that
@@ -171,6 +187,9 @@ the first one has finished.
 `tests/test_init.py::TestResolveStartEnd::test_exceeds_max_hours`
 
 ### C-016: Cancel listeners before awaits
+**Priority enforced**: P-001 (no grid import) and P-002 (min SoC) —
+a stale callback re-enabling an override is the same class of
+defect as C-003
 **Statement**: When cancelling a smart session, all listener
 unsubscriptions must happen synchronously before any `await` calls.
 **Rationale**: If an `await` yields, a stale timer callback can fire
@@ -181,6 +200,9 @@ cancellation, re-enabling an override that should be removed.
 **Traces**: D-018
 
 ### C-017: End-of-discharge guard
+**Priority enforced**: P-001 (no grid import) — the guard specifically
+protects against tail-end import when paced power would fall below
+house load
 **Statement**: When remaining energy above min_soc cannot sustain the
 discharge safety floor for `_END_GUARD_MINUTES` (10 minutes), forced
 discharge must suspend and switch to self-use.
@@ -193,6 +215,8 @@ below house load.
 `tests/test_smart_battery_algorithms.py::TestShouldSuspendDischarge::test_high_consumption_suspends`
 
 ### C-018: Unmanaged work mode protection
+**Priority enforced**: P-002 (min SoC) — silently removing a Backup
+schedule leaves the user without the reserve they configured
 **Statement**: Service calls must refuse to modify the inverter schedule
 when non-managed work modes (e.g. Backup) are present in existing
 schedule groups.
@@ -205,6 +229,9 @@ as the baseline mode.
 `tests/test_init.py::TestMergeWithExisting::test_rejects_schedule_with_backup_mode`
 
 ### C-019: Discharge SoC unavailability aborts session
+**Priority enforced**: P-002 (min SoC) — operating blind during
+forced discharge is the exact scenario that risks breaching the
+min-SoC invariant
 **Statement**: If the SoC entity is unavailable for
 `MAX_SOC_UNAVAILABLE_COUNT` (3) consecutive checks, the smart
 discharge session is cancelled and the inverter reverted to self-use,
@@ -221,6 +248,9 @@ SoC feedback, risking over-discharge.
 ## Invariants — Data Integrity
 
 ### C-004: WebSocket values are in watts; coordinator expects kW
+**Priority enforced**: P-005 (operational transparency) — incorrect
+units surface as wrong dashboard values, which also corrupts the
+taper profile and silently degrades pacing accuracy
 **Statement**: All WebSocket power values are strings representing
 **watts**. They must be converted to kW before injection into the
 coordinator. The per-field `unit` property is authoritative — when
@@ -234,6 +264,9 @@ too small on dashboard cards; taper profile corruption.
 `tests/test_realtime_ws.py::TestMapWsToCoordinator`
 
 ### C-005: WebSocket stale messages must be filtered
+**Priority enforced**: P-005 (operational transparency) — stale
+values displayed in the UI undermine the user's ability to
+understand current system state
 **Statement**: WebSocket messages with `timeDiff > 30` seconds must be
 discarded. The first message after connecting is typically 30-200+
 seconds stale (cached cloud data).
@@ -245,6 +278,8 @@ grid/battery/solar power immediately after WS connects.
 `tests/test_realtime_ws.py::TestStaleness::test_stale_messages_skipped`
 
 ### C-006: Grid direction derived from power balance
+**Priority enforced**: P-005 (operational transparency) — wrong grid
+direction is the most visible possible data-integrity failure
 **Statement**: Grid import/export direction is computed as
 `net = load + bat_charge - bat_discharge - solar`. Positive = importing,
 negative = exporting. The `gridStatus` field is used as fallback when:
@@ -264,6 +299,9 @@ dashboard; feed-in energy integration goes wrong.
 `tests/test_realtime_ws.py::TestMapWsToCoordinator::test_grid_balance_unreliable_importing`
 
 ### C-007: REST poll resets WebSocket integration state
+**Priority enforced**: P-003 (energy target) — the feed-in target is
+tracked against integrated energy; accumulated drift causes the
+session to stop early or late
 **Statement**: When a REST API poll completes, the WebSocket feed-in
 integration baseline is reset and the authoritative REST `feedin` value
 is restored.
@@ -276,6 +314,9 @@ reading over time.
 `tests/test_coordinator.py::TestInjectRealtimeData::test_rest_poll_resets_integration_state`
 
 ### C-014: Taper profile plausibility check
+**Priority enforced**: P-003 (energy target) — a corrupt taper
+profile makes pacing run at max power every tick, defeating the
+target-achievement purpose of smart pacing
 **Statement**: On load, the taper profile is checked for plausibility
 (median trusted ratio > 0.10). Implausible profiles are auto-reset.
 **Rationale**: A corrupted taper profile (e.g., from a unit mismatch
@@ -287,6 +328,9 @@ instead of pacing to target.
 `tests/test_taper.py::TestIsPlausible`
 
 ### C-015: Vendored smart_battery must match canonical
+**Priority enforced**: P-006 (brand portability) and P-007 (process
+integrity) — drift between canonical and vendored copies undermines
+the "extract once, share everywhere" architecture
 **Statement**: The vendored copy at
 `custom_components/foxess_control/smart_battery/` must be byte-identical
 to the canonical root-level `smart_battery/` directory.
@@ -299,6 +343,8 @@ differences that are hard to diagnose.
 ## Invariants — FoxESS API
 
 ### C-008: fdSoc >= 11 and minSocOnGrid <= fdSoc
+**Priority enforced**: P-003 (energy target) — failed schedule
+writes mean the session never runs, so no target can be met
 **Statement**: The FoxESS Cloud API rejects schedule writes where
 `fdSoc < 11` or `minSocOnGrid > fdSoc` (errno 40257). All schedule
 groups must be sanitised before writing.
@@ -308,6 +354,8 @@ groups must be sanitised before writing.
 `tests/test_init.py::TestSanitizeGroup::test_clamps_fd_soc_to_api_minimum`
 
 ### C-009: Schedule windows must not cross midnight
+**Priority enforced**: P-003 (energy target) — same reasoning as
+C-008; a schedule that can't be written can't deliver the target
 **Statement**: All schedule group time windows must start and end on
 the same calendar day. This is a FoxESS API limitation.
 **Rationale**: The FoxESS schedule API uses `startHour/startMinute` and
@@ -317,6 +365,8 @@ the same calendar day. This is a FoxESS API limitation.
 `tests/test_init.py::TestResolveStartEnd::test_crosses_midnight_rejected`
 
 ### C-010: Placeholder schedule groups must be filtered
+**Priority enforced**: P-003 (energy target) — API errno 42023 on
+placeholder leakage blocks schedule writes
 **Statement**: The FoxESS API always returns 8 schedule groups. Unused
 slots must be filtered before writing back.
 **Rationale**: Leaving zero-duration SelfUse groups causes API error
@@ -326,6 +376,8 @@ slots must be filtered before writing back.
 `tests/test_init.py::TestIsPlaceholder`
 
 ### C-011: Extra fields must be stripped from schedule groups
+**Priority enforced**: P-003 (energy target) — write rejection is
+the same failure mode as C-008..C-010
 **Statement**: Schedule groups returned by `scheduler/get` include extra
 fields that `scheduler/enable` rejects. Groups must be sanitised to
 the known-good field set.
@@ -340,6 +392,9 @@ These enforce the C-020 (operational transparency) and C-026 (error
 surfacing) principles at a specific, testable level.
 
 ### C-022: Unreachable charge target must be surfaced
+**Priority enforced**: P-003 (energy target) and P-005 (operational
+transparency) — this is the specific "you asked for X, we can't
+give you X" signal both priorities depend on
 **Statement**: When the system detects that the target SoC is
 unreachable within the remaining window (accounting for consumption
 headroom, taper, and current SoC), it must surface this to the user
@@ -353,6 +408,9 @@ after the window has closed, too late to take corrective action.
 `tests/test_smart_battery_algorithms.py::TestIsChargeTargetReachable`
 
 ### C-026: Proactive error surfacing
+**Priority enforced**: P-005 (operational transparency) — log-only
+errors are invisible to the dashboard user and directly undermine
+the transparency principle
 **Statement**: When the system encounters a persistent error state —
 API returning errors, inverter not responding to mode changes,
 schedule writes failing, or session unable to make progress — it must
@@ -367,6 +425,9 @@ normally when it is actually failing.
 `tests/test_services.py::TestErrorSurfacing`
 
 ### C-038: Sensor-listener parameter parity
+**Priority enforced**: P-005 (operational transparency) — when the
+UI and the listener use different formulas, the user cannot trust
+either display
 **Statement**: Sensor display formulas that present operational timing
 or state information must call the same algorithm functions as
 listeners, with the same parameter lists. When a listener calls
@@ -392,6 +453,9 @@ fixes: c70addae (charge), 8e10b9a (discharge)
 ## Invariants — Testing
 
 ### C-028: Simulator over mocks, with instance isolation
+**Priority enforced**: P-007 (engineering process integrity) — a
+test double that matches the real API's behaviour is the foundation
+for trusting the tests that verify the runtime priorities
 **Statement**: Tests that exercise FoxESS API or WebSocket behaviour
 must use the FoxESS simulator (`simulator/`) rather than response
 mocking libraries. Mocks are acceptable only for HA framework
@@ -415,6 +479,9 @@ state causes intermittent test failures under parallel execution.
 `simulator/server.py::create_app` (per-app state isolation)
 
 ### C-029: E2E tests for HA-dependent behaviour
+**Priority enforced**: P-007 (engineering process integrity) —
+HA-level behaviour is invisible to unit tests, so the tests that
+protect P-005 operational transparency require a real HA
 **Statement**: Behaviour that depends on HA's runtime environment —
 config flow, entity lifecycle, service registration, Lovelace card
 rendering, auth, coordinator polling — must have E2E tests against
@@ -431,6 +498,9 @@ service registration differences.
 **Traces**: `tests/e2e/test_e2e.py`, `tests/e2e/test_ui.py`
 
 ### C-030: E2E tests run in parallel before tagging
+**Priority enforced**: P-007 (engineering process integrity) — a
+slow feedback loop causes tests to be run less, defeating their
+purpose as gates for the runtime priorities
 **Statement**: E2E tests must run with `pytest -n auto` (xdist
 parallel workers) and must pass before any version tag is pushed.
 The pre-push hook enforces this gate.
@@ -444,6 +514,9 @@ in tagged releases.
 **Traces**: `.githooks/pre-push`, `conftest.py::pytest_xdist_auto_num_workers`
 
 ### C-031: No flaky tests — fix root causes, don't mask symptoms
+**Priority enforced**: P-007 (engineering process integrity) — a
+flaky test is evidence of a real race; masking it lets the race
+persist into production behaviour
 **Statement**: Every test failure must be investigated to its root
 cause. Intermittent failures signal real race conditions or timing
 assumptions that also affect production. Tests must not be skipped,
@@ -463,6 +536,8 @@ HA-dependent behaviour); `tests/e2e/ha_client.py::HAEventStream`
 (drain-before-wait pattern eliminates event ordering races)
 
 ### C-032: Reproduce failure before fixing
+**Priority enforced**: P-007 (engineering process integrity) —
+without a failing test, "fixed" is unverifiable
 **Statement**: When a bug is discovered — from user reports, live
 monitoring, or test failures — a test must be written that reliably
 reproduces the failure with the current (broken) code BEFORE any fix
@@ -486,6 +561,9 @@ reappear because the "fix" didn't address the root cause.
 (confirmed to fail with bug, pass with fix)
 
 ### C-033: Minimise known simulator–production deviations
+**Priority enforced**: P-007 (engineering process integrity) —
+every simulator deviation from production is a blind spot in the
+test suite
 **Statement**: Known behavioural differences between the FoxESS
 simulator and the real FoxESS cloud/inverter system must be
 documented and minimised. When a deviation is identified, it must
@@ -508,6 +586,8 @@ the code under test — both erode confidence in the test suite.
 C-032 (reproduce before fix)
 
 ### C-027: Progressive schedule extension (discharge safety)
+**Priority enforced**: P-001 (no grid import) and P-002 (min SoC) —
+a short safe horizon bounds the damage of HA downtime mid-session
 **Statement**: The inverter schedule end time for forced discharge must
 be set to a safe horizon — the time at which the battery would reach
 min_soc at the current discharge rate, divided by the safety factor —
@@ -529,6 +609,9 @@ Structural rules enforced by automated tooling (semgrep, pre-commit
 hooks) to prevent tech debt recurrence.
 
 ### C-034: Module size budget
+**Priority enforced**: P-007 (engineering process integrity) —
+monolithic modules breed coupling that makes future reviews less
+able to notice constraint violations
 **Statement**: No single `.py` file in `custom_components/foxess_control/`
 may exceed 2000 lines. When a module approaches this limit, extract
 cohesive functionality into a dedicated module.
@@ -539,6 +622,9 @@ code cannot be committed.
 **Traces**: `.githooks/check-module-size`
 
 ### C-035: Typed config access
+**Priority enforced**: P-007 (engineering process integrity) —
+typed access catches key typos at lint time; scattered raw access
+was the prior source of config-related defects
 **Statement**: Config values must be read via `IntegrationConfig`
 (accessed through `_cfg(hass)` in the brand layer), not via raw
 `entry.options` access. New config fields must be added to
@@ -555,6 +641,8 @@ pre-commit.
 **Traces**: `.semgrep/foxess-architecture.yaml::no-raw-entry-options`
 
 ### C-036: Typed domain data access
+**Priority enforced**: P-007 (engineering process integrity) — same
+rationale as C-035 at a different layer
 **Statement**: Runtime state in `hass.data[DOMAIN]` must be accessed via
 the `_dd(hass)` helper, not by raw dict lookup. Only `__init__.py`
 (setup/teardown), `_helpers.py` (helper definition), and `domain_data.py`
@@ -567,6 +655,11 @@ pre-commit.
 **Traces**: `.semgrep/foxess-architecture.yaml::no-raw-hass-data-access`
 
 ### C-037: Grid export limit awareness in discharge timing
+**Priority enforced**: P-003 (energy target) and P-004 (feed-in
+maximisation) — without this awareness, feed-in targets go unmet
+on export-limited sites; the constraint also protects P-001 by
+preventing late starts that would force low paced power near window
+end
 **Statement**: When a hardware grid export limit is configured
 (`grid_export_limit_w > 0`), the discharge deferral calculation must
 cap the effective export rate at `grid_export_limit_w / 1000` kW in
@@ -599,6 +692,10 @@ Constraints satisfied by inverter firmware behaviour, validated via
 the simulator model (C-028, C-033) and soak test scenarios.
 
 ### C-023: Solar-first power routing during ForceCharge
+**Priority enforced**: P-003 (energy target) — the invariant is
+about charging efficiency: solar should reach the battery before
+grid energy does, so the energy target is met with minimal grid
+spend
 **Statement**: During forced charging, the inverter firmware routes
 solar generation to house load first, then to the battery, before
 drawing from the grid. The effective grid import is

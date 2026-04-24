@@ -2,7 +2,7 @@
 project: FoxESS Control
 created: 2026-04-14
 last_updated: 2026-04-24
-last_reflection: 2026-04-24T12:00:00+10:00
+last_reflection: 2026-04-24T16:45:00+10:00
 ---
 # Knowledge Tree Meta
 
@@ -555,3 +555,68 @@ from 140 to 130 (deselection of invalid parametrisation combos).
   test section missing entirely. Inflection-point DB tests missing.
 - `05-coverage.md`: Matrix stale — D-043, taper denominator fix,
   grid export limit feature not cross-referenced.
+
+### 2026-04-24 — Priorities component introduced (P-NNN)
+
+**Trigger**: Live smart-discharge session monitoring revealed that
+`calculate_discharge_deferred_start` applied a doubled feed-in
+headroom (`min(headroom*2, 0.40) = 0.20`) even on sites where the
+configured `grid_export_limit_w` (5 kW) was well below the inverter
+max power (10.5 kW). On such sites, load volatility below the
+export clamp threshold has zero effect on effective export rate, so
+the doubled headroom was protecting against a physically impossible
+degradation — eating ~3 min of self-use time to guard feed-in target.
+
+**Structural gap this exposed**: The doubled-headroom line was
+described in D-044's rationale with safety-flavoured language
+("all export must come from forced discharge, so we start earlier to
+absorb load spikes"). But the thing it actually protects is
+**feed-in target achievement** — a lower-priority goal than self-use
+/ no-import. Because the knowledge tree had no formal priority
+register, nobody traced the decision back to the priority it
+actually served, and the trade-off (self-use time for feed-in
+margin) was invisible.
+
+**Action taken** (this pass):
+- Added `## Priorities` section to `01-vision.md` with P-001..P-006:
+  P-001 no grid import, P-002 min SoC, P-003 energy target, P-004
+  feed-in, P-005 operational transparency, P-006 brand portability.
+  Order derived from user memory `feedback_discharge_priorities.md`
+  and extended with operational/architectural goals already implicit
+  in the tree.
+- Backfilled `Priority enforced` on all 38 C-NNN in
+  `02-constraints.md`.
+- Backfilled `Priority served`, `Trades against`, and
+  `Classification` (safety/pacing/other) on all 45 D-NNN across
+  seven design files.
+- Updated D-044 Decision / Key Behaviours to reflect today's fix
+  (`2dee100`): the doubled headroom is now conditional on whether
+  peak load can breach the export-clamp slack.
+- Regenerated `05-coverage.md` with a priority → enforcement matrix
+  and a trade-off audit table; mapped the new
+  `TestFeedinHeadroomAccountsForExportClamp` tests.
+
+**Skill update**: The `project-overview` skill itself was updated
+first to define P-NNN, the trade-off audit, and the safety/pacing
+classification. Templates for `01-vision.md`, `02-constraints.md`,
+`04-design.md`, and `05-coverage.md` updated so future `init`/
+`update` runs ask for priorities during the interview and wire
+them through automatically.
+
+**Rank-change policy**: Priority IDs are stable labels, not rank
+indicators. If P-005 needed to rank above P-003 in a future
+revision, it would be moved earlier in the list in `01-vision.md`
+but keep its ID. Record such rank changes here when they happen;
+none so far.
+
+**Lessons captured** (for future reflection):
+- Buffers and margins commonly attract safety-flavoured rationale
+  even when they serve pacing goals. The `Classification` field
+  forces that distinction to be explicit.
+- Live session monitoring is a productive way to surface priority
+  inversions — the doubled-headroom bug was invisible in review but
+  obvious when watching the system defer for too long on a calm
+  evening.
+- The fix commit pair (`ad624da` Test + `2dee100` Fix) is the
+  concrete example of how a priority-inversion discovery leads to
+  tightened tests and a tighter algorithm.

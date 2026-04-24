@@ -25,6 +25,9 @@ unknown fields, filter placeholders, clamp `fdSoc >= 11`, and ensure
 and sometimes-invalid values that the write endpoint rejects.
 **Rationale**: Defensive programming against an inconsistent API.
 Without sanitisation, common operations (set force charge) fail silently.
+**Priority served**: P-003 (Meet the user's energy target)
+**Trades against**: none
+**Classification**: safety
 **Alternatives considered**:
 - Build groups from scratch: rejected because existing non-conflicting
   groups must be preserved
@@ -42,6 +45,9 @@ header. The algorithm is obfuscated in the portal's JavaScript.
 **Rationale**: WASM is the only reliable way to reproduce the exact
 signature algorithm. Pure Python re-implementation would be fragile
 against portal updates.
+**Priority served**: P-003 (Meet the user's energy target)
+**Trades against**: none
+**Classification**: other
 **Alternatives considered**:
 - Pure Python port: rejected as too fragile; algorithm is obfuscated
 - Headless browser: rejected as too heavy for HA environment
@@ -55,6 +61,9 @@ overwriting them.
 outage protection. The integration assumes SelfUse as baseline.
 **Rationale**: Silently overwriting a Backup schedule could leave the
 home unprotected during an outage.
+**Priority served**: P-002 (Respect minimum state of charge)
+**Trades against**: none
+**Classification**: safety
 **Alternatives considered**:
 - Force-overwrite with warning: rejected because the consequence
   (no backup during outage) is too severe
@@ -86,6 +95,9 @@ rejected tokens from some accounts).
 `POST /generic/v0/device/battery/info` (device UUID lookup + battery
 info). Changed to `/dew/v0/device/detail` after discovering the
 `/generic/v0/` endpoints rejected tokens for some accounts.
+**Priority served**: P-003 (Meet the user's energy target)
+**Trades against**: none
+**Classification**: other
 **Alternatives considered**:
 - Use the Open API `batTemperature` as an approximation: rejected
   because the 7°C discrepancy observed in production makes it
@@ -108,6 +120,9 @@ shared session.
 proxy configuration, and lifecycle tracking.
 **Rationale**: HA best practice — shared sessions respect system-wide
 configuration and are properly cleaned up on shutdown.
+**Priority served**: P-007 (Engineering process integrity)
+**Trades against**: none
+**Classification**: other
 **Alternatives considered**:
 - Always create own session: rejected because it bypasses HA's SSL
   and proxy settings, causing failures in some environments
@@ -128,6 +143,9 @@ this error would fail permanently until the next login cycle.
 case (token rotated) without open-ended retry loops. The executor wrap
 for WASM signatures ensures the CPU-bound signature computation doesn't
 block the HA event loop.
+**Priority served**: P-003 (Meet the user's energy target)
+**Trades against**: none
+**Classification**: other
 **Alternatives considered**:
 - Proactive token refresh on every request: rejected as wasteful
 - Multiple retries with backoff: rejected because auth errors are

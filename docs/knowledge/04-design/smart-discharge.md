@@ -29,6 +29,9 @@ must satisfy all.
 not traded off against revenue. A weighted multi-objective approach would
 allow small grid imports for marginal feed-in gains, which users find
 unacceptable.
+**Priority served**: P-001 (No grid import during forced discharge)
+**Trades against**: P-003 (Meet the user's energy target)
+**Classification**: safety
 **Alternatives considered**:
 - Weighted multi-objective: rejected because even small grid imports are
   visible on smart meters and frustrate users
@@ -49,6 +52,9 @@ governs deferral because the session stops at the feedin target, not at
 min_soc — see D-005. This is critical because large batteries with
 small feedin limits would otherwise start immediately at low paced
 power, creating a long window of C-001 import risk.
+**Priority served**: P-001 (No grid import during forced discharge)
+**Trades against**: none
+**Classification**: pacing
 **Alternatives considered**:
 - Immediate forced discharge at window start: rejected because low
   paced power causes grid import when house load exceeds it
@@ -67,6 +73,9 @@ discharge at this point causes grid import.
 **Rationale**: Switching to self-use 10 minutes early lets the inverter
 serve house load directly from the battery without the forced-discharge
 power floor constraint.
+**Priority served**: P-001 (No grid import during forced discharge)
+**Trades against**: P-003 (Meet the user's energy target)
+**Classification**: safety
 **Alternatives considered**:
 - Continue forced discharge to the end: rejected because the last
   10 minutes of grid import offset the feed-in revenue
@@ -88,6 +97,9 @@ be respected.
 minutes (`0.85^4.27 = 0.5`). This is responsive enough to protect
 against active spikes while adapting within minutes when loads decrease.
 The 1.5x safety factor provides margin above the tracked peak.
+**Priority served**: P-001 (No grid import during forced discharge)
+**Trades against**: P-004 (Maximise feed-in revenue)
+**Classification**: pacing
 **Alternatives considered**:
 - Fixed consumption estimate: rejected because household load is highly
   variable
@@ -133,6 +145,14 @@ full power for a short burst (e.g. 10.5 kW for 7 min) has massive
 headroom and much shorter exposure. Deferring until the feedin deadline
 and then discharging at higher power is therefore strictly safer than
 starting immediately at low paced power (C-001, D-001 P1 priority).
+**Priority served**: P-003 (Meet the user's energy target — the
+configured `feedin_energy_limit_kwh` is a session-level energy
+target, not a "maximise feed-in" aspiration)
+**Trades against**: none — deferred start and rate spreading also
+advance P-001 (shorter low-power tail → less import risk) and P-002
+(don't overshoot min_soc). The only thing sacrificed is time at
+paced power, which is not a priority.
+**Classification**: pacing
 **Alternatives considered**:
 - Export at max until limit hit, then switch to self-use: rejected
   because min_soc target would be missed
@@ -168,6 +188,9 @@ safe horizon, the schedule expires and the inverter reverts to self-use.
 power adjustments the margin *grows* (SoC drops proportionally but the
 schedule end stays fixed), so there is no need for heartbeat extensions
 on every tick — only when `apply_mode` is already called.
+**Priority served**: P-001 (No grid import during forced discharge)
+**Trades against**: none
+**Classification**: safety
 **Alternatives considered**:
 - Fixed 5-minute extension on every tick: rejected — unnecessary API
   calls and doesn't scale with battery headroom
@@ -179,27 +202,58 @@ on every tick — only when `apply_mode` is already called.
 
 ### D-044: Grid export limit awareness
 **Decision**: When a `grid_export_limit_w` is configured (> 0), the
-discharge system adapts in two ways:
-1. **Deferral**: `calculate_discharge_deferred_start` caps the
-   effective export rate at `grid_export_limit_w / 1000` kW in both
-   the SoC deadline and feed-in energy deadline calculations, producing
-   a more conservative (earlier) deferred start.
-2. **Active discharge**: The listener uses `max_power_w` directly
+discharge system adapts in three ways:
+1. **Deferral — effective export rate**:
+   `calculate_discharge_deferred_start` caps the effective export
+   rate at `grid_export_limit_w / 1000` kW in both the SoC deadline
+   and feed-in energy deadline calculations, producing a more
+   conservative (earlier) deferred start when the clamp would be
+   reached.
+2. **Deferral — feed-in headroom selection**: The feed-in deadline's
+   headroom is *conditional* on whether household load volatility
+   can actually erode the effective export rate. Let
+   `clamp_slack = max_power_kw − grid_export_limit_kw`. When a clamp
+   is active (`0 < grid_export_limit_w < max_power_w`) AND
+   `max(net_consumption_kw, consumption_peak_kw) <= clamp_slack`, a
+   load spike cannot reduce export below the clamp, so the **single
+   headroom** (default 10%) is applied. Otherwise — when the clamp
+   provides no protective slack (no clamp, or clamp ≥ max_power_w,
+   or peak/net load exceeds the slack) — the **doubled headroom**
+   (up to 40%) is applied. This avoids eating self-use time on
+   export-limited sites where the doubled margin would be
+   protecting against a physically impossible degradation.
+3. **Active discharge**: The listener uses `max_power_w` directly
    instead of computing a paced power value. The inverter's own
    grid-export limiter constrains actual export, so pacing would
-   double-limit — requesting less than the inverter can deliver while
-   the grid-export limiter independently caps export, resulting in
-   under-utilisation.
+   double-limit — requesting less than the inverter can deliver
+   while the grid-export limiter independently caps export,
+   resulting in under-utilisation.
 **Context**: Some inverter installations have grid export limits
 enforced by the DNO or configured in the inverter firmware. The
 software must account for this when estimating how long discharge
-will take and when to start, but must not fight the hardware limiter
-during active discharge.
+will take and when to start, but must not fight the hardware
+limiter during active discharge. Live session monitoring on
+2026-04-24 revealed that the previous unconditional doubled
+headroom caused ~3 minutes of unnecessary deferral on a site with
+a 5 kW clamp on a 10.5 kW inverter — the load would have needed to
+exceed 5.5 kW to erode export, which is well above typical
+residential baseline load.
 **Rationale**: Software pacing assumes discharge_power ≈ grid_export.
-With a hardware export limit, actual export is `min(discharge, limit)`,
-making pacing calculations incorrect. Running at max power and letting
-the hardware limit handle export produces the correct export rate
-while maximising the battery's contribution to house load.
+With a hardware export limit, actual export is
+`min(discharge, limit)`, making pacing calculations incorrect.
+Running at max power and letting the hardware limit handle export
+produces the correct export rate while maximising the battery's
+contribution to house load. The conditional headroom refinement
+narrows the doubled buffer to the cases where it is actually
+protecting against rate erosion, rather than applying it blindly
+whenever a feed-in limit is set.
+**Priority served**: P-003 (Meet the user's energy target — timely
+start ensures the feed-in target is reachable)
+**Trades against**: none — clamp awareness also serves P-001
+(deferred start prevents the low-power tail that creates import
+risk) and avoids a prior priority inversion where self-use time was
+sacrificed to a pacing margin that had no real effect
+**Classification**: pacing
 **Alternatives considered**:
 - Software pacing to the export limit: rejected because it would
   reduce both export AND house-load contribution, when only export
@@ -207,16 +261,26 @@ while maximising the battery's contribution to house load.
 - Ignoring the limit in deferral: rejected because the deferred
   start would be too late — the session would run out of time to
   export the required energy at the limited rate
-**Traces**: C-001 (no-import), D-002 (deferred start), D-005 (feedin budget);
+- Unconditional doubled feed-in headroom whenever a feed-in limit
+  is set: rejected (2026-04-24) because it over-defers on
+  export-limited sites where clamp slack makes typical load
+  volatility irrelevant to export rate
+**Traces**: C-001 (no-import), C-037 (grid export limit awareness),
+D-002 (deferred start), D-005 (feedin budget);
 `tests/test_sensor.py::TestDischargeDeferredCountdown::test_deferred_countdown_with_grid_export_limit_and_consumption`,
 `tests/test_sensor.py::TestDischargeDeferredCountdown::test_deferred_countdown_grid_export_limit_caps_export_rate`,
-`tests/test_sensor.py::TestDischargeDeferredCountdown::test_deferred_countdown_grid_export_limit_feedin_deadline`
+`tests/test_sensor.py::TestDischargeDeferredCountdown::test_deferred_countdown_grid_export_limit_feedin_deadline`,
+`tests/test_smart_battery_algorithms.py::TestFeedinHeadroomAccountsForExportClamp` (6 tests)
 
 ## Key Behaviours
 
-- Deferred start has doubled headroom when feed-in limit is set (up to
-  40% vs normal 10%) because variable house consumption reduces net
-  export unpredictably.
+- Deferred start feed-in headroom is conditional on export-clamp
+  slack (see D-044). On sites where the configured export limit is
+  meaningfully below inverter max power and projected peak load
+  stays within the slack, single headroom (10%) is used. When a
+  load spike could genuinely reduce net export (no clamp, or clamp
+  at/above inverter max, or peak load above clamp slack), doubled
+  headroom (up to 40%) is used.
 - Discharge check interval is 1 minute (vs 5 minutes for charge)
   because discharge power changes have immediate grid-import risk.
 - After suspension (SoC at min), the session re-evaluates on every

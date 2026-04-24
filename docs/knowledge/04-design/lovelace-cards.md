@@ -28,6 +28,10 @@ entity detail dialogs. Using `bubbles: true, composed: true` crosses
 shadow DOM boundaries. Sub-detail links use `stopPropagation()` to
 prevent parent node click handlers from also firing.
 
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: other
+
 **Alternatives considered**: Opening a separate history panel — rejected
 because HA's built-in more-info dialog is the expected UX pattern and
 requires zero additional code.
@@ -54,6 +58,10 @@ string shorthand (`"solar"`) and object form
 The editor serialises to the minimal config — omitting `boxes` entirely
 when all defaults are used, preserving backward compatibility.
 
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: other
+
 **Alternatives considered**: Separate card variants per configuration —
 rejected because it duplicates rendering logic and requires users to
 switch card types when their system changes.
@@ -79,6 +87,10 @@ charge current at low temperatures. The voltage-based calculation
 The 16 C threshold is conservative — the BMS starts limiting at
 lower temperatures but the exact curve is undocumented.
 
+**Priority served**: P-003 (Meet the user's energy target)
+**Trades against**: none
+**Classification**: pacing
+
 **Traces**: C-001 (no grid import — over-requesting causes oscillation)
 
 ### D-038: BMS temperature value preservation on fetch failure
@@ -96,6 +108,10 @@ caused the overview card and charge curtailment logic to lose state.
 **Rationale**: Temperature changes slowly (thermal mass of battery
 pack). A stale value from minutes ago is more useful than "unknown"
 for both display and charge curtailment decisions.
+
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: other
 
 **Traces**: C-020 (operational transparency), C-026 (error surfacing)
 
@@ -115,6 +131,10 @@ intentional ones.
 **Rationale**: A per-card toggle is simpler than HA's per-user dashboard
 permissions and doesn't require a separate "read-only" card variant.
 Default `true` preserves existing behaviour.
+
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: other
 
 **Traces**: C-020 (operational transparency — user controls what UI shows)
 
@@ -142,6 +162,10 @@ element identity (same DOM nodes), so focus, selection state, and native
 picker popups survive. The `_formValues` snapshot catches
 programmatically-set values (browser autocomplete, test automation) that
 bypass the `input` event.
+
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: other
 
 **Alternatives considered**:
 - LitElement migration — attempted and reverted. HA bundles Lit into
@@ -201,6 +225,10 @@ that:
 
 Vanilla HTMLElement with targeted DOM updates (D-040) is the pragmatic
 choice until a frontend build pipeline is introduced.
+
+**Priority served**: P-007 (Engineering process integrity)
+**Trades against**: none
+**Classification**: other
 
 **Alternatives considered**:
 - Bundled Lit (Rollup) — the correct long-term solution if the card

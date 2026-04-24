@@ -28,6 +28,9 @@ the charge to fall behind.
 **Rationale**: Pacing alone can't guarantee the target is reached if
 the effective charge rate is lower than expected. The catch-up burst
 provides a self-correcting mechanism.
+**Priority served**: P-003 (Meet the user's energy target)
+**Trades against**: none
+**Classification**: pacing
 **Alternatives considered**:
 - Increase headroom globally: rejected because it wastes cheap-rate
   hours (charges too fast, idles at the end)
@@ -44,6 +47,9 @@ available to the battery. If deferred start doesn't account for this,
 charging starts too late.
 **Rationale**: The 10% floor ensures margin even when current
 consumption is low (it may spike overnight, e.g., hot water heater).
+**Priority served**: P-003 (Meet the user's energy target)
+**Trades against**: none
+**Classification**: pacing
 **Alternatives considered**:
 - Use actual consumption only: rejected because overnight loads are
   unpredictable
@@ -64,6 +70,9 @@ until the window ends and the target was missed.
 taper profile and consumption headroom — zero additional computation.
 Exposing it as a sensor attribute rather than a separate entity keeps
 the entity count low and avoids lifecycle complexity.
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: safety
 **Alternatives considered**:
 - Separate binary sensor: rejected because entity lifecycle management
   for a transient per-session value adds complexity
@@ -98,6 +107,9 @@ are uniformly low (true unreachability), the median is also low and the
 verdict correctly remains False.  Pacing keeps the full integration
 because the integrated estimate is the right input for per-tick power
 adjustments.
+**Priority served**: P-003 (Meet the user's energy target)
+**Trades against**: none
+**Classification**: pacing
 **Alternatives considered**:
 - Credit solar surplus as additional effective charge rate: rejected
   because the BMS limit is the binding constraint (inverter + solar >
@@ -133,6 +145,9 @@ deferral is re-evaluated every tick. Switching to self-use during the
 surplus period lets the inverter supply house load from solar/battery
 without grid import — the same benefit as initial deferral (D-002
 analogue for charge).
+**Priority served**: P-003 (Meet the user's energy target)
+**Trades against**: none
+**Classification**: pacing
 **Alternatives considered**:
 - Reduce paced power to near-zero: rejected because 100W floor still
   causes ForceCharge mode to draw from grid; self-use is cleaner

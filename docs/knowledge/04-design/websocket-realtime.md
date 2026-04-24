@@ -49,6 +49,9 @@ casual users get the safe default (auto), power users tracking
 all sessions enable smart_sessions, and dashboard users get always.
 The watchdog in always mode ensures the connection recovers from
 transient cloud outages without manual intervention.
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: other
 **Alternatives considered**:
 - Keep the boolean toggle: rejected because it couldn't express
   "always connected" without overloading the meaning
@@ -70,6 +73,9 @@ only captures data after the inverter has reverted to self-use.
 the REST API may still return the old snapshot for up to 5 minutes.
 **Rationale**: One more WebSocket push (~5s) injects fresh
 post-session values so the overview card immediately reflects reality.
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: other
 **Alternatives considered**:
 - Immediate disconnect: rejected because UI shows stale state for
   minutes
@@ -97,6 +103,9 @@ energy when all sources are visible. When the predicted and actual grid
 magnitudes diverge significantly, an unmeasured source is skewing the
 balance — `gridStatus` is more reliable in that case despite firmware
 inconsistencies.
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: safety
 **Alternatives considered**:
 - Trust `gridStatus` always: rejected after observing incorrect values
   with certain firmware
@@ -126,6 +135,9 @@ configured WebSocket credentials, they need to know whether WS is
 currently active or whether the system has fallen back to API — even
 (especially) when the answer is API. A missing badge when multiple
 sources are configured is itself a source of confusion.
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: other
 **Alternatives considered**:
 - Show freshness timestamp instead of source: rejected because the
   source identity is more actionable than a raw timestamp
@@ -154,6 +166,9 @@ physically impossible values. Filtering at the WS layer (in
 `realtime_ws.py`) rather than the coordinator keeps the coordinator
 agnostic to data source quirks. The filter maintains its own
 `_last_accepted` state that resets on reconnection.
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: safety
 **Alternatives considered**:
 - Coordinator-level filter (original implementation): moved to WS layer
   because it mixed data-source-specific logic into the brand-agnostic
@@ -181,6 +196,9 @@ entity for a purely cosmetic concern. The 30-second threshold matches
 C-005 (WS stale message filter) — if the WS itself considers data
 stale at 30s, the UI should too. Red styling is a clear warning
 without being disruptive.
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: other
 **Alternatives considered**:
 - Server-side staleness sensor: rejected because it adds entity
   overhead for a display-only concern

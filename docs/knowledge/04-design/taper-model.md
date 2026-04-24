@@ -33,6 +33,9 @@ the BMS limit, the ratio `actual/paced` exceeds 1.0, gets clamped to
 **Rationale**: EMA adapts in 3-5 observations per SoC bin. The per-SoC
 granularity captures the non-linear taper curve. Alpha 0.3 balances
 responsiveness vs noise.
+**Priority served**: P-003 (Meet the user's energy target)
+**Trades against**: none
+**Classification**: pacing
 **Alternatives considered**:
 - Fixed taper curve: rejected because BMS behaviour varies by battery
   age, temperature, and cell chemistry
@@ -60,6 +63,9 @@ alpha 0.3 takes ~5 observations to wash out, so prevention is better
 than correction. The listener pre-filter avoids a coordinator lookup
 when the observation would be rejected anyway. The save interval
 balances persistence (surviving restarts) against HA Store I/O.
+**Priority served**: P-003 (Meet the user's energy target)
+**Trades against**: none
+**Classification**: pacing
 **Alternatives considered**:
 - Lower thresholds: rejected after observing 1000x unit mismatch bug
   that corrupted profiles with ~0.1% ratios
@@ -76,6 +82,9 @@ permanently broke pacing.
 **Rationale**: Auto-reset is preferable to requiring user intervention.
 The median check catches systemic corruption while allowing normal
 per-bin variation.
+**Priority served**: P-003 (Meet the user's energy target)
+**Trades against**: none
+**Classification**: safety
 **Alternatives considered**:
 - Manual reset only: rejected because users may not notice degraded
   pacing
@@ -97,6 +106,9 @@ bins with extremely sparse data. The multiplicative model keeps the existing
 SoC profile useful day-one while temperature converges independently in
 ~10-15 integer °C bins. The temperature factor is isolated by dividing out
 the SoC ratio: `temp_factor = (actual/max_power) / soc_ratio`.
+**Priority served**: P-003 (Meet the user's energy target)
+**Trades against**: none
+**Classification**: pacing
 **Alternatives considered**:
 - Temperature-bucketed profiles (separate profile per range): 4× convergence
   time, data sparsity at uncommon temperatures
@@ -119,6 +131,9 @@ margin. The streak-counter approach works with both the 5-minute charge
 and 1-minute discharge polling intervals (2 and 10 ticks respectively).
 SoC-based taper recording continues unconditionally — only temperature
 recording is gated.
+**Priority served**: P-003 (Meet the user's energy target)
+**Trades against**: none
+**Classification**: pacing
 **Traces**: C-014;
 `smart_battery/listeners.py::_record_taper_observation`
 
