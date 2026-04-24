@@ -72,6 +72,49 @@ the entity count low and avoids lifecycle complexity.
 **Traces**: C-022, C-020;
 `tests/test_smart_battery_algorithms.py::TestIsChargeTargetReachable`
 
+### D-046: Outlier-robust feasibility check for reachability
+**Decision**: `is_charge_target_reachable` blends the taper-integrated
+charge-hours estimate with a median-ratio linear estimate across the
+traversed SoC range and takes the minimum.  Pacing (`calculate_charge_power`,
+`calculate_deferred_start`) continues to use the full taper-integrated
+estimate unchanged.
+**Context**: Live 2026-04-24 02:53 UTC — a smart charge with plentiful
+solar surplus and ~65 min remaining for a 15% uplift on a 42 kWh battery
+was reported as unreachable.  The BMS was empirically accepting ~10.2 kW;
+linear: 40 min needed.  The taper profile contained several isolated
+outlier observations (bins 81:0.05 count=1, 83:0.41 count=3, 85:0.16
+count=2, 90:0.21 count=7) surrounded by 0.87-1.0 neighbours.  The
+per-SoC integration summed these outliers and exceeded the remaining
+window by ~5 min — spurious Repair issue, user trust eroded (C-022).
+**Rationale**: `is_charge_target_reachable` is a *feasibility* check, not
+a pacing prediction.  Its contract is "no plausible scenario reaches
+the target" — a stronger bar than the pacing estimate, which is a
+point estimate.  The median of trusted ratios across the traversed
+range represents the typical scenario; it cannot be pulled arbitrarily
+low by a single noisy observation (unlike a sum).  Taking `min(integrated,
+median)` biases toward false negatives (only flag genuinely unreachable
+targets), matching the C-020 "no false alarms" principle — when ratios
+are uniformly low (true unreachability), the median is also low and the
+verdict correctly remains False.  Pacing keeps the full integration
+because the integrated estimate is the right input for per-tick power
+adjustments.
+**Alternatives considered**:
+- Credit solar surplus as additional effective charge rate: rejected
+  because the BMS limit is the binding constraint (inverter + solar >
+  BMS acceptance) — solar does speed up charging at the margin, but
+  the mental-model mismatch is better resolved by not firing a spurious
+  alarm in the first place.
+- Outlier-detection in `TaperProfile._estimate_hours`: rejected as a
+  wider blast radius (affects pacing too).  Pacing's tolerance for
+  outliers is limited by the 5-min adjust interval and the trajectory
+  catch-up burst (D-006); the feasibility check has no such
+  self-correcting mechanism and needs the outlier-robust bound.
+- Raising `MIN_TRUST_COUNT` globally: rejected — genuinely rare
+  observations at high-SoC bins are still valuable, but should not
+  dominate a feasibility bound.
+**Traces**: C-022, C-020, C-014;
+`tests/test_smart_battery_algorithms.py::TestIsChargeTargetReachable::test_outlier_taper_does_not_falsely_fail_live_2026_04_24`
+
 ### D-043: Re-deferral when ahead of schedule
 **Decision**: Once forced charging has started, if the current SoC is
 far enough ahead that `calculate_deferred_start()` says "not yet",

@@ -171,9 +171,29 @@ def is_charge_target_reachable(
 ) -> bool:
     """Return True if the charge target can be reached in the remaining time.
 
-    Uses the same consumption headroom and taper-awareness as the deferred
-    start calculation.  If even max power for the full remaining window
-    (with headroom) can't deliver enough energy, the target is unreachable.
+    Uses the same consumption headroom as the deferred start calculation.
+    If even max power for the full remaining window (with headroom) can't
+    deliver enough energy, the target is unreachable.
+
+    When a *taper_profile* is provided, two estimates are computed:
+
+    1. **Taper-integrated hours** — sums per-SoC-step hours using the
+       full taper curve (the same estimate used by pacing).
+    2. **Median-ratio hours** — a linear estimate using the median
+       trusted ratio across the traversed SoC range as a
+       representative taper factor.
+
+    The minimum of these two is taken as the feasibility bound.  This
+    is a *feasibility* check (C-022): returning False should mean "no
+    plausible scenario reaches the target", not "the pessimistic
+    integration says so".  Isolated outlier observations (e.g. a single
+    tick where the BMS briefly reported near-zero acceptance) can dominate
+    the integrated estimate, pushing it above the remaining window even
+    when the typical scenario comfortably fits.  Using the median-ratio
+    estimate as a floor prevents those outliers from producing spurious
+    HA Repair issues — without masking genuinely unreachable targets,
+    since a short window or uniformly low ratios produce a large
+    median-ratio estimate too.
     """
     energy_needed_kwh = (target_soc - current_soc) / 100.0 * battery_capacity_kwh
     if energy_needed_kwh <= 0:
@@ -190,19 +210,57 @@ def is_charge_target_reachable(
         effective_charge_kw = max_power_kw * headroom
 
     if taper_profile is not None:
-        charge_hours = taper_profile.estimate_charge_hours(
+        integrated_hours = taper_profile.estimate_charge_hours(
             current_soc,
             target_soc,
             battery_capacity_kwh,
             int(effective_charge_kw * 1000),
             temp_c=bms_temp_c,
         )
+        # Median-ratio linear estimate: represents a typical (non-outlier)
+        # scenario across the traversed range.  Combines with the
+        # multiplicative temperature factor in the same way estimate_charge_hours
+        # does internally, so warm vs cold is still distinguished.
+        median_ratio = _median_trusted_charge_ratio(
+            taper_profile, int(current_soc), int(target_soc)
+        )
+        temp_factor = taper_profile.charge_temp_factor(bms_temp_c)
+        effective_ratio = max(0.05, min(1.0, median_ratio * temp_factor))
+        median_hours = energy_needed_kwh / (effective_charge_kw * effective_ratio)
+        charge_hours = min(integrated_hours, median_hours)
     else:
         charge_hours = energy_needed_kwh / effective_charge_kw
 
     denom = 1 - headroom
     buffered_hours = charge_hours / denom if denom > 0 else charge_hours
     return buffered_hours <= remaining_hours
+
+
+def _median_trusted_charge_ratio(
+    taper_profile: TaperProfile, from_soc: int, to_soc: int
+) -> float:
+    """Median of trusted charge ratios across ``[from_soc, to_soc)``.
+
+    Used by :func:`is_charge_target_reachable` as an outlier-robust
+    linear-estimate floor — a single noisy observation cannot pull the
+    median low enough to flip the feasibility verdict.
+
+    Falls back to 1.0 (no-taper assumption) when no trusted bins exist
+    in the range; this preserves the original linear behaviour for
+    fresh or sparsely populated profiles.
+    """
+    from .taper import MIN_TRUST_COUNT
+
+    lo, hi = (from_soc, to_soc) if from_soc <= to_soc else (to_soc, from_soc)
+    ratios = [
+        b.ratio
+        for soc, b in taper_profile.charge.items()
+        if lo <= soc < hi and b.count >= MIN_TRUST_COUNT
+    ]
+    if not ratios:
+        return 1.0
+    ratios.sort()
+    return ratios[len(ratios) // 2]
 
 
 PEAK_DECAY_PER_TICK = 0.85
