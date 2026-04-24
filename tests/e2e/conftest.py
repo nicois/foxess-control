@@ -452,6 +452,77 @@ def event_stream(
         stream.close()
 
 
+# ---------------------------------------------------------------------------
+# Page fixture helpers
+# ---------------------------------------------------------------------------
+
+
+# Matches the error messages Playwright surfaces when a navigation
+# destroys the JS execution context mid-poll.  Checked as substrings.
+_CONTEXT_DESTROYED_SIGNALS = (
+    "Execution context was destroyed",
+    "navigating",
+)
+
+
+_PANEL_READY_JS = """() => {
+    const main = document.querySelector('home-assistant');
+    if (!main || !main.shadowRoot) return false;
+    const ham = main.shadowRoot.querySelector('home-assistant-main');
+    if (!ham || !ham.shadowRoot) return false;
+    const panel = ham.shadowRoot.querySelector('ha-panel-lovelace');
+    return !!panel;
+}"""
+
+
+def _wait_for_lovelace_panel(page: Any, timeout_ms: int = 30000) -> None:
+    """Wait for the Lovelace panel to render in the shadow DOM.
+
+    Retries on Playwright "Execution context was destroyed" errors,
+    which occur when HA's frontend triggers a navigation (WS reconnect,
+    dashboard router refresh, sidebar load) during the initial page
+    load.  Without retry logic, a single navigation burst causes the
+    fixture to time out after 30s even though the panel would render
+    a few seconds later once navigation settles.
+
+    Mirrors the retry pattern in
+    ``tests/e2e/test_ui.py::_find_card`` (commit aa25b10).
+
+    Genuine ``TimeoutError`` (panel never rendered) is propagated.
+    Non-context-destruction Playwright errors are also propagated.
+    """
+    from playwright._impl._errors import Error as PlaywrightError  # noqa: PLC0415
+    from playwright._impl._errors import TimeoutError as PwTimeoutError  # noqa: PLC0415
+
+    deadline = time.monotonic() + timeout_ms / 1000
+    remaining_ms = timeout_ms
+
+    while True:
+        try:
+            page.wait_for_function(_PANEL_READY_JS, timeout=remaining_ms)
+            return
+        except PwTimeoutError:
+            # Genuine timeout — panel truly did not render in budget.
+            raise
+        except PlaywrightError as exc:
+            if not any(s in str(exc) for s in _CONTEXT_DESTROYED_SIGNALS):
+                # Unrelated playwright failure — propagate.
+                raise
+            # Navigation destroyed the context.  Settle on networkidle
+            # (best effort) and retry with whatever budget remains.
+            remaining_ms = int((deadline - time.monotonic()) * 1000)
+            if remaining_ms <= 0:
+                raise
+            with contextlib.suppress(PlaywrightError):
+                page.wait_for_load_state(
+                    "networkidle",
+                    timeout=min(remaining_ms, 15000),
+                )
+            remaining_ms = int((deadline - time.monotonic()) * 1000)
+            if remaining_ms <= 0:
+                raise
+
+
 @pytest.fixture
 def page(
     browser_context: BrowserContext,
@@ -464,21 +535,11 @@ def page(
     p.goto(f"http://localhost:{ha_port}/lovelace/0", timeout=60000)
     p.wait_for_url("**/lovelace/**", timeout=60000)
     p.wait_for_load_state("networkidle", timeout=30000)
-    # Wait for the HA Lovelace panel to render inside the shadow DOM,
-    # rather than a hardcoded sleep.  Under CI load, entity-mode HA
-    # containers take longer to initialise entities and render custom
-    # cards, so a fixed 2s sleep is insufficient.
-    p.wait_for_function(
-        """() => {
-            const main = document.querySelector('home-assistant');
-            if (!main || !main.shadowRoot) return false;
-            const ham = main.shadowRoot.querySelector('home-assistant-main');
-            if (!ham || !ham.shadowRoot) return false;
-            const panel = ham.shadowRoot.querySelector('ha-panel-lovelace');
-            return !!panel;
-        }""",
-        timeout=30000,
-    )
+    # Wait for the HA Lovelace panel to render inside the shadow DOM.
+    # Uses _wait_for_lovelace_panel which retries on
+    # "Execution context was destroyed" errors caused by navigation
+    # churn under CI load (mirrors _find_card's pattern, aa25b10).
+    _wait_for_lovelace_panel(p, timeout_ms=30000)
     _log.warning("[%s] page ready: %.1fs", _worker_id(), time.monotonic() - t0)
     yield p
     p.close()

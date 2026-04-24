@@ -42,7 +42,7 @@ def _get_helper() -> Any:
     from tests.e2e import conftest  # noqa: PLC0415
 
     try:
-        return conftest._wait_for_lovelace_panel  # type: ignore[attr-defined]
+        return conftest._wait_for_lovelace_panel
     except AttributeError as exc:
         msg = (
             "tests.e2e.conftest._wait_for_lovelace_panel is not defined. "
