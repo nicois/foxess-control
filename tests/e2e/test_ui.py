@@ -1003,6 +1003,123 @@ class TestControlCard:
             "Cancel button should be hidden when show_cancel: false"
         )
 
+    def test_charge_section_title_distinguishes_scheduled_deferred_active(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """Charge section title distinguishes scheduled/deferred/active (C-020).
+
+        Regression for user report: "the smart card on the dashboard says
+        'charge scheduled' 'starts in 1m' despite the start time being
+        over an hour ago -- shouldn't it say it is deferred?"
+
+        The discharge side has 4 labels (Discharge Scheduled / Discharge
+        Deferred / Discharge Suspended / Smart Discharge); the charge
+        side only had 2 (Charge Scheduled / Smart Charge), conflating
+        pre-window "scheduled" with within-window "deferred" phases.
+        Users could not distinguish these genuinely-different states
+        from the UI alone -- violating C-020 (operational transparency).
+
+        Rather than drive a full deferred session (timing-sensitive), we
+        inject a synthetic ``sensor.foxess_smart_operations`` state into
+        the card's ``_hass`` and call ``_render()`` directly.  This
+        exercises the exact JS branch that produces the section title
+        for each of the three phases.
+        """
+        # Card must be present.  No session is required -- the test
+        # synthesizes one by injecting attributes directly.
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
+        _robust_reload(page, settle_ms=3000)
+        assert _find_card(page, "foxess-control-card")
+
+        def section_title_for_phase(phase: str) -> str | None:
+            """Inject a charge-active state with the given phase and return
+            the rendered section title (or None)."""
+            result = page.evaluate(
+                """(phase) => {
+                    function findCard(root) {
+                        const card = root.querySelector(
+                            'foxess-control-card'
+                        );
+                        if (card) return card;
+                        for (const el of root.querySelectorAll('*')) {
+                            if (el.shadowRoot) {
+                                const f = findCard(el.shadowRoot);
+                                if (f) return f;
+                            }
+                        }
+                        return null;
+                    }
+                    const card = findCard(document);
+                    if (!card || !card._hass) return null;
+                    const opsId = card._config.operations_entity;
+                    const orig = card._hass.states[opsId] || {
+                        state: 'deferred',
+                        attributes: {},
+                    };
+                    // Minimal synthetic charge-active attrs.  Window is
+                    // 11:00-14:00 (arbitrary -- only charge_start_time
+                    // matters, and the card only uses it for a future
+                    // pre-window check if added).
+                    const origAttrs = orig.attributes || {};
+                    const synth = {
+                        ...origAttrs,
+                        charge_active: true,
+                        charge_phase: phase,
+                        charge_target_soc: 90,
+                        charge_current_soc: 70,
+                        charge_window: '11:00 – 13:59',
+                        charge_remaining: '',
+                        charge_power_w: phase === 'charging' ? 5000 : 0,
+                        charge_start_time: '2026-04-24T11:00:00+10:00',
+                        charge_end_time: '2026-04-24T13:59:00+10:00',
+                    };
+                    card._hass = {
+                        ...card._hass,
+                        states: {
+                            ...card._hass.states,
+                            [opsId]: {
+                                ...orig,
+                                state: phase,
+                                attributes: synth,
+                            },
+                        },
+                    };
+                    card._render();
+                    const charge = card.shadowRoot.querySelector(
+                        '.section.charge'
+                    );
+                    if (!charge) return null;
+                    const title = charge.querySelector('.section-title');
+                    return title ? title.textContent.trim() : null;
+                }""",
+                phase,
+            )
+            return result if isinstance(result, str) or result is None else str(result)
+
+        scheduled = section_title_for_phase("scheduled")
+        deferred = section_title_for_phase("deferred")
+        charging = section_title_for_phase("charging")
+
+        # All three labels must exist and be distinct.  The bug was that
+        # "scheduled" and "deferred" both mapped to "Charge Scheduled".
+        assert scheduled, "No section title rendered for phase='scheduled'"
+        assert deferred, "No section title rendered for phase='deferred'"
+        assert charging, "No section title rendered for phase='charging'"
+
+        assert scheduled != deferred, (
+            f"'scheduled' and 'deferred' produce the same section title "
+            f"({scheduled!r} == {deferred!r}) -- card conflates two "
+            f"genuinely-different states, violating C-020"
+        )
+        assert deferred != charging, (
+            f"'deferred' and 'charging' produce the same section title "
+            f"({deferred!r} == {charging!r})"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Form input persistence tests (C-020: operational transparency)

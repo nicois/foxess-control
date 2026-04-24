@@ -292,6 +292,87 @@ class TestSmartOperationsOverviewSensor:
             assert attrs["charge_phase"] == "charging"
             assert attrs["charge_power_w"] == 10500
 
+    def test_charge_phase_scheduled_before_window(self) -> None:
+        """Before the window opens (now < start), charge_phase = 'scheduled'.
+
+        The discharge side exposes three phases (scheduled/deferred/
+        discharging/suspended); the charge side must do the same so the
+        dashboard card can distinguish "not yet started" from "window open
+        but pacing algorithm has deferred forced charging to later" —
+        these two states look identical today ("Charge Scheduled") which
+        violates C-020 (user must determine system state from UI alone).
+        """
+        hass = _make_hass(
+            smart_charge_state=_charge_state(
+                last_power_w=0,
+                charging_started=False,
+                max_power_w=10500,
+                target_soc=80,
+                start=datetime.datetime(2026, 4, 8, 11, 0, 0),
+                end=datetime.datetime(2026, 4, 8, 14, 0, 0),
+            )
+        )
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 70.0}
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        # At 10:00 — BEFORE the window opens at 11:00
+        with patch(
+            "smart_battery.sensor_base.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 10, 0, 0),
+        ):
+            attrs = sensor.extra_state_attributes
+            assert attrs["charge_phase"] == "scheduled", (
+                f"Expected 'scheduled' before window start, got "
+                f"{attrs['charge_phase']!r}"
+            )
+
+    def test_charge_phase_deferred_within_window(self) -> None:
+        """Within the window but not actively charging: charge_phase='deferred'.
+
+        This is the user-reported bug scenario: window opened at 11:00, now
+        is 12:15, but the pacing algorithm has pushed forced charging to
+        later in the window.  The card must distinguish this from the
+        "scheduled" (pre-window) state.
+        """
+        hass = _make_hass(
+            smart_charge_state=_charge_state(
+                last_power_w=0,
+                charging_started=False,
+                max_power_w=10500,
+                target_soc=80,
+                start=datetime.datetime(2026, 4, 8, 11, 0, 0),
+                end=datetime.datetime(2026, 4, 8, 14, 0, 0),
+            )
+        )
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 70.0}
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        # At 12:15 — window is open (start=11:00) but only 2% SoC headroom
+        # needs ~15min of charging to fill, so full algorithm will defer
+        # near 13:45; at 12:15 we are well within the deferred window.
+        with patch(
+            "smart_battery.sensor_base.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 12, 15, 0),
+        ):
+            attrs = sensor.extra_state_attributes
+            assert attrs["charge_phase"] == "deferred", (
+                f"Expected 'deferred' within open window, got {attrs['charge_phase']!r}"
+            )
+
     def test_discharging(self) -> None:
         hass = _make_hass(smart_discharge_state=_discharge_state())
         sensor = SmartOperationsOverviewSensor(hass, _make_entry())
@@ -529,6 +610,79 @@ class TestChargeRemainingSensor:
             return_value=datetime.datetime(2026, 4, 8, 5, 50, 0),
         ):
             assert sensor.native_value == "10m"
+
+    def test_deferred_never_shows_zero_minute_wait(self) -> None:
+        """When the computed deferred start is within the current minute,
+        charge_remaining must NOT display 'starts in 0m'.
+
+        Reproduces the live incident: the listener recomputes deferred
+        start every tick, and at the instant before the transition it
+        returns a value 0-59 seconds in the future.  ``format_duration``
+        rounds sub-minute durations down to ``0m``, so the sensor
+        displays ``'starts in 0m'`` which is misleading — the user
+        interprets it as "scheduled to start" when the window has
+        actually been open for over an hour.  The reasonable display at
+        this sub-minute boundary is the window-remaining time (same as
+        when deferred start has just passed, ``test_deferred_about_to_start``).
+        """
+        # Build the state and pick a "now" such that the full algorithm
+        # returns a deferred start 30 seconds in the future — i.e. within
+        # the current minute.  With a 10kWh battery, SoC=20, target=80,
+        # max=10500W, window 02:00-06:00 and taper absent:
+        #   energy = 60% * 10kWh = 6kWh
+        #   headroom 10% → effective = 10500 * 0.9 = 9.45kW
+        #   charge_hours = 6/9.45 = 0.635h ≈ 38m06s
+        #   buffered = 0.635/0.9 = 0.706h ≈ 42m22s
+        #   deferred_start = 06:00 - 42m22s ≈ 05:17:38
+        # So patching now to 05:17:08 puts the computed deferred_start
+        # 30s in the future: wait = 0m30s → format_duration returns "0m"
+        # → current code shows the misleading "starts in 0m".
+        hass = _make_hass(
+            smart_charge_state=_charge_state(
+                last_power_w=0,
+                charging_started=False,
+                max_power_w=10500,
+                target_soc=80,
+            )
+        )
+        mock_coordinator = MagicMock()
+        mock_coordinator.data = {"SoC": 20.0}
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=mock_coordinator
+        )
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        # Compute the actual deferred start from the full algorithm and
+        # pick a "now" 30 seconds before it.  This makes the test robust
+        # to future tweaks of the algorithm's exact timing.
+        from smart_battery.algorithms import calculate_deferred_start
+
+        cs = hass.data[DOMAIN].smart_charge_state
+        deferred = calculate_deferred_start(
+            20.0,
+            80,
+            10.0,
+            10500,
+            cs["end"],
+            start=cs["start"],
+            headroom=0.10,
+        )
+        now = deferred - datetime.timedelta(seconds=30)
+
+        sensor = ChargeRemainingSensor(hass, _make_entry())
+        with patch(
+            "smart_battery.sensor_base.dt_util.now",
+            return_value=now,
+        ):
+            result = sensor.native_value
+            assert result is not None
+            assert result != "starts in 0m", (
+                f"'starts in 0m' is a nonsense display — the transition is "
+                f"imminent.  Sensor returned {result!r}; should either show "
+                f"window-remaining time or 'starting' but not a zero wait."
+            )
 
     def test_deferred_clamps_to_window_start(self) -> None:
         """Deferred start never shows a time before the window opens."""
