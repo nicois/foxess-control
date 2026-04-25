@@ -873,6 +873,7 @@ class SmartOperationsOverviewSensor(RestoreSensor):
             "error",
             "charging",
             "deferred",
+            "scheduled",
             "target_reached",
             "discharging",
             "discharge_deferred",
