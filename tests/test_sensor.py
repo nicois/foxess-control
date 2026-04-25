@@ -2333,3 +2333,114 @@ class TestDebugLog:
         finally:
             for h in handlers:
                 logger.removeHandler(h)
+
+
+class TestPacingTransparencyAttributes:
+    """UX #4 / #6 / #8: pacing-transparency attributes.
+
+    These three UX items share a single implementation surface —
+    attributes on ``sensor.foxess_smart_operations`` that expose
+    pacing-algorithm reasoning to the user without requiring log
+    inspection (C-020).
+
+    #4 `discharge_deferred_reason` / `charge_deferred_reason`:
+       short human-readable sentence explaining why the session is
+       still deferred instead of actively discharging / charging.
+
+    #6 `discharge_safety_floor_w` + `discharge_peak_consumption_kw`
+       + `discharge_paced_target_w`: surface the C-001 safety floor
+       so users can see why paced power may exceed what energy math
+       alone suggests.
+
+    #8 `discharge_grid_export_limit_w` + `discharge_clamp_active`:
+       surface the hardware export clamp separately from inverter
+       output — addresses DNO-compliance anxiety on export-limited
+       sites.
+    """
+
+    def test_deferred_reason_populated_when_discharge_deferred(self) -> None:
+        state = _discharge_state(
+            last_power_w=0,
+            discharging_started=False,
+            start=datetime.datetime(2026, 4, 8, 16, 59, 0),  # in the past
+            feedin_energy_limit_kwh=1.0,
+            consumption_peak_kw=0.2,
+        )
+        hass = _make_hass(smart_discharge_state=state)
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 17, 30, 0),
+        ):
+            attrs = sensor.extra_state_attributes
+        assert attrs["discharge_phase"] == "deferred"
+        assert "discharge_deferred_reason" in attrs
+        reason = attrs["discharge_deferred_reason"]
+        assert isinstance(reason, str) and len(reason) > 10
+        # Mentions the feedin-limit motivation.
+        assert "feed-in" in reason or "1 kWh" in reason or "holding" in reason
+
+    def test_deferred_reason_absent_when_actively_discharging(self) -> None:
+        hass = _make_hass(smart_discharge_state=_discharge_state())
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        attrs = sensor.extra_state_attributes
+        assert attrs["discharge_phase"] == "discharging"
+        assert "discharge_deferred_reason" not in attrs
+
+    def test_charge_deferred_reason_populated(self) -> None:
+        state = _charge_state(last_power_w=0, charging_started=False, target_soc=90)
+        hass = _make_hass(smart_charge_state=state, coordinator_soc=50.0)
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        with patch(
+            "custom_components.foxess_control.sensor.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 3, 0, 0),
+        ):
+            attrs = sensor.extra_state_attributes
+        assert attrs["charge_phase"] == "deferred"
+        assert "charge_deferred_reason" in attrs
+        reason = attrs["charge_deferred_reason"]
+        assert "40" in reason or "gap" in reason or "SoC" in reason
+
+    def test_safety_floor_exposed_with_peak(self) -> None:
+        """discharge_safety_floor_w = peak * 1.5 * 1000."""
+        state = _discharge_state(consumption_peak_kw=2.0)
+        hass = _make_hass(smart_discharge_state=state)
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        attrs = sensor.extra_state_attributes
+        assert attrs["discharge_peak_consumption_kw"] == 2.0
+        assert attrs["discharge_safety_floor_w"] == 3000  # 2.0 * 1.5 * 1000
+
+    def test_safety_floor_zero_when_no_peak(self) -> None:
+        state = _discharge_state(consumption_peak_kw=0.0)
+        hass = _make_hass(smart_discharge_state=state)
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        attrs = sensor.extra_state_attributes
+        assert attrs["discharge_safety_floor_w"] == 0
+        assert attrs["discharge_peak_consumption_kw"] == 0.0
+
+    def test_clamp_attributes_absent_when_no_export_limit_configured(
+        self,
+    ) -> None:
+        hass = _make_hass(smart_discharge_state=_discharge_state())
+        mock_entry = MagicMock()
+        mock_entry.options = {"grid_export_limit": 0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        attrs = sensor.extra_state_attributes
+        # With grid_export_limit=0 the clamp attrs should be absent.
+        assert "discharge_grid_export_limit_w" not in attrs
+        assert "discharge_clamp_active" not in attrs
+
+    def test_clamp_attributes_present_when_export_limit_configured(self) -> None:
+        hass = _make_hass(smart_discharge_state=_discharge_state())
+        mock_entry = MagicMock()
+        mock_entry.options = {"grid_export_limit": 5000}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        attrs = sensor.extra_state_attributes
+        assert attrs.get("discharge_grid_export_limit_w") == 5000
+        # discharge_clamp_active should be a bool (not absent).
+        assert isinstance(attrs.get("discharge_clamp_active"), bool)

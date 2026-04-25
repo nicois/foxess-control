@@ -225,6 +225,70 @@ def format_remaining(end: datetime.datetime) -> str:
     return f"{minutes}m"
 
 
+def _explain_discharge_deferral(
+    ds: dict[str, Any],
+    ds_power: int,
+    peak_kw: float,
+    grid_export_limit_w: int,
+) -> str:
+    """Human-readable "why is discharge still deferred?" explanation.
+
+    UX #4: opacity of the pacing algorithm is the largest usability
+    defect in the current UI. Surface the observable constraint
+    keeping the listener in the deferred state so users can stop
+    guessing. Returns a short sentence suitable for one-line
+    rendering on the control card.
+    """
+    # Window not yet open — display handled elsewhere; keep short.
+    now = dt_util.now()
+    start = ds.get("start")
+    if start is not None:
+        if start.tzinfo is None and now.tzinfo is not None:
+            now = now.replace(tzinfo=None)
+        if now < start:
+            return "waiting for window to open"
+    feedin_limit = ds.get("feedin_energy_limit_kwh")
+    if feedin_limit:
+        if grid_export_limit_w > 0:
+            return (
+                f"holding self-use; feed-in target "
+                f"{feedin_limit:g} kWh will take ~"
+                f"{_est_feedin_minutes(feedin_limit, grid_export_limit_w)} min "
+                f"at the {grid_export_limit_w / 1000:.1f} kW export clamp"
+            )
+        return (
+            f"holding self-use so {feedin_limit:g} kWh feed-in target "
+            f"is met in one shorter burst (reduces C-001 import risk)"
+        )
+    return "holding self-use until forced-discharge is required by SoC deadline"
+
+
+def _explain_charge_deferral(
+    cs: dict[str, Any],
+    current_soc: float | None,
+) -> str:
+    """Human-readable "why is charge still deferred?" explanation."""
+    target_soc = cs.get("target_soc")
+    if current_soc is not None and target_soc is not None:
+        gap = target_soc - current_soc
+        if gap <= 0:
+            return "at or above target — will not force-charge"
+        return (
+            f"solar surplus or cheaper-later pricing; waiting to start "
+            f"forced charge (current SoC {current_soc:.1f}%, target "
+            f"{target_soc}%, {gap:.1f}% gap)"
+        )
+    return "waiting for forced-charge deadline"
+
+
+def _est_feedin_minutes(feedin_kwh: float, export_limit_w: int) -> int:
+    """Minutes to feed *feedin_kwh* at the clamp's export rate."""
+    if export_limit_w <= 0:
+        return 0
+    hours = feedin_kwh / (export_limit_w / 1000.0)
+    return int(hours * 60)
+
+
 def format_duration(td: datetime.timedelta) -> str:
     """Format a timedelta as a compact human-readable string."""
     total_minutes = int(td.total_seconds() / 60)
@@ -1207,9 +1271,50 @@ class SmartOperationsOverviewSensor(RestoreSensor):
                     "discharge_export_limit_w": ds.get("last_export_limit_written_w"),
                 }
             )
+            # UX #6: safety-floor indicator. Derived from the live peak
+            # the listener tracks (consumption_peak_kw) via the C-001
+            # invariant peak * 1.5. Exposed alongside the paced power so
+            # users can see why discharge may be running above the energy
+            # math would suggest.
+            from .algorithms import DISCHARGE_SAFETY_FACTOR
+
+            peak_kw = ds.get("consumption_peak_kw", 0.0) or 0.0
+            attrs["discharge_safety_floor_w"] = int(
+                max(0.0, peak_kw) * DISCHARGE_SAFETY_FACTOR * 1000
+            )
+            attrs["discharge_peak_consumption_kw"] = peak_kw
+            attrs["discharge_paced_target_w"] = ds.get("target_power_w")
+            # UX #8: export-limit acknowledgement. Distinguish inverter
+            # output (what gets written to the schedule / actuator) from
+            # the effective grid export (clamped by configured limit).
+            # Helpful for DNO compliance anxiety on export-limited sites.
+            grid_export_limit = _get_grid_export_limit(self.hass, self._domain)
+            if grid_export_limit > 0:
+                attrs["discharge_grid_export_limit_w"] = grid_export_limit
+                # Clamp active when the inverter power exceeds the grid
+                # limit minus household load (i.e. net export would
+                # otherwise exceed the cap without the hardware clamp).
+                load_kw = _get_net_consumption(self.hass, self._domain)
+                max_net_export_kw = ds_power / 1000.0 - load_kw
+                attrs["discharge_clamp_active"] = (
+                    max_net_export_kw > grid_export_limit / 1000.0
+                )
+            # UX #4: "why deferred?" explanation. Populated only when
+            # the session is in the deferred phase so consumers can
+            # render it conditionally.
+            if discharge_phase == "deferred":
+                attrs["discharge_deferred_reason"] = _explain_discharge_deferral(
+                    ds, ds_power, peak_kw, grid_export_limit
+                )
             if ds.get("circuit_open"):
                 attrs["circuit_breaker_active"] = True
                 attrs["circuit_breaker_since"] = ds.get("circuit_open_since")
+
+        # UX #4 (charge-side): same explanation shape for charge deferred.
+        if cs is not None and charge_phase == "deferred":
+            attrs["charge_deferred_reason"] = _explain_charge_deferral(
+                cs, get_interpolated_soc(self.hass, self._domain)
+            )
 
         return attrs
 
