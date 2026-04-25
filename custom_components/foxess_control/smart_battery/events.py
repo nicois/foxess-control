@@ -38,10 +38,10 @@ Event types (kept as constants to avoid typos at call sites):
 from __future__ import annotations
 
 import datetime as _dt
+import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    import logging
     from collections.abc import Callable
 
 EVENT_SCHEMA_VERSION = 1
@@ -65,16 +65,56 @@ def emit_event(
     attributes in addition to a human-readable message.  Handlers that
     understand the event protocol (the debug-log handler) serialise the
     structured fields; other handlers just see a normal log line.
+
+    The dispatch bypasses :meth:`Logger.isEnabledFor` so that handlers
+    attached to an ancestor logger (e.g. the integration's
+    ``custom_components.foxess_control`` debug-log sensor) always see
+    the record — even when a per-module level override elsewhere in the
+    logger hierarchy would otherwise drop INFO emissions.  Structured
+    events are telemetry the integration emits on its own behalf; the
+    consumer decides visibility via handler-level filters/levels, not
+    the global logger level.  Regression: a v1.0.12 user observed zero
+    ``schedule_write`` events from ``foxess.inverter`` in their debug
+    sensor because a per-logger override at WARNING silently dropped
+    records before propagation to the parent handler.
     """
     message = f"{event_type}: {_format_summary(event_type, payload)}"
-    logger.info(
-        message,
-        extra={
-            "event": event_type,
-            "payload": payload,
-            "schema_version": EVENT_SCHEMA_VERSION,
-        },
-    )
+    extra = {
+        "event": event_type,
+        "payload": payload,
+        "schema_version": EVENT_SCHEMA_VERSION,
+    }
+
+    if logger.disabled:
+        return
+
+    # Build the record directly so we can bypass the logger-level
+    # isEnabledFor check that would otherwise drop structured events
+    # when a per-module override pins this logger above INFO.  The
+    # record still flows through logger-level filters (via Logger.handle)
+    # and every handler's own level/filter chain, so consumers retain
+    # full control over visibility.
+    try:
+        record = logger.makeRecord(
+            logger.name,
+            logging.INFO,
+            "(unknown file)",
+            0,
+            message,
+            (),
+            None,
+            func=None,
+            extra=extra,
+            sinfo=None,
+        )
+    except TypeError:
+        # Defensive: if a LogRecord factory rejects one of the fields,
+        # fall through to the normal logger.info path so we at least
+        # emit via the standard pipeline.
+        logger.info(message, extra=extra)
+        return
+
+    logger.handle(record)
 
 
 def emit_schedule_write(
