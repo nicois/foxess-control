@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.13-beta.1
+
+### Fixed
+- **Structured events silently dropped when a user set a per-module log level**: `emit_event` used `logger.info(message, extra=...)`, which Python's logging framework evaluates against `Logger.isEnabledFor()` *before* propagation to ancestor handlers. On a live HA (v1.0.12) with a `logger:` YAML config (or persisted `core.logger` entry) pinning `custom_components.foxess_control.foxess.inverter` above INFO, every `SCHEDULE_WRITE` event emitted from `Inverter._post_schedule()` was dropped at the child's level check — never reaching the debug-log sensor attached to the parent `custom_components.foxess_control` logger. Listener-layer emissions from `smart_battery.listeners` were not affected (that logger inherited DEBUG from the parent, which `setup_debug_log` forces). Root cause diagnosed by executor-path reproduction: the bug is not threading-related; it's a logger-level filter closing before records reach their intended handler. Fixed by changing `emit_event` to build the `LogRecord` via `logger.makeRecord()` and dispatch via `logger.handle()`, bypassing `isEnabledFor()` while still running the logger's filter chain and every handler's level/filter chain. Structured events are telemetry the integration emits on its own behalf; visibility is controlled at the handler level, not at the logger level. Applies to all six event types (`ALGO_DECISION`, `TICK_SNAPSHOT`, `SCHEDULE_WRITE`, `TAPER_UPDATE`, `SERVICE_CALL`, `SESSION_TRANSITION`). Three-test regression suite `TestInverterScheduleWriteReachesParentHandler` covers the exact production symptom (child at WARNING) + default-levels baseline + session-context-survives-child-override neighbourhood. Flags that the existing v1.0.12 test attached its capture handler directly to the emitting leaf logger, so it validated the emit step but not the parent-propagation path production relies on.
+
 ## 1.0.12
 
 ### Fixed
