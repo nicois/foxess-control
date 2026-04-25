@@ -484,6 +484,20 @@ _CONTEXT_DESTROYED_SIGNALS = (
 #     us HA's frontend never attached; stage 2 means the main layout
 #     didn't render; stage 3 means the dashboard router didn't mount
 #     Lovelace.  Stage names appear in log output for diagnosis.
+#
+# Stages 1 and 2 (early DOM milestones) are fast under any CI load: they
+# only check shadow-root attachment, which is done synchronously as soon
+# as HA's bundled JS evaluates.  A tight 30s cap on these stages catches
+# catastrophic failures (HA's frontend never loaded) without masking
+# slow-panel scenarios.  Stage 3 is qualitatively different: it waits
+# for HA's dynamic panel-module import to complete AND for the WS
+# session to establish AND for partial-panel-resolver to hand the panel
+# its hass reference.  Under adversarial CI timing (12 xdist workers
+# contending for CPU, HA firing a housekeeping navigation at t=~12s),
+# stage 3 legitimately needs the full remaining overall budget on its
+# post-navigation retry, not a 30s per-call cap.  See
+# test_retry_after_midstage_nav_uses_remaining_overall_budget for the
+# concrete reproduction.
 
 _STAGE_HOME_ASSISTANT = """() => {
     const el = document.querySelector('home-assistant');
@@ -497,13 +511,50 @@ _STAGE_HOME_ASSISTANT_MAIN = """() => {
     return !!(ham && ham.shadowRoot);
 }"""
 
+# The final-stage predicate requires a *settled* panel, not merely an
+# attached one.  Diagnosed 2026-04-25 by observing a live HA container:
+# HA's frontend fires a full page navigation ~1-15s after the initial
+# goto returns (auth refresh / service-worker registration).  If the
+# predicate only checked ``!!panel``, the helper could return on a
+# transient attachment moments before the navigation detaches the
+# panel — causing the test body to hit ``Element is not attached to
+# the DOM`` as observed in test_gallery_overview_idle[entity] on
+# v1.0.13-beta.1 (run 24921297745).
+#
+# Semantic signals used to prove the panel is past HA's initial
+# navigation churn (ANY one is sufficient — they progress in order
+# of when HA wires them up):
+#   (a) hass.connected === true — WS session established with HA core
+#   (b) panel.hass set — panel wired to the state store
+#   (c) hui-root mounted inside panel.shadowRoot — Lovelace's actual
+#       dashboard renderer is attached
+#
+# Requiring all three would be overly strict (hui-root mounts *after*
+# panel.hass is set).  Requiring hass.connected AND (panel.hass OR
+# hui-root) is the minimal contract that excludes the transient
+# attachment window without flaking on the "panel just mounted, hui-root
+# about to appear" sub-window.
 _STAGE_HA_PANEL_LOVELACE = """() => {
     const main = document.querySelector('home-assistant');
     if (!main || !main.shadowRoot) return false;
+    // (a) hass WebSocket session established — only true once HA's
+    // initial navigation churn has settled and auth refresh completed.
+    if (!main.hass || !main.hass.connected) return false;
     const ham = main.shadowRoot.querySelector('home-assistant-main');
     if (!ham || !ham.shadowRoot) return false;
     const panel = ham.shadowRoot.querySelector('ha-panel-lovelace');
-    return !!panel;
+    if (!panel) return false;
+    // (b) panel is wired to the state store — indicates the panel has
+    // been handed a hass reference, which happens after navigation
+    // settles and partial-panel-resolver completes its dynamic import.
+    if (!panel.hass) return false;
+    // The panel is attached AND hass.connected AND panel.hass — safe
+    // to return.  hui-root may or may not be mounted yet; waiting for
+    // it here would over-constrain the ready signal (panels that show
+    // loading spinners legitimately have panel.hass set but not
+    // hui-root yet, and would time out despite being ready enough for
+    // test-body interactions to proceed via additional waits).
+    return true;
 }"""
 
 
@@ -519,17 +570,40 @@ _LOVELACE_PANEL_STAGES: tuple[tuple[str, str], ...] = (
 )
 
 
+# Per-stage timeout cap in milliseconds.  ``None`` means "use the full
+# remaining overall budget" — used for the final ``ha-panel-lovelace``
+# stage, where post-navigation retries must be allowed to consume any
+# leftover overall budget rather than being re-capped at a per-stage
+# limit.  Stages 1 and 2 retain the 30s cap: they only check shadow-
+# root attachment (synchronous as soon as HA's JS evaluates), so a
+# 30s budget catches catastrophic failures without masking slow-panel
+# scenarios that only manifest in stage 3.
+_LOVELACE_STAGE_TIMEOUTS_MS: dict[str, int | None] = {
+    "home-assistant": 30000,
+    "home-assistant-main": 30000,
+    "ha-panel-lovelace": None,
+}
+
+
 def _wait_for_stage(
     page: Any,
     stage_name: str,
     predicate: str,
     deadline: float,
-    max_stage_ms: int = 30000,
+    max_stage_ms: int | None = 30000,
 ) -> None:
     """Wait for one DOM milestone with retry-on-context-destroyed.
 
-    Each stage uses ``min(remaining_budget, max_stage_ms)`` as its
-    ``wait_for_function`` timeout — bounded per-stage, bounded overall.
+    The per-call timeout is ``min(remaining_budget, max_stage_ms)``
+    when ``max_stage_ms`` is set, or the full remaining budget when
+    ``max_stage_ms is None``.
+
+    The ``max_stage_ms is None`` mode is specifically required for
+    stages that race with navigation-driven context destruction: the
+    post-navigation retry must be allowed to consume any remaining
+    overall budget, not be artificially re-capped.  See
+    ``test_retry_after_midstage_nav_uses_remaining_overall_budget`` for
+    the concrete reproduction.
 
     Retries when Playwright reports context destruction (HA navigation
     churn).  Genuine ``TimeoutError`` and unrelated ``PlaywrightError``
@@ -548,7 +622,10 @@ def _wait_for_stage(
                 f"stage '{stage_name}' could start"
             )
             raise PwTimeoutError(msg)
-        stage_ms = min(remaining_ms, max_stage_ms)
+        if max_stage_ms is None:
+            stage_ms = remaining_ms
+        else:
+            stage_ms = min(remaining_ms, max_stage_ms)
         try:
             page.wait_for_function(predicate, timeout=stage_ms)
             return
@@ -577,10 +654,13 @@ def _wait_for_lovelace_panel(page: Any, timeout_ms: int = 75000) -> None:
     """Wait for the Lovelace panel to render via staged DOM milestones.
 
     Stages (each bounded by its own wait_for_function):
-      1. ``home-assistant`` element exists and has shadowRoot.
+      1. ``home-assistant`` element exists and has shadowRoot (30s cap).
       2. ``home-assistant-main`` exists inside that shadowRoot and has
-         its own shadowRoot.
-      3. ``ha-panel-lovelace`` exists inside the main's shadowRoot.
+         its own shadowRoot (30s cap).
+      3. ``ha-panel-lovelace`` is mounted, HA's WS session is connected,
+         and the panel has been wired to the state store (uses full
+         remaining overall budget — post-navigation retries must not
+         be re-capped).
 
     Each stage retries on Playwright "Execution context was destroyed"
     errors (HA navigation churn — WS reconnect, dashboard router
@@ -595,6 +675,13 @@ def _wait_for_lovelace_panel(page: Any, timeout_ms: int = 75000) -> None:
     registry and dashboard router to finish on the slowest runners
     without masking genuine hangs.
 
+    **Stage-3 stability signal**: the ha-panel-lovelace predicate
+    requires ``hass.connected`` AND ``panel.hass`` set, not merely a
+    bare attach check.  This prevents the helper returning on a
+    transient attachment during HA's housekeeping navigation (observed
+    t=~12s in live traces).  See
+    ``test_final_stage_predicate_includes_stable_signal`` for rationale.
+
     Raises ``TimeoutError`` if any stage fails within its bounded
     budget (stage name appears in the error message).  Unrelated
     Playwright errors propagate unchanged.
@@ -603,7 +690,16 @@ def _wait_for_lovelace_panel(page: Any, timeout_ms: int = 75000) -> None:
 
     for stage_name, predicate in _LOVELACE_PANEL_STAGES:
         stage_start = time.monotonic()
-        _wait_for_stage(page, stage_name, predicate, deadline)
+        # Per-stage cap: ``None`` means "use full remaining budget".
+        # Default 30s for any stage not explicitly listed (defensive).
+        stage_cap_ms = _LOVELACE_STAGE_TIMEOUTS_MS.get(stage_name, 30000)
+        _wait_for_stage(
+            page,
+            stage_name,
+            predicate,
+            deadline,
+            max_stage_ms=stage_cap_ms,
+        )
         stage_dur = time.monotonic() - stage_start
         _log.debug(
             "[%s] lovelace panel stage '%s' ready in %.1fs",
