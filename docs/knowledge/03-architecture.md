@@ -142,6 +142,20 @@ and hardware export limit.
 **Why**: Decouples smart session logic from brand-specific API calls.
 The same `listeners.py` state machine works with any brand that
 implements the protocol's methods.
+**Architectural pattern — dependency inversion via Protocol**: This
+is the project's concrete form of the SOLID dependency-inversion
+principle. `smart_battery/` (the policy layer — pacing algorithms,
+session state machines, sensors) depends on the abstract
+`InverterAdapter` Protocol, never on brand-specific classes. Brand
+packages (`custom_components/foxess_control/foxess/*`, future
+`huawei/*`, `solax/*`, …) depend on `smart_battery/` and implement
+the Protocol. No imports flow the other way — enforced by
+**C-039** (semgrep rule `no-brand-imports-in-smart-battery`).
+Brand-specific state enters `smart_battery/` only through Protocol
+method parameters, and brand-specific behaviour is swapped by
+injecting a different adapter at integration setup. The adapter is
+the single *seam*: any cross-brand refactor touches only this
+Protocol and its implementations.
 **Methods**:
 - `apply_mode(hass, mode, power_w=None, fd_soc=11)` — set work mode
   and optional forced-discharge/charge power and SoC floor.
@@ -198,6 +212,112 @@ on teardown, ensuring HA manages the connection pool lifecycle.
 **Why separate from FoxESSClient**: Web portal credentials (username/password)
 differ from the Open API key. The web portal exposes data (BMS temperature)
 not available through the Open API.
+
+## Adding a New Brand
+
+This section answers "how do I plug a new inverter brand in?" The
+pattern is dependency inversion via the `InverterAdapter` Protocol
+(see Key Abstractions above). `smart_battery/` stays untouched; all
+new code lives under `custom_components/<brand>_control/`.
+
+**Step 1 — Create the brand package**. Mirror the FoxESS layout:
+
+```
+custom_components/<brand>_control/
+├── __init__.py            # HA setup / teardown, wires adapter
+├── manifest.json          # HA integration manifest
+├── config_flow.py         # Brand-specific config (subclasses
+│                            smart_battery/config_flow_base.py)
+├── <brand>_adapter.py     # Implements InverterAdapter Protocol
+├── <brand>/               # Brand-specific API client, WS, auth
+│   ├── client.py
+│   └── inverter.py
+└── smart_battery/         # Vendored copy (kept in sync by
+                             pre-commit hook; never hand-edited — C-015)
+```
+
+**Step 2 — Implement `InverterAdapter`**. The Protocol is the single
+seam: `smart_battery/` will call your adapter for every inverter
+control action. Implement all five methods in `<brand>_adapter.py`:
+
+```python
+class <Brand>Adapter:
+    async def apply_mode(self, hass, mode, power_w=None, fd_soc=11): ...
+    async def remove_override(self, hass, mode): ...
+    def get_max_power_w(self) -> int: ...
+    async def set_export_limit_w(self, hass, value_w): ...  # or no-op
+    async def get_export_limit_w(self, hass) -> int | None: ...
+```
+
+Many brands (any that expose inverter control via HA entities from
+an existing integration like `<brand>_modbus`) can subclass the
+generic `EntityAdapter` in `smart_battery/adapter.py` rather than
+writing from scratch — only the entity-name mapping is brand-
+specific. Cloud-API brands will write more adapter code.
+
+**Step 3 — Wire it up**. In `__init__.py::async_setup_entry`,
+instantiate the brand's adapter and attach it to the
+`FoxESSEntryData`-equivalent runtime_data:
+
+```python
+entry.runtime_data = <Brand>EntryData(
+    coordinator=coordinator,
+    inverter=inverter,
+    adapter=<Brand>Adapter(...),
+)
+```
+
+`smart_battery/` reads the adapter from `entry.runtime_data.adapter`
+and never touches brand-specific types directly.
+
+**Step 4 — What stays brand-agnostic (do NOT add here)**. The
+following items belong in `smart_battery/` and are inherited for
+free — do not duplicate them in the brand package (C-021):
+
+- `algorithms.py` — pacing, deferred-start, taper, feasibility
+- `listeners.py` — session state machine, tick orchestration
+- `services.py` — service dispatch, group resolution
+- `events.py` / `logging.py` — structured telemetry + context filter
+- `sensor_base.py` — sensor entity classes (subclass only to add
+  brand-specific metadata)
+- `config_flow_base.py` — battery-options step, smart-session options
+- `taper.py`, `session.py`, `store.py`, `domain_data.py` — shared
+  state types
+
+**Step 5 — Brand-specific extras**. Sensors exposing data the brand
+offers but the Protocol doesn't (BMS temperature, grid frequency,
+brand-specific diagnostic registers) belong in
+`<brand>_control/sensor.py` — subclass the base sensor classes, add
+brand-specific `DeviceInfo` / entity descriptions.
+
+**Step 6 — Test the integration**. The brand package ships its own
+test suite:
+- Simulator: implement a brand-specific simulator if the brand has a
+  cloud API (FoxESS has `simulator/`). Otherwise entity-mode tests
+  can reuse the generic `EntityAdapter` fixtures.
+- Unit tests for the adapter implementation (one per Protocol method).
+- E2E tests for HA integration surface (config flow, entity
+  discovery). `tests/e2e/` in the FoxESS repo is the template.
+- `smart_battery/` tests do NOT need duplicating — they run against
+  the Protocol, not the implementation.
+
+**Step 7 — Enforcement checks**. Ensure your brand package honours
+C-021 and C-039:
+
+- No `import` from `smart_battery/` in anything under
+  `<brand>/` (the client layer). `smart_battery/` and the brand's
+  *adapter* can import from each other (adapter implements the
+  Protocol); but `<brand>/client.py` should not.
+- No `from custom_components.<brand>_control.<brand> import ...` in
+  `smart_battery/` — semgrep's `no-brand-imports-in-smart-battery`
+  rule (extended per-brand) will block this.
+
+The Protocol boundary is the only injection point. If you find
+yourself wanting to add a new method to `smart_battery/` that
+"every brand has to implement but FoxESS doesn't use yet", add it
+to the Protocol with a default no-op implementation first — then
+brands can fill it in incrementally without breaking existing
+brands.
 
 ## External Dependencies
 

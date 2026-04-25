@@ -53,6 +53,8 @@ serves and any lower-priority goal it trades against.
 - **C-019**: Discharge SoC unavailability aborts session after 3 checks (matching charge C-012)
 
 ### Architecture
+- **C-021**: Brand-agnostic code belongs in `smart_battery/`; brand-specific code must not live there
+- **C-039**: `smart_battery/` must not import from brand-layer modules — dependency inversion via the `InverterAdapter` Protocol (semgrep-enforced). See `docs/knowledge/03-architecture.md` §Adding a New Brand.
 - **C-034**: No `.py` file in `custom_components/foxess_control/` exceeds 2000 lines
 - **C-035**: Config via `IntegrationConfig` / `_cfg(hass)`, not raw `entry.options`
 - **C-036**: Domain data via `_dd(hass)`, not raw `hass.data[DOMAIN]`

@@ -38,17 +38,27 @@ C-022 (unreachable target surfaced), C-026 (error surfacing)
 **Statement**: Code, algorithms, types, and related assets that do not
 directly relate to a specific inverter brand must be placed in the
 `smart_battery/` common package, not in brand-specific integration
-directories.
+directories. **Conversely**, brand-specific code (cloud API clients,
+WASM blobs, per-brand entity naming, brand-specific WebSocket
+protocols) must not live in `smart_battery/`, and `smart_battery/`
+must not import from brand-specific modules (see C-039 for the
+enforced dependency-inversion form).
 **Priority enforced**: P-006 (brand portability)
 **Rationale**: The strategic direction is multi-brand support. Code
 that lives in `custom_components/foxess_control/` but has no FoxESS
 dependency becomes an obstacle — it must be duplicated or extracted
-when adding a second brand. Placing it in `smart_battery/` from the
-start avoids this.
-**Violation consequence**: Brand-agnostic logic trapped in a
-brand-specific directory, requiring extraction work before each new
-brand integration and risking divergence between copies.
-**Traces**: C-015
+when adding a second brand. Conversely, brand leakage into
+`smart_battery/` couples the common package to FoxESS assumptions
+(e.g. FoxESS's `fdSoc` naming) that will not hold for Huawei /
+SolaX / Sungrow. Both directions matter.
+**Violation consequence**: Either (a) brand-agnostic logic trapped
+in a brand-specific directory, requiring extraction work before
+each new brand integration and risking divergence between copies;
+or (b) brand leakage into `smart_battery/` that must be refactored
+out before the next brand can be added.
+**Traces**: C-015 (vendored sync — ensures the common-package copy
+used at runtime matches the canonical one),
+C-039 (dependency-inversion form — enforced by semgrep).
 
 ### C-024: Safe state on failure
 **Statement**: On persistent failure — repeated uncaught exceptions
@@ -662,6 +672,40 @@ provides IDE autocomplete.
 **Violation consequence**: Semgrep rule `no-raw-hass-data-access` fails
 pre-commit.
 **Traces**: `.semgrep/foxess-architecture.yaml::no-raw-hass-data-access`
+
+### C-039: No brand-layer imports in smart_battery/
+**Priority enforced**: P-006 (brand portability) — the
+dependency-inversion form of C-021
+**Statement**: The `smart_battery/` package must not import from any
+brand-specific module. Concretely, no file under `smart_battery/` (or
+the vendored `custom_components/foxess_control/smart_battery/`) may
+`import` or `from ... import` any of:
+`custom_components.foxess_control.foxess.*`,
+`custom_components.foxess_control.foxess_adapter`,
+`custom_components.foxess_control.coordinator`,
+`custom_components.foxess_control._services`, or
+`custom_components.foxess_control._helpers`. Brand-specific state or
+behaviour enters `smart_battery/` only through (a) the
+`InverterAdapter` Protocol passed as a parameter, (b) the
+`EntityAdapter` / `EntityCoordinator` generic helpers, or (c) typed
+data values crossing the boundary via the protocol's method
+signatures.
+**Rationale**: C-021 says where brand-agnostic code goes; C-039 says
+how the layers stay decoupled. Import direction is the concrete
+mechanism for dependency inversion: `smart_battery/` depends on the
+abstract `InverterAdapter` Protocol; brand packages depend on
+`smart_battery/` (and implement the Protocol); nothing flows the
+other way. A `from custom_components.foxess_control.foxess import
+X` in `smart_battery/` would couple the common package to a FoxESS
+type and silently prevent Huawei / SolaX / Sungrow from reusing it
+without modification.
+**Violation consequence**: Pre-commit fails. The semgrep rule
+`no-brand-imports-in-smart-battery` in
+`.semgrep/foxess-architecture.yaml` greps for the forbidden import
+patterns and blocks the commit.
+**Traces**: C-021 (where code belongs — the companion principle),
+C-015 (vendored copy sync);
+`.semgrep/foxess-architecture.yaml::no-brand-imports-in-smart-battery`
 
 ### C-037: Grid export limit awareness in discharge timing
 **Priority enforced**: P-003 (energy target) and P-004 (feed-in

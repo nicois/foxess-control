@@ -25,7 +25,7 @@ serving it.
 | P-003 Meet the user's energy target | C-007, C-008, C-009, C-010, C-011, C-014, C-022, C-023, C-037 | D-005, D-006, D-007, D-011, D-012, D-013, D-014, D-015 (taper), D-028, D-032, D-033, D-037, D-042, D-043, D-044, D-046 | ENFORCED |
 | P-004 Maximise feed-in revenue | (aspirational — no C-NNN) | (no D-NNN currently declares P-004 as primary; D-044 serves P-003 but advances P-004 as a secondary effect) | ASPIRATIONAL |
 | P-005 Operational transparency | C-004, C-005, C-006, C-020, C-022, C-026, C-038 | D-008, D-009, D-010, D-020, D-021, D-027, D-029, D-030, D-035, D-036, D-038, D-039, D-040, D-041 (ws), D-048, D-050 | ENFORCED |
-| P-006 Brand portability | C-015, C-021 | D-022 | ENFORCED |
+| P-006 Brand portability | C-015, C-021, C-039 | D-022 | ENFORCED |
 | P-007 Engineering process integrity | C-015, C-028, C-029, C-030, C-031, C-032, C-033, C-034, C-035, C-036 | D-019, D-031, D-034, D-041 (lovelace), D-045, D-049 | ENFORCED |
 
 **Notes:**
@@ -120,6 +120,7 @@ against a scenario that the system couldn't actually reach.
 | C-034 Module size budget | -- | -- (enforced by `.githooks/check-module-size`) | ACCEPTED |
 | C-035 Typed config access | -- | -- (enforced by semgrep `no-raw-entry-options`) | ACCEPTED |
 | C-036 Typed domain data access | -- | -- (enforced by semgrep `no-raw-hass-data-access`) | ACCEPTED |
+| C-039 No brand-layer imports in smart_battery/ | D-022 (adapter injection) | -- (enforced by semgrep `no-brand-imports-in-smart-battery`) | ACCEPTED |
 
 | C-038 Sensor-listener parameter parity | D-002, D-005, D-043 | `test_charge_deferred_sensor.py` (7), `test_discharge_deferred_sensor.py` (4) | COVERED |
 | C-037 Grid export limit awareness | D-002, D-005, D-044, D-047 | `TestGridExportLimitDeferral` (4), `TestFeedinHeadroomAccountsForExportClamp` (6 — clamp-slack-aware headroom, 2026-04-24), `TestListenerWriteSuppression` (2), `TestListenerStartsAtHardwareMax`, `TestListenerOverwriteExternalChanges`, `TestAdapterExportLimitInterface`, `TestExportLimitThreshold`, `test_deferred_countdown_with_grid_export_limit_and_consumption` | COVERED |
@@ -167,6 +168,11 @@ against a scenario that the system couldn't actually reach.
   `no-raw-entry-options`. No D-NNN expected.
 - **C-036**: Typed domain data access — enforced by semgrep rule
   `no-raw-hass-data-access`. No D-NNN expected.
+- **C-039**: No brand-layer imports in `smart_battery/` —
+  dependency-inversion form of C-021, enforced by semgrep rule
+  `no-brand-imports-in-smart-battery`. Traces conceptually to
+  D-022 (adapter as the injection seam), but the *rule itself*
+  is an import-direction invariant that doesn't need its own D-NNN.
 
 ### Design decisions without tests (UNVERIFIED)
 - **D-002**: Deferred start with self-use — the deferred start
@@ -202,7 +208,7 @@ against a scenario that the system couldn't actually reach.
 ## Summary
 
 - **Priorities**: 7 (P-001..P-007, introduced 2026-04-24)
-- **Total constraints**: 38 (all active; C-023 reclassified as hardware-satisfied)
+- **Total constraints**: 39 (all active; C-023 reclassified as hardware-satisfied; C-039 added 2026-04-25)
 - **Design decisions**: 49 unique (D-001..D-050, D-024 retired; D-014 and
   D-041 each refer to two different entries in different design files —
   ID collisions carried over from earlier passes, tracked in META.md
@@ -211,9 +217,9 @@ against a scenario that the system couldn't actually reach.
   (emit_event bypasses logger-level filter).
 - **Fully covered**: 25 (66%)
 - **Partial (actionable)**: 0
-- **Accepted (non-actionable)**: 13 (34%) — C-009, C-013, C-015, C-023,
-  C-028–C-036 (C-038 kept as COVERED via its related D-NNN even
-  though it has no *dedicated* design decision — see the
+- **Accepted (non-actionable)**: 14 (36%) — C-009, C-013, C-015, C-023,
+  C-028–C-036, C-039 (C-038 kept as COVERED via its related D-NNN
+  even though it has no *dedicated* design decision — see the
   Non-actionable section for the reasoning)
 - **Gaps**: 0
 - **Unjustified design decisions**: 2 (D-015, D-043 — no C-NNN; D-020
@@ -221,7 +227,7 @@ against a scenario that the system couldn't actually reach.
 - **Unverified design decisions**: 3 (D-002, D-016, D-039)
 - **Priority inversions**: 0
 - **Unconstrained priorities**: 1 (P-004 — aspirational by design)
-- **Unprioritised constraints**: 0 (all 38 C-NNN name P-NNN)
+- **Unprioritised constraints**: 0 (all 39 C-NNN name P-NNN)
 - **Unprioritised decisions**: 0 (all 52 D-NNN entries name P-NNN + classification)
 - **Active regression**: none
 - **Orphan tests**: ~160 unit (display, plumbing, lifecycle tests)
