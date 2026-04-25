@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.12-beta.1
+
+### Fixed
+- **Every FoxESS sensor silently freezes during a charge session's pre-window phase** (surfaced 2026-04-25 by the new `collect_ha_session.py` trace collector against the author's live instance). `SmartOperationsSensor.native_value` can return `"scheduled"` — a value added in 1.0.11-beta.9 to distinguish the charge card's pre-window state from the deferred state — but the sensor's `_attr_options` list at `smart_battery/sensor_base.py` was not updated when that phase value was introduced. HA's sensor base class rejects any state that isn't in `_attr_options` and raises `ValueError` from `async_write_ha_state()`. Because `DataUpdateCoordinator.async_update_listeners()` iterates listeners sequentially and the exception is uncaught, **every listener registered after `SmartOperationsSensor` stops receiving updates**. Observed blast radius on the live instance: coordinator polling succeeded every 5 minutes (`success: True` in the debug log), yet SoC, house load, generation, work mode, charge rate and every other FoxESS sensor had `last_reported`/`last_changed` frozen at their pre-session values for 50+ minutes. The `smart_operations` sensor itself stuck at `idle` (its last valid state) while the *binary*-sensor-class `smart_charge_active` — which registers earlier in the listener iteration — correctly showed `on`. That disagreement was the symptom that led to the trace. Fixed by adding `"scheduled"` to `_attr_options`. Regression test (`TestSmartOperationsSensorOptionsCoverage`) parametrises over every string `native_value` can return and asserts each is in options — structurally prevents the class of defect. Traces C-020 (transparency), C-026 (error surfacing), C-038 (sensor-listener parity).
+
 ## 1.0.11
 
 ### Added
