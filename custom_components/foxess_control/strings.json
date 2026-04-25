@@ -307,6 +307,10 @@
     "session_aborted": {
       "title": "Smart {session_type} session aborted",
       "description": "The smart {session_type} session was aborted: {reason}.\n\nThe inverter has been reverted to Self Use mode."
+    },
+    "sensor_write_failed": {
+      "title": "Sensor {entity_id} failed to update",
+      "description": "The sensor `{entity_id}` raised an error while writing its state and is no longer updating:\n\n`{error}`\n\nOther FoxESS sensors continue to update — this is a contained failure, but the named sensor's value may be stale. The issue will clear automatically when the sensor next writes successfully.\n\nIf it persists, consider restarting Home Assistant or reporting the error."
     }
   }
 }

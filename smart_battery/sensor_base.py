@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.binary_sensor import (
@@ -54,6 +55,8 @@ ICON_TIMER = "mdi:timer-sand"
 
 _STATE_UNAVAILABLE = None
 _FORECAST_STEP = datetime.timedelta(minutes=5)
+
+_LOGGER = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -683,23 +686,113 @@ def build_forecast(
 # Sensor-listener safety (C-026)
 # ---------------------------------------------------------------------------
 #
-# Current behaviour (this will be replaced when the Repair surface lands):
-# the helper calls ``sensor.async_write_ha_state()`` with no protection.
-# A ValueError from HA's own SensorEntity.state (e.g. an ENUM value
-# missing from options) propagates out of the listener, halts
-# DataUpdateCoordinator.async_update_listeners iteration, and every
-# sensor registered after the failing one freezes silently.
+# HA's DataUpdateCoordinator.async_update_listeners iterates listeners
+# with no try/except; a single listener exception halts the whole
+# fan-out and every sensor registered after the failure freezes
+# silently.  Production incident 2026-04-25: a SmartOperationsSensor
+# state-write raised ValueError from HA's own SensorEntity.state (ENUM
+# value not in options) and every FoxESS sensor stopped updating for
+# 50+ minutes with no UI signal — violating C-026 (persistent errors
+# must surface via the UI, not only the log).
 #
-# The regression test in ``tests/test_sensor_listener_safety.py`` will
-# expose this via a halted fan-out and an empty Repair registry; the
-# fix will wrap the call in try/except and surface the failure via the
-# HA issue registry while letting later listeners run.
+# ``_safe_write_ha_state`` wraps the write, catching narrow exception
+# types, logging the failure, and creating an HA Repair issue keyed by
+# entity_id so repeated failures do not spam.  On a subsequent
+# successful write the Repair issue is cleared.  The helper does NOT
+# re-raise — letting iteration continue is the whole value prop.
+
+_SENSOR_WRITE_ISSUE_PREFIX = "sensor_write_failed_"
+
+
+def _sanitise_entity_id(entity_id: str) -> str:
+    """Convert an entity_id into a safe issue-registry key suffix."""
+    return entity_id.replace(".", "_").replace("-", "_")
 
 
 def _safe_write_ha_state(hass: HomeAssistant, domain: str, sensor: Any) -> None:
-    """Call ``sensor.async_write_ha_state()``; current implementation
-    is unprotected (reproduces the 2026-04-25 incident pattern)."""
-    sensor.async_write_ha_state()
+    """Call ``sensor.async_write_ha_state()`` with C-026 failure surface.
+
+    Wraps the write so that (a) a failing sensor does not halt the
+    coordinator listener fan-out (production incident 2026-04-25), and
+    (b) the failure surfaces via an HA Repair issue naming the
+    offending sensor, so the user can diagnose the fault from the UI
+    alone (C-020).  On recovery (next successful write) the Repair
+    issue is cleared.
+
+    Caught exception types are narrow — ``ValueError`` covers the
+    SensorEntity.state validation path that triggered the production
+    incident; ``RuntimeError`` covers HA runtime state violations
+    (e.g. entity not yet added).  Other exception classes propagate
+    (programming errors should remain visible).
+    """
+    entity_id = getattr(sensor, "entity_id", None) or "unknown"
+    issue_id = _SENSOR_WRITE_ISSUE_PREFIX + _sanitise_entity_id(entity_id)
+    try:
+        sensor.async_write_ha_state()
+    except (ValueError, RuntimeError) as exc:
+        _LOGGER.exception(
+            "Sensor %s failed to write state; later listeners will still run",
+            entity_id,
+        )
+        _register_sensor_write_issue(hass, domain, issue_id, entity_id, exc)
+    else:
+        _clear_sensor_write_issue(hass, domain, issue_id)
+
+
+def _register_sensor_write_issue(
+    hass: HomeAssistant,
+    domain: str,
+    issue_id: str,
+    entity_id: str,
+    exc: BaseException,
+) -> None:
+    """Create (or refresh) the Repair issue for this sensor failure.
+
+    Idempotent: repeated failures for the same entity_id update one
+    issue rather than creating duplicates (HA's issue registry is keyed
+    on (domain, issue_id)).  Best-effort — any failure in the registry
+    itself falls back to log-only (we already logged the underlying
+    exception above).
+    """
+    try:
+        from homeassistant.helpers.issue_registry import (
+            IssueSeverity,
+            async_create_issue,
+        )
+
+        async_create_issue(
+            hass,
+            domain,
+            issue_id,
+            is_fixable=False,
+            severity=IssueSeverity.WARNING,
+            translation_key="sensor_write_failed",
+            translation_placeholders={
+                "entity_id": entity_id,
+                "error": str(exc),
+            },
+            data={"entity_id": entity_id, "error": str(exc)},
+        )
+    except Exception:
+        _LOGGER.debug(
+            "Failed to register sensor-write Repair for %s (non-critical)",
+            entity_id,
+        )
+
+
+def _clear_sensor_write_issue(hass: HomeAssistant, domain: str, issue_id: str) -> None:
+    """Dismiss the Repair issue for this sensor; no-op if absent.
+
+    Best-effort — if the issue never existed, ``async_delete_issue``
+    quietly returns.  If the registry itself is unavailable (e.g.
+    during tear-down) we swallow to avoid adding noise to the log.
+    """
+    try:
+        from homeassistant.helpers.issue_registry import async_delete_issue
+
+        async_delete_issue(hass, domain, issue_id)
+    except Exception:
+        _LOGGER.debug("Failed to clear sensor-write Repair %s (non-critical)", issue_id)
 
 
 # ---------------------------------------------------------------------------
@@ -741,12 +834,20 @@ class OverrideStatusSensor(SensorEntity):
         self.hass = hass
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to coordinator updates for instant state changes."""
+        """Subscribe to coordinator updates for instant state changes.
+
+        Uses ``_safe_write_ha_state`` so a failure in one sensor does
+        not halt the coordinator's listener fan-out (C-026).
+        """
         dd = get_domain_data(self.hass, self._domain)
         ed = dd.entries.get(self._entry.entry_id)
         if ed is not None and ed.coordinator is not None:
+
+            def _on_coordinator_update() -> None:
+                _safe_write_ha_state(self.hass, self._domain, self)
+
             self.async_on_remove(
-                ed.coordinator.async_add_listener(self.async_write_ha_state)
+                ed.coordinator.async_add_listener(_on_coordinator_update)
             )
 
     @property
@@ -908,7 +1009,11 @@ class SmartOperationsOverviewSensor(RestoreSensor):
         self._restored_state: str | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Restore last state and subscribe to coordinator updates."""
+        """Restore last state and subscribe to coordinator updates.
+
+        Uses ``_safe_write_ha_state`` so a failure in this sensor's
+        write does not halt the coordinator's listener fan-out (C-026).
+        """
         await super().async_added_to_hass()
         last_data = await self.async_get_last_sensor_data()
         if last_data and last_data.native_value:
@@ -919,7 +1024,7 @@ class SmartOperationsOverviewSensor(RestoreSensor):
 
             def _on_coordinator_update() -> None:
                 self._restored_state = None
-                self.async_write_ha_state()
+                _safe_write_ha_state(self.hass, self._domain, self)
 
             self.async_on_remove(coordinator.async_add_listener(_on_coordinator_update))
 
