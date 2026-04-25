@@ -1560,6 +1560,136 @@ class TestControlCard:
 
 
 # ---------------------------------------------------------------------------
+# Taper card (UX #5)
+# ---------------------------------------------------------------------------
+
+
+class TestTaperCard:
+    """Verify foxess-taper-card renders the BMS acceptance histogram."""
+
+    def test_card_renders(self, page: Page) -> None:
+        """Taper card is present on the dashboard."""
+        assert _find_card(page, "foxess-taper-card")
+
+    def test_empty_state_when_no_profile(self, page: Page) -> None:
+        """With no observations recorded yet, the empty-state text
+        (translated) appears inside the card."""
+        assert _find_card(page, "foxess-taper-card")
+        text = page.evaluate(
+            """() => {
+                function find(root) {
+                    const el = root.querySelector('foxess-taper-card');
+                    if (el) return el;
+                    for (const n of root.querySelectorAll('*')) {
+                        if (n.shadowRoot) {
+                            const f = find(n.shadowRoot);
+                            if (f) return f;
+                        }
+                    }
+                    return null;
+                }
+                const card = find(document);
+                if (!card || !card.shadowRoot) return null;
+                const empty = card.shadowRoot.querySelector('.empty');
+                return empty ? empty.textContent.trim() : null;
+            }"""
+        )
+        # The empty state contains translated "no observations" text.
+        # Accept any locale rendering by checking for a non-empty string.
+        assert text, "empty-state text not rendered on taper card"
+
+    def test_bars_render_with_seeded_profile(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """With a synthetic taper profile injected, the card renders
+        charge bars with widths proportional to the ratios.  A
+        low-confidence bin (count < 3) gets a marker dot in the row.
+        """
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
+        _robust_reload(page, settle_ms=3000)
+        assert _find_card(page, "foxess-taper-card")
+
+        raw = page.evaluate(
+            """() => {
+                function find(root) {
+                    const el = root.querySelector('foxess-taper-card');
+                    if (el) return el;
+                    for (const n of root.querySelectorAll('*')) {
+                        if (n.shadowRoot) {
+                            const f = find(n.shadowRoot);
+                            if (f) return f;
+                        }
+                    }
+                    return null;
+                }
+                const card = find(document);
+                if (!card || !card._hass) return { no_card: true };
+                const opsId = card._config.entity;
+                const orig = card._hass.states[opsId] || {
+                    state: 'idle',
+                    attributes: {},
+                };
+                const synth = {
+                    ...(orig.attributes || {}),
+                    taper_profile: {
+                        charge: [
+                            { soc: 80, ratio: 0.90, count: 12 },
+                            { soc: 85, ratio: 0.75, count: 8  },
+                            { soc: 90, ratio: 0.40, count: 1  },
+                        ],
+                        discharge: [
+                            { soc: 20, ratio: 0.70, count: 5 },
+                        ],
+                    },
+                };
+                card._hass = {
+                    ...card._hass,
+                    states: {
+                        ...card._hass.states,
+                        [opsId]: {
+                            ...orig,
+                            state: 'idle',
+                            attributes: synth,
+                        },
+                    },
+                };
+                card._render();
+                const shadow = card.shadowRoot;
+                const rows = Array.from(shadow.querySelectorAll('.bar-row'));
+                const lowConf = rows.filter(r => r.classList.contains('low-conf'));
+                const widths = rows.map(r => {
+                    const fill = r.querySelector('.bar-fill');
+                    return fill ? fill.style.width : null;
+                });
+                return {
+                    row_count: rows.length,
+                    low_conf_count: lowConf.length,
+                    widths: widths,
+                };
+            }"""
+        )
+        result: dict[str, object] = dict(raw) if isinstance(raw, dict) else {}
+        assert not result.get("no_card"), "taper card not found"
+        # 3 charge + 1 discharge = 4 bar-row elements.
+        assert result["row_count"] == 4, (
+            f"expected 4 bar rows, got {result['row_count']}"
+        )
+        # Only the 90% SoC bin (count=1) is low-confidence.
+        assert result["low_conf_count"] == 1, (
+            f"expected 1 low-conf row, got {result['low_conf_count']}"
+        )
+        # Widths should be "90%", "75%", "40%", "70%" (in order).
+        widths = result["widths"]
+        assert widths == ["90%", "75%", "40%", "70%"], (
+            f"unexpected bar widths: {widths}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Form input persistence tests (C-020: operational transparency)
 # ---------------------------------------------------------------------------
 

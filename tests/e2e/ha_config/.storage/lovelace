@@ -16,6 +16,9 @@
               "type": "custom:foxess-control-card"
             },
             {
+              "type": "custom:foxess-taper-card"
+            },
+            {
               "type": "custom:foxess-overview-card",
               "boxes": [
                 { "type": "battery" },
