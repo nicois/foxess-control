@@ -789,7 +789,7 @@ See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for decision-tree guides to common 
 
 **Diagnostics:** Click "Download Diagnostics" on the integration page (Settings > Devices & Services > FoxESS Control) to export coordinator data, session state, WebSocket status, taper profile, and config — with API keys and credentials redacted.
 
-**Repair issues:** Actionable errors (unmanaged work mode, session aborts) surface in HA's Repairs panel instead of just logs. Issues auto-clear when the problem is resolved or a new session starts.
+**Repair issues:** Actionable errors (unmanaged work mode, session aborts, sensor state-write failures) surface in HA's Repairs panel instead of just logs. Issues auto-clear when the problem is resolved or a new session starts. If a sensor fails to write its state, the Repair names the specific sensor and the error — other sensors continue updating rather than silently freezing.
 
 **Reauthentication:** When the FoxESS API key expires or becomes invalid, HA shows a "Reconfigure" prompt instead of silently failing. Enter a new key without removing and re-adding the integration.
 
