@@ -1120,6 +1120,183 @@ class TestControlCard:
             f"({deferred!r} == {charging!r})"
         )
 
+    def test_clamp_split_power_row_renders_when_export_limit_configured(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """UX #8: with ``discharge_grid_export_limit_w`` set, the
+        discharge power row splits into ``inverter kW / export kW``.
+
+        Exercises the card JS render branch directly via synthetic
+        attribute injection — the observable contract is that
+        ``.inverter-power`` AND ``.export-power`` spans both exist
+        when an export limit is configured.
+        """
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
+        _robust_reload(page, settle_ms=3000)
+        assert _find_card(page, "foxess-control-card")
+
+        raw = page.evaluate(
+            """() => {
+                function findCard(root) {
+                    const card = root.querySelector('foxess-control-card');
+                    if (card) return card;
+                    for (const el of root.querySelectorAll('*')) {
+                        if (el.shadowRoot) {
+                            const f = findCard(el.shadowRoot);
+                            if (f) return f;
+                        }
+                    }
+                    return null;
+                }
+                const card = findCard(document);
+                if (!card || !card._hass) return { no_card: true };
+                const opsId = card._config.operations_entity;
+                const orig = card._hass.states[opsId] || {
+                    state: 'discharging',
+                    attributes: {},
+                };
+                const synth = {
+                    ...(orig.attributes || {}),
+                    discharge_active: true,
+                    discharge_power_w: 8900,
+                    discharge_min_soc: 30,
+                    discharge_current_soc: 70,
+                    discharge_window: '18:00 – 18:30',
+                    discharge_remaining: '20m',
+                    discharge_grid_export_limit_w: 5000,
+                    discharge_clamp_active: false,
+                };
+                card._hass = {
+                    ...card._hass,
+                    states: {
+                        ...card._hass.states,
+                        [opsId]: {
+                            ...orig,
+                            state: 'discharging',
+                            attributes: synth,
+                        },
+                    },
+                };
+                card._render();
+                const shadow = card.shadowRoot;
+                const inv = shadow?.querySelector('.inverter-power');
+                const exp = shadow?.querySelector('.export-power');
+                return {
+                    has_inv: !!inv,
+                    has_exp: !!exp,
+                    exp_text: exp ? exp.textContent : null,
+                    inv_text: inv ? inv.textContent : null,
+                    exp_classes: exp ? exp.className : null,
+                };
+            }"""
+        )
+        result: dict[str, object] = dict(raw) if isinstance(raw, dict) else {}
+        assert not result.get("no_card"), "control card not found"
+        assert result["has_inv"], "inverter-power span missing"
+        assert result["has_exp"], "export-power span missing"
+        exp_text = str(result.get("exp_text") or "")
+        exp_classes = str(result.get("exp_classes") or "")
+        # The formatted power uses "kW" suffix for >= 1000 W.
+        assert "5" in exp_text, (
+            f"export-power text missing expected 5 kW value: {exp_text!r}"
+        )
+        # With clamp inactive, class should not include clamp-active.
+        assert "clamp-active" not in exp_classes
+
+    def test_clamp_active_class_toggles_with_attribute(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """UX #8: ``.clamp-active`` class + ``mdi:fence`` icon appear
+        iff ``discharge_clamp_active`` is true.
+
+        Render the card twice via synthetic injection — once with the
+        attribute false, once with it true — and verify the DOM
+        reflects the attribute in both directions.
+        """
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
+        _robust_reload(page, settle_ms=3000)
+        assert _find_card(page, "foxess-control-card")
+
+        def render_with(clamp_active: bool) -> dict[str, bool]:
+            result = page.evaluate(
+                """(clampActive) => {
+                    function findCard(root) {
+                        const card = root.querySelector('foxess-control-card');
+                        if (card) return card;
+                        for (const el of root.querySelectorAll('*')) {
+                            if (el.shadowRoot) {
+                                const f = findCard(el.shadowRoot);
+                                if (f) return f;
+                            }
+                        }
+                        return null;
+                    }
+                    const card = findCard(document);
+                    if (!card || !card._hass) return { no_card: true };
+                    const opsId = card._config.operations_entity;
+                    const orig = card._hass.states[opsId] || {
+                        state: 'discharging',
+                        attributes: {},
+                    };
+                    const synth = {
+                        ...(orig.attributes || {}),
+                        discharge_active: true,
+                        discharge_power_w: 8900,
+                        discharge_min_soc: 30,
+                        discharge_current_soc: 70,
+                        discharge_window: '18:00 – 18:30',
+                        discharge_remaining: '20m',
+                        discharge_grid_export_limit_w: 5000,
+                        discharge_clamp_active: clampActive,
+                    };
+                    card._hass = {
+                        ...card._hass,
+                        states: {
+                            ...card._hass.states,
+                            [opsId]: {
+                                ...orig,
+                                state: 'discharging',
+                                attributes: synth,
+                            },
+                        },
+                    };
+                    card._render();
+                    const shadow = card.shadowRoot;
+                    const exp = shadow?.querySelector('.export-power');
+                    const icon = shadow?.querySelector('.clamp-icon');
+                    return {
+                        has_clamp_active: !!(
+                            exp && exp.classList.contains('clamp-active')
+                        ),
+                        has_icon: !!icon,
+                    };
+                }""",
+                clamp_active,
+            )
+            return dict(result) if isinstance(result, dict) else {}
+
+        inactive = render_with(False)
+        active = render_with(True)
+        assert inactive and active, "control card not found"
+        assert not inactive["has_clamp_active"], (
+            "clamp-active class should be absent when attribute is false"
+        )
+        assert not inactive["has_icon"], (
+            "clamp-icon should be absent when attribute is false"
+        )
+        assert active["has_clamp_active"], (
+            "clamp-active class should be present when attribute is true"
+        )
+        assert active["has_icon"], "clamp-icon should be present when attribute is true"
+
 
 # ---------------------------------------------------------------------------
 # Form input persistence tests (C-020: operational transparency)

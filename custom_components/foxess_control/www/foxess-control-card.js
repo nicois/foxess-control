@@ -993,11 +993,7 @@ class FoxESSControlCard extends HTMLElement {
           </div>` : ""}
           <div class="detail-row">
             <span class="detail-label">${this._t("power")}</span>
-            <span class="detail-value">${deferred ? this._t("self_use") : scheduled ? "—" : this._formatPower(power)}${
-              !deferred && !scheduled && a.discharge_target_power_w != null && a.discharge_target_power_w !== power
-                ? ` <span style="opacity:0.5">→ ${this._formatPower(a.discharge_target_power_w)}</span>`
-                : ""
-            }</span>
+            <span class="detail-value">${this._renderDischargePowerValue(a, power, deferred, scheduled)}</span>
           </div>
           <div class="detail-row">
             <span class="detail-label">${this._t("min_soc")}</span>
@@ -1011,6 +1007,24 @@ class FoxESSControlCard extends HTMLElement {
         </div>
       </div>
     `;
+  }
+
+  _renderDischargePowerValue(a, power, deferred, scheduled) {
+    if (deferred) return this._t("self_use");
+    if (scheduled) return "—";
+    const inv = this._formatPower(power);
+    const tgt = a.discharge_target_power_w != null && a.discharge_target_power_w !== power
+      ? ` <span style="opacity:0.5">→ ${this._formatPower(a.discharge_target_power_w)}</span>`
+      : "";
+    if (a.discharge_grid_export_limit_w) {
+      const expStr = this._formatPower(a.discharge_grid_export_limit_w);
+      const clampClass = a.discharge_clamp_active ? "clamp-active" : "";
+      const icon = a.discharge_clamp_active
+        ? `<ha-icon icon="mdi:fence" title="${this._t("clamp_active_tooltip")}" class="clamp-icon"></ha-icon>`
+        : "";
+      return `<span class="inverter-power">${inv}</span>${tgt}<span class="clamp-sep"> / </span><span class="export-power ${clampClass}">${expStr}${icon}</span>`;
+    }
+    return `${inv}${tgt}`;
   }
 
   _renderIdle() {
@@ -1426,6 +1440,11 @@ class FoxESSControlCard extends HTMLElement {
         color: var(--primary-text-color);
         font-weight: 500;
       }
+      .inverter-power { /* default detail-value styling */ }
+      .clamp-sep { opacity: 0.4; padding: 0 0.2em; }
+      .export-power { opacity: 0.6; font-size: 0.95em; }
+      .export-power.clamp-active { opacity: 1; color: var(--warning-color, #f0b400); }
+      .clamp-icon { --mdc-icon-size: 14px; margin-left: 2px; }
 
       /* Progress bars */
       .progress-section {
