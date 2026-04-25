@@ -543,6 +543,235 @@ class TestSmartOperationsOverviewSensor:
 
 
 # ---------------------------------------------------------------------------
+# Regression: every native_value must be in _attr_options
+#
+# HA's SensorEntity.state performs an `value in options` check when
+# device_class == ENUM and raises ValueError otherwise. That ValueError
+# propagates up through async_write_ha_state → async_update_listeners and
+# skips every listener registered after SmartOperationsSensor, freezing the
+# entire coordinator-driven sensor set.
+#
+# Traces: C-020 (UI shows truth), C-026 (errors must surface), C-038
+# (sensor formulas match listener formulas). See 2026-04-25 incident.
+# ---------------------------------------------------------------------------
+
+
+def _native_value_scenarios() -> list[
+    tuple[str, dict[str, Any] | None, dict[str, Any] | None, datetime.datetime]
+]:
+    """Enumerate every (expected_value, charge_state, discharge_state, now).
+
+    The list must cover every string literal that
+    ``SmartOperationsSensor.native_value`` can return. Adding a new branch
+    to ``native_value`` without adding a case here (and a matching entry in
+    ``_attr_options``) is the class of bug this test exists to catch.
+    """
+    # Reference wall-clock for all scenarios
+    t_before = datetime.datetime(2026, 4, 8, 1, 30, 0)  # before charge start
+    t_charge = datetime.datetime(2026, 4, 8, 4, 0, 0)  # during charge window
+    t_before_disc = datetime.datetime(2026, 4, 8, 16, 30, 0)  # before discharge
+    t_disc = datetime.datetime(2026, 4, 8, 18, 0, 0)  # during discharge
+
+    charge = _charge_state  # local alias for readability
+    discharge = _discharge_state
+
+    return [
+        # idle: no charge, no discharge, no error
+        ("idle", None, None, t_charge),
+        # scheduled: charge window not yet open
+        ("scheduled", charge(), None, t_before),
+        # charging: active, making progress
+        ("charging", charge(), None, t_charge),
+        # deferred: window open but pacing has deferred forced charging
+        (
+            "deferred",
+            charge(last_power_w=0, charging_started=False),
+            None,
+            t_charge,
+        ),
+        # target_reached
+        ("target_reached", charge(target_reached=True), None, t_charge),
+        # charge_discharge_active: both sessions live
+        ("charge_discharge_active", charge(), discharge(), t_charge),
+        # discharge_scheduled: discharge window not yet open
+        ("discharge_scheduled", None, discharge(), t_before_disc),
+        # discharge_deferred: window open, not yet discharging
+        (
+            "discharge_deferred",
+            None,
+            discharge(discharging_started=False),
+            t_disc,
+        ),
+        # discharge_suspended
+        (
+            "discharge_suspended",
+            None,
+            discharge(discharging_started=True, suspended=True),
+            t_disc,
+        ),
+        # discharging
+        ("discharging", None, discharge(discharging_started=True), t_disc),
+    ]
+
+
+class TestSmartOperationsSensorOptionsCoverage:
+    """Every value native_value returns MUST be in _attr_options.
+
+    Without this, HA's SensorEntity.state raises ValueError during
+    ``async_write_ha_state``; that exception is uncaught inside
+    ``DataUpdateCoordinator.async_update_listeners`` and skips every
+    remaining listener — freezing every FoxESS sensor for the duration
+    of the session. See production incident 2026-04-25 10:00 AEST.
+    """
+
+    @pytest.mark.parametrize(
+        "expected,charge,discharge,now",
+        _native_value_scenarios(),
+        ids=lambda v: v if isinstance(v, str) else "",
+    )
+    def test_native_value_is_in_options(
+        self,
+        expected: str,
+        charge: dict[str, Any] | None,
+        discharge: dict[str, Any] | None,
+        now: datetime.datetime,
+    ) -> None:
+        """native_value(scenario) must be a member of _attr_options.
+
+        This is the neighbourhood test: one parametrised case per string
+        native_value can return. The 'scheduled' case is the immediate
+        reproducer for the 2026-04-25 incident; the others guard against
+        future additions to native_value reintroducing the same bug class.
+        """
+        hass = _make_hass(
+            smart_charge_state=charge,
+            smart_discharge_state=discharge,
+        )
+        # Populate the coordinator with a plausible SoC so the deferred
+        # branches evaluate without raising.
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=MagicMock(data={"SoC": 50.0})
+        )
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+
+        with patch(
+            "smart_battery.sensor_base.dt_util.now",
+            return_value=now,
+        ):
+            value = sensor.native_value
+
+        assert value == expected, (
+            f"Scenario expected native_value={expected!r}, got {value!r}"
+        )
+        assert sensor._attr_options is not None
+        assert value in sensor._attr_options, (
+            f"native_value returned {value!r} but it is missing from "
+            f"_attr_options={sensor._attr_options!r}; HA will raise ValueError "
+            f"on async_write_ha_state and freeze all coordinator listeners."
+        )
+
+    def test_scheduled_before_window_is_a_valid_option(self) -> None:
+        """Primary reproducer for 2026-04-25 incident.
+
+        A smart_charge session whose start is in the future (pre-window)
+        must return ``"scheduled"`` as native_value AND that value must
+        be present in the sensor's ``_attr_options`` list — otherwise HA
+        refuses the state and aborts the listener fan-out, freezing every
+        FoxESS sensor until the session ends.
+        """
+        # Charge window opens 11:00; it is 10:00 — i.e. pre-window.
+        hass = _make_hass(
+            smart_charge_state=_charge_state(
+                last_power_w=0,
+                charging_started=False,
+                start=datetime.datetime(2026, 4, 8, 11, 0, 0),
+                end=datetime.datetime(2026, 4, 8, 14, 0, 0),
+            )
+        )
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=MagicMock(data={"SoC": 50.0})
+        )
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        with patch(
+            "smart_battery.sensor_base.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 10, 0, 0),
+        ):
+            value = sensor.native_value
+
+        # Production contract 1: native_value returns "scheduled"
+        assert value == "scheduled", (
+            f"Pre-window charge session should report 'scheduled', got {value!r}"
+        )
+        # Production contract 2 (the bug): "scheduled" must be in options.
+        assert sensor._attr_options is not None
+        assert "scheduled" in sensor._attr_options, (
+            f"_attr_options={sensor._attr_options!r} is missing 'scheduled'; "
+            f"HA's SensorEntity.state will raise ValueError and freeze every "
+            f"listener registered after this sensor."
+        )
+
+    def test_ha_sensor_state_accepts_scheduled(self) -> None:
+        """Belt-and-braces: simulate HA's own SensorEntity.state validation.
+
+        When ``device_class == ENUM``, ``SensorEntity.state`` raises
+        ``ValueError`` if ``native_value`` is not in ``self.options``. The
+        production stack trace shows exactly this ValueError escaping
+        async_update_listeners. This test exercises the same code path.
+        """
+        hass = _make_hass(
+            smart_charge_state=_charge_state(
+                last_power_w=0,
+                charging_started=False,
+                start=datetime.datetime(2026, 4, 8, 11, 0, 0),
+                end=datetime.datetime(2026, 4, 8, 14, 0, 0),
+            )
+        )
+        hass.data[DOMAIN].entries["entry1"] = FoxESSEntryData(
+            inverter=MagicMock(), coordinator=MagicMock(data={"SoC": 50.0})
+        )
+        mock_entry = MagicMock()
+        mock_entry.options = {"battery_capacity_kwh": 10.0}
+        hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
+
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        sensor.entity_id = "sensor.foxess_smart_operations"
+        # HA's SensorEntity.state reads unit_of_measurement; the default
+        # implementation dereferences platform_data which is only set once
+        # the entity is registered to a platform. We stub the translation
+        # key to None so the check short-circuits, isolating the test to
+        # the enum-validation code path we care about.
+        sensor._attr_translation_key = None  # type: ignore[assignment]
+
+        with patch(
+            "smart_battery.sensor_base.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 8, 10, 0, 0),
+        ):
+            # sensor.state is the property HA calls from async_write_ha_state.
+            # It will raise ValueError if native_value is not in options —
+            # which IS the production bug we are guarding against.
+            try:
+                state_value = sensor.state
+            except ValueError as exc:
+                if "not in the list of options" in str(exc):
+                    pytest.fail(
+                        f"HA SensorEntity.state raised ValueError — this is "
+                        f"the production bug that freezes all sensors during "
+                        f"a pre-window charge session: {exc}"
+                    )
+                raise  # any other ValueError is a test setup issue
+
+        assert state_value == "scheduled"
+
+
+# ---------------------------------------------------------------------------
 # Individual dashboard sensors
 # ---------------------------------------------------------------------------
 
