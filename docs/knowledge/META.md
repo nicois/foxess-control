@@ -1,8 +1,8 @@
 ---
 project: FoxESS Control
 created: 2026-04-14
-last_updated: 2026-04-24
-last_reflection: 2026-04-24T19:00:00+10:00
+last_updated: 2026-04-25
+last_reflection: 2026-04-25T14:00:00+10:00
 ---
 # Knowledge Tree Meta
 
@@ -665,3 +665,99 @@ none so far.
   Infrastructure`) rather than being slipped into mid-table. A
   future skill-level improvement could add a markdown structural
   sanity check (tables intact, no orphan rows after blank lines).
+
+### 2026-04-25 — Live-monitoring bug cascade + three D-NNN additions
+
+**Context**: Setting up the `collect_ha_session.py` trace collector
+against the author's live HA surfaced a real production bug that
+had been silently affecting every smart_charge session: SoC / house
+load / generation / work mode all froze for 50+ minutes while
+coordinator polls succeeded. The "sensor frozen" symptom led to an
+investigation that exposed three separate structural gaps.
+
+**Chain of discoveries:**
+
+1. `SmartOperationsOverviewSensor.native_value` returned `"scheduled"`
+   (a value added in 1.0.11-beta.9 to distinguish charge-side
+   pre-window state) that was missing from `_attr_options`. HA's
+   sensor base class raised `ValueError`, and because
+   `async_update_listeners()` iterates sequentially without
+   per-listener exception handling, every listener registered after
+   the failing one stopped updating. Fixed in 1.0.12 with a
+   one-line options addition (`9b95dec`). Regression test
+   (`TestSmartOperationsSensorOptionsCoverage`) is parametrised over
+   every value `native_value` can return — structurally prevents
+   recurrence.
+
+2. The freeze was invisible from the user's perspective: no Repair,
+   no persistent notification, no error attribute, no nothing. This
+   surfaced a gap in C-026's enforcement: the session-error state
+   dict (D-029) is written TO the `SmartOperationsOverviewSensor`
+   itself, so if that sensor is the one failing, the error surface
+   is circular. The Repair-issue path is orthogonal and
+   listener-agnostic. Documented as **D-048** (sensor-listener
+   write failures surface as HA Repair, not silent freeze), fixed
+   in 1.0.12.
+
+3. Trace collection found zero `SCHEDULE_WRITE` events from
+   `foxess.inverter` across a 2-hour session, despite the v1.0.12
+   fix adding emission at `Inverter._post_schedule`. Root-caused
+   to **`emit_event`'s use of `logger.info()`** — Python evaluates
+   `Logger.isEnabledFor()` BEFORE propagation, so a per-module
+   level override (from HA's `logger:` YAML or
+   `logger.set_level` service) silently drops INFO records at the
+   child. Fixed in 1.0.13-beta.1 by changing dispatch to
+   `logger.makeRecord()` + `logger.handle()`, bypassing the
+   logger-level check while keeping every filter/handler chain.
+   Documented as **D-050** (emit_event bypasses logger-level
+   filter).
+
+**Architectural finding**: The v1.0.12 fix emitted
+`SCHEDULE_WRITE` at the FoxESS API layer (`Inverter._post_schedule`)
+in parallel with existing listener-layer emissions in
+`smart_battery/listeners.py` and `smart_battery/services.py` via
+`emit_schedule_write()`. That dual-layer arrangement wasn't
+obviously intentional when viewed from the v1.0.12 fix alone — it
+looked like a near-duplicate. After review: the two layers
+capture fundamentally different information (intent vs wire; D-014
+sanitises between them), and simulator validation needs both.
+Documented as **D-049** (dual-layer SCHEDULE_WRITE emission) so
+future contributors don't collapse it back to a single emission.
+
+**Knowledge-tree updates (this pass)**:
+- `04-design/session-management.md`: added **D-048** and **D-050**.
+- `04-design/foxess-api.md`: added **D-049**.
+- `02-constraints.md`: C-026 Traces line now cites D-029 and D-048,
+  plus the new regression test suite.
+- `06-tests.md`: 863→890 unit (authoritative), 1018→1045 total.
+  Added three new sections: "Structured Events — Emission Paths and
+  Propagation (D-049, D-050)", "Sensor-Listener Write Safety
+  (D-048)", "SmartOperations Sensor Options Coverage (C-038)".
+- `03-architecture.md`: added "Live HA Session Collector" section
+  covering `scripts/collect_ha_session.py` + paired systemd service;
+  expanded Soak Test Infrastructure to note the ExecStart script
+  extraction.
+
+**Lessons captured**:
+- **Live-tracing infrastructure pays for itself.** The
+  `collect_ha_session.py` work that preceded the bug discovery
+  was the only reason any of this was found — the symptom was
+  invisible on the dashboard and absent from the debug log for
+  the failing sensor path. Continuing to run the collector in
+  production accrues value every session.
+- **Enum options and their producers drift apart silently.**
+  Parametrised "every value returned by `native_value` is in
+  `_attr_options`" tests for every HA enum sensor are cheap
+  insurance against this class of defect. Consider a
+  knowledge-tree practice: any D-NNN adding a new enum value to
+  a sensor must cite the matching options update as part of the
+  fix.
+- **Logger-level overrides can silently break integration
+  telemetry.** Future integrations that emit structured events
+  should follow the D-050 pattern from the start (use
+  `logger.handle()` rather than `logger.info()` for telemetry).
+  Candidate for promotion to a constraint if this pattern recurs.
+- **The "single emission per write" intuition is sometimes
+  wrong.** Replay/simulator-validation may need both intent and
+  wire records. Document the split explicitly (D-049) so future
+  refactors don't collapse it.

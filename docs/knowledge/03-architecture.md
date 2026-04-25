@@ -266,4 +266,33 @@ invariants throughout multi-hour simulated scenarios.
   container names to avoid collisions when multiple runs execute
   concurrently.
 - **Nightly execution**: Triggered by systemd timer or CI workflow on
-  tag-based schedules.
+  tag-based schedules. The ExecStart script lives in
+  `systemd/foxess-soak-run.sh` so bash expands `${TS}_${SHORT}` and
+  `$$` correctly — the inlined unit-file form silently lost those
+  expansions to systemd's own `%`/`$`-substitution layer.
+
+## Live HA Session Collector
+
+Paired with the soak suite, `scripts/collect_ha_session.py` captures
+traces from a live HA instance for simulator validation and replay.
+Two modes: `live` (polls every 5 s, appends per-session JSONL files,
+auto-detects the log sensor across integration versions) and
+`history` (reconstructs a past time range via `/api/history/period/`).
+
+Each record is either `kind: "event"` (structured session event as
+emitted by `smart_battery/events.py` — see D-027, D-049, D-050) or
+`kind: "observation"` (a state change on a FoxESS sensor). The
+pairing lets the simulator be validated by feeding the exogenous
+observations in, replaying the algorithm decisions, and asserting
+the simulator's state matches the HA observation within tolerance.
+
+- **Credentials** live in `~/.config/foxess-collect-ha.env` (not in
+  repo); `systemd/foxess-collect-ha.env.example` ships the template.
+- **systemd service** (`systemd/foxess-collect-ha.service`):
+  `Type=simple`, `Restart=always`, `RestartSec=10min`,
+  `StartLimitIntervalSec=0` — survives sustained HA outages
+  without hammering the API on retries.
+- **Failure recovery**: the script exits non-zero after
+  `--max-consecutive-failures` (default 3) poll failures so the
+  service supervisor applies its 10-minute backoff rather than the
+  script busy-waiting internally.

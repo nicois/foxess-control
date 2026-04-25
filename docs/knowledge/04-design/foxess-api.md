@@ -153,6 +153,73 @@ block the HA event loop.
 **Traces**: C-024 (safe state — resilience to transient auth failures);
 `tests/test_web_session.py::TestRetryOnAuthError`
 
+### D-049: Dual-layer SCHEDULE_WRITE emission
+**Decision**: Inverter schedule writes emit the `SCHEDULE_WRITE`
+structured event at **two** layers:
+1. **Listener/service layer** (`smart_battery/listeners.py`,
+   `smart_battery/services.py` via `emit_schedule_write()`): fires
+   when the pacing algorithm or a service handler *decides* to
+   write a schedule. Payload: `{mode, power_w, fd_soc, call_site}`
+   — the intent-level record (one per listener/service call).
+2. **API layer** (`custom_components/foxess_control/foxess/inverter.py::_post_schedule`
+   via `emit_event(SCHEDULE_WRITE, ...)` ): fires when the
+   schedule write actually reaches the FoxESS
+   `/op/v0/device/scheduler/enable` endpoint. Payload:
+   `{groups, response, endpoint, call_site}` — the wire-level
+   record (one per HTTP POST). Routed through `_post_schedule`
+   as the single funnel so `Inverter.set_schedule` and
+   `Inverter.set_work_mode` both produce exactly one API-level
+   event per write.
+**Context**: The replay + simulator-validation infrastructure
+(D-027's structured events) needs to disambiguate "the
+integration decided to write" from "the integration actually
+wrote". The listener-layer event captures decisions that may
+later be coalesced, retried, or cancelled; the API-layer event
+captures what actually crossed the wire. Live-trace collection
+on 2026-04-25 confirmed both layers are observable and they
+emit independently: a charge-adjust decision may emit one
+listener-layer event and (because of D-014 sanitisation and
+retries) zero or one API-layer event.
+**Rationale**: Simulator validation needs the wire-level record
+to assert the simulator's HTTP response matches what the real
+API returned; algorithm-regression replay needs the intent-level
+record to re-invoke the decision with the exact pre-sanitisation
+inputs. Emitting at both layers is the simplest way to satisfy
+both consumers without the consumer having to reconstruct
+missing context from adjacent records. Cost: two records per
+write instead of one; the events are small and the debug-log
+sensor's ring buffer handles the volume fine.
+**Priority served**: P-007 (Engineering process integrity)
+**Trades against**: none — both records are cheap; no runtime
+behaviour changes
+**Classification**: other
+**Alternatives considered**:
+- Emit only at the API layer: rejected because the groups passed
+  to the API have already been sanitised by D-014, so the replay
+  harness can't reconstruct the pre-sanitisation inputs the
+  algorithm actually produced.
+- Emit only at the listener layer: rejected because the API
+  response is not visible there, so simulator-validation loses
+  the ability to assert response agreement.
+- Combine both into one event: rejected because the listener-layer
+  emission fires first (synchronous decision), then the API call
+  runs in an executor thread (D-050 path). Emitting one combined
+  record would require awaiting the API call from the listener
+  (blocking) or queueing the listener-layer half until the API
+  response arrives (stateful). Two independent events are simpler.
+**Priority served**: P-007 (Engineering process integrity)
+**Trades against**: none
+**Classification**: other
+**Traces**: C-008, C-009, C-010, C-011 (the API contracts each
+schedule write must respect);
+`smart_battery/events.py::emit_schedule_write` (listener-layer helper),
+`smart_battery/listeners.py` (6 call sites),
+`smart_battery/services.py` (6 call sites),
+`custom_components/foxess_control/foxess/inverter.py::_post_schedule` (API-layer funnel);
+`tests/test_events.py::TestInverterScheduleWriteEmission` (4),
+`tests/test_events.py::TestInverterScheduleWriteReachesParentHandler` (3),
+`tests/replay_traces/sample_schedule_write.jsonl` (replay regression fixture).
+
 ## Key Behaviours
 
 - Rate limit handling: errno 40400 retried up to `RATE_LIMIT_RETRIES`

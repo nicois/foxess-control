@@ -6,8 +6,8 @@ traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-863 unit + 136 E2E + 19 soak = 1018 total (authoritative count via
-`pytest --co -q` 2026-04-24).
+890 unit + 136 E2E + 19 soak = 1045 total (authoritative count via
+`pytest --co -q` 2026-04-25).
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
@@ -202,6 +202,52 @@ charge/discharge scenarios through containerised HA + simulator
 | `TestDebugLogHandlerWithSession::test_handler_includes_session_in_buffer` | Session in debug sensor | C-020 |
 | `TestDebugLogHandlerWithSession::test_handler_omits_session_when_empty` | No session = no key | C-020 |
 | `TestDebugLogHandlerWithSession::test_handler_omits_session_when_attr_is_empty_dict` | Empty dict = no key | C-020 |
+
+## Structured Events — Emission Paths and Propagation (D-049, D-050)
+
+**Constraints**: C-020, C-026
+**Source**: `tests/test_events.py` (22 tests, 2026-04-25 additions),
+`tests/test_sensor_listener_safety.py` (7 tests, 2026-04-25)
+
+| Test | Verifies | Constraint |
+|---|---|---|
+| `TestInverterScheduleWriteEmission::test_set_schedule_emits_event_with_groups_and_response` | API-layer emission fires with `groups` + `response` payload | D-049 |
+| `TestInverterScheduleWriteEmission::test_set_schedule_payload_is_json_serialisable` | Event payload round-trips through JSON for replay harness | D-049 |
+| `TestInverterScheduleWriteEmission::test_set_work_mode_emits_event` | `self_use` / `force_charge` / `force_discharge` all route through `_post_schedule` | D-049 |
+| `TestInverterScheduleWriteEmission::test_smart_charge_service_emits_schedule_write` | End-to-end service call produces event | D-049 |
+| `TestInverterScheduleWriteReachesParentHandler::test_schedule_write_reaches_parent_handler_with_child_warning_level` | Reproduces 2026-04-25 production symptom: child logger at WARNING no longer drops INFO events | D-050 |
+| `TestInverterScheduleWriteReachesParentHandler::test_schedule_write_reaches_parent_handler_from_executor_default_levels` | Baseline — default levels still reach the parent handler | D-050 |
+| `TestInverterScheduleWriteReachesParentHandler::test_schedule_write_with_session_context_survives_child_override` | Session-context enrichment survives the dispatch change | C-020, D-050 |
+
+## Sensor-Listener Write Safety (D-048)
+
+**Constraints**: C-020, C-026
+**Source**: `tests/test_sensor_listener_safety.py` (7 tests)
+
+| Test | Verifies | Constraint |
+|---|---|---|
+| `TestSensorListenerFailureSurfacesRepair::test_failing_listener_does_not_halt_iteration` | Load-bearing: sensor B still updates when sensor A raises | D-048, C-020 |
+| `TestSensorListenerFailureSurfacesRepair::test_repair_issue_created_with_entity_id` | Repair issue carries the offending entity_id | D-048, C-026 |
+| `TestSensorListenerFailureSurfacesRepair::test_repeated_failures_do_not_spam` | Idempotent registration — one issue, not N | D-048 |
+| `TestSensorListenerFailureSurfacesRepair::test_recovery_dismisses_repair` | Next successful write clears the Repair | D-048 |
+| `TestSensorListenerFailureSurfacesRepair::test_pattern_applies_to_other_sensor_classes` | Helper works with any sensor class (OverrideStatusSensor + SmartOps) | D-048 |
+| `TestSensorListenerFailureSurfacesRepair::test_helper_logs_the_exception` | Log emission still fires, naming the sensor | D-048 |
+| `TestSafeWriteHelperHappyPath::test_no_issue_when_write_succeeds` | Wrapper invisible on the happy path | D-048 |
+
+## SmartOperations Sensor Options Coverage (C-038)
+
+**Constraints**: C-038, C-020
+**Source**: `tests/test_sensor.py::TestSmartOperationsSensorOptionsCoverage`
+(12 tests, 2026-04-25)
+
+Parametrised over every string `SmartOperationsOverviewSensor.native_value`
+can return (idle, error, charging, deferred, scheduled, target_reached,
+charge_discharge_active, discharging, discharge_deferred,
+discharge_scheduled, discharge_suspended — 11 values), plus one HA-state
+roundtrip assertion that fails with the exact production `ValueError`
+the live 2026-04-25 freeze produced. Structural: any future addition to
+`native_value` without a matching `_attr_options` entry is caught
+immediately.
 
 ## Sensor Display
 

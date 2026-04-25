@@ -287,6 +287,122 @@ retried silently per D-025.
 **Traces**: C-026, C-020;
 `tests/test_services.py::TestErrorSurfacing`
 
+### D-048: Sensor-listener write failures surface as Repair, not silent freeze
+**Decision**: Each FoxESS sensor's coordinator-update callback is
+wrapped in a `_safe_write_ha_state(hass, domain, sensor)` helper
+(defined in `smart_battery/sensor_base.py`). The helper calls
+`sensor.async_write_ha_state()` inside a narrow
+`(ValueError, RuntimeError)` try/except. On exception it:
+1. Logs the exception at ERROR level, naming the sensor's
+   `entity_id` and the error message.
+2. Creates an HA Repair issue via the integration's existing
+   `async_create_issue` call (translation key
+   `sensor_write_failed`), keyed by `entity_id` so repeated
+   failures for the same sensor register idempotently.
+3. **Does NOT re-raise.** This is the load-bearing choice: the
+   coordinator's `async_update_listeners()` iterates listeners
+   sequentially, and an uncaught exception from one listener
+   halts iteration for every subsequent listener. Swallowing
+   the exception here preserves the listener chain.
+On the next successful write for the same sensor, the helper
+dismisses the Repair issue via `async_delete_issue`.
+Applied to `SmartOperationsOverviewSensor` and
+`InverterOverrideStatusSensor`; the helper pattern scales to
+any future listener callback.
+**Context**: 2026-04-25 live-monitoring incident: a state-options
+mismatch on `SmartOperationsOverviewSensor` (later fixed via
+D-047-paired addition of `"scheduled"` to the options list)
+caused HA's sensor base class to raise `ValueError` from
+`async_write_ha_state()`. Because the exception was uncaught,
+**every listener registered after `SmartOperationsOverviewSensor`
+stopped receiving updates** — on the author's instance, every
+FoxESS sensor had `last_reported`/`last_changed` frozen for
+50+ minutes while coordinator polls continued succeeding. No
+Repair issue was raised; the symptom was silent.
+**Rationale**: The failure is defence-in-depth: C-026 requires
+errors be surfaced via sensor state, not just logs, but this
+specific failure mode (a sensor callback raising inside the
+coordinator listener iteration) is structurally invisible to
+D-029 (which writes to a per-session error dict the
+`SmartOperationsOverviewSensor` itself reads — circular if the
+sensor is the one failing). The Repair-issue path is orthogonal
+to the integration's own state plumbing and surfaces the
+failure on a surface the user sees outside the dashboard.
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: safety
+**Alternatives considered**:
+- Re-raising the exception after the Repair creation: rejected —
+  this reproduces the halted-listener-iteration bug, defeating
+  the point of the wrapper.
+- Broad `except Exception`: rejected per CLAUDE.md (no blind
+  exception swallowing). The narrow `(ValueError, RuntimeError)`
+  catch matches the exception families HA's sensor base class
+  actually raises.
+- Wrapping only `SmartOperationsOverviewSensor`: rejected — the
+  freeze is listener-iteration-order-dependent, so any listener
+  that raises first halts the rest. The helper must be used by
+  all listener callbacks, not just the one that exhibited the
+  bug first.
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: safety
+**Traces**: C-020, C-026;
+`smart_battery/sensor_base.py::_safe_write_ha_state`,
+`custom_components/foxess_control/strings.json::issues.sensor_write_failed`,
+`tests/test_sensor_listener_safety.py::TestSensorListenerFailureSurfacesRepair` (6),
+`tests/test_sensor_listener_safety.py::TestSafeWriteHelperHappyPath` (1).
+
+### D-050: emit_event bypasses logger-level filter
+**Decision**: `smart_battery/events.py::emit_event` constructs the
+`LogRecord` via `logger.makeRecord()` and dispatches via
+`logger.handle()`, instead of calling `logger.info(message, extra=...)`.
+`Logger.handle()` runs the logger's own filter chain and every
+handler's level/filter chain, but **skips the
+`Logger.isEnabledFor()` early-drop check** that `logger.info()`
+would otherwise apply. Structured events are thus always offered
+to every attached handler; visibility is controlled at the
+*handler* level, not at the *logger* level.
+**Context**: 2026-04-25 live-trace anomaly: during a 2-hour
+smart_charge session on v1.0.12, `sensor.foxess_debug_log` captured
+zero API-layer `SCHEDULE_WRITE` events from
+`custom_components.foxess_control.foxess.inverter` — though
+events from `smart_battery.listeners` (sharing the same ancestor
+and the same debug-log handler) captured fine. Root cause: the
+user's HA had a per-module logger level override (from YAML
+`logger:` or `logger.set_level` service) that pinned the
+`foxess.inverter` child logger above INFO. Python's
+`Logger.info()` evaluates `isEnabledFor(INFO)` *before*
+propagation, so the INFO-level event was dropped at the child
+before the parent's debug-log handler could see it.
+**Rationale**: Structured events are integration-owned telemetry
+(ALGO_DECISION, TICK_SNAPSHOT, SCHEDULE_WRITE, TAPER_UPDATE,
+SERVICE_CALL, SESSION_TRANSITION) — the integration emits them
+for replay, debugging, and simulator validation; their
+visibility should not be silently overridable by a user's
+general-purpose logging configuration. The filter chain still
+runs so anyone who explicitly filters on `extra["event"]` or on
+session context can still drop records; the change affects only
+the `Logger.isEnabledFor()` pre-check.
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none — handler-level visibility is preserved;
+only the pre-propagation drop is bypassed
+**Classification**: other
+**Alternatives considered**:
+- Force-set every descendant logger to DEBUG on integration setup:
+  rejected — hostile to users who want verbose logging for a
+  specific subsystem (they would see their explicit override
+  silently reverted each restart).
+- Emit at WARNING so fewer configurations drop the record:
+  rejected — these are not warnings; mis-classifying them
+  pollutes log-severity semantics.
+- Ship a separate non-logging event bus: rejected — the existing
+  debug-log handler + capture sensor was already designed as the
+  transport; a second event bus doubles the complexity.
+**Traces**: C-020, C-026;
+`smart_battery/events.py::emit_event`,
+`tests/test_events.py::TestInverterScheduleWriteReachesParentHandler` (3).
+
 ### D-031: Typed runtime data via entry.runtime_data
 **Decision**: Store `FoxESSEntryData` (coordinator, inverter, adapter)
 on each config entry's `runtime_data` attribute. Domain-wide state

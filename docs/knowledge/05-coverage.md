@@ -24,9 +24,9 @@ serving it.
 | P-002 Respect minimum state of charge | C-002, C-003, C-012, C-013, C-016, C-018, C-019, C-024, C-025, C-027 | D-001, D-016 | ENFORCED |
 | P-003 Meet the user's energy target | C-007, C-008, C-009, C-010, C-011, C-014, C-022, C-023, C-037 | D-005, D-006, D-007, D-011, D-012, D-013, D-014, D-015 (taper), D-028, D-032, D-033, D-037, D-042, D-043, D-044, D-046 | ENFORCED |
 | P-004 Maximise feed-in revenue | (aspirational — no C-NNN) | (no D-NNN currently declares P-004 as primary; D-044 serves P-003 but advances P-004 as a secondary effect) | ASPIRATIONAL |
-| P-005 Operational transparency | C-004, C-005, C-006, C-020, C-022, C-026, C-038 | D-008, D-009, D-010, D-020, D-021, D-027, D-029, D-030, D-035, D-036, D-038, D-039, D-040, D-041 (ws) | ENFORCED |
+| P-005 Operational transparency | C-004, C-005, C-006, C-020, C-022, C-026, C-038 | D-008, D-009, D-010, D-020, D-021, D-027, D-029, D-030, D-035, D-036, D-038, D-039, D-040, D-041 (ws), D-048, D-050 | ENFORCED |
 | P-006 Brand portability | C-015, C-021 | D-022 | ENFORCED |
-| P-007 Engineering process integrity | C-015, C-028, C-029, C-030, C-031, C-032, C-033, C-034, C-035, C-036 | D-019, D-031, D-034, D-041 (lovelace), D-045 | ENFORCED |
+| P-007 Engineering process integrity | C-015, C-028, C-029, C-030, C-031, C-032, C-033, C-034, C-035, C-036 | D-019, D-031, D-034, D-041 (lovelace), D-045, D-049 | ENFORCED |
 
 **Notes:**
 - **P-004 is intentionally aspirational**. The feed-in target as a
@@ -63,15 +63,15 @@ declaration.
 
 ## Classification Summary
 
-Across 49 decision entries (IDs D-001..D-047, D-024 retired; D-014 and
+Across 52 decision entries (IDs D-001..D-050, D-024 retired; D-014 and
 D-041 each reuse the same ID for two distinct decisions in different
 design files — collisions tracked in META.md):
 
 | Classification | Count | Meaning |
 |---|---|---|
-| safety   | 15 | Enforces a C-NNN invariant; non-negotiable without changing the C-NNN |
+| safety   | 16 | Enforces a C-NNN invariant; non-negotiable without changing the C-NNN |
 | pacing   | 13 | Optimises a target; tunable, reviewable when assumptions change |
-| other    | 21 | Infrastructure / observability / architectural decisions |
+| other    | 23 | Infrastructure / observability / architectural decisions |
 
 Pacing decisions are the ones most vulnerable to priority
 inversion — their language often borrows from safety, but they
@@ -108,7 +108,7 @@ against a scenario that the system couldn't actually reach.
 | C-022 Unreachable charge target surfaced | D-028 | `TestIsChargeTargetReachable` (7) | COVERED |
 | C-024 Safe state on failure | D-023, D-025, D-026, D-031, D-032, D-034, D-042, D-045 | `TestTransientApiErrorResilience` (3), `TestStaleWorkModeAfterCleanupFailure` (2), `TestRecoverSessions` (13), E2E: `test_ws_recovers_after_stream_stolen`, `test_ws_reconnects_after_reload_at_max_power`, `TestReloadRecovery` (7), `test_deferred_to_discharging_triggers_ws` | COVERED |
 | C-025 Session boundary cleanliness | D-026, D-032, D-045 | `TestStaleWorkModeAfterCleanupFailure` (2), `TestRecoverSessions` (13), E2E: `test_self_use_on_clear`, `test_discharge_resumes_after_reload`, `test_charge_resumes_after_reload`, `test_idle_after_reload_with_no_session`, `test_session_clears_after_window_expires_during_reload` | COVERED |
-| C-026 Proactive error surfacing | D-029, D-038 | `TestErrorSurfacing` (2) | COVERED |
+| C-026 Proactive error surfacing | D-029, D-038, D-048 | `TestErrorSurfacing` (2), `TestSensorListenerFailureSurfacesRepair` (6), `TestSafeWriteHelperHappyPath` (1) | COVERED |
 | C-027 Progressive schedule extension | D-023 | `TestRecoverSessions` (13, schedule horizon verification), E2E: `test_schedule_horizon_during_discharge` | COVERED |
 | C-028 Simulator over mocks | -- | `test_client.py` (9), `test_inverter.py` (10) use simulator | ACCEPTED |
 | C-029 E2E for HA-dependent behaviour | -- | 136 E2E (`tests/e2e/test_e2e.py` + `tests/e2e/test_ui.py`, parametrized across cloud/entity/data sources); 19 soak (`tests/soak/`) | ACCEPTED |
@@ -203,10 +203,12 @@ against a scenario that the system couldn't actually reach.
 
 - **Priorities**: 7 (P-001..P-007, introduced 2026-04-24)
 - **Total constraints**: 38 (all active; C-023 reclassified as hardware-satisfied)
-- **Design decisions**: 46 unique (D-001..D-047, D-024 retired; D-014 and
+- **Design decisions**: 49 unique (D-001..D-050, D-024 retired; D-014 and
   D-041 each refer to two different entries in different design files —
   ID collisions carried over from earlier passes, tracked in META.md
-  for a separate fix)
+  for a separate fix). 2026-04-25 additions: D-048 (sensor-listener
+  Repair surface), D-049 (dual-layer SCHEDULE_WRITE emission), D-050
+  (emit_event bypasses logger-level filter).
 - **Fully covered**: 25 (66%)
 - **Partial (actionable)**: 0
 - **Accepted (non-actionable)**: 13 (34%) — C-009, C-013, C-015, C-023,
@@ -220,13 +222,13 @@ against a scenario that the system couldn't actually reach.
 - **Priority inversions**: 0
 - **Unconstrained priorities**: 1 (P-004 — aspirational by design)
 - **Unprioritised constraints**: 0 (all 38 C-NNN name P-NNN)
-- **Unprioritised decisions**: 0 (all 46 D-NNN name P-NNN + classification)
+- **Unprioritised decisions**: 0 (all 52 D-NNN entries name P-NNN + classification)
 - **Active regression**: none
 - **Orphan tests**: ~160 unit (display, plumbing, lifecycle tests)
-- **Unit tests**: 863 (authoritative `pytest --co -q` 2026-04-24)
+- **Unit tests**: 890 (authoritative `pytest --co -q` 2026-04-25)
 - **E2E tests**: 136 (parametrized across cloud/entity/data sources)
 - **Soak tests**: 19 (real-time charge/discharge scenarios, nightly)
-- **Total**: 1018
+- **Total**: 1045
 
 ## HA Integration Quality Scale
 

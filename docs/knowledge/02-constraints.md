@@ -424,8 +424,11 @@ not only to the log.
 invisible to the dashboard user.
 **Violation consequence**: User believes the system is operating
 normally when it is actually failing.
-**Traces**: C-020;
-`tests/test_services.py::TestErrorSurfacing`
+**Traces**: D-029 (session-level error state surfaced via the
+Smart Battery Status sensor), D-048 (sensor-listener write
+failures surface as HA Repair issues);
+`tests/test_services.py::TestErrorSurfacing`,
+`tests/test_sensor_listener_safety.py::TestSensorListenerFailureSurfacesRepair` (6)
 
 ### C-038: Sensor-listener parameter parity
 **Priority enforced**: P-005 (operational transparency) — when the
