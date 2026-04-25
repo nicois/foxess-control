@@ -680,6 +680,29 @@ def build_forecast(
 
 
 # ---------------------------------------------------------------------------
+# Sensor-listener safety (C-026)
+# ---------------------------------------------------------------------------
+#
+# Current behaviour (this will be replaced when the Repair surface lands):
+# the helper calls ``sensor.async_write_ha_state()`` with no protection.
+# A ValueError from HA's own SensorEntity.state (e.g. an ENUM value
+# missing from options) propagates out of the listener, halts
+# DataUpdateCoordinator.async_update_listeners iteration, and every
+# sensor registered after the failing one freezes silently.
+#
+# The regression test in ``tests/test_sensor_listener_safety.py`` will
+# expose this via a halted fan-out and an empty Repair registry; the
+# fix will wrap the call in try/except and surface the failure via the
+# HA issue registry while letting later listeners run.
+
+
+def _safe_write_ha_state(hass: HomeAssistant, domain: str, sensor: Any) -> None:
+    """Call ``sensor.async_write_ha_state()``; current implementation
+    is unprotected (reproduces the 2026-04-25 incident pattern)."""
+    sensor.async_write_ha_state()
+
+
+# ---------------------------------------------------------------------------
 # Sensor base classes
 # ---------------------------------------------------------------------------
 
