@@ -158,6 +158,32 @@ def save_run(
     passed: bool,
 ) -> int:
     events = detect_inflections(recorder.samples)
+    # Persist every recorded invariant violation as its own event row.
+    # Without this the runs row carries only a violations *count*; the
+    # rule and detail are dropped and post-mortem diagnosis is
+    # impossible (C-020).
+    sample_by_elapsed = {s.elapsed_s: s for s in recorder.samples}
+    for v in recorder.violations:
+        nearest = (
+            min(
+                recorder.samples,
+                key=lambda s: abs(s.elapsed_s - v.elapsed_s),
+                default=None,
+            )
+            if recorder.samples
+            else None
+        )
+        snap = sample_by_elapsed.get(v.elapsed_s) or nearest
+        events.append(
+            InflectionEvent(
+                elapsed_s=v.elapsed_s,
+                event_type="violation",
+                detail=f"{v.rule}: {v.detail}",
+                soc=snap.soc if snap else 0.0,
+                power_w=snap.power_w if snap else 0.0,
+                state=snap.state if snap else "",
+            )
+        )
     tag = _get_tag()
 
     conn = _open_db(db_path)
