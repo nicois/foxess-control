@@ -326,3 +326,203 @@ class TestWaitForLovelacePanelStagedBudget:
         # No stage may exceed the total budget (bounded).
         for t in observed_timeouts:
             assert 0 < t <= 60000, f"Stage timeout {t}ms outside (0, 60000]ms budget"
+
+
+class TestWaitForLovelacePanelNavigationDuringPanelRender:
+    """The helper must survive a full page navigation fired *during* the
+    panel-render stage — the scenario that drives the remaining flake.
+
+    **Root cause** (diagnosed 2026-04-25 by observing a live HA container):
+    HA's frontend fires a full page navigation ~1–15 seconds after the
+    initial ``goto`` completes — triggered by its auth refresh / WS
+    reconnect housekeeping.  The navigation destroys the browser's JS
+    execution context mid-flight, and when the new context mounts, the
+    entire shadow-DOM chain (home-assistant → home-assistant-main →
+    ha-panel-lovelace) must rebuild from scratch inside the already-running
+    stage-3 wait.
+
+    The per-stage 30s cap is *just enough* under normal load but breaks
+    under slow-shard contention: the original stage-3 wait burns a few
+    seconds before the nav arrives, Playwright catches the destruction,
+    the retry starts with a fresh context, and the rebuild legitimately
+    needs 25–40s on a contended runner.  With ~25s of stage-3 budget
+    already consumed and only ~5s left, the retry times out.
+
+    Observed CI signatures:
+    - ``test_form_recovers_from_page_navigation[entity]`` setup=40.0s →
+      TimeoutError Page.wait_for_function: Timeout 30000ms exceeded.
+      (v1.0.13-beta.2, run 24931127123)
+    - ``test_time_picker_stays_open_during_rerender[entity]`` setup=39.9s
+      → same TimeoutError. (v1.0.13-beta.1, run 24921297745)
+    - ``test_gallery_overview_idle[entity]`` body failed with
+      ``Locator.screenshot: Element is not attached to the DOM`` — the
+      *same* mid-stage navigation but this time observed from the test
+      body: the helper returned successfully based on the OLD context's
+      ``ha-panel-lovelace``, then the navigation detached it before the
+      test could screenshot it.
+
+    **Fix contract** (what these tests assert):
+    1. When a navigation destroys the context mid-stage, the helper must
+       retry using *any remaining overall budget* — not be artificially
+       capped at the per-stage ``max_stage_ms`` on the retry.  Under
+       adversarial CI timing the retry legitimately needs > 30s.
+    2. The helper must not return when the panel element is present but
+       *transiently* so — a panel that appears then disappears (navigation
+       about to happen) is not a usable ready signal.  Returning on the
+       transient attachment causes the test body to hit
+       ``Element is not attached to the DOM``.
+
+    These tests encode both properties using a MagicMock page whose
+    predicate responses simulate the exact mid-stage navigation.
+    """
+
+    def test_retry_after_midstage_nav_uses_remaining_overall_budget(self) -> None:
+        """Retry after mid-stage context destruction must use any remaining
+        overall budget, not be re-capped to ``max_stage_ms``.
+
+        Scenario: caller supplies ``timeout_ms=75000``.  Earlier stages
+        consume ~2s total.  The final stage enters ``wait_for_function``,
+        runs for 20s, then HA navigates → ``Execution context was
+        destroyed``.  On retry the overall budget still has ~53s left and
+        the helper must use that full amount so the post-navigation panel
+        mount has time to complete under slow-shard contention.
+
+        **What the current code does wrong**: ``_wait_for_stage`` uses
+        ``min(remaining_ms, max_stage_ms=30000)`` on every loop iteration.
+        After the mid-stage navigation the remaining overall budget is
+        ~53s but the retry is re-capped to 30s.  If post-nav rebuild
+        legitimately takes 31–53s (well under overall budget, but over
+        the per-stage cap) we time out spuriously.
+        """
+        helper = _get_helper()
+        page = MagicMock()
+        observed_timeouts: list[int] = []
+        call_history: list[str] = []
+        fired = {"destroyed_once": False}
+
+        def _wait_function(_pred: str, timeout: int = 30000) -> None:
+            observed_timeouts.append(timeout)
+            call_history.append("fn")
+            # The first call that reaches the FINAL stage returns
+            # successfully quickly (stages 1+2 pass fast).  The one we
+            # want to exercise is the call that sees the panel predicate
+            # with a *large* remaining budget — it should be given the
+            # full budget, not 30s.
+            if not fired["destroyed_once"] and timeout > 30000:
+                # This is the final-stage call with full remaining budget.
+                # Simulate a mid-stage navigation.
+                fired["destroyed_once"] = True
+                raise PlaywrightError(
+                    "Page.wait_for_function: Execution context was destroyed, "
+                    "most likely because of a navigation"
+                )
+            return None
+
+        def _wait_selector(_selector: str, timeout: int = 30000, **_kw: Any) -> Any:
+            observed_timeouts.append(timeout)
+            call_history.append("sel")
+            if not fired["destroyed_once"] and timeout > 30000:
+                fired["destroyed_once"] = True
+                raise PlaywrightError(
+                    "Page.wait_for_selector: Execution context was destroyed, "
+                    "most likely because of a navigation"
+                )
+            return MagicMock()
+
+        page.wait_for_function.side_effect = _wait_function
+        page.wait_for_selector.side_effect = _wait_selector
+        page.wait_for_load_state.return_value = None
+
+        helper(page, timeout_ms=75000)
+
+        # Assert: at least one call received a timeout > 30000ms.  A
+        # helper that caps every individual call at 30s cannot honour
+        # the full remaining budget on the post-navigation retry, which
+        # is precisely what drives the observed 40s stage-3 timeouts.
+        assert any(t > 30000 for t in observed_timeouts), (
+            f"Every individual wait call was capped at <=30000ms "
+            f"(observed: {observed_timeouts}).  The final stage must be "
+            f"allowed to consume the remaining overall budget (up to "
+            f"the full 75000ms) on the post-navigation retry, otherwise "
+            f"a slow-shard rebuild has insufficient time to complete."
+        )
+
+    def test_final_stage_predicate_includes_stable_signal(self) -> None:
+        """The final-stage predicate must include a signal that indicates
+        the panel is *settled* — not merely attached once.
+
+        The ``test_gallery_overview_idle[entity]`` failure on
+        v1.0.13-beta.1 showed the exact symptom of this gap: setup
+        returned successfully, the test body took a screenshot of the
+        Lovelace card, and got ``Element is not attached to the DOM`` —
+        because HA navigated between setup return and the test body's
+        first action, detaching the panel the helper had just certified
+        as "ready".
+
+        Diagnosis (observed live 2026-04-25 against a real HA container):
+        after ``page.goto`` returns and stages 1+2 pass, HA's frontend
+        fires a full page navigation ~1–15s later — triggered by its
+        auth refresh / service-worker registration.  The navigation
+        destroys the browser's JS execution context and the panel
+        re-mounts from scratch.  If stage-3's predicate only checks
+        ``!!ham.shadowRoot.querySelector('ha-panel-lovelace')`` (a bare
+        attach check), the helper happily returns on the *first*
+        transient mount — right before HA's housekeeping navigation
+        detaches it again.
+
+        Contract: the final-stage predicate must do more than check that
+        the panel element exists in the DOM.  Concrete signals that
+        prove the panel is past HA's initial navigation churn:
+          - ``ha.hass.connected === true`` (WS session established)
+          - ``ha.hass.states`` is populated (entity snapshot loaded)
+          - ``panel.hass`` is set (panel is wired to the state store)
+          - ``panel.shadowRoot.querySelector('hui-root')`` exists
+            (Lovelace has actually started rendering content)
+
+        Any of these alternatives — or a combination — is strictly
+        stronger than the bare attach check and prevents the
+        transient-attachment failure.  This test fails against the
+        current helper because its final predicate is a bare attach
+        check (``return !!panel``) with no stability signal.
+        """
+        from tests.e2e import conftest  # noqa: PLC0415
+
+        stages = getattr(conftest, "_LOVELACE_PANEL_STAGES", None)
+        assert stages is not None, (
+            "Helper no longer exposes _LOVELACE_PANEL_STAGES — cannot "
+            "inspect the final-stage predicate for stability signal."
+        )
+        # The final stage is the last entry in _LOVELACE_PANEL_STAGES.
+        final_stage_name, final_predicate = stages[-1]
+
+        # Normalise the predicate source: collapse whitespace so we
+        # match irrespective of formatting.
+        normalised = "".join(final_predicate.split())
+
+        # At least one semantic signal must be present in the final
+        # predicate.  Each of these indicates the panel is past HA's
+        # initial navigation churn:
+        semantic_signals = (
+            "hass.connected",  # WS session established
+            "hass.states",  # entity snapshot loaded
+            "panel.hass",  # panel is wired
+            "panelhass",  # alt spelling after whitespace collapse
+            "hui-root",  # Lovelace content renderer mounted
+            "hui_root",
+        )
+
+        has_signal = any(sig in normalised for sig in semantic_signals)
+        assert has_signal, (
+            f"Final-stage predicate for '{final_stage_name}' uses only a "
+            f"bare attach check with no stability signal.  Observed "
+            f"predicate source:\n{final_predicate}\n\n"
+            f"This fails to distinguish a transient panel attachment "
+            f"(moments before HA's housekeeping navigation detaches it) "
+            f"from a stably mounted panel, producing the observed CI "
+            f"flakes:\n"
+            f"  - ``Element is not attached to the DOM`` in the test body\n"
+            f"  - ``wait_for_function: Timeout 30000ms`` at fixture setup\n"
+            f"Add one of: hass.connected check, hass.states non-empty, "
+            f"panel.hass set, or hui-root rendered.  See the docstring "
+            f"for the rationale."
+        )
