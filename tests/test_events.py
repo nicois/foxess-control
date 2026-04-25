@@ -714,10 +714,15 @@ class TestInverterScheduleWriteEmission:
         client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
         inv = Inverter(client, "SIM0001")
 
+        # Large SoC gap + short window forces an immediate (non-deferred)
+        # charge start so inverter.set_schedule is called at service-handle
+        # time.  The deferred path delays the write until mid-session which
+        # would be a different code path (still covered by the unit
+        # Inverter.set_schedule tests above).
         hass = _make_hass(
             inverter=inv,
             battery_capacity_kwh=10.0,
-            coordinator_data={"SoC": 30.0},
+            coordinator_data={"SoC": 20.0},
         )
 
         _register_services(hass)
@@ -766,8 +771,8 @@ class TestInverterScheduleWriteEmission:
                     _make_call(
                         {
                             "start_time": datetime.time(1, 0),
-                            "end_time": datetime.time(5, 0),
-                            "target_soc": 80,
+                            "end_time": datetime.time(2, 0),
+                            "target_soc": 95,
                         }
                     )
                 )

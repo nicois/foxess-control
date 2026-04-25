@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import datetime
+import logging
 from typing import TYPE_CHECKING, Any
 
+from ..smart_battery.events import SCHEDULE_WRITE, emit_event
 from ..smart_battery.types import MinSocSettings, ScheduleGroup, WorkMode
 
 if TYPE_CHECKING:
     from .client import FoxESSClient
 
 __all__ = ["Inverter", "MinSocSettings", "ScheduleGroup", "WorkMode"]
+
+_LOGGER = logging.getLogger(__name__)
+
+_SCHEDULE_ENDPOINT = "/op/v0/device/scheduler/enable"
 
 
 def _parse_real_time(result: Any) -> dict[str, Any]:
@@ -133,6 +139,32 @@ class Inverter:
         sched: dict[str, Any] = result
         return sched
 
+    def _post_schedule(self, groups: list[ScheduleGroup], call_site: str) -> None:
+        """POST groups to ``/scheduler/enable`` and emit a SCHEDULE_WRITE event.
+
+        Every inverter schedule write flows through this helper so replay
+        harnesses observe one ``schedule_write`` event per API call,
+        regardless of whether the caller used :meth:`set_schedule` or
+        :meth:`set_work_mode`.  Payload shape matches the docstring in
+        :mod:`smart_battery.events`: the groups list as written to the
+        API plus whatever the API returned.  The POST runs first so a
+        failing write does not produce a misleading event.
+        """
+        response = self.client.post(
+            _SCHEDULE_ENDPOINT,
+            {"deviceSN": self.sn, "groups": groups},
+        )
+        # Copy the groups list defensively so downstream payload
+        # consumers cannot mutate the caller's data through the event.
+        emit_event(
+            _LOGGER,
+            SCHEDULE_WRITE,
+            groups=[dict(g) for g in groups],
+            response=response,
+            endpoint=_SCHEDULE_ENDPOINT,
+            call_site=call_site,
+        )
+
     def set_work_mode(
         self,
         mode: WorkMode,
@@ -174,10 +206,7 @@ class Inverter:
             "fdSoc": fd_soc,
             "fdPwr": fd_pwr,
         }
-        self.client.post(
-            "/op/v0/device/scheduler/enable",
-            {"deviceSN": self.sn, "groups": [group]},
-        )
+        self._post_schedule([group], call_site="Inverter.set_work_mode")
 
     def set_schedule(self, groups: list[ScheduleGroup]) -> None:
         """Set arbitrary scheduler time segments for fine-grained control.
@@ -185,10 +214,7 @@ class Inverter:
         Each group dict should have: enable, startHour, startMinute,
         endHour, endMinute, workMode, minSocOnGrid, fdSoc, fdPwr.
         """
-        self.client.post(
-            "/op/v0/device/scheduler/enable",
-            {"deviceSN": self.sn, "groups": groups},
-        )
+        self._post_schedule(list(groups), call_site="Inverter.set_schedule")
 
     # --- Convenience methods ---
 
