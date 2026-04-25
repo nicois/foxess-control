@@ -495,6 +495,318 @@ class TestScheduleWrite:
         assert payload["call_site"] == "test"
 
 
+class TestInverterScheduleWriteEmission:
+    """Every inverter schedule API write must emit a SCHEDULE_WRITE event.
+
+    The docstring in :mod:`smart_battery.events` says the payload is
+    "groups list plus the API response".  This is the event that
+    proves a write actually reached the inverter's HTTP endpoint;
+    it is distinct from the pre-write intent emission done by
+    :func:`emit_schedule_write`, which fires at the smart_battery
+    layer before the adapter call.
+
+    Regression: during a live charge session on 2026-04-25, an entire
+    15-minute session with confirmed inverter schedule writes emitted
+    ZERO schedule_write events because the FoxESS ``_services.py``
+    path invokes ``inverter.set_schedule`` directly, bypassing the
+    smart_battery intent emissions.  Emitting at the inverter
+    layer closes that hole for any caller.
+    """
+
+    def _capture_on_logger(
+        self, logger_name: str
+    ) -> tuple[list[logging.LogRecord], logging.Logger, logging.Handler]:
+        logger = logging.getLogger(logger_name)
+        logger.setLevel(logging.DEBUG)
+        captured: list[logging.LogRecord] = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                captured.append(record)
+
+        handler = _Capture()
+        logger.addHandler(handler)
+        return captured, logger, handler
+
+    def test_set_schedule_emits_event_with_groups_and_response(
+        self, foxess_sim: Any
+    ) -> None:
+        """A direct ``Inverter.set_schedule`` call must emit ``SCHEDULE_WRITE``.
+
+        The payload must carry the groups written and the API response
+        so a replay harness can reconstruct the exact API state change.
+        """
+        from custom_components.foxess_control.foxess.client import FoxESSClient
+        from custom_components.foxess_control.foxess.inverter import Inverter
+
+        FoxESSClient.MIN_REQUEST_INTERVAL = 0.0
+        client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
+        inv = Inverter(client, "SIM0001")
+
+        captured, logger, handler = self._capture_on_logger(
+            "custom_components.foxess_control.foxess.inverter"
+        )
+        # Fall back to the canonical root logger the tests can also import
+        # via — both should receive the record.
+        captured_root, logger_root, handler_root = self._capture_on_logger(
+            "foxess.inverter"
+        )
+        try:
+            from custom_components.foxess_control.foxess.inverter import (
+                ScheduleGroup,
+            )
+
+            group: ScheduleGroup = {
+                "enable": 1,
+                "startHour": 1,
+                "startMinute": 0,
+                "endHour": 2,
+                "endMinute": 30,
+                "workMode": "ForceCharge",
+                "minSocOnGrid": 11,
+                "fdSoc": 100,
+                "fdPwr": 5000,
+            }
+            inv.set_schedule([group])
+        finally:
+            logger.removeHandler(handler)
+            logger_root.removeHandler(handler_root)
+
+        events = [
+            r
+            for r in (*captured, *captured_root)
+            if getattr(r, "event", None) == SCHEDULE_WRITE
+        ]
+        assert events, (
+            "Inverter.set_schedule did not emit a schedule_write event; "
+            "loggers seen: "
+            + ", ".join(sorted({r.name for r in (*captured, *captured_root)}))
+        )
+
+        rec = events[0]
+        payload = rec.payload  # type: ignore[attr-defined]
+        assert "groups" in payload, f"missing 'groups' in {payload!r}"
+        assert isinstance(payload["groups"], list)
+        assert len(payload["groups"]) == 1
+        assert payload["groups"][0]["workMode"] == "ForceCharge"
+        assert payload["groups"][0]["fdPwr"] == 5000
+        # Per events.py docstring: "the API response" — the result
+        # field from the FoxESS API (scheduler/enable returns null).
+        assert "response" in payload, f"missing 'response' in {payload!r}"
+
+    def test_set_schedule_payload_is_json_serialisable(self, foxess_sim: Any) -> None:
+        """Payload must survive JSON round-trip for replay harness."""
+        import json as _json
+
+        from custom_components.foxess_control.foxess.client import FoxESSClient
+        from custom_components.foxess_control.foxess.inverter import Inverter
+
+        FoxESSClient.MIN_REQUEST_INTERVAL = 0.0
+        client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
+        inv = Inverter(client, "SIM0001")
+
+        captured, logger, handler = self._capture_on_logger(
+            "custom_components.foxess_control.foxess.inverter"
+        )
+        captured_root, logger_root, handler_root = self._capture_on_logger(
+            "foxess.inverter"
+        )
+        try:
+            from custom_components.foxess_control.foxess.inverter import (
+                ScheduleGroup,
+            )
+
+            group: ScheduleGroup = {
+                "enable": 1,
+                "startHour": 3,
+                "startMinute": 15,
+                "endHour": 4,
+                "endMinute": 45,
+                "workMode": "ForceDischarge",
+                "minSocOnGrid": 11,
+                "fdSoc": 11,
+                "fdPwr": 7500,
+            }
+            inv.set_schedule([group])
+        finally:
+            logger.removeHandler(handler)
+            logger_root.removeHandler(handler_root)
+
+        events = [
+            r
+            for r in (*captured, *captured_root)
+            if getattr(r, "event", None) == SCHEDULE_WRITE
+        ]
+        assert events
+        rec = events[0]
+        # Round-trip the whole envelope through JSON, like the HA REST
+        # API does when the debug-log sensor is scraped.
+        envelope = {
+            "event": rec.event,  # type: ignore[attr-defined]
+            "schema_version": rec.schema_version,  # type: ignore[attr-defined]
+            "payload": rec.payload,  # type: ignore[attr-defined]
+        }
+        restored = _json.loads(_json.dumps(envelope))
+        assert restored["event"] == SCHEDULE_WRITE
+        assert restored["payload"]["groups"][0]["fdPwr"] == 7500
+
+    def test_set_work_mode_emits_event(self, foxess_sim: Any) -> None:
+        """``Inverter.set_work_mode`` also writes to ``/scheduler/enable``.
+
+        ``Inverter.self_use`` delegates to ``set_work_mode``; the
+        same emission must cover both paths.
+        """
+        from custom_components.foxess_control.foxess.client import FoxESSClient
+        from custom_components.foxess_control.foxess.inverter import (
+            Inverter,
+            WorkMode,
+        )
+
+        FoxESSClient.MIN_REQUEST_INTERVAL = 0.0
+        client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
+        inv = Inverter(client, "SIM0001")
+
+        captured, logger, handler = self._capture_on_logger(
+            "custom_components.foxess_control.foxess.inverter"
+        )
+        captured_root, logger_root, handler_root = self._capture_on_logger(
+            "foxess.inverter"
+        )
+        try:
+            inv.set_work_mode(WorkMode.SELF_USE, fd_pwr=5000)
+        finally:
+            logger.removeHandler(handler)
+            logger_root.removeHandler(handler_root)
+
+        events = [
+            r
+            for r in (*captured, *captured_root)
+            if getattr(r, "event", None) == SCHEDULE_WRITE
+        ]
+        assert events, "Inverter.set_work_mode did not emit a schedule_write event"
+        payload = events[0].payload  # type: ignore[attr-defined]
+        assert "groups" in payload
+        assert len(payload["groups"]) == 1
+        assert payload["groups"][0]["workMode"] == WorkMode.SELF_USE.value
+
+    @pytest.mark.asyncio
+    async def test_smart_charge_service_emits_schedule_write(
+        self, foxess_sim: Any
+    ) -> None:
+        """End-to-end: starting smart charge via service call must emit
+        ``schedule_write`` at the initial inverter write.
+
+        This mirrors the 2026-04-25 regression: the user triggered
+        ``smart_charge``, confirmed schedule writes via the API, yet
+        the event stream contained no ``schedule_write`` records
+        because the FoxESS direct-write path bypassed emission sites.
+        """
+        import datetime
+        from unittest.mock import MagicMock, patch
+
+        from custom_components.foxess_control import _register_services
+        from custom_components.foxess_control.foxess.client import FoxESSClient
+        from custom_components.foxess_control.foxess.inverter import Inverter
+
+        from .test_services import _make_call, _make_hass
+
+        FoxESSClient.MIN_REQUEST_INTERVAL = 0.0
+        client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
+        inv = Inverter(client, "SIM0001")
+
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=10.0,
+            coordinator_data={"SoC": 30.0},
+        )
+
+        _register_services(hass)
+        from .conftest import _get_handler
+
+        handler = _get_handler(hass, "smart_charge")
+
+        # Capture records on the integration's root logger so we match
+        # what the production debug-log handler would see.
+        logger = logging.getLogger("custom_components.foxess_control")
+        logger.setLevel(logging.DEBUG)
+        captured: list[logging.LogRecord] = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                captured.append(record)
+
+        cap = _Capture()
+        logger.addHandler(cap)
+
+        now = datetime.datetime(2026, 4, 7, 1, 30, 0)
+        try:
+            with (
+                patch(
+                    "custom_components.foxess_control.dt_util.now",
+                    return_value=now,
+                ),
+                patch(
+                    "custom_components.foxess_control.smart_battery.services.dt_util.now",
+                    return_value=now,
+                ),
+                patch(
+                    "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+                    return_value=now,
+                ),
+                patch(
+                    "custom_components.foxess_control.smart_battery.listeners.async_track_point_in_time",
+                    return_value=MagicMock(),
+                ),
+                patch(
+                    "custom_components.foxess_control.smart_battery.listeners.async_track_time_interval",
+                    return_value=MagicMock(),
+                ),
+            ):
+                await handler(
+                    _make_call(
+                        {
+                            "start_time": datetime.time(1, 0),
+                            "end_time": datetime.time(5, 0),
+                            "target_soc": 80,
+                        }
+                    )
+                )
+        finally:
+            logger.removeHandler(cap)
+
+        write_events = [
+            r for r in captured if getattr(r, "event", None) == SCHEDULE_WRITE
+        ]
+        assert write_events, (
+            "smart_charge service call did not emit any schedule_write "
+            "events on custom_components.foxess_control logger"
+        )
+
+        # At least one event must carry the groups that were actually
+        # written to the API — this is the regression-proof assertion.
+        events_with_groups = [
+            r
+            for r in write_events
+            if isinstance(getattr(r, "payload", None), dict)
+            and "groups" in r.payload  # type: ignore[attr-defined]
+            and r.payload["groups"]  # type: ignore[attr-defined]
+        ]
+        assert events_with_groups, (
+            "no schedule_write event carried a non-empty groups list; "
+            f"payloads seen: {[getattr(r, 'payload', None) for r in write_events]}"
+        )
+        charge_groups = [
+            g
+            for r in events_with_groups
+            for g in r.payload["groups"]  # type: ignore[attr-defined]
+            if g.get("workMode") == "ForceCharge"
+        ]
+        assert charge_groups, (
+            "no schedule_write event carried a ForceCharge group; "
+            f"groups seen: {[r.payload['groups'] for r in events_with_groups]}"  # type: ignore[attr-defined]
+        )
+
+
 class TestNormaliseValue:
     def test_datetime_roundtrip(self) -> None:
         import datetime as _dt
