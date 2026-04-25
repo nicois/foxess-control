@@ -761,3 +761,51 @@ future contributors don't collapse it back to a single emission.
   wrong.** Replay/simulator-validation may need both intent and
   wire records. Document the split explicitly (D-049) so future
   refactors don't collapse it.
+
+### 2026-04-25 — Decision: no string-level brand-reference semgrep rule
+
+**Question raised**: now that C-021 (where brand-agnostic code
+lives), C-039 (no brand-layer imports), and C-040 (brand-agnostic
+tests) are invariants, should there be a complementary rule
+forbidding textual references to "foxess" / "FoxESS" in
+`smart_battery/` docstrings, comments, and string literals?
+
+**Inventory at the time of the question**: 8 references in
+`smart_battery/` — all in docstrings or comments. Every one is a
+legitimate use of `foxess_control` / `FoxESS` as the canonical
+example of a brand implementation (e.g. `testing.py` explains
+*why* the `FakeAdapter` exists: to decouple from the FoxESS
+adapter used by today's sole production integration). Zero
+references are in actual code paths; zero couple the module to
+FoxESS types or behaviour.
+
+**Decision**: **No new rule.** C-039's import-direction invariant
+catches the real coupling risk; docstring references do not
+execute and cannot break a second-brand integration. The cost of
+adding a rule would be:
+- High false-positive rate. Legitimate descriptive uses
+  (``"e.g. foxess_control wraps ..."``) would need rewording to
+  something less informative (``"e.g. <brand>_control wraps ..."``).
+  The `testing.py` rationale specifically names FoxESS because
+  that IS the brand the FakeAdapter currently stands in for.
+- Pre-optimisation. When the second brand arrives, these
+  docstrings will be touched naturally during the "describe the
+  dependency-inversion pattern in brand-neutral terms" pass.
+  Grepping for `foxess` in `smart_battery/` at that point is a
+  one-liner.
+- Semgrep text rules are noisy: any commit message, any new
+  reference-to-the-canonical-brand-example, any paste from the
+  FoxESS adapter would trip the rule.
+
+**What stays on watch instead**: the existing
+`grep -ir foxess smart_battery/` command — run it when adding a
+new brand, expect to generalise the docstrings that match, and
+that's enough.
+
+**Meta-observation**: the case for the rule was weak because
+the rule the community actually wants is not "no mention of
+FoxESS" but "no dependency on FoxESS", and the second is
+already covered by C-039 + C-040. Rules should enforce
+invariants, not house style — a house-style check is better done
+by a brand-portability review when the second brand begins, not
+by a bot.
