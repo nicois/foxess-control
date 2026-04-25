@@ -949,6 +949,11 @@ class FoxESSControlCard extends HTMLElement {
             <span class="detail-label">${this._t("target")}</span>
             <span class="detail-value">${curStr} → ${target != null ? target : "?"}%</span>
           </div>
+          ${a.charge_deferred_reason ? `
+          <div class="detail-row detail-row-wide">
+            <span class="detail-label">${this._t("deferred_reason")}</span>
+            <span class="detail-value detail-value-wrap">${a.charge_deferred_reason}</span>
+          </div>` : ""}
         </div>
       </div>
     `;
@@ -1009,6 +1014,11 @@ class FoxESSControlCard extends HTMLElement {
             <span class="detail-label">${this._t("min_soc")}</span>
             <span class="detail-value">${minSoc != null ? minSoc + "%" : "—"}</span>
           </div>
+          ${a.discharge_deferred_reason ? `
+          <div class="detail-row detail-row-wide">
+            <span class="detail-label">${this._t("deferred_reason")}</span>
+            <span class="detail-value detail-value-wrap">${a.discharge_deferred_reason}</span>
+          </div>` : ""}
           ${feedinLimit != null ? `
           <div class="detail-row">
             <span class="detail-label">${this._t("feedin")}</span>
@@ -1459,6 +1469,14 @@ class FoxESSControlCard extends HTMLElement {
         --mdc-icon-size: 14px;
         color: var(--warning-color, #f0b400);
         margin-left: 4px;
+      }
+      .detail-row-wide { flex-direction: column; align-items: flex-start; }
+      .detail-value-wrap {
+        white-space: normal;
+        word-wrap: break-word;
+        opacity: 0.85;
+        font-size: 0.92em;
+        margin-top: 2px;
       }
 
       /* Progress bars */

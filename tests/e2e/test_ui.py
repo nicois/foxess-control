@@ -1404,6 +1404,160 @@ class TestControlCard:
             "floor-active-hint arrow should be present when paced < floor"
         )
 
+    def test_discharge_deferred_reason_renders_when_attribute_present(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """UX #4: ``discharge_deferred_reason`` renders as a wide
+        row when present.  Reproduces the user's primary complaint
+        that 'deferred' with no explanation is opaque — the reason
+        text (populated by ``_explain_discharge_deferral()``) should
+        surface directly on the card.
+        """
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
+        _robust_reload(page, settle_ms=3000)
+        assert _find_card(page, "foxess-control-card")
+
+        reason = "Feed-in limit reached — holding until more solar is available"
+        raw = page.evaluate(
+            """(reason) => {
+                function findCard(root) {
+                    const card = root.querySelector('foxess-control-card');
+                    if (card) return card;
+                    for (const el of root.querySelectorAll('*')) {
+                        if (el.shadowRoot) {
+                            const f = findCard(el.shadowRoot);
+                            if (f) return f;
+                        }
+                    }
+                    return null;
+                }
+                const card = findCard(document);
+                if (!card || !card._hass) return { no_card: true };
+                const opsId = card._config.operations_entity;
+                const orig = card._hass.states[opsId] || {
+                    state: 'deferred',
+                    attributes: {},
+                };
+                const synth = {
+                    ...(orig.attributes || {}),
+                    discharge_active: true,
+                    discharge_power_w: 0,
+                    discharge_min_soc: 30,
+                    discharge_current_soc: 70,
+                    discharge_window: '18:00 – 18:30',
+                    discharge_remaining: '',
+                    discharge_deferred_reason: reason,
+                };
+                card._hass = {
+                    ...card._hass,
+                    states: {
+                        ...card._hass.states,
+                        [opsId]: {
+                            ...orig,
+                            state: 'deferred',
+                            attributes: synth,
+                        },
+                    },
+                };
+                card._render();
+                const shadow = card.shadowRoot;
+                const wrap = shadow.querySelector(
+                    '.section.discharge .detail-value-wrap'
+                );
+                return {
+                    has_row: !!wrap,
+                    text: wrap ? wrap.textContent.trim() : null,
+                };
+            }""",
+            reason,
+        )
+        result: dict[str, object] = dict(raw) if isinstance(raw, dict) else {}
+        assert not result.get("no_card"), "control card not found"
+        assert result["has_row"], "detail-value-wrap row should render"
+        assert reason in str(result.get("text") or ""), (
+            f"deferred reason text missing: {result.get('text')!r}"
+        )
+
+    def test_charge_deferred_reason_renders_when_attribute_present(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """UX #4: ``charge_deferred_reason`` renders on the charge
+        section when present — mirror of the discharge test.
+        """
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
+        _robust_reload(page, settle_ms=3000)
+        assert _find_card(page, "foxess-control-card")
+
+        reason = "Paused — solar forecast exceeds target"
+        raw = page.evaluate(
+            """(reason) => {
+                function findCard(root) {
+                    const card = root.querySelector('foxess-control-card');
+                    if (card) return card;
+                    for (const el of root.querySelectorAll('*')) {
+                        if (el.shadowRoot) {
+                            const f = findCard(el.shadowRoot);
+                            if (f) return f;
+                        }
+                    }
+                    return null;
+                }
+                const card = findCard(document);
+                if (!card || !card._hass) return { no_card: true };
+                const opsId = card._config.operations_entity;
+                const orig = card._hass.states[opsId] || {
+                    state: 'deferred',
+                    attributes: {},
+                };
+                const synth = {
+                    ...(orig.attributes || {}),
+                    charge_active: true,
+                    charge_phase: 'deferred',
+                    charge_target_soc: 90,
+                    charge_current_soc: 70,
+                    charge_window: '11:00 – 13:59',
+                    charge_remaining: '',
+                    charge_power_w: 0,
+                    charge_deferred_reason: reason,
+                };
+                card._hass = {
+                    ...card._hass,
+                    states: {
+                        ...card._hass.states,
+                        [opsId]: {
+                            ...orig,
+                            state: 'deferred',
+                            attributes: synth,
+                        },
+                    },
+                };
+                card._render();
+                const shadow = card.shadowRoot;
+                const wrap = shadow.querySelector(
+                    '.section.charge .detail-value-wrap'
+                );
+                return {
+                    has_row: !!wrap,
+                    text: wrap ? wrap.textContent.trim() : null,
+                };
+            }""",
+            reason,
+        )
+        result: dict[str, object] = dict(raw) if isinstance(raw, dict) else {}
+        assert not result.get("no_card"), "control card not found"
+        assert result["has_row"], "detail-value-wrap row should render on charge"
+        assert reason in str(result.get("text") or ""), (
+            f"charge deferred reason text missing: {result.get('text')!r}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Form input persistence tests (C-020: operational transparency)
