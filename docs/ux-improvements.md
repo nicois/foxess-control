@@ -83,7 +83,12 @@ liveness is user-visible within one polling interval."*
 
 ---
 
-## 4. "Why deferred?" inline explanation
+## 4. "Why deferred?" inline explanation  ✓ SHIPPED 2026-04-25 (dc89f47)
+
+**Status**: data surface landed. `discharge_deferred_reason` and
+`charge_deferred_reason` attributes live on
+`sensor.foxess_smart_operations`, populated only during the
+deferred phase. Lovelace card wiring is a follow-up.
 
 **Problem**: `"defers 12m"` is honest but cryptic. Users have no
 way to understand why the pacing algorithm has chosen to wait.
@@ -105,7 +110,14 @@ reasoning).
 
 ---
 
-## 5. Taper profile visualisation
+## 5. Taper profile visualisation  ✓ SHIPPED 2026-04-25 (ece71da)
+
+**Status**: data surface landed. `taper_profile` attribute on
+`sensor.foxess_smart_operations` exposes both `charge` and
+`discharge` histograms as chart-friendly `{soc, ratio, count}`
+lists, sorted by SoC ascending. Marked `_unrecorded` to avoid
+recorder bloat. A Lovelace card using ApexCharts to chart this
+is the follow-up.
 
 **Problem**: The taper profile (D-011/D-012/D-014) drives most
 pacing decisions and is completely invisible to users. A user who
@@ -125,7 +137,13 @@ their taper profile set realistic window lengths.
 
 ---
 
-## 6. Peak-consumption safety floor indicator
+## 6. Peak-consumption safety floor indicator  ✓ SHIPPED 2026-04-25 (dc89f47)
+
+**Status**: data surface landed. `discharge_safety_floor_w`,
+`discharge_peak_consumption_kw`, and `discharge_paced_target_w`
+attributes on `sensor.foxess_smart_operations` surface the
+C-001 floor during a discharge session. Control-card rendering
+is a follow-up.
 
 **Problem**: During forced discharge, the C-001 floor
 (peak × 1.5) dominates paced power in low-load homes. Users see
@@ -149,7 +167,19 @@ tracking).
 
 ---
 
-## 7. Session history card with outcome classification
+## 7. Session history card with outcome classification  — DEFERRED
+
+**Status**: scoped but not shipped this pass. Requires a new
+persistence schema (session-history ring buffer in HA Store,
+restore-on-restart), a new sensor class with a translation key,
+and outcome-classification logic that maps session-end reasons
+to the 5 outcome tags. Each of these deserves its own test-first
+PR rather than bundling with the attribute-only features above.
+
+Re-open as a standalone implementation task when bandwidth allows.
+Template: mirror `SmartDischargeExportLimitSensor`'s structure for
+the sensor entity and `smart_battery/store.py`'s pattern for
+the history persistence.
 
 **Problem**: Users running overnight charges / daily discharges
 want a week-over-week view of outcomes, not just "current state".
@@ -178,7 +208,14 @@ real sessions and persist to HA recorder.
 
 ---
 
-## 8. Export-limit visual acknowledgement on the card
+## 8. Export-limit visual acknowledgement on the card  ✓ SHIPPED 2026-04-25 (dc89f47)
+
+**Status**: data surface landed. `discharge_grid_export_limit_w`
+and `discharge_clamp_active` attributes on
+`sensor.foxess_smart_operations` populate when
+`grid_export_limit` is configured non-zero. Card-level
+rendering (showing "inverter X kW / export Y kW clamped") is
+the follow-up.
 
 **Problem**: A user with `grid_export_limit=5000` and a 10.5 kW
 inverter sees "Discharging 8.9 kW" and wonders whether the DNO
