@@ -139,3 +139,21 @@ def foxess_sim() -> Generator[SimulatorHandle, None, None]:
 
     handle.reset()
     # Thread is daemon — it will be cleaned up on process exit
+
+
+@pytest.fixture
+def fake_adapter() -> Any:
+    """Brand-agnostic InverterAdapter stub that records every Protocol call.
+
+    Import :class:`smart_battery.testing.FakeAdapter` directly for tests
+    that want to customise ``max_power_w`` or ``export_limit_w``; use
+    this fixture for the default 10 kW / no-export-limit case.
+
+    Intended for tests of ``smart_battery/`` code that want to prove
+    the code is brand-agnostic. A test that passes with FakeAdapter
+    will pass with any correct :class:`InverterAdapter` implementation —
+    it cannot silently depend on FoxESS response shapes.
+    """
+    from smart_battery.testing import FakeAdapter
+
+    return FakeAdapter()

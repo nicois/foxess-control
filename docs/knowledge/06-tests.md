@@ -6,7 +6,7 @@ traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-890 unit + 136 E2E + 19 soak = 1045 total (authoritative count via
+905 unit + 136 E2E + 19 soak = 1060 total (authoritative count via
 `pytest --co -q` 2026-04-25).
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
@@ -233,6 +233,31 @@ charge/discharge scenarios through containerised HA + simulator
 | `TestSensorListenerFailureSurfacesRepair::test_pattern_applies_to_other_sensor_classes` | Helper works with any sensor class (OverrideStatusSensor + SmartOps) | D-048 |
 | `TestSensorListenerFailureSurfacesRepair::test_helper_logs_the_exception` | Log emission still fires, naming the sensor | D-048 |
 | `TestSafeWriteHelperHappyPath::test_no_issue_when_write_succeeds` | Wrapper invisible on the happy path | D-048 |
+
+## Brand-Agnostic Contract (C-040)
+
+**Constraints**: C-040 (brand-agnostic code has brand-agnostic tests),
+C-021, C-039 (the structural sibling invariants)
+**Source**: `tests/test_smart_battery_agnostic.py` (15 tests)
+
+Exercises `smart_battery/` code using only `smart_battery/` types +
+the `FakeAdapter` test double from `smart_battery/testing.py`.
+**No brand-specific imports.** A test that passes here is proof the
+exercised code paths are genuinely brand-agnostic and will run
+unchanged against any correct `InverterAdapter` implementation.
+
+| Test class | Coverage |
+|---|---|
+| `TestFakeAdapterProtocolConformance` | `FakeAdapter` satisfies every `InverterAdapter` Protocol method; any new Protocol method surfaces here. |
+| `TestFakeAdapterRecordsCalls` (7) | Canonical recording patterns: `apply_mode_calls`, `remove_override_calls`, `set_export_limit_calls`, `get_export_limit_w` behaviour, `modes_applied`/`power_sequence` accessors, `reset()` semantics. |
+| `TestFakeAdapterInvariants` (4) | Protocol contract: apply_mode/remove_override/set_export_limit_w return None; get_max_power_w is sync + returns int. |
+| `TestFakeAdapterUsageAgainstListenerAssertions` (3) | Example patterns for brand-agnostic listener tests: canonical charge sequence, export-limit tapering sequence, **inline self-check** that this module does not import from brand-specific code (C-040 structural assertion). |
+
+See `smart_battery/testing.py` for the FakeAdapter contract. When
+writing tests for new code under `smart_battery/`, use the
+`fake_adapter` fixture from `tests/conftest.py` (or instantiate
+`FakeAdapter` directly for custom configuration). Do NOT reach
+into brand-specific modules — that defeats the point of C-040.
 
 ## SmartOperations Sensor Options Coverage (C-038)
 

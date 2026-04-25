@@ -673,6 +673,42 @@ provides IDE autocomplete.
 pre-commit.
 **Traces**: `.semgrep/foxess-architecture.yaml::no-raw-hass-data-access`
 
+### C-040: Brand-agnostic code has brand-agnostic tests
+**Priority enforced**: P-006 (brand portability) — the test-level
+complement to C-021 (where code lives) and C-039 (how modules are
+decoupled)
+**Statement**: Tests exercising code under `smart_battery/` must be
+runnable without loading any brand-specific module. The canonical
+test double is `smart_battery.testing.FakeAdapter` (satisfies the
+`InverterAdapter` Protocol; records every call). Cross-layer tests
+that deliberately exercise the FoxESS adapter + simulator
+integration are allowed but go in separate files whose names
+explicitly signal the coupling (e.g. `test_foxess_adapter.py`,
+`test_inverter.py`) — they are NOT "smart_battery tests".
+`tests/test_smart_battery_agnostic.py` is the template for a
+brand-agnostic test module.
+**Rationale**: A test that reaches through FakeAdapter into a
+FoxESS-specific response shape cannot prove "the listener is
+brand-agnostic" — it only proves "the listener works against
+FoxESS". When Huawei / SolaX / Sungrow adapters arrive, every
+`smart_battery/` behaviour needs to be re-tested against them; if
+the existing tests are coupled to FoxESS, that re-testing means
+either duplicating the tests per brand or discovering at
+integration time that the listener had latent FoxESS assumptions.
+The FakeAdapter pattern proves the agnostic contract holds
+*before* the second brand exists.
+**Violation consequence**: Brand-agnostic regressions that slip
+through until the second brand integration, where they surface
+as integration-time failures requiring retrofit fixes — exactly
+the P-006 rework pattern C-021 / C-039 were meant to prevent.
+**Traces**: C-021 (where code lives), C-039 (import-direction
+invariant), D-022 (adapter as injection seam);
+`smart_battery/testing.py::FakeAdapter`,
+`tests/test_smart_battery_agnostic.py` (11 tests proving the
+FakeAdapter satisfies the Protocol + canonical recording
+patterns; 1 inline check that asserts this module does not
+import brand-specific code).
+
 ### C-039: No brand-layer imports in smart_battery/
 **Priority enforced**: P-006 (brand portability) — the
 dependency-inversion form of C-021

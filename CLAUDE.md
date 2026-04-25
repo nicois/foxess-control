@@ -55,6 +55,7 @@ serves and any lower-priority goal it trades against.
 ### Architecture
 - **C-021**: Brand-agnostic code belongs in `smart_battery/`; brand-specific code must not live there
 - **C-039**: `smart_battery/` must not import from brand-layer modules — dependency inversion via the `InverterAdapter` Protocol (semgrep-enforced). See `docs/knowledge/03-architecture.md` §Adding a New Brand.
+- **C-040**: Brand-agnostic code has brand-agnostic tests — use `smart_battery.testing.FakeAdapter` (or the `fake_adapter` fixture), never a brand-specific adapter. See `tests/test_smart_battery_agnostic.py`.
 - **C-034**: No `.py` file in `custom_components/foxess_control/` exceeds 2000 lines
 - **C-035**: Config via `IntegrationConfig` / `_cfg(hass)`, not raw `entry.options`
 - **C-036**: Domain data via `_dd(hass)`, not raw `hass.data[DOMAIN]`
