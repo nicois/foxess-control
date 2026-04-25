@@ -2444,3 +2444,63 @@ class TestPacingTransparencyAttributes:
         assert attrs.get("discharge_grid_export_limit_w") == 5000
         # discharge_clamp_active should be a bool (not absent).
         assert isinstance(attrs.get("discharge_clamp_active"), bool)
+
+
+class TestTaperProfileAttribute:
+    """UX #5: the taper profile is exposed as a chart-friendly
+    attribute on sensor.foxess_smart_operations.
+
+    The attribute is _unrecorded (no recorder bloat) and contains
+    both charge and discharge histograms — each a list of
+    {soc, ratio, count} entries, sorted by SoC bin ascending.
+    """
+
+    def test_taper_profile_present_when_observations_recorded(self) -> None:
+        from smart_battery.taper import TaperProfile
+
+        profile = TaperProfile()
+        profile.record_charge(soc=50.0, requested_w=5000, actual_w=5000)
+        profile.record_charge(soc=90.0, requested_w=5000, actual_w=1000)
+        profile.record_discharge(soc=20.0, requested_w=5000, actual_w=2500)
+
+        hass = _make_hass()
+        hass.data[DOMAIN].taper_profile = profile
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        attrs = sensor.extra_state_attributes
+        assert "taper_profile" in attrs
+        summary = attrs["taper_profile"]
+        # Both charge and discharge histograms present, even if only
+        # one has observations (empty list is allowed).
+        assert "charge" in summary and isinstance(summary["charge"], list)
+        assert "discharge" in summary and isinstance(summary["discharge"], list)
+        # Charge observations captured.
+        assert len(summary["charge"]) == 2
+        # Sorted by SoC ascending.
+        socs = [entry["soc"] for entry in summary["charge"]]
+        assert socs == sorted(socs)
+        # Each entry has the expected shape.
+        for entry in summary["charge"]:
+            assert set(entry.keys()) == {"soc", "ratio", "count"}
+            assert 0.0 <= entry["ratio"] <= 1.0
+            assert entry["count"] >= 1
+
+    def test_taper_profile_present_even_with_no_observations(self) -> None:
+        from smart_battery.taper import TaperProfile
+
+        hass = _make_hass()
+        hass.data[DOMAIN].taper_profile = TaperProfile()
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        attrs = sensor.extra_state_attributes
+        # Empty profile still surfaces (empty-list histograms), so
+        # consumer charts can render "no data yet" gracefully.
+        assert attrs["taper_profile"] == {"charge": [], "discharge": []}
+
+    def test_taper_profile_absent_when_no_profile_attached(self) -> None:
+        hass = _make_hass()
+        # hass.data[DOMAIN].taper_profile stays None (default).
+        sensor = SmartOperationsOverviewSensor(hass, _make_entry())
+        attrs = sensor.extra_state_attributes
+        # When no taper profile is attached to domain data, the key
+        # is absent (not empty). Distinguishes "not yet initialised"
+        # from "initialised but empty".
+        assert "taper_profile" not in attrs

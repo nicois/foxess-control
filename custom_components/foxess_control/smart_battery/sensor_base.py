@@ -289,6 +289,27 @@ def _est_feedin_minutes(feedin_kwh: float, export_limit_w: int) -> int:
     return int(hours * 60)
 
 
+def _taper_profile_summary(taper: TaperProfile) -> dict[str, Any]:
+    """UX #5: serialise the taper profile for chart consumers.
+
+    Returns a dict with both charge and discharge histograms. Each
+    histogram is a list of ``{"soc": int, "ratio": float, "count":
+    int}`` entries, sorted by SoC bin ascending. Consumers (Lovelace
+    cards, ApexCharts) can plot ratio-vs-SoC directly; count is
+    available to de-emphasise low-confidence bins.
+    """
+    return {
+        "charge": [
+            {"soc": bucket, "ratio": round(b.ratio, 3), "count": b.count}
+            for bucket, b in sorted(taper.charge.items())
+        ],
+        "discharge": [
+            {"soc": bucket, "ratio": round(b.ratio, 3), "count": b.count}
+            for bucket, b in sorted(taper.discharge.items())
+        ],
+    }
+
+
 def format_duration(td: datetime.timedelta) -> str:
     """Format a timedelta as a compact human-readable string."""
     total_minutes = int(td.total_seconds() / 60)
@@ -1038,6 +1059,7 @@ class SmartOperationsOverviewSensor(RestoreSensor):
             "discharge_feedin_used_kwh",
             "discharge_feedin_projected_kwh",
             "discharge_export_limit_w",
+            "taper_profile",
             "has_error",
             "last_error",
             "last_error_at",
@@ -1315,6 +1337,16 @@ class SmartOperationsOverviewSensor(RestoreSensor):
             attrs["charge_deferred_reason"] = _explain_charge_deferral(
                 cs, get_interpolated_soc(self.hass, self._domain)
             )
+
+        # UX #5: taper profile visualisation data. Exposes the SoC-
+        # binned acceptance ratios the pacing algorithm uses so the
+        # user can see why charge/discharge runs below full inverter
+        # power in specific SoC regions. Attribute is _unrecorded so
+        # it doesn't bloat the recorder database — consumers poll
+        # the live sensor for chart data.
+        taper = _get_taper_profile(self.hass, self._domain)
+        if taper is not None:
+            attrs["taper_profile"] = _taper_profile_summary(taper)
 
         return attrs
 
