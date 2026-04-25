@@ -812,6 +812,270 @@ class TestInverterScheduleWriteEmission:
         )
 
 
+class TestInverterScheduleWriteReachesParentHandler:
+    """SCHEDULE_WRITE from ``_post_schedule`` must reach the debug-log
+    handler attached to the integration's parent logger — even when a
+    child logger has an explicit level override that would otherwise
+    suppress INFO emissions.
+
+    Production wiring:
+    :func:`custom_components.foxess_control.sensor.setup_debug_log`
+    attaches a bounded-deque ``_DebugLogHandler`` at the parent logger
+    ``custom_components.foxess_control`` and relies on Python logging's
+    propagation so records from every descendant module (including
+    ``...foxess.inverter`` and ``...foxess_adapter``) land in the
+    same buffer.  The parent logger's level is forced to DEBUG so that
+    unconfigured children inherit DEBUG.
+
+    Regression: during a 2-hour ``smart_charge`` session on v1.0.12, a
+    live HA user observed zero API-layer ``schedule_write`` events in
+    ``sensor.foxess_debug_log`` despite confirmed inverter writes.
+    Listener-layer schedule_write emissions (from
+    ``custom_components.foxess_control.smart_battery.listeners``) did
+    reach the buffer in the same session.  Both loggers share the same
+    parent and the same propagation path, so the asymmetry points to
+    something specific to the child logger, not the handler chain:
+    an **explicit level set on the child logger** (via HA's
+    ``logger:`` YAML, the ``logger.set_level`` service, or a saved
+    debug-logger config in ``core.logger``) drops INFO records at
+    :meth:`Logger.isEnabledFor` **before** they propagate to the parent's
+    handlers.
+
+    The existing
+    :class:`TestInverterScheduleWriteEmission` test attaches its capture
+    handler **directly** to the ``foxess.inverter`` leaf logger, bypassing
+    the parent-propagation code path entirely, so it cannot observe
+    records being dropped at the child's level check.  These tests
+    wire the handler the way production wires it and prove that the
+    record still reaches the buffer when the child logger's level is
+    WARNING (matching the user's symptom).
+    """
+
+    @pytest.mark.asyncio
+    async def test_schedule_write_reaches_parent_handler_with_child_warning_level(
+        self, foxess_sim: Any
+    ) -> None:
+        """Reproduce the production symptom: child logger at WARNING.
+
+        The handler is attached to ``custom_components.foxess_control``
+        at DEBUG (just like :func:`setup_debug_log`).  The child
+        logger ``custom_components.foxess_control.foxess.inverter`` is
+        explicitly set to WARNING — emulating what HA's
+        ``logger.set_level`` or an archived ``core.logger`` config
+        could have done.  ``_post_schedule`` must still deliver the
+        ``SCHEDULE_WRITE`` event to the parent's handler because the
+        event is part of the integration's structured telemetry and
+        is the only record confirming a write reached the API.
+        """
+        import asyncio as _asyncio
+
+        from custom_components.foxess_control.foxess.client import FoxESSClient
+        from custom_components.foxess_control.foxess.inverter import (
+            Inverter,
+            ScheduleGroup,
+        )
+        from custom_components.foxess_control.sensor import _DebugLogHandler
+        from smart_battery.logging import SessionContextFilter
+
+        FoxESSClient.MIN_REQUEST_INTERVAL = 0.0
+        client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
+        inv = Inverter(client, "SIM0001")
+
+        parent_logger = logging.getLogger("custom_components.foxess_control")
+        child_logger = logging.getLogger(
+            "custom_components.foxess_control.foxess.inverter"
+        )
+        original_parent_level = parent_logger.level
+        original_child_level = child_logger.level
+        parent_logger.setLevel(logging.DEBUG)
+        # Simulate a live-user configuration where the child logger was
+        # explicitly pinned at WARNING (HA's logger component writes
+        # level on child loggers when the frontend or YAML specifies
+        # per-module logging).  With this override, INFO records from
+        # the child are dropped by the logger's isEnabledFor check
+        # before propagation — the parent-attached handler never fires.
+        child_logger.setLevel(logging.WARNING)
+
+        buf: collections.deque[dict[str, Any]] = collections.deque(maxlen=100)
+        handler = _DebugLogHandler(buf)
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+        handler.addFilter(SessionContextFilter(lambda: (None, None)))
+        parent_logger.addHandler(handler)
+
+        group: ScheduleGroup = {
+            "enable": 1,
+            "startHour": 1,
+            "startMinute": 0,
+            "endHour": 2,
+            "endMinute": 30,
+            "workMode": "ForceCharge",
+            "minSocOnGrid": 11,
+            "fdSoc": 100,
+            "fdPwr": 5000,
+        }
+
+        loop = _asyncio.get_running_loop()
+        try:
+            # Route through the default ThreadPoolExecutor, the same
+            # mechanism HomeAssistant.async_add_executor_job uses.
+            await loop.run_in_executor(None, inv.set_schedule, [group])
+        finally:
+            parent_logger.removeHandler(handler)
+            parent_logger.setLevel(original_parent_level)
+            child_logger.setLevel(original_child_level)
+
+        api_events = [
+            e
+            for e in buf
+            if e.get("event") == SCHEDULE_WRITE and "groups" in e.get("payload", {})
+        ]
+        assert api_events, (
+            "Inverter.set_schedule did not reach the parent's debug-log "
+            "handler when the child logger level is WARNING. "
+            "This is the production symptom: the API-layer schedule_write "
+            "event must survive any child-logger level override because "
+            "it is the sole telemetry confirming a schedule was written. "
+            f"Buffer: {list(buf)}"
+        )
+        payload = api_events[0]["payload"]
+        assert payload["groups"][0]["workMode"] == "ForceCharge"
+        assert "response" in payload
+        assert payload["endpoint"] == "/op/v0/device/scheduler/enable"
+
+    @pytest.mark.asyncio
+    async def test_schedule_write_reaches_parent_handler_from_executor_default_levels(
+        self, foxess_sim: Any
+    ) -> None:
+        """Baseline: executor-path emission with default child logger levels.
+
+        With no child-level override, the record should also reach the
+        parent's debug-log handler.  Guards against a future change that
+        over-corrects by attaching a handler **only** to the leaf logger
+        (which would still work here but break the production
+        parent-handler contract).
+        """
+        import asyncio as _asyncio
+
+        from custom_components.foxess_control.foxess.client import FoxESSClient
+        from custom_components.foxess_control.foxess.inverter import (
+            Inverter,
+            ScheduleGroup,
+        )
+        from custom_components.foxess_control.sensor import _DebugLogHandler
+
+        FoxESSClient.MIN_REQUEST_INTERVAL = 0.0
+        client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
+        inv = Inverter(client, "SIM0001")
+
+        parent_logger = logging.getLogger("custom_components.foxess_control")
+        original_level = parent_logger.level
+        parent_logger.setLevel(logging.DEBUG)
+
+        buf: collections.deque[dict[str, Any]] = collections.deque(maxlen=100)
+        handler = _DebugLogHandler(buf)
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+        parent_logger.addHandler(handler)
+
+        group: ScheduleGroup = {
+            "enable": 1,
+            "startHour": 3,
+            "startMinute": 15,
+            "endHour": 4,
+            "endMinute": 45,
+            "workMode": "ForceDischarge",
+            "minSocOnGrid": 11,
+            "fdSoc": 11,
+            "fdPwr": 7500,
+        }
+
+        loop = _asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(None, inv.set_schedule, [group])
+        finally:
+            parent_logger.removeHandler(handler)
+            parent_logger.setLevel(original_level)
+
+        api_events = [e for e in buf if e.get("event") == SCHEDULE_WRITE]
+        assert api_events, f"no SCHEDULE_WRITE reached buffer; buf={list(buf)}"
+
+    @pytest.mark.asyncio
+    async def test_schedule_write_with_session_context_survives_child_override(
+        self, foxess_sim: Any
+    ) -> None:
+        """Neighbourhood case for C-038-style divergence: session context
+        must still attach to executor-emitted records even when the
+        child logger has a level override.
+
+        The fix must not strip session context (the session filter lives
+        on the handler, so as long as the record reaches the handler,
+        the filter runs and enriches the record).
+        """
+        import asyncio as _asyncio
+
+        from custom_components.foxess_control.foxess.client import FoxESSClient
+        from custom_components.foxess_control.foxess.inverter import (
+            Inverter,
+            ScheduleGroup,
+        )
+        from custom_components.foxess_control.sensor import _DebugLogHandler
+        from smart_battery.logging import SessionContextFilter
+
+        FoxESSClient.MIN_REQUEST_INTERVAL = 0.0
+        client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
+        inv = Inverter(client, "SIM0001")
+
+        parent_logger = logging.getLogger("custom_components.foxess_control")
+        child_logger = logging.getLogger(
+            "custom_components.foxess_control.foxess.inverter"
+        )
+        original_parent_level = parent_logger.level
+        original_child_level = child_logger.level
+        parent_logger.setLevel(logging.DEBUG)
+        child_logger.setLevel(logging.WARNING)
+
+        buf: collections.deque[dict[str, Any]] = collections.deque(maxlen=100)
+        handler = _DebugLogHandler(buf)
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+        charge_state: dict[str, Any] = {
+            "session_id": "charge-executor-5678",
+            "target_soc": 95,
+            "max_power_w": 5000,
+        }
+        handler.addFilter(SessionContextFilter(lambda: (charge_state, None)))
+        parent_logger.addHandler(handler)
+
+        group: ScheduleGroup = {
+            "enable": 1,
+            "startHour": 1,
+            "startMinute": 0,
+            "endHour": 2,
+            "endMinute": 30,
+            "workMode": "ForceCharge",
+            "minSocOnGrid": 11,
+            "fdSoc": 100,
+            "fdPwr": 5000,
+        }
+
+        loop = _asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(None, inv.set_schedule, [group])
+        finally:
+            parent_logger.removeHandler(handler)
+            parent_logger.setLevel(original_parent_level)
+            child_logger.setLevel(original_child_level)
+
+        api_events = [e for e in buf if e.get("event") == SCHEDULE_WRITE]
+        assert api_events, "no SCHEDULE_WRITE reached buffer"
+        entry = api_events[0]
+        assert "session" in entry, (
+            f"session context missing from executor-emitted record; entry: {entry}"
+        )
+        assert entry["session"].get("session_id") == "charge-executor-5678"
+
+
 class TestNormaliseValue:
     def test_datetime_roundtrip(self) -> None:
         import datetime as _dt
