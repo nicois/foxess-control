@@ -807,6 +807,7 @@ _CARD_URLS = [
     f"/{DOMAIN}/foxess-overview-card.js",
     f"/{DOMAIN}/foxess-forecast-card.js",
     f"/{DOMAIN}/foxess-history-card.js",
+    f"/{DOMAIN}/foxess-taper-card.js",
 ]
 
 
