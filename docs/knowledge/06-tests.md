@@ -1,12 +1,12 @@
 ---
 project: FoxESS Control
 level: 6
-last_verified: 2026-04-24
+last_verified: 2026-04-25
 traces_up: [02-constraints.md, 04-design/]
 ---
 # Test Inventory
 
-905 unit + 136 E2E + 19 soak = 1060 total (authoritative count via
+919 unit + 164 E2E + 19 soak = 1102 total (authoritative count via
 `pytest --co -q` 2026-04-25).
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
@@ -373,9 +373,26 @@ Key tests:
 | `test_smart_battery_has_no_brand_imports` | No foxess imports in smart_battery/ | C-021 |
 | `test_cancel_smart_session_is_synchronous` | cancel_smart_session is sync (no awaits) | C-016 |
 
+## Card Translation Coverage (D-051)
+
+**Constraints**: C-020
+**Source**: `tests/test_card_translations.py` (4 tests)
+
+Parses each card JS file's `TRANSLATIONS = {...}` table via regex
+and asserts that every non-English locale carries every key defined
+by the English table.  Guards against the beta.7-class bug where a
+missing locale key leaves the user looking at the raw key name.
+
+| Test | Verifies | Constraint |
+|---|---|---|
+| `test_all_locales_cover_english_keys[foxess-control-card.js]` | Control card locales carry all English keys | C-020 |
+| `test_all_locales_cover_english_keys[foxess-taper-card.js]` | Taper card locales carry all English keys | C-020 |
+| `test_parser_finds_expected_locales` | Control card has exactly 10 locales (parser self-check) | C-020 |
+| `test_new_keys_present_in_every_locale` | UX #4/#6/#8 keys present in every locale | C-020, D-051 |
+
 ## E2E Tests (Containerised HA + Simulator + Playwright)
 
-**Source**: `tests/e2e/test_e2e.py` (62 tests), `tests/e2e/test_ui.py` (80 tests)
+**Source**: `tests/e2e/test_e2e.py` (64 tests), `tests/e2e/test_ui.py` (100 tests)
 **Infrastructure**: Podman HA container, FoxESS simulator, Playwright Chromium
 
 | Test | Verifies | Constraint |
@@ -414,6 +431,15 @@ Key tests:
 | `TestControlCard::test_progress_hidden_when_idle` | No progress section when idle | C-020 |
 | `TestControlCard::test_progress_visible_during_discharge[api/ws/entity]` | Progress section during discharge | C-020 |
 | `TestControlCard::test_schedule_horizon_during_discharge` | Schedule horizon displayed | C-027 |
+| `TestControlCard::test_charge_section_title_distinguishes_scheduled_deferred_active` | Distinct charge-phase section titles | C-020 |
+| `TestControlCard::test_clamp_split_power_row_renders_when_export_limit_configured` | UX #8: inverter/export split power row | C-020, D-051 |
+| `TestControlCard::test_clamp_active_class_toggles_with_attribute` | UX #8: clamp-active class + mdi:fence icon | C-020, D-051 |
+| `TestControlCard::test_safety_floor_row_appears_when_tracked` | UX #6: safety_floor row + upward-arrow when clamped | C-001, C-020, D-051 |
+| `TestControlCard::test_discharge_deferred_reason_renders_when_attribute_present` | UX #4: reason text in .detail-value-wrap (discharge) | C-020, D-051 |
+| `TestControlCard::test_charge_deferred_reason_renders_when_attribute_present` | UX #4: reason text in .detail-value-wrap (charge) | C-020, D-051 |
+| `TestTaperCard::test_card_renders` | UX #5: taper card present on dashboard | C-020, D-051 |
+| `TestTaperCard::test_empty_state_when_no_profile` | UX #5: empty-state text when no observations | C-020, D-051 |
+| `TestTaperCard::test_bars_render_with_seeded_profile` | UX #5: bar widths proportional to ratio, low-conf marker | C-014, C-020, D-051 |
 | `TestFormInputPersistence::test_time_input_survives_rerender` | Form values persist through hass update | C-020 |
 | `TestFormInputPersistence::test_time_input_survives_multiple_rerenders` | Form values persist through 3 rapid updates | C-020 |
 | `TestFormInputPersistence::test_rerender_between_field_edits` | Interleaved re-render preserves earlier values | C-020 |
@@ -426,7 +452,7 @@ Tests are parametrized across `[cloud, entity]` connection modes and
 `[api, ws, entity]` data sources. The `ws_refuse` simulator fault blocks
 WS connections for API-only mode. Invalid parametrisation combos
 (`entity-api`, `entity-ws`, `cloud-entity`) are deselected at collection
-time. Total E2E count is 130.
+time. Total E2E count is 164.
 
 ## Soak Tests (Real-Time Charge/Discharge Scenarios)
 

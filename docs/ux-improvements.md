@@ -83,12 +83,15 @@ liveness is user-visible within one polling interval."*
 
 ---
 
-## 4. "Why deferred?" inline explanation  ✓ SHIPPED 2026-04-25 (dc89f47)
+## 4. "Why deferred?" inline explanation  ✓ SHIPPED 2026-04-25 (dc89f47, 23fa55b)
 
-**Status**: data surface landed. `discharge_deferred_reason` and
+**Status**: data surface landed (dc89f47); control-card wiring
+landed (23fa55b). `discharge_deferred_reason` and
 `charge_deferred_reason` attributes live on
 `sensor.foxess_smart_operations`, populated only during the
-deferred phase. Lovelace card wiring is a follow-up.
+deferred phase.  The control card renders a wide row with the
+reason text inside `.detail-value-wrap` on both the charge and
+discharge sections.
 
 **Problem**: `"defers 12m"` is honest but cryptic. Users have no
 way to understand why the pacing algorithm has chosen to wait.
@@ -110,14 +113,19 @@ reasoning).
 
 ---
 
-## 5. Taper profile visualisation  ✓ SHIPPED 2026-04-25 (ece71da)
+## 5. Taper profile visualisation  ✓ SHIPPED 2026-04-25 (ece71da, 600cd04, 61e5712)
 
-**Status**: data surface landed. `taper_profile` attribute on
-`sensor.foxess_smart_operations` exposes both `charge` and
-`discharge` histograms as chart-friendly `{soc, ratio, count}`
-lists, sorted by SoC ascending. Marked `_unrecorded` to avoid
-recorder bloat. A Lovelace card using ApexCharts to chart this
-is the follow-up.
+**Status**: data surface landed (ece71da); standalone
+`foxess-taper-card` shipped (600cd04 scaffold + 61e5712 E2E).
+`taper_profile` attribute on `sensor.foxess_smart_operations`
+exposes both `charge` and `discharge` histograms as chart-friendly
+`{soc, ratio, count}` lists, sorted by SoC ascending. Marked
+`_unrecorded` to avoid recorder bloat.  The custom card renders
+horizontal bars per SoC bin with low-confidence markers for bins
+having fewer than 3 observations; users opt in by adding
+`type: custom:foxess-taper-card` to their dashboard.  An
+ApexCharts variant is covered as a user template in
+`docs/lovelace-examples.md`.
 
 **Problem**: The taper profile (D-011/D-012/D-014) drives most
 pacing decisions and is completely invisible to users. A user who
@@ -137,13 +145,16 @@ their taper profile set realistic window lengths.
 
 ---
 
-## 6. Peak-consumption safety floor indicator  ✓ SHIPPED 2026-04-25 (dc89f47)
+## 6. Peak-consumption safety floor indicator  ✓ SHIPPED 2026-04-25 (dc89f47, 7072df5)
 
-**Status**: data surface landed. `discharge_safety_floor_w`,
+**Status**: data surface landed (dc89f47); control-card wiring
+landed (7072df5). `discharge_safety_floor_w`,
 `discharge_peak_consumption_kw`, and `discharge_paced_target_w`
-attributes on `sensor.foxess_smart_operations` surface the
-C-001 floor during a discharge session. Control-card rendering
-is a follow-up.
+attributes on `sensor.foxess_smart_operations` surface the C-001
+floor during a discharge session.  The control card renders a
+`safety_floor` row when the floor is non-zero, with an upward-arrow
+icon appearing when the paced target is *below* the floor
+(indicating active clamping).
 
 **Problem**: During forced discharge, the C-001 floor
 (peak × 1.5) dominates paced power in low-load homes. Users see
@@ -208,14 +219,16 @@ real sessions and persist to HA recorder.
 
 ---
 
-## 8. Export-limit visual acknowledgement on the card  ✓ SHIPPED 2026-04-25 (dc89f47)
+## 8. Export-limit visual acknowledgement on the card  ✓ SHIPPED 2026-04-25 (dc89f47, e022ef0)
 
-**Status**: data surface landed. `discharge_grid_export_limit_w`
-and `discharge_clamp_active` attributes on
+**Status**: data surface landed (dc89f47); control-card wiring
+landed (e022ef0). `discharge_grid_export_limit_w` and
+`discharge_clamp_active` attributes on
 `sensor.foxess_smart_operations` populate when
-`grid_export_limit` is configured non-zero. Card-level
-rendering (showing "inverter X kW / export Y kW clamped") is
-the follow-up.
+`grid_export_limit` is configured non-zero.  The discharge power
+row now renders a split "inverter kW / export kW" layout; the
+export side takes the warning colour and shows a `mdi:fence` icon
+when `discharge_clamp_active` is true.
 
 **Problem**: A user with `grid_export_limit=5000` and a 10.5 kW
 inverter sees "Discharging 8.9 kW" and wonders whether the DNO

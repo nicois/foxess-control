@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 5
-last_verified: 2026-04-24
+last_verified: 2026-04-25
 traces_up: [02-constraints.md, 04-design/]
 traces_down: [06-tests.md]
 ---
@@ -24,7 +24,7 @@ serving it.
 | P-002 Respect minimum state of charge | C-002, C-003, C-012, C-013, C-016, C-018, C-019, C-024, C-025, C-027 | D-001, D-016 | ENFORCED |
 | P-003 Meet the user's energy target | C-007, C-008, C-009, C-010, C-011, C-014, C-022, C-023, C-037 | D-005, D-006, D-007, D-011, D-012, D-013, D-014, D-015 (taper), D-028, D-032, D-033, D-037, D-042, D-043, D-044, D-046 | ENFORCED |
 | P-004 Maximise feed-in revenue | (aspirational — no C-NNN) | (no D-NNN currently declares P-004 as primary; D-044 serves P-003 but advances P-004 as a secondary effect) | ASPIRATIONAL |
-| P-005 Operational transparency | C-004, C-005, C-006, C-020, C-022, C-026, C-038 | D-008, D-009, D-010, D-020, D-021, D-027, D-029, D-030, D-035, D-036, D-038, D-039, D-040, D-041 (ws), D-048, D-050 | ENFORCED |
+| P-005 Operational transparency | C-004, C-005, C-006, C-020, C-022, C-026, C-038 | D-008, D-009, D-010, D-020, D-021, D-027, D-029, D-030, D-035, D-036, D-038, D-039, D-040, D-041 (ws), D-048, D-050, D-051 | ENFORCED |
 | P-006 Brand portability | C-015, C-021, C-039, C-040 | D-022 | ENFORCED |
 | P-007 Engineering process integrity | C-015, C-028, C-029, C-030, C-031, C-032, C-033, C-034, C-035, C-036 | D-019, D-031, D-034, D-041 (lovelace), D-045, D-049 | ENFORCED |
 
@@ -103,7 +103,7 @@ against a scenario that the system couldn't actually reach.
 | C-017 End-of-discharge guard | D-003 | `TestShouldSuspendDischarge::test_high_consumption_suspends` | COVERED |
 | C-018 Unmanaged work mode protection | D-016 | `TestCheckScheduleSafe` (7), `test_rejects_schedule_with_backup_mode` | COVERED |
 | C-019 Discharge SoC unavailability abort | D-019 | `TestDischargeSocUnavailability` (2) | COVERED |
-| C-020 Operational transparency | D-008, D-009, D-021, D-027, D-028, D-029, D-030, D-033, D-035, D-036, D-038, D-039, D-040 | `TestSessionContextFilter` (7), `TestInstallRemove` (2), `TestDebugLogHandlerWithSession` (3), `TestBMSBatteryTemperature` (3 mapped), `TestBatteryDetailEndpoint` (2 mapped), `TestCompoundIdFromWebSocket` (1 mapped), `TestSmartDischargeExportLimitSensor` (2), `TestSmartOperationsOverviewAttribute`, E2E: `test_data_source_badge_matches_mode` (3), `test_stale_badge_shown_for_old_api_data` (3), `test_api_source_when_idle`, `test_ws_always_connects_without_session`, `test_ws_mode_persists_via_options_flow`, `test_ws_linger_captures_post_discharge_data`, `test_house_load_never_greyed`, `test_pv_values_consistent_with_solar_total` (3), `test_node_click_opens_more_info`, `test_default_config_renders_all_four_boxes`, `test_custom_boxes_*` (3), `test_progress_hidden_when_idle`, `test_progress_visible_during_discharge` (3), `TestFormInputPersistence` (5) | COVERED |
+| C-020 Operational transparency | D-008, D-009, D-021, D-027, D-028, D-029, D-030, D-033, D-035, D-036, D-038, D-039, D-040, D-051 | `TestSessionContextFilter` (7), `TestInstallRemove` (2), `TestDebugLogHandlerWithSession` (3), `TestBMSBatteryTemperature` (3 mapped), `TestBatteryDetailEndpoint` (2 mapped), `TestCompoundIdFromWebSocket` (1 mapped), `TestSmartDischargeExportLimitSensor` (2), `TestSmartOperationsOverviewAttribute`, `test_all_locales_cover_english_keys` (2, parametrized), `test_parser_finds_expected_locales`, `test_new_keys_present_in_every_locale`, E2E: `test_data_source_badge_matches_mode` (3), `test_stale_badge_shown_for_old_api_data` (3), `test_api_source_when_idle`, `test_ws_always_connects_without_session`, `test_ws_mode_persists_via_options_flow`, `test_ws_linger_captures_post_discharge_data`, `test_house_load_never_greyed`, `test_pv_values_consistent_with_solar_total` (3), `test_node_click_opens_more_info`, `test_default_config_renders_all_four_boxes`, `test_custom_boxes_*` (3), `test_progress_hidden_when_idle`, `test_progress_visible_during_discharge` (3), `test_clamp_split_power_row_renders_when_export_limit_configured`, `test_clamp_active_class_toggles_with_attribute`, `test_safety_floor_row_appears_when_tracked`, `test_discharge_deferred_reason_renders_when_attribute_present`, `test_charge_deferred_reason_renders_when_attribute_present`, `TestTaperCard` (3), `TestFormInputPersistence` (5) | COVERED |
 | C-021 Brand-agnostic code in common package | D-022 | `test_smart_battery_has_no_brand_imports`, `test_vendored_copy_matches_canonical` | COVERED |
 | C-022 Unreachable charge target surfaced | D-028 | `TestIsChargeTargetReachable` (7) | COVERED |
 | C-024 Safe state on failure | D-023, D-025, D-026, D-031, D-032, D-034, D-042, D-045 | `TestTransientApiErrorResilience` (3), `TestStaleWorkModeAfterCleanupFailure` (2), `TestRecoverSessions` (13), E2E: `test_ws_recovers_after_stream_stolen`, `test_ws_reconnects_after_reload_at_max_power`, `TestReloadRecovery` (7), `test_deferred_to_discharging_triggers_ws` | COVERED |
@@ -229,13 +229,13 @@ against a scenario that the system couldn't actually reach.
 - **Priority inversions**: 0
 - **Unconstrained priorities**: 1 (P-004 — aspirational by design)
 - **Unprioritised constraints**: 0 (all 40 C-NNN name P-NNN)
-- **Unprioritised decisions**: 0 (all 52 D-NNN entries name P-NNN + classification)
+- **Unprioritised decisions**: 0 (all 53 D-NNN entries name P-NNN + classification)
 - **Active regression**: none
 - **Orphan tests**: ~160 unit (display, plumbing, lifecycle tests)
-- **Unit tests**: 905 (authoritative `pytest --co -q` 2026-04-25; +15 for `TestFakeAdapter*` suites)
-- **E2E tests**: 136 (parametrized across cloud/entity/data sources)
+- **Unit tests**: 919 (authoritative `pytest --co -q` 2026-04-25)
+- **E2E tests**: 164 (parametrized across cloud/entity/data sources; +6 card-wiring UX tests, +3 taper card)
 - **Soak tests**: 19 (real-time charge/discharge scenarios, nightly)
-- **Total**: 1060
+- **Total**: 1102
 
 ## HA Integration Quality Scale
 

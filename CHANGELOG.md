@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.13-beta.2
+
+### Added
+- **Pacing-transparency UI on the control card (UX #4 / #6 / #8)**: the four data-surface attributes shipped in 1.0.13-beta.1 (`discharge_deferred_reason` + `charge_deferred_reason`, `discharge_safety_floor_w`, `discharge_grid_export_limit_w` + `discharge_clamp_active`) are now rendered directly as rows on `foxess-control-card`:
+  - **Deferred reason** (UX #4) — both charge and discharge sections render a wide row with the explanatory text produced by `_explain_*_deferral()` whenever the deferred phase is active. Longer strings wrap via new `.detail-row-wide` / `.detail-value-wrap` styling.
+  - **Safety floor** (UX #6) — a `safety_floor` row appears whenever `discharge_safety_floor_w > 0`; an upward-arrow icon (`mdi:arrow-up-bold`) with an explanatory tooltip surfaces when the paced target is *below* the floor (the C-001 floor is actively raising paced power).
+  - **Export clamp split** (UX #8) — when `grid_export_limit` is configured, the discharge power row splits into an *inverter / export* pair separated by `/`; the export side takes the warning colour and shows a `mdi:fence` icon when `discharge_clamp_active` is true. Unchanged for sites without an export limit.
+- **Standalone `foxess-taper-card` (UX #5)** rendering the BMS acceptance-ratio histogram from `taper_profile` on `sensor.foxess_smart_operations`. Separate horizontal-bar sections for charge and discharge; per-bin observation count annotation; low-confidence marker (`·`) for bins with fewer than 3 observations. Users opt in by adding `type: custom:foxess-taper-card` to their dashboard.
+- **Card translation coverage test** (`tests/test_card_translations.py`, 4 tests): parses each card's `TRANSLATIONS` table and asserts every non-English locale carries every English key. Prevents the class of bug that left the `info_log` sensor ID broken in beta.7 — a locale missing a key silently falls back to the raw key name.
+- **E2E card-wiring tests**: 6 new `TestControlCard` tests synthesise active-session state via attribute injection and assert the split power row / safety-floor row / deferred-reason row render correctly with clamp-active / floor-active toggles; 3 new `TestTaperCard` tests verify card mount, empty state, and bar rendering with a seeded profile. Taper card added to the E2E Lovelace dashboard.
+- **D-051 "Transparency attributes surfaced via card rows, not tooltips"** in `docs/knowledge/04-design/lovelace-cards.md` captures the design decision (visible rows over hover tooltips / debug panels / consolidated toggles) and traces to C-020 and C-034.
+
 ## 1.0.13-beta.1
 
 ### Fixed

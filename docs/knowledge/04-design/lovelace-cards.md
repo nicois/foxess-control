@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 4
-last_verified: 2026-04-23
+last_verified: 2026-04-25
 traces_up: [../02-constraints.md]
 traces_down: [../06-tests.md]
 ---
@@ -236,5 +236,62 @@ choice until a frontend build pipeline is introduced.
 - morphdom (inlined, ~3 KB) — viable intermediate step; provides DOM
   diffing without framework overhead. No build step needed if the
   minified source is vendored into the JS file.
+
+### D-051: Transparency attributes surfaced via card rows, not tooltips
+
+**Decision**: Four pacing-transparency data surfaces
+(`discharge_deferred_reason` / `charge_deferred_reason`,
+`discharge_safety_floor_w`, `discharge_grid_export_limit_w` +
+`discharge_clamp_active`, `taper_profile`) are rendered as *visible
+rows or a dedicated card* rather than hover-only tooltips or a single
+debug panel:
+
+- **Deferred reason** (UX #4) — a `.detail-row-wide` row on both
+  charge and discharge sections, visible only while
+  `*_deferred_reason` is populated.
+- **Safety floor** (UX #6) — a `safety_floor` detail row on the
+  discharge section, visible only when
+  `discharge_safety_floor_w > 0`.  An upward-arrow icon appears
+  when the paced target is *below* the floor (active clamping).
+- **Export clamp** (UX #8) — the discharge power row splits into
+  inverter + export spans separated by `/`, with a `mdi:fence`
+  icon and warning colour on the export side when
+  `discharge_clamp_active` is true.
+- **Taper profile** (UX #5) — a standalone `foxess-taper-card`
+  rendering the BMS acceptance histogram per 5% SoC bin, for
+  charge and discharge independently.
+
+**Context**: The underlying attributes were already emitted by the
+sensor (dc89f47 / ece71da, 2026-04-25). The question was whether
+wiring them onto the UI belonged in the existing control card
+(integrated) or as new tooltips / a debug panel / a separate card.
+
+**Rationale**: C-020 (operational transparency) requires that users
+determine system state from the UI alone — no log inspection. Hover
+tooltips are invisible on mobile and to users who don't know to
+hover.  A single debug panel would hide the explanatory context
+behind a toggle.  Inline rows keep the information adjacent to the
+numbers it explains; the taper profile, always-useful irrespective
+of session state, earns a dedicated opt-in card rather than bloating
+the control card with a permanent histogram that users without a
+BMS-taper concern don't need.
+
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: other
+
+**Alternatives considered**:
+- Hover-only tooltips — rejected: invisible on mobile (the dominant
+  HA viewport for ad-hoc checks) and to users unaware they exist.
+- Consolidated debug panel toggle — rejected: hides the
+  explanations behind an extra click, defeating the
+  glance-friendly goal.
+- Taper histogram inside the control card — rejected: control card
+  is already 1662 lines (near the 2000-line C-034 budget) and the
+  taper profile is *always* informative, not session-scoped.
+
+**Traces**: C-020, C-034 (module size budget), P-005, D-040
+(targeted DOM updates — the new rows reuse the same
+`detail-row` pattern).
 
 **Traces**: D-040 (targeted DOM updates depend on this constraint)
