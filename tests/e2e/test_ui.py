@@ -1297,6 +1297,113 @@ class TestControlCard:
         )
         assert active["has_icon"], "clamp-icon should be present when attribute is true"
 
+    def test_safety_floor_row_appears_when_tracked(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """UX #6: a ``safety_floor`` row renders when
+        ``discharge_safety_floor_w > 0``.
+
+        The floor derives from tracked peak consumption × 1.5 (C-001).
+        When no peak has been sampled yet the attribute is 0 and no
+        row should appear; once non-zero, the row renders.  An
+        upward-arrow icon appears when paced power is *below* the
+        floor — the informative case where the floor is actively
+        raising the target.
+        """
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
+        _robust_reload(page, settle_ms=3000)
+        assert _find_card(page, "foxess-control-card")
+
+        def render_with(floor_w: float, paced_w: float | None) -> dict[str, object]:
+            raw = page.evaluate(
+                """([floorW, pacedW]) => {
+                    function findCard(root) {
+                        const card = root.querySelector('foxess-control-card');
+                        if (card) return card;
+                        for (const el of root.querySelectorAll('*')) {
+                            if (el.shadowRoot) {
+                                const f = findCard(el.shadowRoot);
+                                if (f) return f;
+                            }
+                        }
+                        return null;
+                    }
+                    const card = findCard(document);
+                    if (!card || !card._hass) return { no_card: true };
+                    const opsId = card._config.operations_entity;
+                    const orig = card._hass.states[opsId] || {
+                        state: 'discharging',
+                        attributes: {},
+                    };
+                    const synth = {
+                        ...(orig.attributes || {}),
+                        discharge_active: true,
+                        discharge_power_w: 3000,
+                        discharge_min_soc: 30,
+                        discharge_current_soc: 70,
+                        discharge_window: '18:00 – 18:30',
+                        discharge_remaining: '20m',
+                        discharge_safety_floor_w: floorW,
+                        discharge_paced_target_w: pacedW,
+                    };
+                    card._hass = {
+                        ...card._hass,
+                        states: {
+                            ...card._hass.states,
+                            [opsId]: {
+                                ...orig,
+                                state: 'discharging',
+                                attributes: synth,
+                            },
+                        },
+                    };
+                    card._render();
+                    const shadow = card.shadowRoot;
+                    const rows = Array.from(
+                        shadow.querySelectorAll('.section.discharge .detail-row')
+                    );
+                    const safetyLabel = (card._t('safety_floor') || '').trim();
+                    let floorRow = null;
+                    for (const row of rows) {
+                        const lbl = row.querySelector('.detail-label');
+                        if (lbl && (lbl.textContent || '').trim() === safetyLabel) {
+                            floorRow = row;
+                            break;
+                        }
+                    }
+                    const icon = floorRow
+                        ? floorRow.querySelector('.floor-active-hint')
+                        : null;
+                    return {
+                        has_row: !!floorRow,
+                        has_icon: !!icon,
+                    };
+                }""",
+                [floor_w, paced_w],
+            )
+            return dict(raw) if isinstance(raw, dict) else {}
+
+        # Zero floor — no row.
+        zero = render_with(0.0, None)
+        assert zero and not zero.get("no_card")
+        assert not zero["has_row"], "safety_floor row must not render when floor is 0"
+        # Non-zero floor with paced above — row renders, no arrow.
+        above = render_with(1500.0, 3000.0)
+        assert above["has_row"], "safety_floor row should render when floor > 0"
+        assert not above["has_icon"], (
+            "floor-active-hint arrow should be absent when paced >= floor"
+        )
+        # Paced below floor — arrow indicates active clamping.
+        below = render_with(1500.0, 800.0)
+        assert below["has_row"]
+        assert below["has_icon"], (
+            "floor-active-hint arrow should be present when paced < floor"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Form input persistence tests (C-020: operational transparency)

@@ -995,6 +995,16 @@ class FoxESSControlCard extends HTMLElement {
             <span class="detail-label">${this._t("power")}</span>
             <span class="detail-value">${this._renderDischargePowerValue(a, power, deferred, scheduled)}</span>
           </div>
+          ${a.discharge_safety_floor_w > 0 ? `
+          <div class="detail-row">
+            <span class="detail-label">${this._t("safety_floor")}</span>
+            <span class="detail-value">
+              ${this._formatPower(a.discharge_safety_floor_w)}
+              ${a.discharge_paced_target_w != null && a.discharge_paced_target_w < a.discharge_safety_floor_w
+                ? `<ha-icon icon="mdi:arrow-up-bold" title="${this._t("floor_clamping_tooltip")}" class="floor-active-hint"></ha-icon>`
+                : ""}
+            </span>
+          </div>` : ""}
           <div class="detail-row">
             <span class="detail-label">${this._t("min_soc")}</span>
             <span class="detail-value">${minSoc != null ? minSoc + "%" : "—"}</span>
@@ -1445,6 +1455,11 @@ class FoxESSControlCard extends HTMLElement {
       .export-power { opacity: 0.6; font-size: 0.95em; }
       .export-power.clamp-active { opacity: 1; color: var(--warning-color, #f0b400); }
       .clamp-icon { --mdc-icon-size: 14px; margin-left: 2px; }
+      .floor-active-hint {
+        --mdc-icon-size: 14px;
+        color: var(--warning-color, #f0b400);
+        margin-left: 4px;
+      }
 
       /* Progress bars */
       .progress-section {
