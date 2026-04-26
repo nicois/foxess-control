@@ -1404,6 +1404,106 @@ class TestControlCard:
             "floor-active-hint arrow should be present when paced < floor"
         )
 
+    def test_safety_floor_row_is_expandable_and_shows_peak(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """The safety-floor row is click-expandable and the tip
+        includes the formatted peak consumption (so users can see
+        where the number came from).
+
+        C-020 (operational transparency): hover tooltips are
+        invisible on mobile; the expand-on-click pattern makes
+        the explanation discoverable on any viewport.
+        """
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
+        _robust_reload(page, settle_ms=3000)
+        assert _find_card(page, "foxess-control-card")
+
+        raw = page.evaluate(
+            """() => {
+                function findCard(root) {
+                    const card = root.querySelector('foxess-control-card');
+                    if (card) return card;
+                    for (const el of root.querySelectorAll('*')) {
+                        if (el.shadowRoot) {
+                            const f = findCard(el.shadowRoot);
+                            if (f) return f;
+                        }
+                    }
+                    return null;
+                }
+                const card = findCard(document);
+                if (!card || !card._hass) return { no_card: true };
+                const opsId = card._config.operations_entity;
+                const orig = card._hass.states[opsId] || {
+                    state: 'discharging',
+                    attributes: {},
+                };
+                const synth = {
+                    ...(orig.attributes || {}),
+                    discharge_active: true,
+                    discharge_power_w: 3000,
+                    discharge_min_soc: 30,
+                    discharge_current_soc: 70,
+                    discharge_window: '18:00 – 18:30',
+                    discharge_remaining: '20m',
+                    discharge_safety_floor_w: 1500,
+                    discharge_paced_target_w: 3000,
+                    discharge_peak_consumption_kw: 1.0,
+                };
+                card._hass = {
+                    ...card._hass,
+                    states: {
+                        ...card._hass.states,
+                        [opsId]: {
+                            ...orig,
+                            state: 'discharging',
+                            attributes: synth,
+                        },
+                    },
+                };
+                card._render();
+                const shadow = card.shadowRoot;
+                const sel =
+                    '.section.discharge .detail-row.has-tip'
+                    + '[data-tip-key="safety_floor"]';
+                const row = shadow.querySelector(sel);
+                if (!row) return { no_row: true };
+                const tipBefore = row.querySelector('.detail-tip');
+                const beforeExpanded = row.classList.contains('expanded');
+                // Simulate a click — click handler toggles expanded class.
+                row.click();
+                const afterExpanded = row.classList.contains('expanded');
+                return {
+                    has_row: true,
+                    has_tip_element: !!tipBefore,
+                    tip_text: tipBefore ? tipBefore.textContent.trim() : null,
+                    expanded_before: beforeExpanded,
+                    expanded_after: afterExpanded,
+                };
+            }"""
+        )
+        result: dict[str, object] = dict(raw) if isinstance(raw, dict) else {}
+        assert not result.get("no_card"), "control card not found"
+        assert not result.get("no_row"), "expandable safety_floor row missing"
+        assert result["has_tip_element"], "detail-tip element not rendered"
+        tip = str(result.get("tip_text") or "")
+        # Peak × 1.5 was 1.0 kW × 1.5 = 1.5 kW — the formatted peak
+        # (1.0 kW, displayed as "1.0 kW" by _formatPower) must appear in
+        # the tip so the user can see where the number came from.
+        assert "1.0" in tip or "1000" in tip, (
+            f"expected peak value in tip, got: {tip!r}"
+        )
+        # Click toggles expansion.
+        assert result["expanded_before"] is False
+        assert result["expanded_after"] is True, (
+            "clicking the row should expand the tip"
+        )
+
     def test_discharge_deferred_reason_renders_when_attribute_present(
         self,
         page: Page,

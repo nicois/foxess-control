@@ -58,6 +58,8 @@ const TRANSLATIONS = {
     deferred_reason: "reason",
     safety_floor: "safety floor",
     floor_clamping_tooltip: "Raising paced power to prevent grid import (C-001)",
+    safety_floor_explainer:
+      "Minimum discharge power. Computed as peak household load ({peak}) × 1.5, so the battery can cover sudden load spikes without pulling from the grid.",
     clamp_active_tooltip: "Hardware export limiter is capping grid export at this value",
     btn_cancel: "Cancel",
     btn_confirm_cancel: "Confirm cancel?",
@@ -106,6 +108,8 @@ const TRANSLATIONS = {
     deferred_reason: "Grund",
     safety_floor: "Sicherheitsmindestleistung",
     floor_clamping_tooltip: "Grundleistung wird angehoben, um Netzeinspeisung zu verhindern (C-001)",
+    safety_floor_explainer:
+      "Mindestentladeleistung. Berechnet als Spitzen-Haushaltslast ({peak}) × 1,5, damit die Batterie plötzliche Lastspitzen ohne Netzbezug abdeckt.",
     clamp_active_tooltip: "Die Hardware-Exportsperre begrenzt die Netzeinspeisung auf diesen Wert",
     btn_cancel: "Abbrechen",
     btn_confirm_cancel: "Abbrechen bestätigen?",
@@ -154,6 +158,8 @@ const TRANSLATIONS = {
     deferred_reason: "raison",
     safety_floor: "plancher de sécurité",
     floor_clamping_tooltip: "Augmente la puissance pour éviter l'importation depuis le réseau (C-001)",
+    safety_floor_explainer:
+      "Puissance de décharge minimale. Calculée comme pic de consommation foyer ({peak}) × 1,5, pour couvrir les pics de charge sans importer depuis le réseau.",
     clamp_active_tooltip: "Le limiteur matériel plafonne l'injection réseau à cette valeur",
     btn_cancel: "Annuler",
     btn_confirm_cancel: "Confirmer l'annulation ?",
@@ -202,6 +208,8 @@ const TRANSLATIONS = {
     deferred_reason: "reden",
     safety_floor: "veiligheidsondergrens",
     floor_clamping_tooltip: "Vermogen wordt verhoogd om netimport te voorkomen (C-001)",
+    safety_floor_explainer:
+      "Minimale ontlaadkracht. Berekend als piekbelasting woning ({peak}) × 1,5, zodat de batterij plotse piekbelastingen dekt zonder netimport.",
     clamp_active_tooltip: "De hardware-exportlimiter beperkt de netinjectie tot deze waarde",
     btn_cancel: "Annuleren",
     btn_confirm_cancel: "Annulering bevestigen?",
@@ -250,6 +258,8 @@ const TRANSLATIONS = {
     deferred_reason: "motivo",
     safety_floor: "mínimo de seguridad",
     floor_clamping_tooltip: "Se eleva la potencia para evitar importación de la red (C-001)",
+    safety_floor_explainer:
+      "Potencia mínima de descarga. Calculada como pico de consumo doméstico ({peak}) × 1,5, para cubrir picos súbitos sin importar de la red.",
     clamp_active_tooltip: "El limitador hardware está limitando la exportación a este valor",
     btn_cancel: "Cancelar",
     btn_confirm_cancel: "¿Confirmar cancelación?",
@@ -298,6 +308,8 @@ const TRANSLATIONS = {
     deferred_reason: "motivo",
     safety_floor: "limite di sicurezza",
     floor_clamping_tooltip: "Potenza aumentata per evitare prelievo dalla rete (C-001)",
+    safety_floor_explainer:
+      "Potenza minima di scarica. Calcolata come picco di consumo casa ({peak}) × 1,5, per coprire picchi improvvisi senza prelevare dalla rete.",
     clamp_active_tooltip: "Il limitatore hardware sta limitando l'esportazione a questo valore",
     btn_cancel: "Annulla",
     btn_confirm_cancel: "Confermare annullamento?",
@@ -346,6 +358,8 @@ const TRANSLATIONS = {
     deferred_reason: "powód",
     safety_floor: "próg bezpieczeństwa",
     floor_clamping_tooltip: "Zwiększono moc, aby uniknąć poboru z sieci (C-001)",
+    safety_floor_explainer:
+      "Minimalna moc rozładowania. Wyliczana jako szczyt zużycia domu ({peak}) × 1,5, aby bateria pokryła nagłe skoki bez poboru z sieci.",
     clamp_active_tooltip: "Ogranicznik sprzętowy limituje eksport do tej wartości",
     btn_cancel: "Anuluj",
     btn_confirm_cancel: "Potwierdzić anulowanie?",
@@ -394,6 +408,8 @@ const TRANSLATIONS = {
     deferred_reason: "motivo",
     safety_floor: "piso de segurança",
     floor_clamping_tooltip: "Potência elevada para evitar importação da rede (C-001)",
+    safety_floor_explainer:
+      "Potência mínima de descarga. Calculada como pico de consumo doméstico ({peak}) × 1,5, para cobrir picos sem importar da rede.",
     clamp_active_tooltip: "O limitador de hardware está a limitar a exportação a este valor",
     btn_cancel: "Cancelar",
     btn_confirm_cancel: "Confirmar cancelamento?",
@@ -442,6 +458,8 @@ const TRANSLATIONS = {
     deferred_reason: "原因",
     safety_floor: "安全下限",
     floor_clamping_tooltip: "提高分配功率以防止电网导入 (C-001)",
+    safety_floor_explainer:
+      "最小放电功率。按家庭峰值负载 ({peak}) × 1.5 计算,保证电池可覆盖突发负载尖峰而不从电网导入。",
     clamp_active_tooltip: "硬件限制器将馈网限制在此值",
     btn_cancel: "取消",
     btn_confirm_cancel: "确认取消？",
@@ -490,6 +508,8 @@ const TRANSLATIONS = {
     deferred_reason: "理由",
     safety_floor: "安全下限",
     floor_clamping_tooltip: "ペース電力を引き上げて系統インポートを防止 (C-001)",
+    safety_floor_explainer:
+      "最小放電電力。家庭ピーク負荷 ({peak}) × 1.5 で計算。急な負荷スパイクを系統からの電力輸入なしでカバーするため。",
     clamp_active_tooltip: "ハードウェア制限器が系統送電をこの値に制限しています",
     btn_cancel: "キャンセル",
     btn_confirm_cancel: "キャンセルしますか？",
@@ -522,7 +542,9 @@ class FoxESSControlCard extends HTMLElement {
       else if (input.id === "form-soc") this._formValues.soc = input.value;
     });
     this.shadowRoot.addEventListener("click", (e) => {
-      const row = e.target.closest(".progress-row.has-tip");
+      const row = e.target.closest(
+        ".progress-row.has-tip, .detail-row.has-tip",
+      );
       if (row) {
         const key = row.dataset.tipKey;
         if (key) {
@@ -1000,16 +1022,7 @@ class FoxESSControlCard extends HTMLElement {
             <span class="detail-label">${this._t("power")}</span>
             <span class="detail-value">${this._renderDischargePowerValue(a, power, deferred, scheduled)}</span>
           </div>
-          ${a.discharge_safety_floor_w > 0 ? `
-          <div class="detail-row">
-            <span class="detail-label">${this._t("safety_floor")}</span>
-            <span class="detail-value">
-              ${this._formatPower(a.discharge_safety_floor_w)}
-              ${a.discharge_paced_target_w != null && a.discharge_paced_target_w < a.discharge_safety_floor_w
-                ? `<ha-icon icon="mdi:arrow-up-bold" title="${this._t("floor_clamping_tooltip")}" class="floor-active-hint"></ha-icon>`
-                : ""}
-            </span>
-          </div>` : ""}
+          ${a.discharge_safety_floor_w > 0 ? this._renderSafetyFloorRow(a) : ""}
           <div class="detail-row">
             <span class="detail-label">${this._t("min_soc")}</span>
             <span class="detail-value">${minSoc != null ? minSoc + "%" : "—"}</span>
@@ -1045,6 +1058,44 @@ class FoxESSControlCard extends HTMLElement {
       return `<span class="inverter-power">${inv}</span>${tgt}<span class="clamp-sep"> / </span><span class="export-power ${clampClass}">${expStr}${icon}</span>`;
     }
     return `${inv}${tgt}`;
+  }
+
+  _renderSafetyFloorRow(a) {
+    // UX: the label "safety floor" is unintuitive — a user seeing
+    // "Safety floor: 3.5 kW" has no way to know this is the *minimum*
+    // discharge power the algorithm will use, nor where the number
+    // came from.  Click-to-expand explainer (same pattern as progress
+    // bars) reveals the peak × 1.5 formula and the rationale.
+    const expanded = this._expandedTips.has("safety_floor");
+    const clamping =
+      a.discharge_paced_target_w != null &&
+      a.discharge_paced_target_w < a.discharge_safety_floor_w;
+    const arrow = clamping
+      ? `<ha-icon icon="mdi:arrow-up-bold" title="${this._t("floor_clamping_tooltip")}" class="floor-active-hint"></ha-icon>`
+      : "";
+    const peakKw = a.discharge_peak_consumption_kw;
+    const peakStr =
+      typeof peakKw === "number" && peakKw > 0
+        ? this._formatPower(peakKw * 1000)
+        : "?";
+    const explainer = this._t("safety_floor_explainer").replace(
+      "{peak}",
+      peakStr,
+    );
+    return `
+      <div class="detail-row has-tip${expanded ? " expanded" : ""}"
+           data-tip-key="safety_floor">
+        <div class="detail-row-main">
+          <span class="detail-label">${this._t("safety_floor")}</span>
+          <span class="detail-value">
+            ${this._formatPower(a.discharge_safety_floor_w)}
+            ${arrow}
+            <ha-icon icon="mdi:information-outline" class="tip-indicator"></ha-icon>
+          </span>
+        </div>
+        <div class="detail-tip">${explainer}</div>
+      </div>
+    `;
   }
 
   _renderIdle() {
@@ -1477,6 +1528,37 @@ class FoxESSControlCard extends HTMLElement {
         opacity: 0.85;
         font-size: 0.92em;
         margin-top: 2px;
+      }
+      /* Expandable detail row — same affordance as .progress-row.has-tip. */
+      .detail-row.has-tip {
+        flex-direction: column;
+        align-items: stretch;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .detail-row.has-tip .detail-row-main {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .detail-row.has-tip .tip-indicator {
+        --mdc-icon-size: 14px;
+        opacity: 0.5;
+        margin-left: 4px;
+      }
+      .detail-row.has-tip .detail-tip {
+        max-height: 0;
+        overflow: hidden;
+        font-size: 0.78em;
+        color: var(--secondary-text-color, #888);
+        line-height: 1.4;
+        transition: max-height 0.25s ease, margin-top 0.25s ease, opacity 0.2s ease;
+        opacity: 0;
+      }
+      .detail-row.has-tip.expanded .detail-tip {
+        max-height: 6em;
+        margin-top: 4px;
+        opacity: 1;
       }
 
       /* Progress bars */
