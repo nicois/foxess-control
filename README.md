@@ -399,6 +399,7 @@ When `charge_active` is true:
 | `charge_end_time` | string | End time in ISO format. |
 | `charge_target_reachable` | bool | `false` when even max power can't reach the target SoC in remaining time. An [HA Repair issue](#unreachable-charge-target) is raised when this becomes `false` mid-session. |
 | `charge_time_slack_s` | int \| null | During the `deferred` phase, seconds remaining until forced charging must start. Recomputed every tick — solar surplus grows the slack and load spikes shrink it. `null` outside the deferred phase. |
+| `charge_deferred_reason` | string \| null | Plain-language explanation of *why* the deferred phase is holding (e.g. "Paused — solar forecast exceeds target"). Populated only during the `deferred` phase; `null` otherwise. Rendered as a wrapping row on the control card. |
 
 When `discharge_active` is true:
 
@@ -414,6 +415,13 @@ When `discharge_active` is true:
 | `discharge_end_time` | string | End time in ISO format. |
 | `discharge_time_slack_s` | int \| null | During the `deferred` phase, seconds remaining until forced discharge must start (`deferred_start − now`). Recomputed every tick, so solar surplus grows the slack and load spikes shrink it. `null` outside the deferred phase. |
 | `discharge_export_limit_w` | int \| null | When an export-limit actuator is mapped (entity mode), the current paced export-limit value written to the hardware. `null` when the actuator is not configured. |
+| `discharge_deferred_reason` | string \| null | Plain-language explanation of *why* discharge is deferred (e.g. "Feed-in limit reached — holding until more solar is available"). Populated only during the `deferred` phase; `null` otherwise. |
+| `discharge_safety_floor_w` | int | The C-001 safety floor — minimum discharge power the algorithm will use, computed as `peak_consumption_kw × 1.5`. 0 until the listener has observed at least one non-zero peak. |
+| `discharge_peak_consumption_kw` | float | Tracked peak house consumption (kW) used to derive the safety floor. Updated each tick if the current consumption exceeds the stored peak. |
+| `discharge_paced_target_w` | int \| null | The algorithm's pacing decision *before* the C-001 floor is applied. Useful to see when the floor is actively raising the target (floor > paced_target) — the control card renders an upward-arrow hint in this case. |
+| `discharge_grid_export_limit_w` | int \| null | The configured **Grid Export Limit** in watts, when non-zero. Populated regardless of whether an export-limit actuator is mapped — the control card uses this to render an "inverter / export" split value. `null` when the option is 0. |
+| `discharge_clamp_active` | bool | `true` when the hardware export limiter is actively capping grid export (i.e. paced target × 1 > grid_export_limit). The control card highlights the export side of the power row in warning colour with a fence icon when this is true. |
+| `taper_profile` | object | BMS acceptance-ratio histogram for *both* charge and discharge (`{"charge": [{"soc": 80, "ratio": 0.75, "count": 12}, …], "discharge": […]}`), sorted by SoC ascending. Marked unrecorded (not persisted to HA recorder). Used by the standalone `foxess-taper-card`. |
 
 When any session is active, error state attributes are also available:
 
@@ -652,6 +660,25 @@ type: custom:foxess-history-card
 hours: 48
 ```
 
+### Taper profile card
+
+Visualises the BMS acceptance-ratio histogram from the `taper_profile`
+attribute — a horizontal bar per 5% SoC bin for charge and discharge,
+annotated with the observation count. Low-confidence bins (fewer than
+3 observations) are greyed out with a `·` marker. Useful to understand
+why high-SoC charging tapers off and why discharge tapers at low SoC.
+
+```yaml
+type: custom:foxess-taper-card
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `entity` | `sensor.foxess_smart_operations` | Smart operations sensor entity ID. |
+
+An ApexCharts variant is covered as a user template in
+[`docs/lovelace-examples.md`](docs/lovelace-examples.md).
+
 > **YAML mode dashboards:** If you use YAML-mode Lovelace (not the default storage mode), add the resources manually to your `configuration.yaml`:
 > ```yaml
 > lovelace:
@@ -663,6 +690,8 @@ hours: 48
 >     - url: /foxess_control/foxess-forecast-card.js
 >       type: module
 >     - url: /foxess_control/foxess-history-card.js
+>       type: module
+>     - url: /foxess_control/foxess-taper-card.js
 >       type: module
 > ```
 
