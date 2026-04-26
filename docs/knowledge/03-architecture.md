@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 3
-last_verified: 2026-04-24
+last_verified: 2026-04-27
 traces_up: [02-constraints.md]
 traces_down: [04-design/]
 ---
@@ -416,3 +416,21 @@ the simulator's state matches the HA observation within tolerance.
   `--max-consecutive-failures` (default 3) poll failures so the
   service supervisor applies its 10-minute backoff rather than the
   script busy-waiting internally.
+
+## Test Inventory Summary
+
+`scripts/test_summary.py` derives the current test counts (unit /
+E2E / soak / total) on demand from `pytest --co -q`, so knowledge-
+tree docs never embed fast-moving numbers.  Three modes:
+
+- default — current working-tree counts, human-readable.
+- `--json` — machine-readable for tooling.
+- `--history [--since TAG]` — walks every `v*` tag, checks each
+  out into a temporary worktree, collects counts, caches the
+  result at `.test-count-cache.json` (git-ignored).  Reconstructs
+  the growth curve on demand from git; no in-repo time-series
+  tracking needed.
+
+The script counts actual enumerated test items (lines starting
+``tests/`` in `--co -q` output), not the pytest footer — the
+footer can report higher under xdist or after marker filtering.

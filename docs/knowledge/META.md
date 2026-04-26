@@ -2,7 +2,7 @@
 project: FoxESS Control
 created: 2026-04-14
 last_updated: 2026-04-27
-last_reflection: 2026-04-25T14:00:00+10:00
+last_reflection: 2026-04-27T08:34:52+10:00
 ---
 # Knowledge Tree Meta
 
@@ -853,3 +853,80 @@ splitting into domain-specific modules.
 **No priority or constraint changes** — purely test-inventory
 and design-decision refresh. No propagation implications
 downward.
+
+### 2026-04-27 — Automated reflection (42 interactions, 2026-04-25 to 2026-04-26)
+
+**Scope**: 42 user interactions spanning the 1.0.13-beta.1 → 1.0.13
+release and follow-on betas (hui-root fix, Jekyll safety, test-count
+script). Covers ~42 hours of project work across multiple sessions.
+
+**Signals analysed**:
+
+1. **User articulated a documentation-process principle**
+   (interaction #39, 2026-04-26T21:40): *"Instead of referencing the
+   test counts inline, create a script to generate a summary on demand.
+   There is some value in tracking how they change over time, but that
+   can be generated retrospectively using git history."* — Acted on
+   via `scripts/test_summary.py` + removal of inline counts. This is a
+   **reusable meta-principle**, not just a one-off request: any metric
+   that drifts between doc updates (test counts, coverage percentages,
+   dependency versions) and is reconstructible from git should be
+   generated on demand rather than embedded. Adding below as a
+   Structure Refinement.
+
+2. **UX principle validated by user review** (interaction #28,
+   2026-04-26T09:51): *"how does a user know what safety floor means
+   on the dashboard?"* — exposed that the original UX #6 safety-floor
+   row had only a hover tooltip, invisible on mobile. The user's
+   question itself *was* the correction: the information existed but
+   wasn't discoverable on the dominant viewport for ad-hoc checks.
+   D-051 now reflects this in its safety-floor bullet; the
+   `safety_floor_explainer` i18n key + click-to-expand pattern
+   were the remediation. Structure Refinement captured below.
+
+3. **No priority inversions surfaced, no new C-NNN needed**. The
+   grid-import-during-charge question (from a conversational aside
+   about 10kW inverter + 5kW solar + 1h window) turned out to be
+   already covered by C-023 (solar-first during ForceCharge) and the
+   vision's "avoid *unnecessary* energy import" clause — which
+   deliberately qualifies the absolute "no grid import during
+   discharge" invariant. The asymmetry between charge and discharge
+   regarding grid import IS documented; the user's question was
+   answerable from existing docs.
+
+4. **Git-only signals cross-referenced**: 49 commits since last
+   reflection, all corresponding to topics already captured in the
+   tree via the intervening `update` pass + the fresh `update` just
+   completed (see above). Nothing un-documented.
+
+**Actions taken**:
+- `scripts/test_summary.py` + inline-count removal (in `fa0f76e`).
+- `03-architecture.md`: new "Test Inventory Summary" section
+  documenting `scripts/test_summary.py` alongside the existing
+  `collect_ha_session.py` and `collect_events.py`.
+- Two new Structure Refinement items (see below).
+
+**Actions recommended (not taken this pass)**: none. Tree is
+current. No priority inversions, no unconstrained priorities.
+
+---
+
+## Structure Refinements (continued)
+
+- **Numbers that drift should be generated, not embedded.** Test
+  counts in `06-tests.md` + `05-coverage.md` required manual
+  synchronisation across four locations on every update pass and
+  drifted silently in between. Replaced with
+  `scripts/test_summary.py`, which reads `pytest --co -q` at call
+  time and walks git tags for historical counts on demand. The same
+  principle applies to any metric that changes faster than docs are
+  revised: embed a pointer to the authoritative generator, not a
+  snapshot.
+- **UX accessibility on mobile is a C-020 requirement, not a nice-
+  to-have.** Hover tooltips do not satisfy "user determines system
+  state from the UI alone" when the UI is viewed on a touch device.
+  When proposing tooltip-based disclosure, first ask whether the
+  information is reachable by tap-to-expand or permanent visibility;
+  if not, the design fails C-020 on the dominant HA viewport. This
+  generalises beyond UX #6 — it applies to any future card
+  refinement that surfaces explanatory text.
