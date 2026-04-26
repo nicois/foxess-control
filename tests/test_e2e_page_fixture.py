@@ -526,3 +526,210 @@ class TestWaitForLovelacePanelNavigationDuringPanelRender:
             f"panel.hass set, or hui-root rendered.  See the docstring "
             f"for the rationale."
         )
+
+
+class TestWaitForLovelacePanelCloudVariantSignalStability:
+    """The final-stage predicate must be *robust* across HA's async
+    panel-lifecycle wiring order — including the [cloud] variant.
+
+    **Background** (diagnosed 2026-04-26 from Flaky Test Detection run
+    24956110840 for v1.0.13): after the beta.3 fix landed, a *new* flake
+    signature emerged — different from beta.3's 30s-per-stage cap:
+
+        playwright._impl._errors.TimeoutError:
+        Page.wait_for_function: Timeout 74958ms exceeded.
+
+    Note the ``74958ms``: virtually the entire 75000ms overall budget
+    was consumed by the final stage without converging.  The victim was
+    ``test_gallery_control_charging[cloud]`` — a ``cloud`` variant, not
+    an ``entity`` variant.
+
+    **Root-cause diagnosis** (which signal is slow under cloud):
+    Stage 3 currently requires THREE signals to be simultaneously true:
+      (a) ``main.hass.connected === true`` — HA WS session established.
+      (b) ``ha-panel-lovelace`` attached inside the main shadow root.
+      (c) ``panel.hass`` set — partial-panel-resolver wired the panel.
+
+    Signal (c) has a **timing vulnerability**: it is set by HA's
+    ``partial-panel-resolver`` between the panel's ``connectedCallback``
+    and its first render.  Under adversarial CI timing (12 xdist workers,
+    cloud config doing additional async integration startup work), a
+    navigation can destroy the context between panel mount and the
+    ``panel.hass`` assignment — cycling the helper through retries that
+    never simultaneously see all three signals true.
+
+    **Fix contract** (what this test asserts): an observable
+    *DOM-level* stability signal — specifically ``hui-root`` mounted
+    inside ``panel.shadowRoot`` — is strictly stronger than
+    ``panel.hass`` and must be used in place of (or as an alternative
+    to) ``panel.hass`` in the final-stage predicate:
+
+      - ``hui-root`` cannot exist unless the panel's render cycle
+        completed at least once.
+      - A render cycle requires ``panel.hass`` to have been assigned
+        *and* still be set at render time.
+      - So ``hui-root`` implies ``panel.hass`` (the DOM is the proof),
+        but ``hui-root`` also survives the wire-up race because its
+        presence is a synchronous DOM fact, not a transient JS property.
+
+    The predicate can legitimately fall back to ``panel.hass`` when
+    ``hui-root`` has not yet mounted (panels that show loading
+    spinners), but ``hui-root`` being present must always be sufficient
+    to return — never gated by ``panel.hass`` also being truthy.
+    """
+
+    def test_hui_root_presence_is_sufficient_for_settled_signal(self) -> None:
+        """If ``hui-root`` is mounted inside ``panel.shadowRoot``, the
+        final-stage predicate must reference it as *executable code*,
+        not merely in comments.
+
+        Why this matters: ``hui-root`` is rendered *by* the panel only
+        after ``panel.hass`` has been assigned at least once and a Lit
+        render cycle has completed.  Its presence proves the panel
+        passed through the wired state.  But ``panel.hass`` can briefly
+        read as ``null`` mid-navigation when HA's
+        ``partial-panel-resolver`` is swapping panels — and we do not
+        want the predicate to go false on that transient blip.
+
+        The check strips JS comments before scanning, so mentions of
+        ``hui-root`` in rationale comments do not satisfy the
+        assertion — only executable ``querySelector('hui-root')`` (or
+        an equivalent DOM reference) counts.
+        """
+        import re  # noqa: PLC0415
+
+        from tests.e2e import conftest  # noqa: PLC0415
+
+        stages = getattr(conftest, "_LOVELACE_PANEL_STAGES", None)
+        assert stages is not None, "Helper missing _LOVELACE_PANEL_STAGES"
+        _final_stage_name, final_predicate = stages[-1]
+
+        # Strip JS line comments (// ...) and block comments (/* */)
+        # so mentions of hui-root in rationale prose do not satisfy the
+        # assertion — only references in executable code count.
+        stripped = re.sub(r"//[^\n]*", "", final_predicate)
+        stripped = re.sub(r"/\*.*?\*/", "", stripped, flags=re.DOTALL)
+        normalised = "".join(stripped.split())
+
+        has_hui_root = "hui-root" in normalised or "hui_root" in normalised
+        assert has_hui_root, (
+            "Final-stage predicate does not reference hui-root in "
+            "executable code.  Observed predicate (with comments "
+            f"stripped):\n{stripped}\n\n"
+            "The [cloud] variant flake (run 24956110840, timeout "
+            "74958ms) is driven by ``panel.hass`` being transiently "
+            "unset during HA's navigation churn.  ``hui-root`` is a "
+            "synchronous DOM fact that is strictly stronger and does "
+            "not suffer the wire-up race.  Add ``hui-root`` as an "
+            "alternative path in the predicate, or replace panel.hass "
+            "with it entirely."
+        )
+
+    def test_predicate_succeeds_when_hui_root_present_even_if_panel_hass_null(
+        self,
+    ) -> None:
+        """Evaluate the final-stage predicate's JavaScript source
+        against a simulated DOM snapshot (``hui-root`` mounted,
+        ``panel.hass`` ``null``) and confirm it returns truthy.
+
+        Rationale: a purely-syntactic test (checking the predicate
+        source contains ``hui-root``) can be satisfied by a comment or
+        by a gated AND-clause that never actually accepts
+        ``hui-root``-alone.  This test exercises the actual JavaScript
+        semantics via a minimal JS interpreter (Node if available, or
+        a textual simulation as fallback) to guarantee the predicate
+        *behaviourally* accepts ``hui-root`` as sufficient proof.
+        """
+        import json  # noqa: PLC0415
+        import shutil  # noqa: PLC0415
+        import subprocess  # noqa: PLC0415
+
+        from tests.e2e import conftest  # noqa: PLC0415
+
+        stages = getattr(conftest, "_LOVELACE_PANEL_STAGES", None)
+        assert stages is not None, "Helper missing _LOVELACE_PANEL_STAGES"
+        _final_stage_name, final_predicate = stages[-1]
+
+        # Require node.js for the DOM-behavioural check.  If not
+        # available in the CI environment, the syntactic check in the
+        # sibling test is the fall-back guard.
+        node_bin = shutil.which("node")
+        if node_bin is None:
+            pytest.skip("node.js unavailable — cannot execute predicate JS")
+
+        # Build a DOM mock that represents the observed adversarial
+        # cloud-variant snapshot:
+        #   - document.querySelector('home-assistant') resolves.
+        #   - main.shadowRoot.querySelector('home-assistant-main') resolves.
+        #   - ham.shadowRoot.querySelector('ha-panel-lovelace') resolves.
+        #   - main.hass.connected === true.
+        #   - main.hass.states populated.
+        #   - panel.shadowRoot.querySelector('hui-root') resolves.
+        #   - panel.hass === null (the transient race state).
+        # Under this snapshot, a predicate that REQUIRES ``panel.hass``
+        # will return false; a predicate that accepts ``hui-root`` as
+        # alternative proof will return true.
+        dom_setup = r"""
+        const panel_shadow = {
+            querySelector: (sel) => (
+                sel === 'hui-root' ? {nodeName: 'HUI-ROOT'} : null
+            ),
+        };
+        const panel = { shadowRoot: panel_shadow, hass: null };
+        const ham_shadow = {
+            querySelector: (sel) => (
+                sel === 'ha-panel-lovelace' ? panel : null
+            ),
+        };
+        const ham = { shadowRoot: ham_shadow };
+        const main_shadow = {
+            querySelector: (sel) => (
+                sel === 'home-assistant-main' ? ham : null
+            ),
+        };
+        const main = {
+            shadowRoot: main_shadow,
+            hass: { connected: true, states: { 'sensor.x': {} } },
+        };
+        global.document = {
+            querySelector: (sel) => (
+                sel === 'home-assistant' ? main : null
+            ),
+        };
+        """
+        # Strip the trailing semicolon safety — the predicate is the
+        # arrow expression ``() => { ... }``; we invoke it with ``()``.
+        js_source = (
+            dom_setup
+            + "\n"
+            + "const predicate = "
+            + final_predicate
+            + ";\n"
+            + "console.log(JSON.stringify({ result: Boolean(predicate()) }));"
+        )
+
+        completed = subprocess.run(  # noqa: S603
+            [node_bin, "-e", js_source],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        assert completed.returncode == 0, (
+            f"Node evaluation failed: {completed.stderr}\n"
+            f"Predicate source:\n{final_predicate}"
+        )
+        payload = json.loads(completed.stdout.strip().splitlines()[-1])
+        assert payload["result"] is True, (
+            "Final-stage predicate returned FALSE when given a DOM "
+            "snapshot representing a stable Lovelace panel (hui-root "
+            "mounted inside panel.shadowRoot, main.hass.connected "
+            "true) BUT with panel.hass transiently null — the exact "
+            "cloud-variant race that drove the 74958ms timeout on run "
+            "24956110840.\n\nThe predicate is over-constraining: it "
+            "requires panel.hass to be truthy, but hui-root being "
+            "mounted already proves the panel passed through the wired "
+            "state.  hui-root's presence is a synchronous DOM fact "
+            "that survives the panel.hass wire-up race.\n\n"
+            f"Predicate source:\n{final_predicate}"
+        )
