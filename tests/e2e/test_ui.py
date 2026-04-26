@@ -1492,11 +1492,12 @@ class TestControlCard:
         assert not result.get("no_row"), "expandable safety_floor row missing"
         assert result["has_tip_element"], "detail-tip element not rendered"
         tip = str(result.get("tip_text") or "")
-        # Peak × 1.5 was 1.0 kW × 1.5 = 1.5 kW — the formatted peak
-        # (1.0 kW, displayed as "1.0 kW" by _formatPower) must appear in
-        # the tip so the user can see where the number came from.
-        assert "1.0" in tip or "1000" in tip, (
-            f"expected peak value in tip, got: {tip!r}"
+        # Peak = 1.0 kW (injected); _formatPower renders it as "1 kW"
+        # (integer kW is displayed without trailing zeros).  The tip
+        # must include the formatted peak so the user sees where the
+        # safety-floor number came from.
+        assert "1 kW" in tip or "1.0 kW" in tip or "1000" in tip, (
+            f"expected formatted peak value in tip, got: {tip!r}"
         )
         # Click toggles expansion.
         assert result["expanded_before"] is False
