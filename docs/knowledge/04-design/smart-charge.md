@@ -153,7 +153,9 @@ analogue for charge).
   causes ForceCharge mode to draw from grid; self-use is cleaner
 - Subtract solar from power request: rejected because solar forecast
   is unavailable and instantaneous solar is volatile
-**Traces**: D-006 (trajectory tracking still applies after re-deferral);
+**Traces**: C-023 (solar-first during ForceCharge — D-043 is the
+software complement); D-006 (trajectory tracking still applies after
+re-deferral);
 `tests/test_smart_battery_algorithms.py::TestCalculateChargePower`
 
 ## Key Behaviours

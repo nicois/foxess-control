@@ -22,9 +22,9 @@ serving it.
 |---|---|---|---|
 | P-001 No grid import during forced discharge | C-001, C-003, C-013, C-016, C-017, C-024, C-025, C-027 | D-001, D-002, D-003, D-004, D-017, D-018, D-023, D-025, D-026, D-047 | ENFORCED |
 | P-002 Respect minimum state of charge | C-002, C-003, C-012, C-013, C-016, C-018, C-019, C-024, C-025, C-027 | D-001, D-016 | ENFORCED |
-| P-003 Meet the user's energy target | C-007, C-008, C-009, C-010, C-011, C-014, C-022, C-023, C-037 | D-005, D-006, D-007, D-011, D-012, D-013, D-014, D-015 (taper), D-028, D-032, D-033, D-037, D-042, D-043, D-044, D-046 | ENFORCED |
+| P-003 Meet the user's energy target | C-007, C-008, C-009, C-010, C-011, C-014, C-022, C-023, C-037 | D-005, D-006, D-007, D-011, D-012, D-013, D-014, D-015 (taper), D-019, D-032, D-033, D-037, D-042, D-043, D-044, D-046 | ENFORCED |
 | P-004 Maximise feed-in revenue | (aspirational — no C-NNN) | (no D-NNN currently declares P-004 as primary; D-044 serves P-003 but advances P-004 as a secondary effect) | ASPIRATIONAL |
-| P-005 Operational transparency | C-004, C-005, C-006, C-020, C-022, C-026, C-038 | D-008, D-009, D-010, D-020, D-021, D-027, D-029, D-030, D-035, D-036, D-038, D-039, D-040, D-041 (ws), D-048, D-050, D-051 | ENFORCED |
+| P-005 Operational transparency | C-004, C-005, C-006, C-020, C-022, C-026, C-038 | D-008, D-009, D-010, D-020, D-021, D-027, D-028, D-029, D-030, D-035, D-036, D-038, D-039, D-040, D-041 (ws), D-048, D-050, D-051 | ENFORCED |
 | P-006 Brand portability | C-015, C-021, C-039, C-040 | D-022 | ENFORCED |
 | P-007 Engineering process integrity | C-015, C-028, C-029, C-030, C-031, C-032, C-033, C-034, C-035, C-036 | D-019, D-031, D-034, D-041 (lovelace), D-045, D-049 | ENFORCED |
 
@@ -190,9 +190,10 @@ against a scenario that the system couldn't actually reach.
 ### Design decisions without constraint traces (UNJUSTIFIED)
 - **D-015**: WASM signature generation — no C-NNN trace. Provides API
   authentication but no constraint captures "requests must be signed".
-- **D-043**: Charge re-deferral when ahead of schedule — now traces
-  to C-023 (solar-first during ForceCharge). D-043 is the software
-  complement to the hardware behaviour.
+- **D-020**: start_soc persistence for progress display — no C-NNN
+  trace. Purely UX: avoids a progress-bar jump when a session is
+  resumed mid-ride. Tolerated UNJUSTIFIED because the behaviour is
+  purely display and has no correctness implications.
 
 ### Bidirectional trace mismatches
 (none)
@@ -229,7 +230,7 @@ against a scenario that the system couldn't actually reach.
 - **Priority inversions**: 0
 - **Unconstrained priorities**: 1 (P-004 — aspirational by design)
 - **Unprioritised constraints**: 0 (all 40 C-NNN name P-NNN)
-- **Unprioritised decisions**: 0 (all 53 D-NNN entries name P-NNN + classification)
+- **Unprioritised decisions**: 0 (all 52 D-NNN entries name P-NNN + classification; IDs span D-001..D-051 with D-024 silently retired and D-014 / D-041 each carrying two distinct entries in different design files — ID reuse collisions noted below under Classification Summary)
 - **Active regression**: none
 - **Orphan tests**: ~160 unit (display, plumbing, lifecycle tests)
 - **Test counts**: run `python scripts/test_summary.py` for
