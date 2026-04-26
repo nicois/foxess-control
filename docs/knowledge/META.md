@@ -930,3 +930,28 @@ current. No priority inversions, no unconstrained priorities.
   if not, the design fails C-020 on the dominant HA viewport. This
   generalises beyond UX #6 — it applies to any future card
   refinement that surfaces explanatory text.
+
+## Known D-NNN ID Collisions
+
+Three D-NNN IDs currently carry two distinct entries each, in
+different design files. The tree convention says IDs are stable
+and not reused — these predate that convention.  Rather than
+renumber (which would break cross-references in commits and
+CHANGELOG), each pair is tolerated and listed here so the parity
+check in `05-coverage.md` stays honest.
+
+| ID    | Entry A (file) | Entry B (file) |
+|-------|----------------|----------------|
+| D-014 | Multiplicative temperature correction factor (`taper-model.md`) | Schedule group sanitisation on read-before-write (`foxess-api.md`) |
+| D-015 | 10-minute stability gate for temperature observations (`taper-model.md`) | WASM signature generation (`foxess-api.md`) |
+| D-041 | WS anomaly plausibility filter (`websocket-realtime.md`) | Vanilla HTMLElement constraint for custom cards (`lovelace-cards.md`) |
+
+**Policy**: future D-NNN assignments MUST scan every design file for
+the next unused ID, not just the file being edited.  The previous
+heuristic ("find max D-NNN in this file + 1") is what produced these
+collisions; it is now retired.
+
+**Also silently retired**: D-024.  No file carries a D-024 entry and
+no `[RETIRED]` marker documents its removal.  Tolerated, not fixed,
+because adding a tombstone now would just add noise; the gap in the
+numbering sequence is harmless.

@@ -63,15 +63,16 @@ declaration.
 
 ## Classification Summary
 
-Across 52 decision entries (IDs D-001..D-050, D-024 retired; D-014 and
-D-041 each reuse the same ID for two distinct decisions in different
-design files — collisions tracked in META.md):
+Across 53 decision entries (IDs D-001..D-051 with D-024 silently
+retired without marker; D-014, D-015, and D-041 each reuse the same
+ID for two distinct decisions in different design files — collisions
+tracked in META.md):
 
 | Classification | Count | Meaning |
 |---|---|---|
 | safety   | 16 | Enforces a C-NNN invariant; non-negotiable without changing the C-NNN |
 | pacing   | 13 | Optimises a target; tunable, reviewable when assumptions change |
-| other    | 23 | Infrastructure / observability / architectural decisions |
+| other    | 24 | Infrastructure / observability / architectural decisions |
 
 Pacing decisions are the ones most vulnerable to priority
 inversion — their language often borrows from safety, but they
@@ -188,12 +189,30 @@ against a scenario that the system couldn't actually reach.
   exercised only by the visual editor.
 
 ### Design decisions without constraint traces (UNJUSTIFIED)
-- **D-015**: WASM signature generation — no C-NNN trace. Provides API
-  authentication but no constraint captures "requests must be signed".
-- **D-020**: start_soc persistence for progress display — no C-NNN
-  trace. Purely UX: avoids a progress-bar jump when a session is
-  resumed mid-ride. Tolerated UNJUSTIFIED because the behaviour is
-  purely display and has no correctness implications.
+- **D-015** (`foxess-api.md`): WASM signature generation — no C-NNN
+  trace. Provides API authentication but no constraint captures
+  "requests must be signed".
+- **D-015** (`taper-model.md`): 10-minute stability gate for
+  temperature observations — no C-NNN trace, but D-011 and the taper
+  model design doc describe the invariant informally.  The ID
+  collision means this entry lives alongside the WASM-signature
+  D-015; both are tolerated without an explicit C-NNN.
+- **D-020** (`session-management.md`): start_soc persistence for
+  progress display — no C-NNN trace. Purely UX: avoids a
+  progress-bar jump when a session is resumed mid-ride. Tolerated
+  UNJUSTIFIED because the behaviour is purely display and has no
+  correctness implications.
+- **D-041** (`lovelace-cards.md`): Vanilla HTMLElement constraint
+  for custom cards — no C-NNN trace and no `**Traces**:` line at all.
+  The decision explains WHY the project uses vanilla `HTMLElement`
+  over LitElement/Lit (no HA-managed import map; Lit extraction from
+  the prototype chain yields class but not templates; CDN carries
+  external-service risk; bundling requires a build pipeline the
+  project doesn't have for frontend assets).  Classification is
+  `other`; priority served is P-007 (engineering process integrity).
+  Tolerated UNJUSTIFIED because the decision is a stack-choice
+  rationale rather than an invariant-enforcing one — no discrete
+  C-NNN captures "use vanilla Web Components".
 
 ### Bidirectional trace mismatches
 (none)
@@ -230,7 +249,7 @@ against a scenario that the system couldn't actually reach.
 - **Priority inversions**: 0
 - **Unconstrained priorities**: 1 (P-004 — aspirational by design)
 - **Unprioritised constraints**: 0 (all 40 C-NNN name P-NNN)
-- **Unprioritised decisions**: 0 (all 52 D-NNN entries name P-NNN + classification; IDs span D-001..D-051 with D-024 silently retired and D-014 / D-041 each carrying two distinct entries in different design files — ID reuse collisions noted below under Classification Summary)
+- **Unprioritised decisions**: 0 (all 53 D-NNN entries name P-NNN + classification; IDs span D-001..D-051 with D-024 silently retired and D-014 / D-015 / D-041 each carrying two distinct entries in different design files — ID reuse collisions noted below under Classification Summary)
 - **Active regression**: none
 - **Orphan tests**: ~160 unit (display, plumbing, lifecycle tests)
 - **Test counts**: run `python scripts/test_summary.py` for
