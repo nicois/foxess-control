@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.13-beta.4
+
+### Added
+- **Expandable "safety floor" explainer on the control card**: the UX #6 safety-floor row previously surfaced a kW value with no on-card explanation of what it meant or where the number came from — users reading "Safety floor: 3.5 kW" had no way to know this was the *minimum* discharge power, computed as peak household load × 1.5. Hover tooltips (previously the only affordance) are invisible on mobile where most ad-hoc dashboard checks happen. The row now uses the existing click-to-expand pattern (`.has-tip`, matching the progress-bar tips), revealing a translation-aware sentence with the *actual* peak value interpolated (e.g. "Minimum discharge power. Computed as peak household load (1.0 kW) × 1.5, so the battery can cover sudden load spikes without pulling from the grid."). A subtle `mdi:information-outline` icon hints at the interactivity. Click handler extended to match `.detail-row.has-tip` in addition to the pre-existing `.progress-row.has-tip`. New `safety_floor_explainer` i18n key translated across all 10 supported locales; regression test synthesises the discharge state, verifies the tip element renders with the peak value interpolated, and asserts clicking toggles the expanded class.
+
 ## 1.0.13-beta.3
 
 ### Fixed
