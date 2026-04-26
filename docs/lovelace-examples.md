@@ -1,3 +1,15 @@
+---
+# This file contains Home Assistant Jinja2 template examples (see
+# the ``content: |`` blocks below). Jekyll's Liquid preprocessor
+# does not understand Jinja's ``{% set %}`` / ``{% if %}`` / ``{% for %}``
+# tags and errors out on them, which breaks the GitHub Pages build.
+# ``render_with_liquid: false`` tells Jekyll to skip its Liquid
+# pass for this one file — markdown rendering still happens
+# normally, so the page still publishes, just without Liquid
+# interpretation of the HA template examples (which is what we
+# want: users should see the literal HA syntax to copy/paste).
+render_with_liquid: false
+---
 # Lovelace templates for FoxESS Control attributes
 
 These templates consume the 2026-04-25 data-surface attributes
