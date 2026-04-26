@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 created: 2026-04-14
-last_updated: 2026-04-25
+last_updated: 2026-04-27
 last_reflection: 2026-04-25T14:00:00+10:00
 ---
 # Knowledge Tree Meta
@@ -809,3 +809,47 @@ already covered by C-039 + C-040. Rules should enforce
 invariants, not house style — a house-style check is better done
 by a brand-portability review when the second brand begins, not
 by a bot.
+
+### 2026-04-27 — Update pass (test infrastructure guards + CI hygiene)
+
+**Surface drift addressed**:
+- Test counts: 919 → 950 unit, 164 → 166 E2E, 1102 → 1135 total.
+- C-020 row: added `TestSaveRunViolationPersistence` + the new
+  `test_safety_floor_row_is_expandable_and_shows_peak` E2E.
+- C-031 row: promoted from ACCEPTED (`-- (meta-constraint)`) to
+  COVERED, now traces to four test classes in
+  `tests/test_e2e_page_fixture.py`. The 2026-04-26 page-fixture
+  flake diagnosis (HA's housekeeping navigation + cloud-variant
+  `panel.hass` race) produced its own regression-test scaffolding
+  which is now first-class tree coverage.
+- D-051: safety-floor bullet extended to document the
+  click-to-expand explainer refinement (`e1ce181`, 2026-04-26)
+  and the `safety_floor_explainer` i18n key.
+- Two new sections in `06-tests.md`:
+  - **Test Infrastructure Guards** (C-031) — 11 page-fixture
+    helper tests + 2 soak-recorder persistence tests. A
+    category that didn't exist before: unit tests whose
+    subject is the test infrastructure itself, reproducing
+    flakes deterministically so future regressions are caught
+    pre-push instead of post-merge.
+  - **CI Hygiene** — 25 parametrised docs-Jekyll safety tests.
+    Structural ACCEPTED gap (no C-NNN) because Jekyll collision
+    isn't a product invariant; the test guards *our* ability
+    to publish docs without touching production code.
+
+**Meta-observation**: the "Test Infrastructure Guards" category
+emerged organically from three distinct flake investigations
+(page-fixture × 2, SoakRecorder, docs-Jekyll). Each fix followed
+the `/regression-test` methodology (test first, then fix) and
+the tests shipped as artefacts of the diagnosis — not as
+after-the-fact coverage. This confirms C-031's operational model:
+every flake becomes a permanent regression-test, and the test
+file organically clusters around what the *helpers* need to do
+correctly, independent of product code. Worth watching whether
+this category continues to grow — if more than ~20 unit tests
+accumulate under it, `tests/test_e2e_page_fixture.py` may want
+splitting into domain-specific modules.
+
+**No priority or constraint changes** — purely test-inventory
+and design-decision refresh. No propagation implications
+downward.

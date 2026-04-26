@@ -1,13 +1,18 @@
 ---
 project: FoxESS Control
 level: 6
-last_verified: 2026-04-25
+last_verified: 2026-04-27
 traces_up: [02-constraints.md, 04-design/]
+# This file describes the Jekyll/Liquid safety test and quotes the
+# Jinja tag names literally as examples.  Disable Jekyll's Liquid
+# preprocessing so the "inline" tag references don't collide with
+# the parser on publish.
+render_with_liquid: false
 ---
 # Test Inventory
 
-919 unit + 164 E2E + 19 soak = 1102 total (authoritative count via
-`pytest --co -q` 2026-04-25).
+950 unit + 166 E2E + 19 soak = 1135 total (authoritative count via
+`pytest --co -q` 2026-04-27).
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
@@ -390,9 +395,53 @@ missing locale key leaves the user looking at the raw key name.
 | `test_parser_finds_expected_locales` | Control card has exactly 10 locales (parser self-check) | C-020 |
 | `test_new_keys_present_in_every_locale` | UX #4/#6/#8 keys present in every locale | C-020, D-051 |
 
+## Test Infrastructure Guards (C-031)
+
+**Constraints**: C-031 (no flaky tests), C-020 (observability)
+**Source**: `tests/test_e2e_page_fixture.py` (11 tests),
+`tests/test_soak_results_db.py::TestSaveRunViolationPersistence` (2)
+
+Unit tests that guard the *test infrastructure itself* — helpers
+and fixtures whose correctness is invisible to production code but
+whose failure erodes test confidence.  The page-fixture helpers
+exercise the staged Lovelace-panel wait (see C-031 and the
+`hui-root` signal change), isolating the retry / budget / predicate
+logic from the real HA container so future flakes can be
+reproduced deterministically.  The SoakRecorder persistence test
+ensures invariant-violation detail reaches the SQLite events
+table (so post-mortem analysis isn't reduced to a bare counter).
+
+| Test | Verifies | Constraint |
+|---|---|---|
+| `TestWaitForLovelacePanelStagedBudget::*` (3) | Each stage bounded, at least one stage ≥ 10s, all ≤ overall budget | C-031 |
+| `TestWaitForLovelacePanelRetries::*` (4) | Retry on execution-context-destroyed / navigating errors; propagate unrelated errors | C-031 |
+| `TestWaitForLovelacePanelNavigationDuringPanelRender::*` (2) | Final-stage predicate must include a stable signal beyond bare attach; post-nav retry must use remaining overall budget | C-031 |
+| `TestWaitForLovelacePanelCloudVariantSignalStability::*` (2) | `hui-root` presence is sufficient (stronger than `panel.hass` which races with navigation wire-up) | C-031 |
+| `TestSaveRunViolationPersistence::test_violations_persisted_as_events` | Each InvariantViolation persisted as event_type='violation' with rule + detail | C-020 |
+| `TestSaveRunViolationPersistence::test_no_violation_events_when_clean` | Clean run produces zero violation events (not a tautology fix) | C-020 |
+
+## CI Hygiene
+
+**Constraints**: — (structural; not a product constraint)
+**Source**: `tests/test_docs_jekyll_liquid.py` (25 tests,
+parametrised over every `docs/**/*.md`)
+
+A static-scan test that blocks Jekyll/Liquid syntax errors in
+published docs *before* they break the GitHub Pages build.  The
+`pages-build-deployment` workflow processes `docs/` via
+Jekyll+Liquid on every push to `main`, and HA template examples
+(`{% set %}`, `{% if %}`, `{% for %}` — legitimate Jinja that
+users copy into Lovelace markdown cards) collide with Liquid's
+tag parser.  Files can opt out with `render_with_liquid: false`
+frontmatter or wrap Jinja in `{% raw %}` blocks.
+
+| Test | Verifies | Constraint |
+|---|---|---|
+| `test_docs_markdown_is_jekyll_liquid_safe` (25, parametrised over every docs/*.md) | No unescaped, un-opted-out Jinja tags in published markdown | -- |
+
 ## E2E Tests (Containerised HA + Simulator + Playwright)
 
-**Source**: `tests/e2e/test_e2e.py` (64 tests), `tests/e2e/test_ui.py` (100 tests)
+**Source**: `tests/e2e/test_e2e.py` (64 tests), `tests/e2e/test_ui.py` (102 tests)
 **Infrastructure**: Podman HA container, FoxESS simulator, Playwright Chromium
 
 | Test | Verifies | Constraint |
@@ -435,6 +484,7 @@ missing locale key leaves the user looking at the raw key name.
 | `TestControlCard::test_clamp_split_power_row_renders_when_export_limit_configured` | UX #8: inverter/export split power row | C-020, D-051 |
 | `TestControlCard::test_clamp_active_class_toggles_with_attribute` | UX #8: clamp-active class + mdi:fence icon | C-020, D-051 |
 | `TestControlCard::test_safety_floor_row_appears_when_tracked` | UX #6: safety_floor row + upward-arrow when clamped | C-001, C-020, D-051 |
+| `TestControlCard::test_safety_floor_row_is_expandable_and_shows_peak` | UX #6 refinement: click-to-expand explainer + peak-value interpolation | C-020, D-051 |
 | `TestControlCard::test_discharge_deferred_reason_renders_when_attribute_present` | UX #4: reason text in .detail-value-wrap (discharge) | C-020, D-051 |
 | `TestControlCard::test_charge_deferred_reason_renders_when_attribute_present` | UX #4: reason text in .detail-value-wrap (charge) | C-020, D-051 |
 | `TestTaperCard::test_card_renders` | UX #5: taper card present on dashboard | C-020, D-051 |
@@ -452,7 +502,7 @@ Tests are parametrized across `[cloud, entity]` connection modes and
 `[api, ws, entity]` data sources. The `ws_refuse` simulator fault blocks
 WS connections for API-only mode. Invalid parametrisation combos
 (`entity-api`, `entity-ws`, `cloud-entity`) are deselected at collection
-time. Total E2E count is 164.
+time. Total E2E count is 166.
 
 ## Soak Tests (Real-Time Charge/Discharge Scenarios)
 

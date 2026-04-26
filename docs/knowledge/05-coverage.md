@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 5
-last_verified: 2026-04-25
+last_verified: 2026-04-27
 traces_up: [02-constraints.md, 04-design/]
 traces_down: [06-tests.md]
 ---
@@ -103,7 +103,7 @@ against a scenario that the system couldn't actually reach.
 | C-017 End-of-discharge guard | D-003 | `TestShouldSuspendDischarge::test_high_consumption_suspends` | COVERED |
 | C-018 Unmanaged work mode protection | D-016 | `TestCheckScheduleSafe` (7), `test_rejects_schedule_with_backup_mode` | COVERED |
 | C-019 Discharge SoC unavailability abort | D-019 | `TestDischargeSocUnavailability` (2) | COVERED |
-| C-020 Operational transparency | D-008, D-009, D-021, D-027, D-028, D-029, D-030, D-033, D-035, D-036, D-038, D-039, D-040, D-051 | `TestSessionContextFilter` (7), `TestInstallRemove` (2), `TestDebugLogHandlerWithSession` (3), `TestBMSBatteryTemperature` (3 mapped), `TestBatteryDetailEndpoint` (2 mapped), `TestCompoundIdFromWebSocket` (1 mapped), `TestSmartDischargeExportLimitSensor` (2), `TestSmartOperationsOverviewAttribute`, `test_all_locales_cover_english_keys` (2, parametrized), `test_parser_finds_expected_locales`, `test_new_keys_present_in_every_locale`, E2E: `test_data_source_badge_matches_mode` (3), `test_stale_badge_shown_for_old_api_data` (3), `test_api_source_when_idle`, `test_ws_always_connects_without_session`, `test_ws_mode_persists_via_options_flow`, `test_ws_linger_captures_post_discharge_data`, `test_house_load_never_greyed`, `test_pv_values_consistent_with_solar_total` (3), `test_node_click_opens_more_info`, `test_default_config_renders_all_four_boxes`, `test_custom_boxes_*` (3), `test_progress_hidden_when_idle`, `test_progress_visible_during_discharge` (3), `test_clamp_split_power_row_renders_when_export_limit_configured`, `test_clamp_active_class_toggles_with_attribute`, `test_safety_floor_row_appears_when_tracked`, `test_discharge_deferred_reason_renders_when_attribute_present`, `test_charge_deferred_reason_renders_when_attribute_present`, `TestTaperCard` (3), `TestFormInputPersistence` (5) | COVERED |
+| C-020 Operational transparency | D-008, D-009, D-021, D-027, D-028, D-029, D-030, D-033, D-035, D-036, D-038, D-039, D-040, D-051 | `TestSessionContextFilter` (7), `TestInstallRemove` (2), `TestDebugLogHandlerWithSession` (3), `TestBMSBatteryTemperature` (3 mapped), `TestBatteryDetailEndpoint` (2 mapped), `TestCompoundIdFromWebSocket` (1 mapped), `TestSmartDischargeExportLimitSensor` (2), `TestSmartOperationsOverviewAttribute`, `test_all_locales_cover_english_keys` (2, parametrized), `test_parser_finds_expected_locales`, `test_new_keys_present_in_every_locale`, `TestSaveRunViolationPersistence` (2, soak-recorder observability), E2E: `test_data_source_badge_matches_mode` (3), `test_stale_badge_shown_for_old_api_data` (3), `test_api_source_when_idle`, `test_ws_always_connects_without_session`, `test_ws_mode_persists_via_options_flow`, `test_ws_linger_captures_post_discharge_data`, `test_house_load_never_greyed`, `test_pv_values_consistent_with_solar_total` (3), `test_node_click_opens_more_info`, `test_default_config_renders_all_four_boxes`, `test_custom_boxes_*` (3), `test_progress_hidden_when_idle`, `test_progress_visible_during_discharge` (3), `test_clamp_split_power_row_renders_when_export_limit_configured`, `test_clamp_active_class_toggles_with_attribute`, `test_safety_floor_row_appears_when_tracked`, `test_safety_floor_row_is_expandable_and_shows_peak`, `test_discharge_deferred_reason_renders_when_attribute_present`, `test_charge_deferred_reason_renders_when_attribute_present`, `TestTaperCard` (3), `TestFormInputPersistence` (5) | COVERED |
 | C-021 Brand-agnostic code in common package | D-022 | `test_smart_battery_has_no_brand_imports`, `test_vendored_copy_matches_canonical` | COVERED |
 | C-022 Unreachable charge target surfaced | D-028 | `TestIsChargeTargetReachable` (7) | COVERED |
 | C-024 Safe state on failure | D-023, D-025, D-026, D-031, D-032, D-034, D-042, D-045 | `TestTransientApiErrorResilience` (3), `TestStaleWorkModeAfterCleanupFailure` (2), `TestRecoverSessions` (13), E2E: `test_ws_recovers_after_stream_stolen`, `test_ws_reconnects_after_reload_at_max_power`, `TestReloadRecovery` (7), `test_deferred_to_discharging_triggers_ws` | COVERED |
@@ -111,9 +111,9 @@ against a scenario that the system couldn't actually reach.
 | C-026 Proactive error surfacing | D-029, D-038, D-048 | `TestErrorSurfacing` (2), `TestSensorListenerFailureSurfacesRepair` (6), `TestSafeWriteHelperHappyPath` (1) | COVERED |
 | C-027 Progressive schedule extension | D-023 | `TestRecoverSessions` (13, schedule horizon verification), E2E: `test_schedule_horizon_during_discharge` | COVERED |
 | C-028 Simulator over mocks | -- | `test_client.py` (9), `test_inverter.py` (10) use simulator | ACCEPTED |
-| C-029 E2E for HA-dependent behaviour | -- | 136 E2E (`tests/e2e/test_e2e.py` + `tests/e2e/test_ui.py`, parametrized across cloud/entity/data sources); 19 soak (`tests/soak/`) | ACCEPTED |
+| C-029 E2E for HA-dependent behaviour | -- | 166 E2E (`tests/e2e/test_e2e.py` + `tests/e2e/test_ui.py`, parametrized across cloud/entity/data sources); 19 soak (`tests/soak/`) | ACCEPTED |
 | C-030 E2E parallel before tagging | -- | `.githooks/pre-push` enforces gate | ACCEPTED |
-| C-031 No flaky tests | -- | -- (meta-constraint; traces to C-028, C-029) | ACCEPTED |
+| C-031 No flaky tests | -- | `TestWaitForLovelacePanelStagedBudget` (3), `TestWaitForLovelacePanelRetries` (4), `TestWaitForLovelacePanelNavigationDuringPanelRender` (2), `TestWaitForLovelacePanelCloudVariantSignalStability` (2) — all guard the `_wait_for_lovelace_panel` helper against the specific flake patterns historically observed on Flaky Test Detection | COVERED |
 | C-032 Reproduce failure before fixing | -- | `TestSocInterpolationDuringDischarge`; `/regression-test` skill | ACCEPTED |
 | C-033 Minimise simulator–production deviations | -- | -- (process constraint; traces to C-028, C-031, C-032) | ACCEPTED |
 
@@ -232,10 +232,10 @@ against a scenario that the system couldn't actually reach.
 - **Unprioritised decisions**: 0 (all 53 D-NNN entries name P-NNN + classification)
 - **Active regression**: none
 - **Orphan tests**: ~160 unit (display, plumbing, lifecycle tests)
-- **Unit tests**: 919 (authoritative `pytest --co -q` 2026-04-25)
-- **E2E tests**: 164 (parametrized across cloud/entity/data sources; +6 card-wiring UX tests, +3 taper card)
+- **Unit tests**: 950 (authoritative `pytest --co -q` 2026-04-27; +11 page-fixture helper tests, +2 soak-recorder persistence tests, +25 Jekyll-safety parametrised docs tests)
+- **E2E tests**: 166 (parametrized across cloud/entity/data sources; +2 safety-floor explainer tests for UX #6 refinement)
 - **Soak tests**: 19 (real-time charge/discharge scenarios, nightly)
-- **Total**: 1102
+- **Total**: 1135
 
 ## HA Integration Quality Scale
 

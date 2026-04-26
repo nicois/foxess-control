@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 4
-last_verified: 2026-04-25
+last_verified: 2026-04-27
 traces_up: [../02-constraints.md]
 traces_down: [../06-tests.md]
 ---
@@ -253,6 +253,14 @@ debug panel:
   discharge section, visible only when
   `discharge_safety_floor_w > 0`.  An upward-arrow icon appears
   when the paced target is *below* the floor (active clamping).
+  The row is *click-expandable* (`.detail-row.has-tip`, reusing
+  the progress-bar tip pattern): tapping it reveals a
+  translation-aware explainer (`safety_floor_explainer` i18n key)
+  with the tracked peak consumption interpolated into the text,
+  so users see exactly how the floor was computed (peak × 1.5).
+  Expandable form is mobile-first — the earlier hover-only
+  tooltip on the arrow icon is invisible on touch devices where
+  most ad-hoc dashboard checks happen.
 - **Export clamp** (UX #8) — the discharge power row splits into
   inverter + export spans separated by `/`, with a `mdi:fence`
   icon and warning colour on the export side when

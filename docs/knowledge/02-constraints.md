@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 2
-last_verified: 2026-04-24
+last_verified: 2026-04-27
 traces_up: [01-vision.md]
 traces_down: [03-architecture.md, 04-design/]
 ---
@@ -552,7 +552,13 @@ manifesting as intermittent user-facing bugs that are hard to
 reproduce and diagnose.
 **Traces**: C-028 (simulator over mocks), C-029 (E2E for
 HA-dependent behaviour); `tests/e2e/ha_client.py::HAEventStream`
-(drain-before-wait pattern eliminates event ordering races)
+(drain-before-wait pattern eliminates event ordering races);
+`tests/test_e2e_page_fixture.py::TestWaitForLovelacePanelNavigationDuringPanelRender`
+(predicate must include a settled signal; retries must use remaining
+overall budget — encoded from the beta.3 page-fixture diagnosis);
+`tests/test_e2e_page_fixture.py::TestWaitForLovelacePanelCloudVariantSignalStability`
+(`hui-root` is stronger than `panel.hass` — DOM fact vs racy JS
+property — encoded from the cloud-variant diagnosis)
 
 ### C-032: Reproduce failure before fixing
 **Priority enforced**: P-007 (engineering process integrity) —
