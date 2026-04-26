@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.13-beta.3
+
+### Fixed
+- **Page-fixture flake caused by HA's housekeeping navigation** (Flaky Test Detection surfaced this on four consecutive tag runs v1.0.11–v1.0.13-beta.2; live-diagnosed 2026-04-26 by observing a real HA container). Two compounding bugs in the staged Lovelace-panel wait (`tests/e2e/conftest.py`): (a) the final stage's predicate was a bare `!!panel` attach check, which could return truthy moments before HA's service-worker/auth-refresh navigation at t≈12s detached the panel — surfacing either as a 30s `wait_for_function` timeout or, in the test body, as `Locator.screenshot: Element is not attached to the DOM`; (b) `_wait_for_stage` re-capped every retry at `max_stage_ms=30000` even when 50+ seconds of overall budget remained, so a post-navigation rebuild under slow-shard CPU contention had insufficient time to complete. Fix: stage-3 predicate now requires three *settled* signals (`hass.connected === true`, `ha-panel-lovelace` mounted, `panel.hass` wired) — proving the panel is past HA's initial navigation churn, not merely attached; and a new `_LOVELACE_STAGE_TIMEOUTS_MS` mapping lets the final stage use the full remaining overall budget on retries while keeping the tight 30s cap on stages 1+2 (shadow-root attachment is synchronous and catastrophic failures must still time out fast). Two-test regression suite `TestWaitForLovelacePanelNavigationDuringPanelRender` encodes both invariants (predicate must include a settled signal; per-stage cap must not block retry from using remaining budget).
+- **SoakRecorder dropped invariant violation detail when persisting run results**: `save_run` in `tests/soak/results_db.py` wrote a `violations` count to the `runs` row but never inserted corresponding `events` rows, so the rule name and detail message were lost. Observed on the 2026-04-23 nightly when `test_charge_solar_then_spike` recorded `violations=3` with zero persisted detail — making post-mortem diagnosis impossible and hollowing out the C-020 observability value of the recorder. Each `InvariantViolation` now emits an `event_type='violation'` row with `{rule}: {detail}` as the event detail, anchored to the nearest sample's SoC/power/state so cross-run queries (`SELECT * FROM events WHERE event_type='violation'`) can correlate violations back to system state.
+
 ## 1.0.13-beta.2
 
 ### Added
