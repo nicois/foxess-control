@@ -522,18 +522,34 @@ _STAGE_HOME_ASSISTANT_MAIN = """() => {
 # v1.0.13-beta.1 (run 24921297745).
 #
 # Semantic signals used to prove the panel is past HA's initial
-# navigation churn (ANY one is sufficient — they progress in order
-# of when HA wires them up):
-#   (a) hass.connected === true — WS session established with HA core
-#   (b) panel.hass set — panel wired to the state store
-#   (c) hui-root mounted inside panel.shadowRoot — Lovelace's actual
-#       dashboard renderer is attached
+# navigation churn:
+#   (a) main.hass.connected === true — WS session established with HA
+#       core.  Only true once HA's initial navigation churn has settled
+#       and auth refresh completed.
+#   (b) ha-panel-lovelace attached inside the main shadow root.
+#   (c) hui-root mounted inside panel.shadowRoot — the DOM-observable
+#       proof that the panel has completed at least one full render
+#       cycle.  hui-root cannot exist unless panel.hass was assigned
+#       AND a Lit render cycle ran, so its presence implies panel.hass
+#       was set, but without the transient wire-up race.
 #
-# Requiring all three would be overly strict (hui-root mounts *after*
-# panel.hass is set).  Requiring hass.connected AND (panel.hass OR
-# hui-root) is the minimal contract that excludes the transient
-# attachment window without flaking on the "panel just mounted, hui-root
-# about to appear" sub-window.
+# Why (c) instead of panel.hass?  Diagnosed 2026-04-26 from Flaky Test
+# Detection run 24956110840 (v1.0.13), victim
+# test_gallery_control_charging[cloud]: stage 3 timed out at 74958ms
+# (virtually the entire 75s overall budget).  The prior predicate
+# required panel.hass to be truthy, but panel.hass is a JS property
+# assigned by HA's partial-panel-resolver between panel mount and first
+# render.  Under adversarial cloud-variant CI timing (12 xdist workers,
+# extra integration-startup async work, navigation bursts) the
+# predicate cycled through retries without ever observing panel.hass
+# simultaneously truthy with the other signals.
+#
+# hui-root is a synchronous DOM fact — once mounted inside
+# panel.shadowRoot, it survives the partial-panel-resolver wire-up
+# race that can transiently null panel.hass during navigation.  We do
+# NOT require panel.hass; panel.shadowRoot.querySelector('hui-root')
+# being non-null is strictly stronger (the Lit render that produced
+# hui-root required panel.hass to be set at render time).
 _STAGE_HA_PANEL_LOVELACE = """() => {
     const main = document.querySelector('home-assistant');
     if (!main || !main.shadowRoot) return false;
@@ -542,18 +558,15 @@ _STAGE_HA_PANEL_LOVELACE = """() => {
     if (!main.hass || !main.hass.connected) return false;
     const ham = main.shadowRoot.querySelector('home-assistant-main');
     if (!ham || !ham.shadowRoot) return false;
+    // (b) ha-panel-lovelace attached.
     const panel = ham.shadowRoot.querySelector('ha-panel-lovelace');
-    if (!panel) return false;
-    // (b) panel is wired to the state store — indicates the panel has
-    // been handed a hass reference, which happens after navigation
-    // settles and partial-panel-resolver completes its dynamic import.
-    if (!panel.hass) return false;
-    // The panel is attached AND hass.connected AND panel.hass — safe
-    // to return.  hui-root may or may not be mounted yet; waiting for
-    // it here would over-constrain the ready signal (panels that show
-    // loading spinners legitimately have panel.hass set but not
-    // hui-root yet, and would time out despite being ready enough for
-    // test-body interactions to proceed via additional waits).
+    if (!panel || !panel.shadowRoot) return false;
+    // (c) hui-root mounted inside panel.shadowRoot — DOM-observable
+    // proof the panel completed a render cycle.  Stronger than
+    // panel.hass (which has a wire-up race under cloud-variant CI
+    // timing).  See comment block above for rationale.
+    const huiRoot = panel.shadowRoot.querySelector('hui-root');
+    if (!huiRoot) return false;
     return true;
 }"""
 
@@ -658,9 +671,10 @@ def _wait_for_lovelace_panel(page: Any, timeout_ms: int = 75000) -> None:
       2. ``home-assistant-main`` exists inside that shadowRoot and has
          its own shadowRoot (30s cap).
       3. ``ha-panel-lovelace`` is mounted, HA's WS session is connected,
-         and the panel has been wired to the state store (uses full
+         and ``hui-root`` is mounted inside ``panel.shadowRoot`` (proves
+         the panel completed at least one render cycle).  Uses full
          remaining overall budget — post-navigation retries must not
-         be re-capped).
+         be re-capped.
 
     Each stage retries on Playwright "Execution context was destroyed"
     errors (HA navigation churn — WS reconnect, dashboard router
@@ -676,11 +690,14 @@ def _wait_for_lovelace_panel(page: Any, timeout_ms: int = 75000) -> None:
     without masking genuine hangs.
 
     **Stage-3 stability signal**: the ha-panel-lovelace predicate
-    requires ``hass.connected`` AND ``panel.hass`` set, not merely a
-    bare attach check.  This prevents the helper returning on a
-    transient attachment during HA's housekeeping navigation (observed
-    t=~12s in live traces).  See
-    ``test_final_stage_predicate_includes_stable_signal`` for rationale.
+    requires ``main.hass.connected`` AND ``hui-root`` mounted inside
+    ``panel.shadowRoot``, not ``panel.hass`` (the earlier attempt).
+    ``hui-root`` is a synchronous DOM fact that cannot exist unless
+    ``panel.hass`` was assigned and a render cycle completed, so it
+    is strictly stronger than a JS-property check and does not suffer
+    the wire-up race observed on run 24956110840 (cloud variant, 74958ms
+    timeout).  See ``TestWaitForLovelacePanelCloudVariantSignalStability``
+    for the regression test.
 
     Raises ``TimeoutError`` if any stage fails within its bounded
     budget (stage name appears in the error message).  Unrelated
