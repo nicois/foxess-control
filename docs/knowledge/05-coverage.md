@@ -111,7 +111,7 @@ against a scenario that the system couldn't actually reach.
 | C-026 Proactive error surfacing | D-029, D-038, D-048 | `TestErrorSurfacing` (2), `TestSensorListenerFailureSurfacesRepair` (6), `TestSafeWriteHelperHappyPath` (1) | COVERED |
 | C-027 Progressive schedule extension | D-023 | `TestRecoverSessions` (13, schedule horizon verification), E2E: `test_schedule_horizon_during_discharge` | COVERED |
 | C-028 Simulator over mocks | -- | `test_client.py` (9), `test_inverter.py` (10) use simulator | ACCEPTED |
-| C-029 E2E for HA-dependent behaviour | -- | 166 E2E (`tests/e2e/test_e2e.py` + `tests/e2e/test_ui.py`, parametrized across cloud/entity/data sources); 19 soak (`tests/soak/`) | ACCEPTED |
+| C-029 E2E for HA-dependent behaviour | -- | `tests/e2e/test_e2e.py` + `tests/e2e/test_ui.py` (parametrized across cloud/entity/data sources); `tests/soak/` (real-time scenarios). Counts: `scripts/test_summary.py` | ACCEPTED |
 | C-030 E2E parallel before tagging | -- | `.githooks/pre-push` enforces gate | ACCEPTED |
 | C-031 No flaky tests | -- | `TestWaitForLovelacePanelStagedBudget` (3), `TestWaitForLovelacePanelRetries` (4), `TestWaitForLovelacePanelNavigationDuringPanelRender` (2), `TestWaitForLovelacePanelCloudVariantSignalStability` (2) — all guard the `_wait_for_lovelace_panel` helper against the specific flake patterns historically observed on Flaky Test Detection | COVERED |
 | C-032 Reproduce failure before fixing | -- | `TestSocInterpolationDuringDischarge`; `/regression-test` skill | ACCEPTED |
@@ -232,10 +232,11 @@ against a scenario that the system couldn't actually reach.
 - **Unprioritised decisions**: 0 (all 53 D-NNN entries name P-NNN + classification)
 - **Active regression**: none
 - **Orphan tests**: ~160 unit (display, plumbing, lifecycle tests)
-- **Unit tests**: 950 (authoritative `pytest --co -q` 2026-04-27; +11 page-fixture helper tests, +2 soak-recorder persistence tests, +25 Jekyll-safety parametrised docs tests)
-- **E2E tests**: 166 (parametrized across cloud/entity/data sources; +2 safety-floor explainer tests for UX #6 refinement)
-- **Soak tests**: 19 (real-time charge/discharge scenarios, nightly)
-- **Total**: 1135
+- **Test counts**: run `python scripts/test_summary.py` for
+  authoritative current counts (unit / E2E / soak / total),
+  `--history` for per-tag counts reconstructed from git.  Counts
+  are no longer tracked inline — they drifted between updates and
+  the script reads directly from `pytest --co -q`.
 
 ## HA Integration Quality Scale
 

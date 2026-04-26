@@ -11,8 +11,18 @@ render_with_liquid: false
 ---
 # Test Inventory
 
-950 unit + 166 E2E + 19 soak = 1135 total (authoritative count via
-`pytest --co -q` 2026-04-27).
+For current test counts (unit / E2E / soak / total), run:
+
+```bash
+python scripts/test_summary.py             # human-readable
+python scripts/test_summary.py --json      # machine-readable
+python scripts/test_summary.py --history   # per-tag walk (cached)
+```
+
+Hard-coded counts in this file used to drift whenever the suite grew;
+the script reads directly from `pytest --co -q` so it cannot get
+stale.  Historical counts are reconstructible on demand from git tags,
+so this file no longer tracks them.
 
 Unit tests run with pytest-xdist (`-n auto`, randomised via
 pytest-randomly). E2E tests use Podman containers with a FoxESS
@@ -441,7 +451,7 @@ frontmatter or wrap Jinja in `{% raw %}` blocks.
 
 ## E2E Tests (Containerised HA + Simulator + Playwright)
 
-**Source**: `tests/e2e/test_e2e.py` (64 tests), `tests/e2e/test_ui.py` (102 tests)
+**Source**: `tests/e2e/test_e2e.py`, `tests/e2e/test_ui.py` (counts via `scripts/test_summary.py`)
 **Infrastructure**: Podman HA container, FoxESS simulator, Playwright Chromium
 
 | Test | Verifies | Constraint |
@@ -502,7 +512,7 @@ Tests are parametrized across `[cloud, entity]` connection modes and
 `[api, ws, entity]` data sources. The `ws_refuse` simulator fault blocks
 WS connections for API-only mode. Invalid parametrisation combos
 (`entity-api`, `entity-ws`, `cloud-entity`) are deselected at collection
-time. Total E2E count is 166.
+time.  Current E2E count: `scripts/test_summary.py`.
 
 ## Soak Tests (Real-Time Charge/Discharge Scenarios)
 
