@@ -734,6 +734,13 @@ async def _recover_sessions(
 # -- WebSocket API for Lovelace cards ----------------------------------------
 
 # Map of role → unique_id suffix used by the integration's sensor entities.
+# The `foxess_control/entity_map` WS command returns role → real_entity_id,
+# letting Lovelace cards AND external tooling (scripts/collect_ha_session.py)
+# find entities without assuming English friendly-name derivation. Every
+# entity a consumer may want to discover by role MUST appear here;
+# unique_id suffixes are stable across locale changes whereas entity_ids
+# are not (they're derived from the translated friendly name on first
+# registration).
 _ENTITY_ROLES: dict[str, str] = {
     "solar_power": "pv_power",
     "house_load": "loads_power",
@@ -752,6 +759,14 @@ _ENTITY_ROLES: dict[str, str] = {
     "smart_operations": "smart_operations",
     "battery_forecast": "battery_forecast",
     "data_freshness": "data_freshness",
+    # Additional roles needed by external tooling. Cards ignore roles
+    # they don't know about, so adding here is backwards-compatible.
+    "override_status": "override_status",
+    "smart_charge_active": "smart_charge_active",
+    "smart_discharge_active": "smart_discharge_active",
+    "feedin_energy": "feedin_energy",
+    "grid_consumption_energy": "grid_consumption_energy",
+    "meter_power": "meter_power",
 }
 
 

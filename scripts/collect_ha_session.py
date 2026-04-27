@@ -57,6 +57,7 @@ Environment: ``HA_URL`` + one of ``HA_TOKEN`` / ``HA_CLAUDE_TOKEN``.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -75,32 +76,36 @@ except ImportError:  # pragma: no cover
     sys.exit(1)
 
 
-# Default sensors worth pairing with events. Override with --sensor.
-# Chosen to cover: SoC, house load, solar (split + total), grid flows
-# (power + cumulative energy), BMS + inverter temperatures, charge /
-# discharge power, work mode, and the integration's own exposed
-# smart-ops attributes. Missing entities on a given deployment are
-# tolerated — ``fetch_state`` returns None for 404s.
-DEFAULT_SENSORS = [
-    "sensor.foxess_battery_soc",
-    "sensor.foxess_house_load",
-    "sensor.foxess_generation",
-    "sensor.foxess_pv1_power",
-    "sensor.foxess_pv2_power",
-    "sensor.foxess_grid_consumption",
-    "sensor.foxess_grid_feed_in",
-    "sensor.foxess_grid_meter_power",
-    "sensor.foxess_grid_feed_in_energy",
-    "sensor.foxess_grid_consumption_energy",
-    "sensor.foxess_charge_rate",
-    "sensor.foxess_discharge_rate",
-    "sensor.foxess_battery_temperature",
-    "sensor.foxess_bms_battery_temperature",
-    "sensor.foxess_work_mode",
-    "sensor.foxess_smart_operations",
-    "sensor.foxess_status",
-    "binary_sensor.foxess_smart_charge_active",
-    "binary_sensor.foxess_smart_discharge_active",
+# Default roles worth pairing with events, mapped via the
+# ``foxess_control/entity_map`` WebSocket command so this script works
+# on any HA locale (DE entity_ids are ``sensor.foxess_intelligente_
+# steuerung`` etc., not the English defaults below).  Each entry is
+# ``(role, english_fallback)``: the role is looked up in the
+# integration's entity_map; if the WS command is unavailable (older
+# integration version, auth failure) the English fallback is used so
+# the script still works on English installs without any network
+# handshake.  Missing entities on a deployment are tolerated —
+# ``get_state`` returns ``None`` for 404s.
+DEFAULT_ROLES: list[tuple[str, str]] = [
+    ("battery_soc", "sensor.foxess_battery_soc"),
+    ("house_load", "sensor.foxess_house_load"),
+    ("solar_power", "sensor.foxess_generation"),
+    ("pv1_power", "sensor.foxess_pv1_power"),
+    ("pv2_power", "sensor.foxess_pv2_power"),
+    ("grid_consumption", "sensor.foxess_grid_consumption"),
+    ("grid_feed_in", "sensor.foxess_grid_feed_in"),
+    ("meter_power", "sensor.foxess_grid_meter_power"),
+    ("feedin_energy", "sensor.foxess_grid_feed_in_energy"),
+    ("grid_consumption_energy", "sensor.foxess_grid_consumption_energy"),
+    ("charge_rate", "sensor.foxess_charge_rate"),
+    ("discharge_rate", "sensor.foxess_discharge_rate"),
+    ("battery_temperature", "sensor.foxess_battery_temperature"),
+    ("bms_battery_temperature", "sensor.foxess_bms_battery_temperature"),
+    ("work_mode", "sensor.foxess_work_mode"),
+    ("smart_operations", "sensor.foxess_smart_operations"),
+    ("override_status", "sensor.foxess_status"),
+    ("smart_charge_active", "binary_sensor.foxess_smart_charge_active"),
+    ("smart_discharge_active", "binary_sensor.foxess_smart_discharge_active"),
 ]
 
 # Log sensors that carry structured events. The integration
@@ -150,6 +155,52 @@ class HAClient:
         r.raise_for_status()
         return cast("list[list[dict[str, Any]]]", r.json())
 
+    def resolve_entity_map(self) -> dict[str, str]:
+        """Return role → entity_id via ``foxess_control/entity_map``.
+
+        The integration registers this WS command to let external
+        consumers (Lovelace cards, scripts) find entities without
+        assuming English friendly-name derivation.  On any failure
+        (old integration, network issue, auth) returns ``{}`` so the
+        caller falls back to hardcoded English names.
+        """
+        try:
+            import websocket  # websocket-client
+        except ImportError:  # pragma: no cover
+            return {}
+
+        ws_url = self.base.replace("http", "ws", 1) + "/api/websocket"
+        try:
+            ws = websocket.create_connection(ws_url, timeout=self.timeout)
+        except OSError:
+            return {}
+
+        try:
+            # HA protocol: server sends auth_required, client replies
+            # with auth, server confirms auth_ok, then request/result.
+            hello = json.loads(ws.recv())
+            if hello.get("type") != "auth_required":
+                return {}
+            ws.send(
+                json.dumps(
+                    {"type": "auth", "access_token": self.headers["Authorization"][7:]}
+                )
+            )
+            auth_result = json.loads(ws.recv())
+            if auth_result.get("type") != "auth_ok":
+                return {}
+            ws.send(json.dumps({"id": 1, "type": "foxess_control/entity_map"}))
+            resp = json.loads(ws.recv())
+            if resp.get("type") != "result" or not resp.get("success"):
+                return {}
+            result = resp.get("result") or {}
+            return {str(k): str(v) for k, v in result.items() if isinstance(v, str)}
+        except (OSError, ValueError, KeyError):
+            return {}
+        finally:
+            with contextlib.suppress(OSError):
+                ws.close()
+
 
 # ---------- Event parsing ----------
 
@@ -179,6 +230,19 @@ def _obs_fingerprint(entity_id: str, obs: dict[str, Any]) -> str:
 def _session_id(entry: dict[str, Any]) -> str:
     sess = entry.get("session") or {}
     return sess.get("session_id") or "no_session"
+
+
+def resolve_default_sensors(client: HAClient) -> list[str]:
+    """Resolve ``DEFAULT_ROLES`` to concrete entity_ids for this HA.
+
+    Locale-aware: calls the integration's ``foxess_control/entity_map``
+    WS command to discover the real entity_id per role, falling back
+    to the English default when the role isn't in the map (e.g. the
+    integration is too old to register the command, or the entity is
+    disabled and never registered).
+    """
+    entity_map = client.resolve_entity_map()
+    return [entity_map.get(role, fallback) for role, fallback in DEFAULT_ROLES]
 
 
 def _pick_event_sensor(client: HAClient, override: str | None) -> str | None:
@@ -288,6 +352,11 @@ def run_live(args: argparse.Namespace, client: HAClient) -> int:
             file=sys.stderr,
         )
 
+    # Resolve the default sensor list once at startup via the
+    # integration's entity_map WS command (locale-aware). User-supplied
+    # --sensor args always take precedence over the default resolution.
+    sensors = args.sensor or resolve_default_sensors(client)
+
     writer = TimelineWriter(args.out)
     stop = False
 
@@ -319,7 +388,7 @@ def run_live(args: argparse.Namespace, client: HAClient) -> int:
                 new_events = 0
 
             new_obs = 0
-            for sensor in args.sensor or DEFAULT_SENSORS:
+            for sensor in sensors:
                 obs = client.get_state(sensor)
                 if obs is None:
                     continue
@@ -365,7 +434,7 @@ def run_live(args: argparse.Namespace, client: HAClient) -> int:
 def run_history(args: argparse.Namespace, client: HAClient) -> int:
     start = _parse_ts(args.start)
     end = _parse_ts(args.end)
-    sensors = args.sensor or DEFAULT_SENSORS
+    sensors = args.sensor or resolve_default_sensors(client)
     event_sensor = _pick_event_sensor(client, args.event_sensor)
 
     # Single merged file for a known-bounded history run.

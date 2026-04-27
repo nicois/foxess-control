@@ -21,6 +21,21 @@ All examples below target a single entity, `sensor.foxess_smart_operations`,
 which carries the pacing-transparency attributes on its
 `extra_state_attributes`.
 
+> **⚠️ Locale note — the entity_id may differ on non-English installs**
+>
+> Home Assistant derives entity_ids from the *translated* friendly name
+> at entity-creation time. On a German install this sensor is
+> `sensor.foxess_intelligente_steuerung`; on a French install it's
+> `sensor.foxess_operations_intelligentes`; and so on. If the templates
+> below show "unknown" or your card says "no data", open
+> **Developer Tools → States**, filter by `foxess`, and substitute your
+> actual entity_id in each `state_attr(...)` / `states.sensor.foxess_...`
+> reference. The native FoxESS cards (`foxess-control-card`,
+> `foxess-taper-card`, etc.) auto-discover the entity via the
+> `foxess_control/entity_map` WS command and do not need this
+> substitution — these markdown-card templates do because HA's
+> templating engine has no concept of "role-based entity lookup".
+
 ## All-in-one reasoning card (no external dependencies)
 
 This markdown card exercises every new attribute with built-in

@@ -74,3 +74,55 @@ rules:
       registration point for all HA service handlers.
     languages: [python]
     severity: ERROR
+
+  # C-020: Lovelace cards must resolve entity-role config keys via
+  # _resolve() so locale-specific entity_ids from foxess_control/
+  # entity_map win over hardcoded English defaults. Reading
+  # `this._config.<role>_entity` (or `this._config.entity` on the
+  # taper card) directly bypasses the WS lookup and silently misses
+  # the real entity_id on DE/FR/etc. installs — the exact bug that
+  # produced the "No active operations" regression in v1.0.14-beta.1.
+  #
+  # Scope excludes:
+  #   1. _resolve() — the one place English defaults legitimately live.
+  #   2. *Editor classes (foxess-*-card-editor) — these render the
+  #      user's current YAML config back into input fields, so reading
+  #      this._config.<key> to populate an <input value="..."> is the
+  #      correct behaviour (the config is the user's explicit override).
+  - id: card-entity-config-must-use-resolve
+    patterns:
+      - pattern-either:
+          - pattern: this._config.operations_entity
+          - pattern: this._config.soc_entity
+          - pattern: this._config.freshness_entity
+          - pattern: this._config.forecast_entity
+          - pattern: this._config.entity
+      - pattern-not-inside: |
+          _resolve($KEY) {
+            ...
+          }
+      # Editor classes (foxess-*-card-editor) render the user's YAML
+      # config back into input fields — reading this._config there is
+      # correct. Exclude any class whose name ends with "Editor".
+      - metavariable-pattern:
+          metavariable: $CLASS
+          patterns:
+            - pattern-not-regex: .*Editor$
+      - pattern-inside: |
+          class $CLASS extends HTMLElement {
+            ...
+          }
+    paths:
+      include:
+        - "**/custom_components/foxess_control/www/*.js"
+    message: >
+      Lovelace cards must route entity-role lookups through _resolve(key),
+      not read this._config.<role>_entity directly. The _resolve() helper
+      consults foxess_control/entity_map (populated from unique_id
+      suffixes in _ENTITY_ROLES) before falling back to the English
+      default. Reading _config directly silently misses the real
+      entity_id on non-English HA locales (e.g. DE:
+      sensor.foxess_intelligente_steuerung) — the bug fixed in
+      v1.0.14-beta.1.
+    languages: [js]
+    severity: ERROR

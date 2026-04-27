@@ -683,10 +683,7 @@ class FoxESSControlCard extends HTMLElement {
   }
 
   _getFreshnessEntityId() {
-    if (this._config.freshness_entity) return this._config.freshness_entity;
-    if (this._entityMap && this._entityMap.data_freshness)
-      return this._entityMap.data_freshness;
-    return null;
+    return this._resolve("freshness_entity");
   }
 
   getCardSize() {
