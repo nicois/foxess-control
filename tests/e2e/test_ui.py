@@ -1055,7 +1055,7 @@ class TestControlCard:
                     }
                     const card = findCard(document);
                     if (!card || !card._hass) return null;
-                    const opsId = card._config.operations_entity;
+                    const opsId = card._resolve('operations_entity');
                     const orig = card._hass.states[opsId] || {
                         state: 'deferred',
                         attributes: {},
@@ -1154,7 +1154,7 @@ class TestControlCard:
                 }
                 const card = findCard(document);
                 if (!card || !card._hass) return { no_card: true };
-                const opsId = card._config.operations_entity;
+                const opsId = card._resolve('operations_entity');
                 const orig = card._hass.states[opsId] || {
                     state: 'discharging',
                     attributes: {},
@@ -1241,7 +1241,7 @@ class TestControlCard:
                     }
                     const card = findCard(document);
                     if (!card || !card._hass) return { no_card: true };
-                    const opsId = card._config.operations_entity;
+                    const opsId = card._resolve('operations_entity');
                     const orig = card._hass.states[opsId] || {
                         state: 'discharging',
                         attributes: {},
@@ -1334,7 +1334,7 @@ class TestControlCard:
                     }
                     const card = findCard(document);
                     if (!card || !card._hass) return { no_card: true };
-                    const opsId = card._config.operations_entity;
+                    const opsId = card._resolve('operations_entity');
                     const orig = card._hass.states[opsId] || {
                         state: 'discharging',
                         attributes: {},
@@ -1438,7 +1438,7 @@ class TestControlCard:
                 }
                 const card = findCard(document);
                 if (!card || !card._hass) return { no_card: true };
-                const opsId = card._config.operations_entity;
+                const opsId = card._resolve('operations_entity');
                 const orig = card._hass.states[opsId] || {
                     state: 'discharging',
                     attributes: {},
@@ -1538,7 +1538,7 @@ class TestControlCard:
                 }
                 const card = findCard(document);
                 if (!card || !card._hass) return { no_card: true };
-                const opsId = card._config.operations_entity;
+                const opsId = card._resolve('operations_entity');
                 const orig = card._hass.states[opsId] || {
                     state: 'deferred',
                     attributes: {},
@@ -1613,7 +1613,7 @@ class TestControlCard:
                 }
                 const card = findCard(document);
                 if (!card || !card._hass) return { no_card: true };
-                const opsId = card._config.operations_entity;
+                const opsId = card._resolve('operations_entity');
                 const orig = card._hass.states[opsId] || {
                     state: 'deferred',
                     attributes: {},
@@ -1729,7 +1729,7 @@ class TestTaperCard:
                 }
                 const card = find(document);
                 if (!card || !card._hass) return { no_card: true };
-                const opsId = card._config.entity;
+                const opsId = card._resolve('entity');
                 const orig = card._hass.states[opsId] || {
                     state: 'idle',
                     attributes: {},
