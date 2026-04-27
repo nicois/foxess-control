@@ -592,6 +592,45 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
 ]
 
 
+# Coordinator keys (WebSocket-fed instantaneous power channels, kW) that
+# receive a 3-sample rolling median at the *display* layer to mask
+# single-frame artefacts in the ~5 s WS cadence (partial/stale frames,
+# energy-counter quantisation glitches).  The filter lives on the sensor
+# entity — coordinator.data[...] retains the raw value for the control
+# path (smart_battery listeners read it directly for safety floors; see
+# C-001, C-017).  Only instantaneous power is filtered: cumulative energy
+# counters, SoC, voltage, current, temperature and frequency are not,
+# because smoothing would distort their semantics (HA statistics,
+# dashboards, controlling logic).  See production incident 2026-04-27.
+_WS_MEDIAN_FILTERED_VARIABLES: frozenset[str] = frozenset(
+    {
+        "batChargePower",
+        "batDischargePower",
+        "loadsPower",
+        "pvPower",
+        "gridConsumptionPower",
+        "feedinPower",
+        "meterPower",
+    }
+)
+
+_MEDIAN_WINDOW_SIZE = 3
+
+
+def _median_of_three(samples: collections.deque[float]) -> float:
+    """Return the display value for a rolling-median window.
+
+    With fewer than three samples, returns the most recent one (no
+    smoothing before enough history exists, so the first push still
+    surfaces fresh data immediately).  With three, returns the median.
+    """
+    if len(samples) < _MEDIAN_WINDOW_SIZE:
+        return samples[-1]
+    a, b, c = samples
+    # Median of three without heap/sort overhead.
+    return max(min(a, b), min(max(a, b), c))
+
+
 class FoxESSPolledSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity):
     """Sensor backed by the DataUpdateCoordinator."""
 
@@ -622,6 +661,13 @@ class FoxESSPolledSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity)
             self._attr_suggested_display_precision = desc.display_precision
         # Only expose data_source when multiple sources are configured
         self._has_multiple_sources = bool(entry.data.get(CONF_WEB_USERNAME))
+        # Per-entity rolling-median window for WS power artefact masking
+        # (display-only; coordinator.data is never mutated by this path).
+        self._median_window: collections.deque[float] | None = (
+            collections.deque(maxlen=_MEDIAN_WINDOW_SIZE)
+            if desc.variable in _WS_MEDIAN_FILTERED_VARIABLES
+            else None
+        )
 
     @property
     def native_value(self) -> float | None:
@@ -629,11 +675,20 @@ class FoxESSPolledSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity)
             return None
         val = self.coordinator.data.get(self._variable)
         if val is None:
+            # Genuine unavailability — do not paper over with a stale
+            # median value.  The filter window is intentionally preserved
+            # across transient None frames so that recovery produces a
+            # clean median, but the displayed state goes unavailable now.
             return None
         try:
-            return float(val)
+            fval = float(val)
         except (ValueError, TypeError):
             return None
+        window = self._median_window
+        if window is None:
+            return fval
+        window.append(fval)
+        return _median_of_three(window)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
