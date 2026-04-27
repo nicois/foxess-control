@@ -124,6 +124,65 @@ def _safe_evaluate(
     raise last_exc
 
 
+def _safe_screenshot(
+    page: Page,
+    tag: str,
+    path: str | Path,
+    *,
+    retries: int = 3,
+    settle_timeout_ms: int = 15000,
+) -> None:
+    """Screenshot a custom card, retrying on navigation-induced detach.
+
+    ``page.locator(f"{tag} >>> ha-card").first`` resolves lazily — the
+    handle points to whatever element matches *at call time*.  Between
+    that resolve and ``element.screenshot()``, HA's frontend can push
+    a WebSocket state update, auth refresh, or router rebuild that
+    causes Lit to detach and replace the ``ha-card``.  Playwright
+    surfaces this as:
+
+    - ``PlaywrightError("Locator.screenshot: Element is not attached
+      to the DOM")`` — the original handle's target is gone,
+    - ``PlaywrightError("Execution context was destroyed, most likely
+      because of a navigation")`` — full navigation mid-screenshot,
+    - ``PlaywrightError("Target closed")`` — tab/frame torn down.
+
+    All three are the same root cause (DOM swap between resolve and
+    use) and all three recover on a fresh locator.  On each, we wait
+    for ``networkidle`` (best-effort) to let the post-navigation page
+    settle, then re-resolve the locator and retry.  Observed on Flaky
+    Test Detection run 24994690563 against
+    ``test_gallery_control_charging[entity]``.
+
+    Mirrors the retry pattern in :func:`_safe_evaluate` and
+    :func:`_find_card`.  Unrelated Playwright errors (e.g. a genuine
+    ``Timeout``) propagate unchanged — we don't swallow real failures.
+    """
+    _RETRYABLE = (
+        "Element is not attached to the DOM",
+        "Execution context was destroyed",
+        "Target closed",
+    )
+    last_exc: PlaywrightError | None = None
+    for attempt in range(retries + 1):
+        try:
+            card = page.locator(f"{tag} >>> ha-card").first
+            card.screenshot(path=str(path))
+            return
+        except PlaywrightError as exc:
+            msg = str(exc)
+            if not any(s in msg for s in _RETRYABLE):
+                raise
+            last_exc = exc
+            if attempt == retries:
+                break
+            # Settle the post-navigation page before re-resolving.
+            with contextlib.suppress(PlaywrightError):
+                page.wait_for_load_state("networkidle", timeout=settle_timeout_ms)
+    assert last_exc is not None  # noqa: S101
+    raise last_exc
+
+
 def _wait_for_card_hass(page: Page, tag: str, timeout_ms: int = 30000) -> None:
     """Wait until ``<tag>._hass`` is truthy (HA has wired the card into its
     state tree).  Retries on context-destroyed navigation churn.
@@ -2508,8 +2567,10 @@ class TestGalleryScreenshots:
             }}""",
             timeout=timeout,
         )
-        card = page.locator(f"{tag} >>> ha-card").first
-        card.screenshot(path=str(self.GALLERY_DIR / filename))
+        # Delegate the actual capture to ``_safe_screenshot`` so HA
+        # re-renders between ``page.locator(...).first`` and
+        # ``card.screenshot()`` are recovered with a fresh locator.
+        _safe_screenshot(page, tag, self.GALLERY_DIR / filename)
 
     def test_gallery_overview_idle(
         self,
