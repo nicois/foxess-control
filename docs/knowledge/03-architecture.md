@@ -434,3 +434,29 @@ tree docs never embed fast-moving numbers.  Three modes:
 The script counts actual enumerated test items (lines starting
 ``tests/`` in `--co -q` output), not the pytest footer — the
 footer can report higher under xdist or after marker filtering.
+
+## Knowledge-Tree Audit
+
+`scripts/knowledge_audit.py` mechanises the inventory and trace
+checks that the `/project-overview check` skill previously
+reconstructed by ad-hoc regex each run.  Three modes:
+
+- default — human-readable report (inventory, collisions, sequence
+  gaps, priority-integrity violations, unconstrained priorities,
+  UNJUSTIFIED D-NNN).
+- `--json` — machine-readable for tooling.
+- `--strict` — exit non-zero if any priority-integrity violation is
+  present (missing `Priority enforced/served`, missing
+  `Classification`, missing `Trades against`, trade-off inversions,
+  `safety` without a C-NNN trace).  ID collisions and sequence gaps
+  are reported but not fatal — this project tolerates three known
+  collisions (D-014, D-015, D-041) documented in META.md.
+
+What the script does NOT do:
+- Decide whether a gap is GAP vs ACCEPTED (remains judgement).
+- Classify prose staleness.
+- Write new tree entries or propagate constraint changes.
+
+Output matches the format of the `check` skill's summary, so a CI
+guard can run `knowledge_audit.py --strict` to block merges that
+introduce trade-off inversions or strip required fields.

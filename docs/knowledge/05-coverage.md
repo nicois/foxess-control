@@ -189,14 +189,13 @@ against a scenario that the system couldn't actually reach.
   exercised only by the visual editor.
 
 ### Design decisions without constraint traces (UNJUSTIFIED)
+Derived by `scripts/knowledge_audit.py`.  The other D-015 (in
+`taper-model.md`) is *not* in this list — it correctly traces to
+C-014.
+
 - **D-015** (`foxess-api.md`): WASM signature generation — no C-NNN
   trace. Provides API authentication but no constraint captures
   "requests must be signed".
-- **D-015** (`taper-model.md`): 10-minute stability gate for
-  temperature observations — no C-NNN trace, but D-011 and the taper
-  model design doc describe the invariant informally.  The ID
-  collision means this entry lives alongside the WASM-signature
-  D-015; both are tolerated without an explicit C-NNN.
 - **D-020** (`session-management.md`): start_soc persistence for
   progress display — no C-NNN trace. Purely UX: avoids a
   progress-bar jump when a session is resumed mid-ride. Tolerated
