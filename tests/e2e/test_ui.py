@@ -78,6 +78,52 @@ def _wait_for_card_text(
     return locator.first.text_content() or ""
 
 
+def _safe_evaluate(
+    page: Page,
+    expression: str,
+    *,
+    retries: int = 3,
+    settle_timeout_ms: int = 15000,
+) -> object:
+    """Run ``page.evaluate`` with retry on navigation-induced context destruction.
+
+    HA fires background navigations (WebSocket reconnect, dashboard
+    auto-refresh, auth refresh ~1-15s after initial load) that destroy
+    the JS execution context mid-evaluate.  Playwright surfaces this as
+    ``PlaywrightError("Execution context was destroyed, most likely
+    because of a navigation")`` — observed on Flaky Test Detection run
+    24990047496 against
+    ``TestTaperCard::test_bars_render_with_seeded_profile[cloud]``.
+
+    On each context-destroyed error we wait for ``networkidle`` (best
+    effort) to let the new page settle, then retry with a fresh
+    context.  Unrelated Playwright errors propagate unchanged.
+
+    Matches the pattern in ``_find_card`` (which wraps
+    ``wait_for_function``) and ``TestFormInputPersistence._safe_evaluate``
+    (class-scoped for form workflows).  This module-level version is
+    used by evaluate blocks that mutate card state and read results in
+    a single sync JS block — they cannot themselves resume where they
+    left off on context destruction, so the whole evaluate must restart.
+    """
+    last_exc: PlaywrightError | None = None
+    for attempt in range(retries + 1):
+        try:
+            return page.evaluate(expression)
+        except PlaywrightError as exc:
+            msg = str(exc)
+            if "Execution context was destroyed" not in msg and "navigating" not in msg:
+                raise
+            last_exc = exc
+            if attempt == retries:
+                break
+            # Wait for the post-navigation page to settle before retrying.
+            with contextlib.suppress(PlaywrightError):
+                page.wait_for_load_state("networkidle", timeout=settle_timeout_ms)
+    assert last_exc is not None  # noqa: S101
+    raise last_exc
+
+
 def _wait_for_card_hass(page: Page, tag: str, timeout_ms: int = 30000) -> None:
     """Wait until ``<tag>._hass`` is truthy (HA has wired the card into its
     state tree).  Retries on context-destroyed navigation churn.
@@ -1790,7 +1836,14 @@ class TestTaperCard:
         # HA's initial wire-up churn before we mutate it.
         _wait_for_card_hass(page, "foxess-taper-card")
 
-        raw = page.evaluate(
+        # _safe_evaluate retries on "Execution context was destroyed"
+        # — HA can fire a navigation (WS reconnect, auth refresh) mid
+        # evaluate.  Observed on run 24990047496 against this test.
+        # The injection + render + query must all complete in a single
+        # synchronous JS block, so a destroyed context forces a full
+        # restart: wait for networkidle, then re-evaluate.
+        raw = _safe_evaluate(
+            page,
             """() => {
                 function find(root) {
                     const el = root.querySelector('foxess-taper-card');
@@ -1847,7 +1900,7 @@ class TestTaperCard:
                     low_conf_count: lowConf.length,
                     widths: widths,
                 };
-            }"""
+            }""",
         )
         result: dict[str, object] = dict(raw) if isinstance(raw, dict) else {}
         assert not result.get("no_card"), "taper card not found"
