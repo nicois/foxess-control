@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.14-beta.1
+
+### Fixed
+- **Control and taper cards showed "No active operations" on non-English Home Assistant installs (C-020 violation)**: during an active smart charge session, a user running HA in German saw "Keine aktiven Vorgänge" on the control card despite `charge_active=true` and `charge_phase=scheduled` on the backing sensor. The cards hardcoded `sensor.foxess_smart_operations` as the `operations_entity` default, but HA derives entity_ids from the translated friendly name at entity-creation time — in DE the real entity is `sensor.foxess_intelligente_steuerung`, in FR `sensor.foxess_operations_intelligentes`, etc. The integration already exposes `foxess_control/entity_map` for role-based discovery, and the forecast/history cards already consult it via a `_resolve(key)` helper; the control and taper cards ignored it. Users had no way to determine system state from the UI alone, requiring entity-registry inspection — a direct C-020 violation. Fixed by routing both cards through a `_resolve(key)` helper matching the forecast/history pattern: explicit `operations_entity:` config > `_entityMap["smart_operations"]` from the WS command > hardcoded English default as last-resort fallback. The taper card previously didn't fetch the entity map at all; it now does. Backwards-compatible for users with explicit dashboard YAML overrides. Seven-test regression suite (`tests/test_card_entity_resolution.py`) drives the card JS in a Playwright-chromium stub, reproducing the exact DE-locale symptom — four cases fail against pre-fix card code, three passed throughout (backwards-compat + graceful-degradation + source-level guards that catch any future regression into direct `this._config.operations_entity` reads).
+- **`logs.txt` added to `.gitignore`**: ad-hoc HA log captures from live debugging sessions should not be tracked.
+
 ## 1.0.13
 
 ### Added
