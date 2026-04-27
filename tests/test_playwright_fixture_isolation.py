@@ -110,6 +110,11 @@ def test_pytest_playwright_does_not_leak_running_loop(tmp_path: Path) -> None:
     # the sandbox conftest.  If the marker block is absent, the
     # subprocess runs against stock pytest-playwright and the repro
     # MUST fail — which is what we assert-not after the fix.
+    #
+    # Preamble imports mirror what the real tests/conftest.py
+    # provides at module scope so the lifted block compiles
+    # unchanged.  ``TYPE_CHECKING`` is exposed because the override
+    # uses it as a forward-reference gate.
     override = _extract_override_block()
     if override is not None:
         (sandbox / "conftest.py").write_text(
@@ -118,7 +123,7 @@ def test_pytest_playwright_does_not_leak_running_loop(tmp_path: Path) -> None:
                 from __future__ import annotations
 
                 from collections.abc import Generator
-                from typing import Any
+                from typing import TYPE_CHECKING, Any
 
                 import pytest
                 """
