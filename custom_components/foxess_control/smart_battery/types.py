@@ -58,6 +58,14 @@ class ChargeSessionState(TypedDict, total=False):
     charging_started: bool
     charging_started_at: Any  # datetime.datetime | None
     charging_started_energy_kwh: float | None
+    # Listener's latest committed deferred-start decision.  Set by the
+    # service (session creation) and by setup_smart_charge_listeners()
+    # every tick that the listener stays in the deferred phase.  Read by
+    # sensor-side is_effectively_charging() to keep the phase display
+    # stable between 5-minute listener ticks — live-input recomputation
+    # in the sensor is the source of the 2026-04-27 ops-sensor thrash.
+    # Cleared (None) when the listener transitions into active charging.
+    deferred_start_committed: Any  # datetime.datetime | None
     target_reached: bool
     groups: list[ScheduleGroup] | None
     last_power_w: int

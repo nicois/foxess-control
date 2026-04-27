@@ -714,6 +714,13 @@ def setup_smart_charge_listeners(
                 taper_profile=taper,
                 bms_temp_c=bms_temp,
             )
+            # Commit the listener's decision so the sensor reads a stable
+            # value between listener ticks.  Without this, the sensor
+            # recomputes deferred on every ~5 s coordinator refresh with
+            # noisy live inputs (net consumption, fractional-percent SoC)
+            # and oscillates on the now >= deferred boundary (live 2026-04-27
+            # ops-sensor thrash).
+            cur_state["deferred_start_committed"] = deferred
             if now_dt < deferred:
                 _LOGGER.debug(
                     "Smart charge: deferring until ~%02d:%02d "
@@ -765,6 +772,9 @@ def setup_smart_charge_listeners(
             cur_state["last_power_w"] = new_power
             cur_state["charging_started"] = True
             cur_state["charging_started_at"] = now_dt
+            # Clear the committed deferred-start: charging is now active
+            # and the sensor reads charging_started directly.
+            cur_state["deferred_start_committed"] = None
             cur_state["start_soc"] = cur_soc
             cur_state["charging_started_energy_kwh"] = (
                 cur_soc / 100.0 * cur_state["battery_capacity_kwh"]
@@ -820,6 +830,11 @@ def setup_smart_charge_listeners(
                 return
             _cs["charging_started"] = False
             _cs["charging_started_at"] = None
+            # Commit the re-deferral decision so the sensor holds "deferred"
+            # until the next listener tick — mirror of the pre_start branch
+            # above.  Without this, the sensor recomputes deferred from live
+            # inputs and flips back to "charging" within seconds.
+            _cs["deferred_start_committed"] = deferred
             await save_session(
                 _get_store(hass, domain),
                 "smart_charge",

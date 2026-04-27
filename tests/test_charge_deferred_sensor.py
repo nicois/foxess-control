@@ -95,11 +95,16 @@ def _charge_state(**overrides: Any) -> dict[str, Any]:
 
 
 class TestIsEffectivelyChargingDeferredMismatch:
-    """Test that is_effectively_charging uses the full deferred start algorithm.
+    """Test that is_effectively_charging reflects the listener's committed
+    deferred-start — the same value the listener uses for its transition
+    decision, computed by ``calculate_deferred_start()`` with the full
+    parameter set (taper, consumption, headroom, BMS temp).
 
-    The listener calls calculate_deferred_start() with taper, consumption,
-    headroom, and BMS temp.  The sensor-side is_effectively_charging() must
-    agree with this calculation.
+    Previously the sensor recomputed this from live coordinator inputs
+    each tick.  After the 2026-04-27 thrash fix the listener stores its
+    decision in ``deferred_start_committed`` and the sensor reads that;
+    the invariant (sensor and listener agree on transition timing) is
+    unchanged, but it is now achieved without sensor-side recomputation.
     """
 
     def test_taper_causes_earlier_start_detected(self) -> None:
@@ -109,11 +114,9 @@ class TestIsEffectivelyChargingDeferredMismatch:
         window 02:00-06:00, taper profile showing 30% acceptance above 80%.
 
         The full algorithm accounts for slow charging in the 80-95% range,
-        so it computes an earlier deferred start.  The simplified formula
-        in the sensor ignores taper and computes a later start.
-
-        At a time between the two start times, is_effectively_charging()
-        should return True (matching the listener), not False.
+        so it computes an earlier deferred start.  The listener commits
+        this value; the sensor reads it and reports "charging" once now
+        passes the committed deferred-start.
         """
         taper = _make_taper_with_high_soc_limiting()
         hass = _make_hass(
@@ -121,27 +124,26 @@ class TestIsEffectivelyChargingDeferredMismatch:
             battery_capacity_kwh=10.0,
             taper_profile=taper,
         )
-        cs = _charge_state(
-            max_power_w=10000,
-            target_soc=95,
-            start=datetime.datetime(2026, 4, 8, 2, 0, 0),
-            end=datetime.datetime(2026, 4, 8, 6, 0, 0),
-        )
-
-        # Calculate the full deferred start (what the listener uses)
+        # Calculate the full deferred start (what the listener commits)
         full_deferred = calculate_deferred_start(
             50.0,
             95,
             10.0,
             10000,
-            cs["end"],
-            start=cs["start"],
+            datetime.datetime(2026, 4, 8, 6, 0, 0),
+            start=datetime.datetime(2026, 4, 8, 2, 0, 0),
             headroom=0.10,
             taper_profile=taper,
         )
+        cs = _charge_state(
+            max_power_w=10000,
+            target_soc=95,
+            start=datetime.datetime(2026, 4, 8, 2, 0, 0),
+            end=datetime.datetime(2026, 4, 8, 6, 0, 0),
+            deferred_start_committed=full_deferred,
+        )
 
-        # Pick a time after the full algorithm's deferred start but where
-        # the simplified formula would still say "deferred"
+        # Pick a time after the full algorithm's deferred start
         test_time = full_deferred + datetime.timedelta(minutes=5)
 
         with patch(
@@ -151,7 +153,7 @@ class TestIsEffectivelyChargingDeferredMismatch:
             result = is_effectively_charging(hass, TEST_DOMAIN, cs)
             assert result is True, (
                 f"is_effectively_charging returned False at {test_time} "
-                f"but full algorithm deferred start is {full_deferred}"
+                f"but committed deferred start is {full_deferred}"
             )
 
     def test_high_consumption_causes_earlier_start_detected(self) -> None:
@@ -161,36 +163,32 @@ class TestIsEffectivelyChargingDeferredMismatch:
         window 02:00-06:00, house consuming 3kW.
 
         The full algorithm reduces effective charge power by consumption
-        (3kW out of 10kW), computing an earlier start.  The simplified
-        formula uses (1-h)^2 * max_power which doesn't account for
-        actual consumption.
+        (3kW out of 10kW), computing an earlier start.  The listener
+        commits this; the sensor honours it.
         """
         hass = _make_hass(
             coordinator_soc=50.0,
             battery_capacity_kwh=10.0,
             coordinator_extra={"loadsPower": 3.0, "pvPower": 0.0},
         )
-        cs = _charge_state(
-            max_power_w=10000,
-            target_soc=90,
-            start=datetime.datetime(2026, 4, 8, 2, 0, 0),
-            end=datetime.datetime(2026, 4, 8, 6, 0, 0),
-        )
-
-        # Full deferred start with consumption
         full_deferred = calculate_deferred_start(
             50.0,
             90,
             10.0,
             10000,
-            cs["end"],
+            datetime.datetime(2026, 4, 8, 6, 0, 0),
             net_consumption_kw=3.0,
-            start=cs["start"],
+            start=datetime.datetime(2026, 4, 8, 2, 0, 0),
             headroom=0.10,
         )
+        cs = _charge_state(
+            max_power_w=10000,
+            target_soc=90,
+            start=datetime.datetime(2026, 4, 8, 2, 0, 0),
+            end=datetime.datetime(2026, 4, 8, 6, 0, 0),
+            deferred_start_committed=full_deferred,
+        )
 
-        # Pick a time after the full algorithm's start but where the
-        # simplified formula (which ignores consumption) says "deferred"
         test_time = full_deferred + datetime.timedelta(minutes=5)
 
         with patch(
@@ -200,7 +198,7 @@ class TestIsEffectivelyChargingDeferredMismatch:
             result = is_effectively_charging(hass, TEST_DOMAIN, cs)
             assert result is True, (
                 f"is_effectively_charging returned False at {test_time} "
-                f"but full algorithm deferred start (with 3kW consumption) "
+                f"but committed deferred start (with 3kW consumption) "
                 f"is {full_deferred}"
             )
 
@@ -221,23 +219,23 @@ class TestIsEffectivelyChargingDeferredMismatch:
             taper_profile=taper,
             coordinator_extra={"loadsPower": 2.0, "pvPower": 0.0},
         )
-        cs = _charge_state(
-            max_power_w=10000,
-            target_soc=95,
-            start=datetime.datetime(2026, 4, 8, 2, 0, 0),
-            end=datetime.datetime(2026, 4, 8, 6, 0, 0),
-        )
-
         full_deferred = calculate_deferred_start(
             50.0,
             95,
             10.0,
             10000,
-            cs["end"],
+            datetime.datetime(2026, 4, 8, 6, 0, 0),
             net_consumption_kw=2.0,
-            start=cs["start"],
+            start=datetime.datetime(2026, 4, 8, 2, 0, 0),
             headroom=0.10,
             taper_profile=taper,
+        )
+        cs = _charge_state(
+            max_power_w=10000,
+            target_soc=95,
+            start=datetime.datetime(2026, 4, 8, 2, 0, 0),
+            end=datetime.datetime(2026, 4, 8, 6, 0, 0),
+            deferred_start_committed=full_deferred,
         )
 
         test_time = full_deferred + datetime.timedelta(minutes=5)
@@ -249,7 +247,7 @@ class TestIsEffectivelyChargingDeferredMismatch:
             result = is_effectively_charging(hass, TEST_DOMAIN, cs)
             assert result is True, (
                 f"is_effectively_charging returned False at {test_time} "
-                f"but full algorithm (taper+consumption) deferred start "
+                f"but committed deferred start (taper+consumption) "
                 f"is {full_deferred}"
             )
 
@@ -578,27 +576,33 @@ class TestIsEffectivelyChargingStability:
     def test_phase_still_transitions_on_qualitative_change(self) -> None:
         """Stability must not suppress real transitions.
 
-        Once the qualitative input truly justifies a different phase
-        (e.g. now is materially past the deferred start even under the
-        worst-case / low-consumption estimate), the sensor MUST still
-        report the appropriate phase.  Hysteresis that suppresses real
-        signal is tuning, not a root-cause fix (C-031).
+        Once the listener has committed a deferred-start in the past
+        (i.e. time has materially passed the transition point), the
+        sensor MUST report the appropriate phase — hysteresis that
+        suppresses real signal is tuning, not a root-cause fix (C-031).
+        The committed value below represents the listener having run and
+        concluded "deferred-start is now in the past, transition is due".
         """
         hass = _make_hass(
             coordinator_soc=50.0,
             battery_capacity_kwh=10.0,
             headroom_pct=10,
         )
+        # The listener's committed decision at its most recent tick:
+        # deferred-start is well in the past relative to test_time, so
+        # the sensor should report "charging" immediately.
+        committed_deferred = datetime.datetime(2026, 4, 27, 12, 30, 0)
         cs = _charge_state(
             target_soc=90,
             max_power_w=5000,
             start=datetime.datetime(2026, 4, 27, 11, 0, 0),
             end=datetime.datetime(2026, 4, 27, 13, 59, 0),
             charging_started=False,
+            deferred_start_committed=committed_deferred,
         )
 
-        # Mid-window with a large SoC gap (40%) — well past the latest
-        # plausible deferred start regardless of consumption noise.
+        # Mid-window with a large SoC gap (40%) — well past the
+        # listener's committed deferred-start.
         test_time = datetime.datetime(2026, 4, 27, 13, 50, 0)
         coord = hass.data[TEST_DOMAIN].entries["entry1"].coordinator
         coord.data = {"SoC": 50.0, "loadsPower": 0.5, "pvPower": 0.0}
@@ -607,10 +611,10 @@ class TestIsEffectivelyChargingStability:
             return_value=test_time,
         ):
             assert is_effectively_charging(hass, TEST_DOMAIN, cs) is True, (
-                "With 40% gap and 9 minutes remaining, the sensor must "
-                "report 'charging' — the listener cannot possibly be "
-                "deferring in this state.  Hysteresis must not suppress "
-                "legitimate transitions."
+                "With committed deferred-start at 12:30 and now=13:50, "
+                "the sensor must report 'charging'.  Stability must not "
+                "suppress legitimate transitions when the listener has "
+                "already decided to transition."
             )
 
 

@@ -630,6 +630,14 @@ def register_services(
                 groups=[],
             ),
         )
+        # Seed the sensor-visible deferred-start so the operations sensor
+        # reads a stable value from the moment the session exists — before
+        # the first listener tick (~5 min later).  When should_defer is
+        # False, charging_started=True and this field is unused; when
+        # should_defer is True, the sensor uses it to decide "deferred"
+        # vs "charging" instead of recomputing from noisy live inputs.
+        if should_defer and current_soc is not None:
+            charge_state["deferred_start_committed"] = deferred_start
         dd.smart_charge_state = charge_state
 
         setup_smart_charge_listeners(hass, domain, adapter)

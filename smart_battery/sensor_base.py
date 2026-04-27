@@ -346,40 +346,40 @@ def is_effectively_charging(
 ) -> bool:
     """Return True if the charge session should be considered active.
 
-    Uses the full ``calculate_deferred_start()`` with taper profile,
-    net consumption, headroom, and BMS temperature — the same parameters
-    the listener passes — so the sensor-side phase matches the listener's
-    actual transition point.
+    Reads only the listener's committed state:
+    * ``charging_started`` — True once the listener has requested
+      ForceCharge from the adapter; remains True until D-043 re-defers.
+    * ``deferred_start_committed`` — the ``calculate_deferred_start()``
+      result from the listener's most recent tick (or the service at
+      session creation).
+
+    The sensor never recomputes ``calculate_deferred_start()`` from
+    live coordinator inputs.  Doing so — as a prior implementation did
+    — makes the ``now >= deferred`` comparison sensitive to
+    consumption jitter and fractional-percent SoC noise, flipping the
+    reported phase many times per minute while the inverter hardware
+    stays stable (live 2026-04-27 ops-sensor thrash, violating C-020
+    operational transparency and breaking the C-038 sensor-listener
+    parity on a sub-minute timescale).
     """
     if cs.get("charging_started", True):
         return True
-    soc = get_soc_value(hass, domain)
-    capacity_kwh = get_battery_capacity_kwh(hass, domain)
-    target_soc: int = cs.get("target_soc", 100)
-    max_power_w: int = cs.get("effective_max_power_w", cs.get("max_power_w", 0))
-    end: datetime.datetime = cs["end"]
-    start: datetime.datetime | None = cs.get("start")
-    if soc is not None and capacity_kwh > 0 and max_power_w > 0 and soc < target_soc:
-        from .algorithms import calculate_deferred_start
-
-        headroom = get_smart_headroom_fraction(hass, domain)
-        deferred_start = calculate_deferred_start(
-            soc,
-            target_soc,
-            capacity_kwh,
-            max_power_w,
-            end,
-            net_consumption_kw=_get_net_consumption(hass, domain),
-            start=start,
-            headroom=headroom,
-            taper_profile=_get_taper_profile(hass, domain),
-            bms_temp_c=_get_bms_temp(hass, domain),
-        )
-        now = dt_util.now()
-        if end.tzinfo is None and now.tzinfo is not None:
-            now = now.replace(tzinfo=None)
-        return (deferred_start - now).total_seconds() <= 0
-    return False
+    committed: datetime.datetime | None = cs.get("deferred_start_committed")
+    if committed is None:
+        # No listener decision yet — e.g. brand-new session saved to
+        # storage between schedule-start and first listener tick, or a
+        # restore-from-storage path where the field was absent.  Honour
+        # the authoritative ``charging_started=False`` — the listener's
+        # next tick (≤ 5 min) will populate ``deferred_start_committed``
+        # and the sensor will then track the transition.  A transient
+        # "deferred" display for up to one listener interval is a far
+        # smaller operational-transparency defect than rapid phase
+        # oscillation.
+        return False
+    now = dt_util.now()
+    if committed.tzinfo is None and now.tzinfo is not None:
+        now = now.replace(tzinfo=None)
+    return (committed - now).total_seconds() <= 0
 
 
 def estimate_discharge_remaining(
