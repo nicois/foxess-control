@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.14-beta.2
+
+### Fixed
+- **Charge-phase sensor oscillated rapidly between `charging` and `deferred` during an active session**: observed 2026-04-27 on a live charge session (11:00–13:59 window) where `sensor.foxess_smart_operations` flipped phase many times per minute (including a 5-second flip at 02:39:01 → 02:39:36) while the inverter's actual work mode only transitioned twice in the same 3 hours.  The control-card title ("Smart Charge" vs "Charge Deferred") faithfully tracked the sensor's thrashing state, so the user saw the card lag reality by a couple of minutes after the algorithm had actually re-deferred — the sensor kept flipping back to `charging` as inputs jittered.  Root cause: `is_effectively_charging()` in `smart_battery/sensor_base.py` independently recomputed `calculate_deferred_start()` from live coordinator data on every ~5s WS refresh; `net_consumption_kw` jitter of ±1 kW (appliances cycling, solar flicker) swung the computed `deferred_start` by 10–30 minutes tick-to-tick, crossing the `now >= deferred` threshold in both directions.  SoC jitter of 0.1% (BMS reporting granularity / interpolation noise) had the same effect.  Fix: the listener now commits its `calculate_deferred_start()` result to the session state (`deferred_start_committed`) on every tick; the sensor reads that committed value instead of recomputing.  Same formula on both sides (preserving C-038 sensor-listener parameter parity), but the sensor is now a stable read-only view of the listener's most recent decision — no sub-minute volatility.  Four-test regression suite (`TestIsEffectivelyChargingStability`) drives `is_effectively_charging()` with realistic input-noise sequences (±0.1% SoC, ±0.4 kW consumption) and asserts no phase flip under noise; neighbourhood tests confirm real qualitative changes still flip phase promptly.
+- **Misleading wording in charge-deferral reason**: the deferred-charge reason text previously read *"solar surplus or cheaper-later pricing; waiting to start forced charge"*.  The integration has never had tariff awareness (tariff optimisation is an explicit non-goal per the vision), so "cheaper-later pricing" was factually incorrect.  Simplified to describe only what the integration actually reasons about: solar surplus and deferred-start math.
+
 ## 1.0.14-beta.1
 
 ### Fixed
