@@ -105,21 +105,60 @@ class FoxESSTaperCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
-    this._config = null;
+    this._config = {};
     this._hass = null;
+    this._entityMap = null;
+    this._fetchPending = false;
   }
 
   setConfig(config) {
-    this._config = Object.assign(
-      { entity: "sensor.foxess_smart_operations" },
-      config || {},
-    );
+    // Do NOT bake a hardcoded English entity_id into the stored config.
+    // English default is a *fallback* applied at render time by
+    // _resolve() after the entity_map WS lookup is consulted — DE-locale
+    // installs expose sensor.foxess_intelligente_steuerung etc.
+    // See C-020 (operational transparency).
+    this._config = Object.assign({}, config || {});
     this._render();
   }
 
   set hass(hass) {
     this._hass = hass;
+    if (!this._entityMap && !this._fetchPending) {
+      this._fetchPending = true;
+      this._fetchEntityMap();
+    }
     this._render();
+  }
+
+  async _fetchEntityMap() {
+    try {
+      this._entityMap = await this._hass.callWS({
+        type: "foxess_control/entity_map",
+      });
+    } catch (_e) {
+      this._entityMap = {};
+    }
+    this._fetchPending = false;
+    this._render();
+  }
+
+  /**
+   * Resolve the taper card's source entity.  Priority:
+   *   1. explicit user-set ``this._config.entity``
+   *   2. ``_entityMap.smart_operations`` (from the WS command)
+   *   3. English default ``sensor.foxess_smart_operations``
+   */
+  _resolve(key) {
+    if (this._config[key]) return this._config[key];
+    if (
+      key === "entity" &&
+      this._entityMap &&
+      this._entityMap.smart_operations
+    ) {
+      return this._entityMap.smart_operations;
+    }
+    if (key === "entity") return "sensor.foxess_smart_operations";
+    return null;
   }
 
   getCardSize() {
@@ -137,7 +176,7 @@ class FoxESSTaperCard extends HTMLElement {
 
   _render() {
     if (!this._hass || !this._config) return;
-    const state = this._hass.states[this._config.entity];
+    const state = this._hass.states[this._resolve("entity")];
     const taper = state && state.attributes && state.attributes.taper_profile;
     const chargeBins = (taper && taper.charge) || [];
     const dischargeBins = (taper && taper.discharge) || [];

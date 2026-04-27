@@ -305,11 +305,12 @@ class TestTaperCardEntityResolution:
     def test_taper_card_uses_entity_map_when_default_missing(self, page: Page) -> None:
         """Same DE-locale scenario for the taper card: the taper
         profile data lives on ``sensor.foxess_intelligente_steuerung``.
-        A broken resolver shows "Noch keine Beobachtungen" even when
-        the sensor carries a populated ``taper_profile``.
+        A broken resolver renders no bins at all (``soc-label`` is
+        absent); a working resolver renders the synthetic 95% charge
+        bin under the "Laden" section title.
         """
         _inject_card(page, _TAPER_CARD_JS)
-        page.evaluate(
+        result = page.evaluate(
             """async () => {
                 const entityMap = {
                     smart_operations: "sensor.foxess_intelligente_steuerung",
@@ -319,20 +320,27 @@ class TestTaperCardEntityResolution:
                 document.getElementById("root").appendChild(card);
                 card.hass = window.makeHassDE(entityMap);
                 await new Promise((r) => setTimeout(r, 50));
+                const sr = card.shadowRoot;
+                return {
+                    text: sr.textContent || "",
+                    socLabels: Array.from(
+                        sr.querySelectorAll(".soc-label")
+                    ).map((n) => n.textContent),
+                };
             }"""
         )
-        text = _shadow_text(page, "foxess-taper-card")
-        # The stub's taper_profile has one charge bin.  If the card
-        # resolves to the right entity it renders the "Laden" section;
-        # otherwise it shows the "Noch keine Beobachtungen" empty state.
-        assert "Noch keine Beobachtungen" not in text, (
-            "Taper card rendered the empty-observation state — it ignored "
-            "the entity_map and fell back to the hardcoded English default.\n"
-            f"Shadow text: {text!r}"
+        # With a broken resolver, no bins render at all — .soc-label
+        # nodes are absent.  A working resolver renders the "95%"
+        # charge bin present in the stub taper_profile.
+        assert "95%" in result["socLabels"], (
+            "Taper card ignored the entity_map and fell back to the "
+            "hardcoded English default — no charge bin rendered.\n"
+            f"soc labels: {result['socLabels']!r}\n"
+            f"Shadow text: {result['text']!r}"
         )
-        assert "Laden" in text, (
-            "Taper card should render the Laden (charge) section when "
-            f"taper_profile has charge bins.\nShadow text: {text!r}"
+        assert "Laden" in result["text"], (
+            "Taper card should render the Laden (charge) section title "
+            f"in DE. Shadow text: {result['text']!r}"
         )
 
     def test_taper_card_respects_explicit_config_override(self, page: Page) -> None:
@@ -395,6 +403,18 @@ class TestTaperCardEntityResolution:
 # ---------------------------------------------------------------------------
 
 
+def _is_comment_or_string(line: str) -> bool:
+    """Heuristic: the trimmed line starts with a comment/doc marker.
+
+    We do not parse JS — this only needs to catch the doc-comment
+    references that mention the forbidden pattern inside rationale
+    prose.  Trimmed prefixes we treat as "not code" are ``//``,
+    ``/*``, ``*``, and backticked documentation.
+    """
+    t = line.strip()
+    return t.startswith(("//", "/*", "*/", "*"))
+
+
 def test_control_card_does_not_read_config_operations_entity_directly() -> None:
     """Source-level regression guard.  The card must never read
     ``this._config.operations_entity`` directly at runtime — all
@@ -412,11 +432,11 @@ def test_control_card_does_not_read_config_operations_entity_directly() -> None:
     assert editor_idx > 0, "could not find editor class marker"
     runtime_src = src[:editor_idx]
     # Forbidden pattern: direct dereference of config.operations_entity
-    # inside the runtime class (read path).
+    # inside the runtime class (read path), excluding doc-comment prose.
     bad_lines = [
         (lineno, line)
         for lineno, line in enumerate(runtime_src.splitlines(), 1)
-        if "this._config.operations_entity" in line
+        if "this._config.operations_entity" in line and not _is_comment_or_string(line)
     ]
     assert not bad_lines, (
         "Control card runtime code reads this._config.operations_entity "
@@ -432,7 +452,7 @@ def test_taper_card_does_not_read_config_entity_directly() -> None:
     bad_lines = [
         (lineno, line)
         for lineno, line in enumerate(src.splitlines(), 1)
-        if "this._config.entity" in line
+        if "this._config.entity" in line and not _is_comment_or_string(line)
     ]
     assert not bad_lines, (
         "Taper card reads this._config.entity directly — use "

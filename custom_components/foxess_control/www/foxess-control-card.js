@@ -620,14 +620,45 @@ class FoxESSControlCard extends HTMLElement {
   // -- Lovelace lifecycle ----------------------------------------------------
 
   setConfig(config) {
-    this._config = {
-      operations_entity:
-        config.operations_entity || "sensor.foxess_smart_operations",
-      soc_entity: config.soc_entity || "sensor.foxess_battery_soc",
-      ...config,
-    };
+    // Do NOT bake hardcoded English entity_ids into the stored config.
+    // The English defaults are *fallbacks*, applied at render time by
+    // _resolve() once the entity_map WS lookup has been consulted.
+    // Baking them here would defeat the per-locale entity_id discovery
+    // (e.g. `sensor.foxess_intelligente_steuerung` on a DE install).
+    // See D-052 / C-020.
+    this._config = { ...(config || {}) };
     this._entityMap = null;
     this._fetchPending = false;
+  }
+
+  /**
+   * Resolve a config key to an entity_id, consulting (in order):
+   *   1. an explicit user-set ``this._config[key]``;
+   *   2. the ``foxess_control/entity_map`` WS response
+   *      (``this._entityMap``);
+   *   3. the English default hardcoded below.
+   *
+   * Step 3 is the graceful-degradation path: it fires only when the
+   * WS command fails or the user's integration predates it.  In a
+   * healthy DE-locale install, step 2 wins and the real entity_id
+   * (e.g. ``sensor.foxess_intelligente_steuerung``) is returned.
+   */
+  _resolve(key) {
+    if (this._config[key]) return this._config[key];
+    const roleMap = {
+      operations_entity: "smart_operations",
+      soc_entity: "battery_soc",
+      freshness_entity: "data_freshness",
+    };
+    const defaults = {
+      operations_entity: "sensor.foxess_smart_operations",
+      soc_entity: "sensor.foxess_battery_soc",
+    };
+    const role = roleMap[key];
+    if (role && this._entityMap && this._entityMap[role]) {
+      return this._entityMap[role];
+    }
+    return defaults[key] || null;
   }
 
   set hass(hass) {
@@ -690,7 +721,7 @@ class FoxESSControlCard extends HTMLElement {
 
   /** Read the data_source attribute from the SoC entity. */
   _getDataSource() {
-    const e = this._entity(this._config.soc_entity);
+    const e = this._entity(this._resolve("soc_entity"));
     return e && e.attributes && e.attributes.data_source ? e.attributes.data_source : null;
   }
 
@@ -793,7 +824,7 @@ class FoxESSControlCard extends HTMLElement {
       if (fc && fc.value) this._formValues.soc = fc.value;
     }
 
-    const ops = this._config.operations_entity;
+    const ops = this._resolve("operations_entity");
     const a = this._attr(ops);
     const soc = a.charge_current_soc ?? a.discharge_current_soc ?? this._getSoc();
     const chargeActive = a.charge_active === true;
@@ -869,7 +900,7 @@ class FoxESSControlCard extends HTMLElement {
   }
 
   _getSoc() {
-    const s = this._state(this._config.soc_entity);
+    const s = this._state(this._resolve("soc_entity"));
     return s != null && s !== "unavailable" && s !== "unknown"
       ? parseFloat(s)
       : null;
@@ -990,7 +1021,7 @@ class FoxESSControlCard extends HTMLElement {
     const slackS = a.discharge_time_slack_s;
     const beforeStart = remaining.startsWith && remaining.startsWith("starts");
     const scheduled = beforeStart || remaining.startsWith("scheduled");
-    const opsState = this._state(this._config.operations_entity) || "";
+    const opsState = this._state(this._resolve("operations_entity")) || "";
     const suspended = opsState.includes("suspended");
     const deferred = opsState.includes("deferred");
 
