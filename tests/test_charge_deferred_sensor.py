@@ -408,6 +408,212 @@ class TestEstimateChargeRemainingDeferredMismatch:
             )
 
 
+class TestIsEffectivelyChargingStability:
+    """The sensor's charge phase must not oscillate under micro-fluctuations.
+
+    Observed 2026-04-27 (11:00–13:59 live session): the operations sensor
+    (``sensor.foxess_smart_operations``) flipped between ``charging`` and
+    ``deferred`` many times in a 3-hour window — e.g. 02:38:56 deferred →
+    02:39:01 charging (5 seconds) → 02:39:36 deferred (35 seconds) →
+    02:41:58 charging (2m 22s).  During the same window the inverter
+    ``betriebsmodus`` only transitioned twice (SelfUse ↔ ForceCharge),
+    confirming that the inverter hardware was stable but the sensor's
+    reported phase was flipping.
+
+    Root cause: ``is_effectively_charging()`` recomputes
+    ``calculate_deferred_start()`` on every coordinator refresh (~5 s with
+    WebSocket data).  The algorithm is sensitive to ``net_consumption_kw``
+    and ``current_soc`` — both of which fluctuate second-to-second in real
+    homes (appliance cycling, BMS reporting jitter, solar clouds).  When
+    the recomputed ``deferred_start`` straddles ``now``, the ``now >=
+    deferred`` comparison flips on every tick, and the sensor state
+    oscillates on a 5-second cadence.
+
+    This violates C-020 (operational transparency) — the user literally
+    cannot tell from the UI what the system is doing — and C-038 insofar
+    as the sensor reports a *different* phase than the listener holds
+    stable between 5-minute ticks.
+
+    Invariant: once ``charging_started`` is False (either the initial
+    deferred state or a D-043 re-deferral), the sensor must hold that
+    phase until the listener's next scheduled run, not flip it based on
+    sub-minute fluctuations in consumption or SoC reporting noise.
+    """
+
+    def test_no_flip_under_consumption_noise(self) -> None:
+        """Consumption jitter between ticks must not flip the phase.
+
+        Reproduces the user's 2026-04-27 live symptom.  Drives
+        ``is_effectively_charging`` with a sequence of plausible
+        tick-to-tick net-consumption readings (appliance cycling and solar
+        flicker both routinely swing site load by ±1 kW on second-scale
+        timeframes).  The function must return a single, stable phase —
+        not a different answer for each reading.
+        """
+        hass = _make_hass(
+            coordinator_soc=63.5,
+            battery_capacity_kwh=10.0,
+            headroom_pct=10,
+        )
+        cs = _charge_state(
+            target_soc=90,
+            max_power_w=5000,
+            start=datetime.datetime(2026, 4, 27, 11, 0, 0),
+            end=datetime.datetime(2026, 4, 27, 13, 59, 0),
+            charging_started=False,
+        )
+
+        # Plausible tick-to-tick variation: appliance cycling, BMS
+        # reporting jitter, solar flicker.  All readings are within the
+        # legitimate "house load" band for a 5 kW system.
+        consumption_readings = [1.5, 1.7, 1.6, 1.8, 1.5, 1.4, 1.9, 1.6, 1.7]
+        # "now" positioned right on the boundary where the reading-to-reading
+        # variation straddles the deferred-start threshold — exactly the
+        # conditions under which the user saw rapid state changes.
+        test_time = datetime.datetime(2026, 4, 27, 13, 7, 0)
+
+        results: list[bool] = []
+        for loads_kw in consumption_readings:
+            # Update coordinator so _get_net_consumption reflects this tick.
+            coord = hass.data[TEST_DOMAIN].entries["entry1"].coordinator
+            coord.data = {"SoC": 63.5, "loadsPower": loads_kw, "pvPower": 0.0}
+            with patch(
+                "smart_battery.sensor_base.dt_util.now",
+                return_value=test_time,
+            ):
+                results.append(is_effectively_charging(hass, TEST_DOMAIN, cs))
+
+        # The phase must be a single value across the sequence — no
+        # ping-ponging on noise.  If the sensor flips even once on this
+        # benign fluctuation it reproduces the live symptom.
+        unique_results = set(results)
+        assert len(unique_results) == 1, (
+            f"is_effectively_charging oscillated on consumption noise: "
+            f"sequence={results}, unique={unique_results}, "
+            f"consumption_readings={consumption_readings}. "
+            f"The sensor must hold a stable phase between listener ticks; "
+            f"it may not second-guess charging_started=False on sub-minute "
+            f"input variation."
+        )
+
+    def test_no_flip_under_soc_micro_movement(self) -> None:
+        """0.1% SoC movement (BMS interpolation) must not flip the phase.
+
+        The user's live data shows a 0.1% SoC shift (63.4 → 63.5)
+        triggered a re-deferral and immediate re-charging within 35
+        seconds.  A 0.1% SoC change is below the threshold at which any
+        qualitative phase decision should change.
+        """
+        hass = _make_hass(
+            coordinator_soc=63.5,
+            battery_capacity_kwh=10.0,
+            headroom_pct=10,
+        )
+        cs = _charge_state(
+            target_soc=90,
+            max_power_w=5000,
+            start=datetime.datetime(2026, 4, 27, 11, 0, 0),
+            end=datetime.datetime(2026, 4, 27, 13, 59, 0),
+            charging_started=False,
+        )
+
+        # Pick consumption + time such that the raw algorithm is right on
+        # the boundary (deferred ≈ now).  With consumption=1.6kW and the
+        # sequence below we straddle the transition point and reproduce
+        # the live symptom.
+        test_time = datetime.datetime(2026, 4, 27, 13, 7, 0)
+        soc_sequence = [63.4, 63.5, 63.4, 63.5, 63.6, 63.5, 63.4]
+
+        results: list[bool] = []
+        for soc in soc_sequence:
+            coord = hass.data[TEST_DOMAIN].entries["entry1"].coordinator
+            coord.data = {"SoC": soc, "loadsPower": 1.6, "pvPower": 0.0}
+            with patch(
+                "smart_battery.sensor_base.dt_util.now",
+                return_value=test_time,
+            ):
+                results.append(is_effectively_charging(hass, TEST_DOMAIN, cs))
+
+        unique_results = set(results)
+        assert len(unique_results) == 1, (
+            f"is_effectively_charging oscillated on 0.1% SoC micro-movement: "
+            f"sequence={results}, unique={unique_results}, "
+            f"soc_sequence={soc_sequence}. "
+            f"A 0.1% SoC change (reporting granularity / interpolation "
+            f"noise) is not a qualitative change in system state and "
+            f"must not flip the reported phase."
+        )
+
+    def test_charging_started_true_is_stable(self) -> None:
+        """Inverse case: when charging_started=True, phase stays charging.
+
+        Confirms the stability invariant works in both directions — the
+        phase does not flip to 'deferred' under noisy inputs when the
+        listener has committed to charging.
+        """
+        hass = _make_hass(
+            coordinator_soc=63.5,
+            battery_capacity_kwh=10.0,
+            headroom_pct=10,
+        )
+        cs = _charge_state(
+            target_soc=90,
+            max_power_w=5000,
+            start=datetime.datetime(2026, 4, 27, 11, 0, 0),
+            end=datetime.datetime(2026, 4, 27, 13, 59, 0),
+            charging_started=True,
+        )
+
+        test_time = datetime.datetime(2026, 4, 27, 13, 7, 0)
+        # Heavy noise — should not matter when charging_started=True.
+        for loads_kw in [0.1, 3.0, 0.2, 2.5, 0.3, 2.0]:
+            coord = hass.data[TEST_DOMAIN].entries["entry1"].coordinator
+            coord.data = {"SoC": 63.5, "loadsPower": loads_kw, "pvPower": 0.0}
+            with patch(
+                "smart_battery.sensor_base.dt_util.now",
+                return_value=test_time,
+            ):
+                assert is_effectively_charging(hass, TEST_DOMAIN, cs) is True
+
+    def test_phase_still_transitions_on_qualitative_change(self) -> None:
+        """Stability must not suppress real transitions.
+
+        Once the qualitative input truly justifies a different phase
+        (e.g. now is materially past the deferred start even under the
+        worst-case / low-consumption estimate), the sensor MUST still
+        report the appropriate phase.  Hysteresis that suppresses real
+        signal is tuning, not a root-cause fix (C-031).
+        """
+        hass = _make_hass(
+            coordinator_soc=50.0,
+            battery_capacity_kwh=10.0,
+            headroom_pct=10,
+        )
+        cs = _charge_state(
+            target_soc=90,
+            max_power_w=5000,
+            start=datetime.datetime(2026, 4, 27, 11, 0, 0),
+            end=datetime.datetime(2026, 4, 27, 13, 59, 0),
+            charging_started=False,
+        )
+
+        # Mid-window with a large SoC gap (40%) — well past the latest
+        # plausible deferred start regardless of consumption noise.
+        test_time = datetime.datetime(2026, 4, 27, 13, 50, 0)
+        coord = hass.data[TEST_DOMAIN].entries["entry1"].coordinator
+        coord.data = {"SoC": 50.0, "loadsPower": 0.5, "pvPower": 0.0}
+        with patch(
+            "smart_battery.sensor_base.dt_util.now",
+            return_value=test_time,
+        ):
+            assert is_effectively_charging(hass, TEST_DOMAIN, cs) is True, (
+                "With 40% gap and 9 minutes remaining, the sensor must "
+                "report 'charging' — the listener cannot possibly be "
+                "deferring in this state.  Hysteresis must not suppress "
+                "legitimate transitions."
+            )
+
+
 def _parse_duration_minutes(text: str) -> float:
     """Parse a duration string like '3h 17m' or '42m' into total minutes."""
     hours = 0
