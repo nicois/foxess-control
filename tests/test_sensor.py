@@ -137,13 +137,17 @@ class TestInverterOverrideStatusSensor:
         assert sensor.icon == "mdi:battery-clock"
 
     def test_deferred_past_start_shows_charging(self) -> None:
-        """When deferred start has passed, show charging not waiting."""
+        """When listener's committed deferred-start has passed, show charging."""
         hass = _make_hass(
             smart_charge_state=_charge_state(
                 last_power_w=0,
                 charging_started=False,
                 max_power_w=10500,
                 target_soc=80,
+                # Listener committed "start at 05:17" on its last tick;
+                # at 05:50 the sensor should report charging.  See
+                # smart_battery/sensor_base.py::is_effectively_charging.
+                deferred_start_committed=datetime.datetime(2026, 4, 8, 5, 17, 0),
             )
         )
         mock_coordinator = MagicMock()
@@ -156,7 +160,7 @@ class TestInverterOverrideStatusSensor:
         hass.config_entries.async_get_entry = MagicMock(return_value=mock_entry)
 
         sensor = InverterOverrideStatusSensor(hass, _make_entry())
-        # At 05:50, deferred start (~05:17) has passed
+        # At 05:50, committed deferred-start (05:17) has passed
         with patch(
             "custom_components.foxess_control.sensor.dt_util.now",
             return_value=datetime.datetime(2026, 4, 8, 5, 50, 0),
@@ -264,13 +268,14 @@ class TestSmartOperationsOverviewSensor:
         assert attrs["charge_power_w"] == 0
 
     def test_deferred_past_start_shows_charging(self) -> None:
-        """When deferred start has passed, show charging state not deferred."""
+        """When listener's committed deferred-start has passed, show charging."""
         hass = _make_hass(
             smart_charge_state=_charge_state(
                 last_power_w=0,
                 charging_started=False,
                 max_power_w=10500,
                 target_soc=80,
+                deferred_start_committed=datetime.datetime(2026, 4, 8, 5, 17, 0),
             )
         )
         mock_coordinator = MagicMock()
@@ -796,13 +801,20 @@ class TestChargePowerSensor:
         assert attrs["phase"] == "charging"
 
     def test_transition_shows_max_power(self) -> None:
-        """Before callback fires, show max_power_w not 0."""
+        """Before callback fires, show max_power_w not 0.
+
+        Represents the tick between the listener committing "it's time"
+        (deferred-start in the past) and the listener actually writing the
+        new power to hardware.  The sensor should display the upcoming
+        max_power_w, not the stale 0 from the deferred phase.
+        """
         hass = _make_hass(
             smart_charge_state=_charge_state(
                 last_power_w=0,
                 charging_started=False,
                 max_power_w=10500,
                 target_soc=80,
+                deferred_start_committed=datetime.datetime(2026, 4, 8, 5, 17, 0),
             )
         )
         mock_coordinator = MagicMock()
