@@ -157,3 +157,148 @@ def fake_adapter() -> Any:
     from smart_battery.testing import FakeAdapter
 
     return FakeAdapter()
+
+
+# === PLAYWRIGHT ISOLATION OVERRIDE START ===
+# Narrow the pytest-playwright fixture chain from session- to
+# function-scope so each unit test that uses ``page`` gets a fresh
+# ``sync_playwright`` context AND releases it on teardown.
+#
+# Why this exists
+# ---------------
+# ``pytest-playwright``'s ``playwright`` fixture is
+# ``scope="session"`` and calls
+# ``playwright.sync_api.sync_playwright().start()`` lazily on first
+# use.  Playwright's sync API is a greenlet shim over an asyncio
+# event loop running on the main thread — that loop remains
+# ``running`` from pytest-playwright's perspective until ``.stop()``
+# is called at end-of-session.  While it runs, every
+# ``@pytest.mark.asyncio`` test scheduled after a ``page``-using
+# test on the same xdist worker fails with either
+# ``RuntimeError: Runner.run() cannot be called from a running
+# event loop`` (entry path) or ``RuntimeError: Cannot run the event
+# loop while another loop is running`` (teardown path during
+# ``loop.shutdown_asyncgens``).
+#
+# The flake is intermittent because ``pytest-randomly`` only
+# occasionally schedules ``page``-using tests (currently
+# ``tests/test_card_entity_resolution.py``) before asyncio tests
+# on the same worker.
+#
+# Narrowing to function scope costs a single Chromium cold-start
+# per ``page``-using test (~0.5s each).  With only five unit
+# tests using ``page`` that is negligible.
+#
+# E2E compatibility
+# -----------------
+# ``tests/e2e/conftest.py`` declares a **session-scoped**
+# ``browser_context`` fixture that depends on ``playwright``.  A
+# blanket function-scope override here would cascade into
+# ``tests/e2e/`` and break the E2E suite with ``ScopeMismatch``
+# (the previous attempt — see the pair of reverts at
+# ``69caf66`` / ``960381e`` — destroyed 18/20 E2E shards on CI).
+# To avoid that, ``tests/e2e/conftest.py`` carries a **counter-
+# override** that re-declares ``playwright`` (and the downstream
+# chain) at session scope.  Pytest's child-conftest override rule
+# guarantees the session-scoped fixtures win for tests collected
+# under ``tests/e2e/``; the function-scoped fixtures here apply
+# only to the unit suite at ``tests/``.
+#
+# The override is kept as a marker-delimited block so
+# ``tests/test_playwright_fixture_isolation.py`` can lift it into
+# an isolated sandbox subprocess without dragging in the rest of
+# ``tests/conftest.py`` (which imports simulator / HA machinery
+# that would fail in the sandbox).
+#
+# Refs C-031 (no flaky tests — root cause, not skip/xfail).
+# Refs C-029 (E2E tests protect HA-level behaviour — must not break).
+# Refs C-040 (brand-agnostic tests unaffected — fake_adapter above).
+
+if TYPE_CHECKING:
+    from playwright.sync_api import (
+        Browser,
+        BrowserContext,
+        BrowserType,
+        Page,
+        Playwright,
+    )
+
+
+@pytest.fixture
+def playwright() -> Generator[Playwright, None, None]:
+    """Function-scoped override of pytest-playwright's session-scoped
+    ``playwright`` fixture.
+
+    Starting and stopping ``sync_playwright`` per test releases the
+    greenlet-backed asyncio loop before any subsequent asyncio test
+    runs on the same xdist worker.
+
+    Counter-overridden at session scope in ``tests/e2e/conftest.py``
+    so the E2E ``browser_context`` fixture chain remains valid.
+    """
+    from playwright.sync_api import sync_playwright
+
+    pw = sync_playwright().start()
+    try:
+        yield pw
+    finally:
+        pw.stop()
+
+
+@pytest.fixture
+def browser_type(playwright: Playwright, browser_name: str) -> BrowserType:
+    """Function-scoped override — see ``playwright`` fixture above.
+
+    Must be overridden alongside ``playwright`` because pytest
+    forbids a session-scoped fixture from depending on a
+    function-scoped one; the two scopes must agree down the chain.
+    """
+    return getattr(playwright, browser_name)
+
+
+@pytest.fixture
+def browser(browser_type: BrowserType) -> Generator[Browser, None, None]:
+    """Function-scoped override — see ``playwright`` fixture above.
+
+    Each test gets a fresh Chromium process; the ``sync_playwright``
+    teardown at the end of the test closes it and releases the loop.
+    """
+    browser = browser_type.launch(headless=True)
+    try:
+        yield browser
+    finally:
+        browser.close()
+
+
+@pytest.fixture
+def context(browser: Browser) -> Generator[BrowserContext, None, None]:
+    """Function-scoped override — see ``playwright`` fixture above.
+
+    pytest-playwright's default ``context`` fixture is already
+    function-scoped, but it depends on the session-scoped
+    ``new_context`` callback which pulls in artifact-recording
+    infrastructure we do not need.  A direct ``browser.new_context()``
+    is simpler and keeps the chain fully function-scoped.
+    """
+    ctx = browser.new_context()
+    try:
+        yield ctx
+    finally:
+        ctx.close()
+
+
+@pytest.fixture
+def page(context: BrowserContext) -> Generator[Page, None, None]:
+    """Function-scoped override — see ``playwright`` fixture above.
+
+    Returns a fresh tab; the surrounding context/browser/playwright
+    fixtures close everything on teardown.
+    """
+    pg = context.new_page()
+    try:
+        yield pg
+    finally:
+        pg.close()
+
+
+# === PLAYWRIGHT ISOLATION OVERRIDE END ===

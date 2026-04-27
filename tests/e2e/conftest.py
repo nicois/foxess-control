@@ -97,7 +97,90 @@ def pytest_terminal_summary(terminalreporter: Any, config: Any) -> None:
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
 
-    from playwright.sync_api import BrowserContext, Page, Playwright
+    from playwright.sync_api import (
+        Browser,
+        BrowserContext,
+        BrowserType,
+        Page,
+        Playwright,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Counter-override of the unit-suite pytest-playwright scope narrowing.
+#
+# ``tests/conftest.py`` declares ``playwright`` / ``browser_type`` /
+# ``browser`` / ``context`` / ``page`` at **function** scope so that
+# pytest-playwright's greenlet-backed asyncio loop is torn down at
+# the end of each unit test that uses ``page`` (preventing the
+# ``Runner.run() cannot be called from a running event loop``
+# cross-test flake on xdist workers that happen to run a page-using
+# test before an asyncio test).
+#
+# Pytest's fixture-resolution rule is that a fixture declared in a
+# nearer conftest overrides one declared in a farther parent
+# conftest.  The E2E suite under ``tests/e2e/`` ships its own
+# ``browser_context`` at **session** scope and must therefore have
+# session-scoped ``playwright`` (and downstream chain) visible to
+# tests collected here — otherwise the session-scoped
+# ``browser_context`` hits ``ScopeMismatch`` at setup.  (That is the
+# exact failure that broke 18/20 E2E shards on CI run 25023535568 —
+# reverted at ``69caf66`` and ``960381e``.)
+#
+# These fixtures restore the session scope **only for tests under
+# ``tests/e2e/``**.  The unit-suite function-scoped overrides remain
+# in effect for the rest of ``tests/``.
+#
+# Refs C-029 (E2E tests for HA-dependent behaviour — must not break).
+# Refs C-031 (no flaky tests — root cause).
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def playwright() -> Generator[Playwright, None, None]:
+    """Session-scoped ``playwright`` for the E2E suite only.
+
+    Re-declaring at session scope here wins over the function-scoped
+    override in ``tests/conftest.py`` for tests collected under
+    ``tests/e2e/``.  Required because ``browser_context`` below is
+    session-scoped and cannot depend on a function-scoped fixture.
+    """
+    from playwright.sync_api import sync_playwright
+
+    pw = sync_playwright().start()
+    try:
+        yield pw
+    finally:
+        pw.stop()
+
+
+@pytest.fixture(scope="session")
+def browser_type(playwright: Playwright, browser_name: str) -> BrowserType:
+    """Session-scoped ``browser_type`` for the E2E suite only.
+
+    Mirrors pytest-playwright's default.  Only needed because the
+    unit-suite override in ``tests/conftest.py`` declares it at
+    function scope; without re-declaring here, any consumer that
+    reaches ``browser_type`` via pytest-playwright's session-scoped
+    ``launch_browser`` / ``browser`` fixtures would ScopeMismatch.
+    """
+    return getattr(playwright, browser_name)
+
+
+@pytest.fixture(scope="session")
+def browser(browser_type: BrowserType) -> Generator[Browser, None, None]:
+    """Session-scoped ``browser`` for the E2E suite only.
+
+    Not used directly by E2E tests (``browser_context`` below calls
+    ``playwright.chromium.launch`` itself), but re-declared to keep
+    the full pytest-playwright fixture chain scope-consistent in
+    case any future E2E test wires ``browser`` in.
+    """
+    b = browser_type.launch(headless=True)
+    try:
+        yield b
+    finally:
+        b.close()
 
 
 # ---------------------------------------------------------------------------
