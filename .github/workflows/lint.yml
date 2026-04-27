@@ -24,6 +24,7 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install -e '.[dev]'
+      - run: playwright install --with-deps chromium
       - run: pytest -m "not slow" --tb=short
 
   performance:
