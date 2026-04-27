@@ -267,16 +267,25 @@ def _explain_charge_deferral(
     cs: dict[str, Any],
     current_soc: float | None,
 ) -> str:
-    """Human-readable "why is charge still deferred?" explanation."""
+    """Human-readable "why is charge still deferred?" explanation.
+
+    The deferred-start algorithm is purely a time-budget calculation
+    (``energy_needed / effective_charge_power``); it has no tariff
+    input.  The message must not imply the integration models
+    pricing — that's the user's automation layer (vision.md lists
+    tariff optimisation as a non-goal).  What we can honestly say:
+    the current SoC trajectory projects to reach target without
+    forced charge.
+    """
     target_soc = cs.get("target_soc")
     if current_soc is not None and target_soc is not None:
         gap = target_soc - current_soc
         if gap <= 0:
             return "at or above target — will not force-charge"
         return (
-            f"solar surplus or cheaper-later pricing; waiting to start "
-            f"forced charge (current SoC {current_soc:.1f}%, target "
-            f"{target_soc}%, {gap:.1f}% gap)"
+            f"waiting — SoC trajectory currently projects to reach target "
+            f"without forced charge (current SoC {current_soc:.1f}%, "
+            f"target {target_soc}%, {gap:.1f}% gap)"
         )
     return "waiting for forced-charge deadline"
 
