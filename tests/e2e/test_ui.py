@@ -78,6 +78,69 @@ def _wait_for_card_text(
     return locator.first.text_content() or ""
 
 
+def _wait_for_card_hass(page: Page, tag: str, timeout_ms: int = 30000) -> None:
+    """Wait until ``<tag>._hass`` is truthy (HA has wired the card into its
+    state tree).  Retries on context-destroyed navigation churn.
+
+    ``_find_card`` returns as soon as the element exists, but the element
+    constructor runs synchronously on DOM insertion — before HA's
+    partial-panel-resolver has called ``card.hass = {...}``.  Tests that
+    mutate ``card._hass`` need the initial hass to be in place first;
+    otherwise they either see ``{no_card: true}`` (if they guard on
+    ``!card._hass``) or, worse, inject into a card that HA overwrites
+    with its own ``hass`` update moments later, producing the
+    "expected 4 bar rows, got 0" flake (run 24972009514).
+    """
+    js = f"""() => {{
+        function find(root) {{
+            const el = root.querySelector('{tag}');
+            if (el) return el;
+            for (const n of root.querySelectorAll('*')) {{
+                if (n.shadowRoot) {{
+                    const f = find(n.shadowRoot);
+                    if (f) return f;
+                }}
+            }}
+            return null;
+        }}
+        const card = find(document);
+        // Truthy _hass AND at least one render cycle completed
+        // (shadowRoot populated).  Either condition alone is insufficient:
+        // _hass can be set between ticks with no render yet, and an
+        // empty shadowRoot can mean pre-setConfig.
+        return !!(
+            card
+            && card._hass
+            && card.shadowRoot
+            && card.shadowRoot.childNodes.length > 0
+        );
+    }}"""
+    import time as _time
+
+    deadline = _time.monotonic() + timeout_ms / 1000
+    while True:
+        remaining = int((deadline - _time.monotonic()) * 1000)
+        if remaining <= 0:
+            msg = f"card {tag!r} did not reach _hass-ready within {timeout_ms}ms"
+            raise TimeoutError(msg)
+        try:
+            page.wait_for_function(js, timeout=remaining)
+            return
+        except PlaywrightError as exc:
+            msg = str(exc)
+            if "Execution context was destroyed" not in msg and "navigating" not in msg:
+                raise
+            # Navigation churn — settle and retry within remaining budget.
+            with contextlib.suppress(PlaywrightError):
+                page.wait_for_load_state(
+                    "networkidle",
+                    timeout=min(
+                        int((deadline - _time.monotonic()) * 1000),
+                        15000,
+                    ),
+                )
+
+
 def _find_card(page: Page, tag: str, timeout: int = 30000) -> bool:
     """Check if a custom card element exists anywhere in the page DOM.
 
@@ -1713,6 +1776,19 @@ class TestTaperCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
         _robust_reload(page, settle_ms=3000)
         assert _find_card(page, "foxess-taper-card")
+        # Pre-condition for the injection evaluate below: the card must
+        # already have ``_hass`` wired AND have rendered once.  Without
+        # this wait, two races produce flaky failures:
+        #   (1) ``_hass`` still null → ``{no_card: true}`` branch triggers
+        #       before we get to inject.
+        #   (2) HA pushes its own ``hass`` update between our injection
+        #       and the shadow-DOM query — effectively wiping our
+        #       synthetic state.  Symptom: "expected 4 bar rows, got 0"
+        #       (run 24972009514, 2026-04-27).
+        # Waiting for both ``_hass`` truthy AND the shadowRoot populated
+        # (proof a render cycle completed) ensures the card has passed
+        # HA's initial wire-up churn before we mutate it.
+        _wait_for_card_hass(page, "foxess-taper-card")
 
         raw = page.evaluate(
             """() => {
