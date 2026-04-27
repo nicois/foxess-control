@@ -25,7 +25,14 @@ jobs:
           python-version: "3.13"
       - run: pip install -e '.[dev]'
       - run: playwright install --with-deps chromium
-      - run: pytest -m "not slow" --tb=short
+      # Split into two invocations: pytest-playwright's session-scoped
+      # event loop collides with pytest-asyncio's per-test runners on
+      # Python 3.13 under xdist, causing "Runner.run() cannot be called
+      # from a running event loop" across ~25 unrelated async tests.
+      # Running card-browser tests in a separate pytest process avoids
+      # the plugin-level interference.
+      - run: pytest -m "not slow" --ignore=tests/test_card_entity_resolution.py --tb=short
+      - run: pytest tests/test_card_entity_resolution.py --tb=short
 
   performance:
     runs-on: ubuntu-latest
