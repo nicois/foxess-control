@@ -10,3 +10,4 @@ tests/e2e/screenshots/
 test-artifacts/
 .e2e-build.lock
 .test-count-cache.json
+logs.txt
