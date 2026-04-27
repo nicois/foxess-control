@@ -2010,6 +2010,304 @@ class TestFoxESSPolledSensor:
 
 
 # ---------------------------------------------------------------------------
+# WS power-sensor rolling median (masks single-frame artefacts)
+#
+# Regression guard for production incident 2026-04-27: WebSocket-driven
+# power sensors showed transient single-sample dips to ~20% of true value
+# (e.g. displayed 1.16 kW discharge while physical flow was ~5.4 kW).
+# Fix: 3-sample rolling median at the sensor display layer (DISPLAY-ONLY —
+# raw values on coordinator.data remain intact for the control path).
+# ---------------------------------------------------------------------------
+
+
+class TestWsPowerSensorRollingMedian:
+    """3-sample rolling median on WS-fed power-display sensors.
+
+    The filter sits at ``native_value`` and must not touch the values read
+    by control listeners (C-038 parity: listeners read ``coordinator.data``
+    directly — the filter is per-sensor-entity display state).
+    """
+
+    # Map of coordinator variable name -> descriptor unique_id_suffix.
+    # These are the seven WS-fed power channels that must be filtered.
+    _WS_POWER_VARS = {
+        "batChargePower": "bat_charge_power",
+        "batDischargePower": "bat_discharge_power",
+        "loadsPower": "loads_power",
+        "pvPower": "pv_power",
+        "gridConsumptionPower": "grid_consumption",
+        "feedinPower": "feedin_power",
+        "meterPower": "meter_power",
+    }
+
+    def _make_coordinator(self, data: dict[str, Any] | None = None) -> MagicMock:
+        coordinator = MagicMock()
+        coordinator.data = data
+        return coordinator
+
+    def _find_desc(self, variable: str) -> Any:
+        for d in POLLED_SENSOR_DESCRIPTIONS:
+            if d.variable == variable:
+                return d
+        raise AssertionError(f"no descriptor for {variable}")
+
+    def _feed(
+        self,
+        sensor: FoxESSPolledSensor,
+        coordinator: MagicMock,
+        variable: str,
+        value: float | None,
+    ) -> float | None:
+        """Push one WS sample, then read the displayed value."""
+        if coordinator.data is None:
+            coordinator.data = {}
+        coordinator.data[variable] = value
+        return sensor.native_value
+
+    # -- (a) Single-sample dip on batDischargePower is masked ----------------
+
+    def test_single_sample_dip_on_discharge_is_masked(self) -> None:
+        """Deep dip pattern from 19:44:09 local: 5.39, 5.39, 5.39, dip, 5.39."""
+        variable = "batDischargePower"
+        coordinator = self._make_coordinator({variable: 5.39})
+        desc = self._find_desc(variable)
+        sensor = FoxESSPolledSensor(coordinator, _make_entry(), desc)
+
+        # Seed three steady samples (fills the 3-sample window).
+        assert self._feed(sensor, coordinator, variable, 5.39) == 5.39
+        assert self._feed(sensor, coordinator, variable, 5.39) == 5.39
+        assert self._feed(sensor, coordinator, variable, 5.39) == 5.39
+
+        # Single isolated dip — median({5.39, 5.39, 1.16}) = 5.39.
+        displayed = self._feed(sensor, coordinator, variable, 1.16)
+        assert displayed == 5.39, (
+            f"expected displayed discharge ~5.39 kW (median masks dip), "
+            f"got {displayed} kW"
+        )
+
+        # Next steady sample — median({5.39, 1.16, 5.39}) = 5.39.
+        assert self._feed(sensor, coordinator, variable, 5.39) == 5.39
+
+    # -- (b) Single-sample overshoot is masked ------------------------------
+
+    def test_single_sample_overshoot_is_masked(self) -> None:
+        """Overshoot pattern preceding the dip: 5.39, 6.18, 5.39 -> 5.39."""
+        variable = "batDischargePower"
+        coordinator = self._make_coordinator({variable: 5.39})
+        desc = self._find_desc(variable)
+        sensor = FoxESSPolledSensor(coordinator, _make_entry(), desc)
+
+        self._feed(sensor, coordinator, variable, 5.39)
+        self._feed(sensor, coordinator, variable, 5.39)
+        assert self._feed(sensor, coordinator, variable, 5.39) == 5.39
+
+        # Single overshoot — median({5.39, 5.39, 6.18}) = 5.39.
+        assert self._feed(sensor, coordinator, variable, 6.18) == 5.39
+        # Return to steady — median({5.39, 6.18, 5.39}) = 5.39.
+        assert self._feed(sensor, coordinator, variable, 5.39) == 5.39
+
+    # -- (c) Two consecutive dips are NOT masked ----------------------------
+
+    def test_two_consecutive_dips_are_not_masked(self) -> None:
+        """Confirms the 3-sample window exposes real multi-sample drops.
+
+        Steady 5.39 -> dip 1.0 -> dip 1.1 -> steady 5.39.
+        After the second dip frame the window is {5.39, 1.0, 1.1}, median = 1.1.
+        This ensures the filter cannot hide genuine sustained drops (e.g.
+        inverter throttling below an export cap, which the dashboard must
+        reflect accurately per C-020).
+        """
+        variable = "batDischargePower"
+        coordinator = self._make_coordinator({variable: 5.39})
+        desc = self._find_desc(variable)
+        sensor = FoxESSPolledSensor(coordinator, _make_entry(), desc)
+
+        self._feed(sensor, coordinator, variable, 5.39)
+        self._feed(sensor, coordinator, variable, 5.39)
+        assert self._feed(sensor, coordinator, variable, 5.39) == 5.39
+
+        # First dip — masked by two steady neighbours: median = 5.39.
+        assert self._feed(sensor, coordinator, variable, 1.0) == 5.39
+        # Second consecutive dip — window {5.39, 1.0, 1.1}, median = 1.1.
+        displayed = self._feed(sensor, coordinator, variable, 1.1)
+        assert displayed == pytest.approx(1.1), (
+            f"expected two consecutive dips to surface (median = 1.1), got {displayed}"
+        )
+
+    # -- (d) Real step change is tracked within two samples ------------------
+
+    def test_real_step_change_tracked_within_two_samples(self) -> None:
+        """Steady 5.39 -> step to 2.0 -> hold 2.0 -> display tracks 2.0.
+
+        After the third sample at 2.0 the window is {5.39, 2.0, 2.0};
+        median = 2.0. Confirms the filter tracks real transitions without
+        excessive lag (max 2 samples of smoothing on a step change).
+        """
+        variable = "feedinPower"
+        coordinator = self._make_coordinator({variable: 5.39})
+        desc = self._find_desc(variable)
+        sensor = FoxESSPolledSensor(coordinator, _make_entry(), desc)
+
+        self._feed(sensor, coordinator, variable, 5.39)
+        self._feed(sensor, coordinator, variable, 5.39)
+        assert self._feed(sensor, coordinator, variable, 5.39) == 5.39
+
+        # Step down — median({5.39, 5.39, 2.0}) = 5.39 (still lagging).
+        assert self._feed(sensor, coordinator, variable, 2.0) == 5.39
+        # Hold — median({5.39, 2.0, 2.0}) = 2.0 (caught up).
+        assert self._feed(sensor, coordinator, variable, 2.0) == pytest.approx(2.0)
+        # Continue hold — median({2.0, 2.0, 2.0}) = 2.0.
+        assert self._feed(sensor, coordinator, variable, 2.0) == pytest.approx(2.0)
+
+    # -- (e) Startup with <3 samples returns most recent --------------------
+
+    def test_startup_returns_most_recent_until_window_full(self) -> None:
+        """With 1 sample, display equals that sample; with 2, display is most recent.
+
+        Acceptable alternative behaviour would be median-of-what's-present,
+        but 'most recent' avoids smoothing before enough history exists and
+        matches the current (unfiltered) behaviour on the very first push.
+        """
+        variable = "loadsPower"
+        coordinator = self._make_coordinator({variable: None})
+        desc = self._find_desc(variable)
+        sensor = FoxESSPolledSensor(coordinator, _make_entry(), desc)
+
+        # First sample — returned as-is.
+        assert self._feed(sensor, coordinator, variable, 0.37) == pytest.approx(0.37)
+        # Second sample — returned as-is (most recent).
+        assert self._feed(sensor, coordinator, variable, 0.42) == pytest.approx(0.42)
+        # Third sample — now full: median({0.37, 0.42, 0.40}) = 0.40.
+        assert self._feed(sensor, coordinator, variable, 0.40) == pytest.approx(0.40)
+
+    # -- (f) Other WS sensors are also filtered -----------------------------
+
+    def test_netzeinspeisung_dip_is_masked(self) -> None:
+        """Feed-in sensor (sensor.foxess_netzeinspeisung) is filtered too."""
+        variable = "feedinPower"
+        coordinator = self._make_coordinator({variable: 5.02})
+        desc = self._find_desc(variable)
+        sensor = FoxESSPolledSensor(coordinator, _make_entry(), desc)
+
+        self._feed(sensor, coordinator, variable, 5.02)
+        self._feed(sensor, coordinator, variable, 5.02)
+        assert self._feed(sensor, coordinator, variable, 5.02) == 5.02
+        # Single isolated export dip (from 19:44:09 example: 1.01 vs 5.02).
+        displayed = self._feed(sensor, coordinator, variable, 1.01)
+        assert displayed == pytest.approx(5.02), (
+            f"expected feed-in display ~5.02 kW (median masks dip), got {displayed} kW"
+        )
+
+    def test_all_ws_power_sensors_are_filtered(self) -> None:
+        """All seven WS-fed power channels apply the rolling median."""
+        for variable in self._WS_POWER_VARS:
+            coordinator = self._make_coordinator({variable: 5.0})
+            desc = self._find_desc(variable)
+            sensor = FoxESSPolledSensor(coordinator, _make_entry(), desc)
+
+            self._feed(sensor, coordinator, variable, 5.0)
+            self._feed(sensor, coordinator, variable, 5.0)
+            assert self._feed(sensor, coordinator, variable, 5.0) == pytest.approx(5.0)
+            displayed = self._feed(sensor, coordinator, variable, 1.0)
+            assert displayed == pytest.approx(5.0), (
+                f"{variable}: expected 5.0 kW (median), got {displayed}"
+            )
+
+    # -- (g) Control path is NOT filtered (safety-critical assertion) --------
+
+    def test_control_path_sees_raw_values_not_filtered(self) -> None:
+        """The filter must not leak upstream of what listeners read.
+
+        Listeners read coordinator.data[key] directly (see
+        smart_battery/listeners.py _get_coordinator_value). If the filter
+        accidentally mutated coordinator.data, C-001 (no-import) could fail
+        because the safety-floor calculations would use smoothed power.
+
+        This test asserts that after a dip is fed to the sensor, the raw
+        value remains exactly as written on the coordinator — only the
+        display property smooths it.
+        """
+        variable = "batDischargePower"
+        coordinator = self._make_coordinator({variable: 5.39})
+        desc = self._find_desc(variable)
+        sensor = FoxESSPolledSensor(coordinator, _make_entry(), desc)
+
+        self._feed(sensor, coordinator, variable, 5.39)
+        self._feed(sensor, coordinator, variable, 5.39)
+        self._feed(sensor, coordinator, variable, 5.39)
+
+        # The dip frame: display smoothed, coordinator raw.
+        displayed = self._feed(sensor, coordinator, variable, 1.16)
+        assert displayed == pytest.approx(5.39), "display should be smoothed"
+        assert coordinator.data[variable] == pytest.approx(1.16), (
+            "coordinator.data MUST retain the raw 1.16 kW value — "
+            "control listeners read it directly and safety floors "
+            "(C-001, C-017) depend on raw values"
+        )
+
+        # And grid_consumption ('netzbezug') raw value also unchanged — this
+        # is the field the production control loop uses for no-import check.
+        gvar = "gridConsumptionPower"
+        gdesc = self._find_desc(gvar)
+        gsensor = FoxESSPolledSensor(coordinator, _make_entry(), gdesc)
+        coordinator.data[gvar] = 0.0
+        _ = gsensor.native_value  # prime
+        coordinator.data[gvar] = 0.0
+        _ = gsensor.native_value
+        coordinator.data[gvar] = 0.0
+        _ = gsensor.native_value
+        # Simulate a spurious frame that claims grid import.
+        coordinator.data[gvar] = 0.8
+        _ = gsensor.native_value
+        assert coordinator.data[gvar] == pytest.approx(0.8), (
+            "coordinator.data['gridConsumptionPower'] must retain raw value "
+            "so the control loop's no-import guard sees real measurements"
+        )
+
+    # -- Unavailability: None value must surface unavailability --------------
+
+    def test_none_value_surfaces_unavailability_without_stale_median(self) -> None:
+        """If the coordinator key becomes None, the sensor must report None.
+
+        The filter must not paper over a genuine unavailability by returning
+        a stale median from previous samples.
+        """
+        variable = "batDischargePower"
+        coordinator = self._make_coordinator({variable: 5.39})
+        desc = self._find_desc(variable)
+        sensor = FoxESSPolledSensor(coordinator, _make_entry(), desc)
+
+        self._feed(sensor, coordinator, variable, 5.39)
+        self._feed(sensor, coordinator, variable, 5.39)
+        self._feed(sensor, coordinator, variable, 5.39)
+        # Now the variable goes None — unavailable.
+        coordinator.data[variable] = None
+        assert sensor.native_value is None
+
+    # -- Non-WS sensor (e.g. energy counter) is NOT filtered -----------------
+
+    def test_energy_counter_is_not_filtered(self) -> None:
+        """Only the seven power channels are filtered; energy counters are not.
+
+        A cumulative kWh counter must not be smoothed — that would distort
+        period-energy calculations in HA statistics.
+        """
+        variable = "feedin"  # lifetime feed-in energy kWh
+        coordinator = self._make_coordinator({variable: 100.0})
+        desc = self._find_desc(variable)
+        sensor = FoxESSPolledSensor(coordinator, _make_entry(), desc)
+
+        assert sensor.native_value == pytest.approx(100.0)
+        coordinator.data[variable] = 100.1
+        assert sensor.native_value == pytest.approx(100.1)
+        coordinator.data[variable] = 100.2
+        assert sensor.native_value == pytest.approx(100.2)
+        # A temporarily low value should pass through (no filtering).
+        coordinator.data[variable] = 50.0
+        assert sensor.native_value == pytest.approx(50.0)
+
+
+# ---------------------------------------------------------------------------
 # FoxESSWorkModeSensor
 # ---------------------------------------------------------------------------
 
