@@ -964,6 +964,167 @@ class TestCalculateDischargeDeferredStart:
         assert delta < 20  # well under 20 minutes, not the ~67 min for full SoC
 
 
+class TestGalleryDischargingScenarioBoundary:
+    """Regression tests for the `test_gallery_overview_discharging` flake
+    observed 2026-04-30 in GH CI run 25195325664 (shard 1/20).
+
+    The E2E gallery test calls `smart_discharge` with:
+      * SoC=65%, min_soc=20%, battery=10 kWh
+      * load=1.8 kW, solar=0.5 kW → net_consumption=1.3 kW
+      * default inverter max power (12 kW from `DEFAULT_INVERTER_POWER`)
+      * headroom=10% (default)
+      * window = `_tight_window(30)` → 30 minutes starting 2 minutes
+        before the service call.
+
+    With these parameters `calculate_discharge_deferred_start` returns
+    a deferred start that is only ~2 seconds before `now` for fully
+    fresh coordinator data — well inside the noise floor of the
+    integration's coordinator polling (every 5 s in entity mode).
+    Any slight staleness in `loadsPower` or `pvPower` at service-call
+    time (e.g. an input-number write that has not yet been picked up
+    by the next coordinator poll) makes the computed deferred start
+    fall *after* `now`, and the service creates a deferred session.
+    On the next listener tick (60 s later) the deferred start is
+    still within seconds of `now`, so whether the session transitions
+    to `discharging` depends on sub-second coordinator timing — 120 s
+    of wall time is insufficient margin.
+
+    The gallery test's job is to produce a *visual* of the discharging
+    state — it is not a test of the deferral boundary.  The parameters
+    must therefore land well inside the "must start immediately" side
+    of the boundary, with enough margin to absorb plausible coordinator
+    noise (±0.5 kW on `loadsPower` / `pvPower`).  This test asserts the
+    margin property directly: for the gallery scenario's parameters,
+    `now` must be past the computed deferred start by at least 60 s
+    (one full listener tick) across the full realistic range of net
+    consumption values.
+
+    Root-cause constraint: C-031 (no flaky tests — fix root cause).
+    The "right" fix is to choose gallery-test window/SoC/load values
+    that give a deterministic immediate start, not to widen the 120 s
+    timeout or add retries — those would be symptom-masking.
+    """
+
+    # Mirror the gallery test's parameters verbatim so regressions in
+    # the test's setup are caught here as algorithmic expectations.
+    SOC = 65.0
+    MIN_SOC = 20
+    BATTERY_KWH = 10.0
+    MAX_POWER_W = 12_000  # DEFAULT_INVERTER_POWER when not set in options
+    HEADROOM = 0.10
+    WINDOW_MINUTES = 30
+    START_OFFSET_MINUTES = 2  # _tight_window starts 2 min before now
+
+    # Realistic coordinator-noise range: solar 0.3–0.7 kW, load 1.5–2.0
+    # kW at the moment the service fires.  `net` spans 0.8–1.7 kW.
+    # The gallery test nominal net is 1.3 kW.
+    PLAUSIBLE_NET_CONSUMPTION_KW = (0.8, 1.0, 1.3, 1.5, 1.7)
+
+    # The smallest margin we will tolerate between `now` and the
+    # computed deferred start, in seconds.  One listener tick is 60 s
+    # (SMART_DISCHARGE_CHECK_SECONDS); to be resilient to a single-tick
+    # delay the service must already be past the deferred threshold by
+    # at least this much.
+    MIN_IMMEDIATE_START_MARGIN_S = 60.0
+
+    def _window(self) -> tuple[datetime.datetime, datetime.datetime, datetime.datetime]:
+        """Return (start, end, now) mirroring _tight_window(30).
+
+        `_tight_window` rounds to the current UTC minute and pads
+        start by `START_OFFSET_MINUTES` back.  `now` is a later
+        second within the start minute.  The test picks the worst
+        case: `now` at the very start of the minute (SS=0), giving
+        the maximum possible `end - now` and therefore the tightest
+        deferral boundary.
+        """
+        now = datetime.datetime(2026, 4, 29, 12, 2, 0)
+        start = now - datetime.timedelta(minutes=self.START_OFFSET_MINUTES)
+        end = start + datetime.timedelta(minutes=self.WINDOW_MINUTES)
+        return start, end, now
+
+    def test_gallery_scenario_reaches_immediate_start_with_margin(self) -> None:
+        """Gallery-test parameters must start discharging immediately with
+        at least one listener-tick of margin across plausible net values.
+
+        This asserts the *contract* the gallery test relies on: the
+        service call produces ``discharging_started=True`` (i.e.
+        ``now >= deferred_start``), and the margin is large enough to
+        tolerate coordinator staleness of up to one poll interval.
+        """
+        start, end, now = self._window()
+        failures: list[str] = []
+        for net in self.PLAUSIBLE_NET_CONSUMPTION_KW:
+            deferred = calculate_discharge_deferred_start(
+                self.SOC,
+                self.MIN_SOC,
+                self.BATTERY_KWH,
+                self.MAX_POWER_W,
+                end,
+                net_consumption_kw=net,
+                start=start,
+                headroom=self.HEADROOM,
+                consumption_peak_kw=net,
+            )
+            margin_s = (now - deferred).total_seconds()
+            if margin_s < self.MIN_IMMEDIATE_START_MARGIN_S:
+                failures.append(
+                    f"net_consumption_kw={net:.2f}: "
+                    f"deferred={deferred.isoformat()}, "
+                    f"margin={margin_s:+.1f}s "
+                    f"(require >= {self.MIN_IMMEDIATE_START_MARGIN_S:.0f}s)"
+                )
+        assert not failures, (
+            "Gallery-test parameters sit at the deferral boundary — the "
+            "E2E test will flake when coordinator data is not perfectly "
+            "fresh at service-call time.  Failing cases:\n  " + "\n  ".join(failures)
+        )
+
+    def test_gallery_scenario_immediate_start_independent_of_stale_coordinator(
+        self,
+    ) -> None:
+        """The worst case staleness (coordinator reports zero consumption
+        because the input-number writes have not yet been polled) must
+        also produce immediate start.
+
+        Pre-fix, with the 30-min window and 12 kW inverter, a stale
+        coordinator (`loadsPower=0`, `pvPower=0`) yields
+        ``net_consumption_kw=0`` and pushes the deferred start several
+        minutes past ``now``.  The correct fix is a window / SoC
+        parameter choice that clamps the deferred start to the window
+        ``start`` regardless of net consumption.
+        """
+        start, end, now = self._window()
+        deferred = calculate_discharge_deferred_start(
+            self.SOC,
+            self.MIN_SOC,
+            self.BATTERY_KWH,
+            self.MAX_POWER_W,
+            end,
+            net_consumption_kw=0.0,
+            start=start,
+            headroom=self.HEADROOM,
+            consumption_peak_kw=0.0,
+        )
+        # With zero consumption (stale coordinator), the raw SoC drain
+        # time still puts the deferred start within the window.  The
+        # gallery test's parameters must be chosen so even this worst
+        # case clamps to the window start — i.e. the raw drain time
+        # exceeds the window length.
+        assert deferred <= start, (
+            f"Stale-coordinator worst case does not clamp to start: "
+            f"deferred={deferred.isoformat()}, start={start.isoformat()}. "
+            "The gallery test's window is too long (or SoC too low) for "
+            "the configured inverter power — the deferral boundary is "
+            "inside the window, creating a flake."
+        )
+        # And the effective deferred start equals `start`, so margin
+        # relative to `now` is exactly START_OFFSET_MINUTES.
+        margin_s = (now - deferred).total_seconds()
+        assert margin_s >= self.START_OFFSET_MINUTES * 60, (
+            f"Clamp to start did not apply: margin={margin_s}s"
+        )
+
+
 class TestGridExportLimitDeferral:
     """Tests for grid_export_limit_w effect on discharge deferral (C-037).
 
