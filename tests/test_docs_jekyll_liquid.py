@@ -13,20 +13,32 @@ markdown cards, but they blow up the Pages build with::
 
     Liquid Exception: Liquid syntax error (line 23): Unknown tag 'set' ...
 
-Two escape hatches exist:
+Two escape hatches were historically considered:
 
 1. Wrap the Jinja region(s) in ``{% raw %}...{% endraw %}`` — Liquid
-   emits the content literally and skips tag parsing.
+   emits the content literally and skips tag parsing. **This is
+   the only mechanism that works on GitHub Pages today.**
 2. Add ``render_with_liquid: false`` to the YAML frontmatter of the
-   file — Jekyll skips Liquid entirely for that file (but still
-   renders markdown).
+   file. This is a **Jekyll 4.0+** feature
+   (https://jekyllrb.com/news/2020/03/31/announcing-jekyll-4/).
+   The ``github-pages`` gem (v232) is pinned to Jekyll 3.10.0, so
+   this flag is silently ignored in production. GH CI run
+   25195304627 (2026-04-30) demonstrated this: ``06-tests.md`` had
+   ``render_with_liquid: false`` in its frontmatter AND still blew
+   up with ``Unknown tag 'set'`` at line 432.
 
-This test enforces that any ``docs/**/*.md`` file containing a
-Jinja-style ``{% ... %}`` tag is either wrapped in ``{% raw %}`` or
-has ``render_with_liquid: false`` in its frontmatter. Without this
-guard, a doc author adding HA template examples to the docs tree
-will silently break the Pages deployment on the next push to
-``main``.
+This test therefore enforces a stricter rule than the first
+iteration: every Jinja-style ``{% ... %}`` tag in any
+``docs/**/*.md`` file must be inside a ``{% raw %}...{% endraw %}``
+envelope — *regardless* of whether the file claims
+``render_with_liquid: false`` in its frontmatter, and *regardless*
+of whether the tag sits inside a markdown backtick/code-fence
+(Liquid runs before the markdown pass, so backticks and fences
+mean nothing to it).
+
+Without this guard, a doc author adding HA template examples to
+the docs tree will silently break the Pages deployment on the next
+push to ``main``.
 """
 
 from __future__ import annotations
@@ -49,8 +61,11 @@ DOCS_ROOT = REPO_ROOT / "docs"
 # We key off the opening ``{%`` rather than trying to enumerate every
 # incompatible tag: anything at all between ``{%`` and ``%}`` that is
 # not known-safe-for-Liquid is a risk. The safest enforcement is
-# "every ``{% ... %}`` must be inside a ``{% raw %}...{% endraw %}``
-# envelope, or the file must have ``render_with_liquid: false``".
+# "every ``{% ... %}`` in the document body must be inside a
+# ``{% raw %}...{% endraw %}`` envelope" — ``render_with_liquid:
+# false`` in frontmatter is NOT a valid escape because it's a
+# Jekyll-4.0+ feature and github-pages is still pinned to Jekyll
+# 3.10.
 #
 # Liquid tag tokens that ARE legal at document level (outside raw
 # blocks) and therefore should NOT trigger the guard:
@@ -72,8 +87,12 @@ _TAG_OPEN_RE = re.compile(r"\{%-?\s*(\w+)")
 _RAW_OPEN_RE = re.compile(r"\{%-?\s*raw\s*-?%\}")
 _RAW_CLOSE_RE = re.compile(r"\{%-?\s*endraw\s*-?%\}")
 
-# Frontmatter opt-out: ``render_with_liquid: false`` anywhere in the
-# leading ``---``-fenced YAML block.
+# Frontmatter fence: the ``---``-fenced YAML block at the top of a
+# Jekyll document. We skip *that block* when scanning for Liquid
+# tokens (tokens quoted inside frontmatter comments such as
+# ``# Disable Liquid on {% set %}`` are never passed to the Liquid
+# parser — Jekyll strips the frontmatter before handing the body to
+# Liquid). Everything *after* the second ``---`` is fair game.
 _FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 
@@ -83,22 +102,30 @@ def _docs_markdown_files() -> list[Path]:
     return sorted(p for p in DOCS_ROOT.rglob("*.md") if "_site" not in p.parts)
 
 
-def _frontmatter_opts_out(text: str) -> bool:
-    """True if the file frontmatter sets ``render_with_liquid: false``.
+def _body_and_frontmatter_lines(text: str) -> tuple[str, int]:
+    """Return ``(body_text, frontmatter_line_count)``.
 
-    Jekyll treats any ``---``-fenced YAML block at the start of the
-    file as frontmatter. ``render_with_liquid: false`` inside it tells
-    Jekyll to skip the Liquid pass entirely for this file — exactly
-    what we want for files full of HA Jinja templates.
+    Jekyll treats the ``---``-fenced block at the very top as YAML
+    metadata and does not pass it to Liquid. Anything in the body
+    *is* passed to Liquid — including content inside backticks and
+    fenced code blocks (Liquid runs before the markdown pass, so it
+    has no concept of either).
+
+    Liquid numbers lines starting at 1 within the body (i.e. after
+    the frontmatter strip). GH CI run 25195304627 confirms this:
+    the ``{% set %}`` on source line 443 of ``06-tests.md`` was
+    reported by Liquid as line 432 — which is exactly 443 minus
+    the 11-line frontmatter block. Returning the frontmatter line
+    count lets callers report errors in either coordinate system.
     """
     match = _FRONTMATTER_RE.match(text)
     if not match:
-        return False
-    fm = match.group(1)
-    # Loose regex match — we're not a YAML parser, just checking for
-    # the opt-out flag. A stricter test would import yaml, but that
-    # pulls in a dep for something a one-line regex handles cleanly.
-    return bool(re.search(r"^\s*render_with_liquid\s*:\s*false\s*$", fm, re.MULTILINE))
+        return text, 0
+    frontmatter_text = text[: match.end()]
+    # ``---\n...\n---\n`` — count newlines to get the line count.
+    frontmatter_lines = frontmatter_text.count("\n")
+    body = text[match.end() :]
+    return body, frontmatter_lines
 
 
 def _unescaped_jinja_tags(text: str) -> list[tuple[int, str]]:
@@ -149,29 +176,51 @@ def _unescaped_jinja_tags(text: str) -> list[tuple[int, str]]:
 def test_docs_markdown_is_jekyll_liquid_safe(md_file: Path) -> None:
     """Every ``docs/**/*.md`` file must survive the Jekyll Liquid pass.
 
-    A file fails this test when it contains a Jinja2-style tag such as
-    ``{% set %}`` or ``{% for %}`` that sits outside a
-    ``{% raw %}...{% endraw %}`` envelope AND does not have
-    ``render_with_liquid: false`` in its frontmatter.
+    A file fails this test when it contains a Jinja2-style tag such
+    as ``{% set %}`` or ``{% for %}`` in the document body that sits
+    outside a ``{% raw %}...{% endraw %}`` envelope.
+
+    Note: ``render_with_liquid: false`` in frontmatter is a
+    Jekyll-4.0+ feature and is silently ignored by the ``github-
+    pages`` gem (Jekyll 3.10). It is therefore *not* accepted as an
+    opt-out by this test. Backticks and fenced code blocks are also
+    not accepted — Liquid runs before the markdown pass and cannot
+    see them. The only reliable escape is ``{% raw %}...{% endraw %}``.
+
+    GH CI run 25195304627 (2026-04-30) demonstrated both failure
+    modes simultaneously: ``docs/knowledge/06-tests.md`` had
+    ``render_with_liquid: false`` set AND its offending ``{% set %}``
+    token sat inside a markdown backtick — yet Jekyll still blew up
+    with ``Unknown tag 'set'`` at line 432.
 
     The GitHub Pages build (which publishes ``docs/`` on every push
     to ``main``) will fail with a ``Liquid syntax error`` exactly
     when this guard fires — catch it in CI, not after merge.
     """
     text = md_file.read_text(encoding="utf-8")
+    body, frontmatter_lines = _body_and_frontmatter_lines(text)
 
-    if _frontmatter_opts_out(text):
-        # File has opted out of Liquid processing — no need to check.
-        return
-
-    offenders = _unescaped_jinja_tags(text)
+    offenders = _unescaped_jinja_tags(body)
     rel = md_file.relative_to(REPO_ROOT)
+
+    def _render(ln: int, tag: str) -> str:
+        # Report both Liquid's body-relative line number (what CI
+        # logs) and the absolute source line (what editors jump to).
+        absolute = ln + frontmatter_lines
+        return f"  body line {ln} (source line {absolute}): {{% {tag} ... %}}"
+
     assert not offenders, (
         f"{rel} contains Liquid-incompatible tags that will break the "
         f"Jekyll/GitHub-Pages build:\n"
-        + "\n".join(f"  line {ln}: {{% {tag} ... %}}" for ln, tag in offenders)
+        + "\n".join(_render(ln, tag) for ln, tag in offenders)
         + "\n\nFix options:\n"
         "  (a) wrap the Jinja region(s) in {% raw %}...{% endraw %}\n"
-        "  (b) add ``render_with_liquid: false`` to the frontmatter\n"
-        "  (c) delete the file from docs/ if it should not be published"
+        "      (this is the ONLY mechanism that works on the\n"
+        "      github-pages gem — Jekyll 3.10 — today)\n"
+        "  (b) rephrase to avoid the Jinja-style tokens entirely\n"
+        "  (c) delete the file from docs/ if it should not be published\n"
+        "\n"
+        "NOTE: ``render_with_liquid: false`` in frontmatter is a\n"
+        "Jekyll-4.0+ feature and is silently ignored by github-pages\n"
+        "(Jekyll 3.10). It is NOT a valid escape here."
     )
