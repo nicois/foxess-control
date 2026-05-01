@@ -13,6 +13,21 @@ markdown cards, but they blow up the Pages build with::
 
     Liquid Exception: Liquid syntax error (line 23): Unknown tag 'set' ...
 
+Liquid *also* parses ``{{ ... }}`` as variable interpolation, and
+raises a ``Variable '...' was not properly terminated with regexp:
+/\\}\\}/`` error when the token it finds inside the braces isn't a
+valid Liquid expression — which is exactly what happens when an
+author embeds a Python f-string (e.g. a triple-quoted f-string
+whose body contains ``{{ ... }}`` as a brace escape) or a
+JavaScript object literal in a code block. GH CI run 25199109037
+(2026-04-30) caught this on
+``docs/superpowers/plans/2026-04-20-overview-card-customisation.md``
+line 543::
+
+    Liquid Exception: Liquid syntax error (line 543): Variable
+    '{{ {_JS_FIND_OVERVIEW_CARD}' was not properly terminated with
+    regexp: /\\}\\}/ ...
+
 Two escape hatches were historically considered:
 
 1. Wrap the Jinja region(s) in ``{% raw %}...{% endraw %}`` — Liquid
@@ -28,13 +43,13 @@ Two escape hatches were historically considered:
    up with ``Unknown tag 'set'`` at line 432.
 
 This test therefore enforces a stricter rule than the first
-iteration: every Jinja-style ``{% ... %}`` tag in any
-``docs/**/*.md`` file must be inside a ``{% raw %}...{% endraw %}``
-envelope — *regardless* of whether the file claims
-``render_with_liquid: false`` in its frontmatter, and *regardless*
-of whether the tag sits inside a markdown backtick/code-fence
-(Liquid runs before the markdown pass, so backticks and fences
-mean nothing to it).
+iteration: every Jinja-style ``{% ... %}`` tag AND every
+``{{ ... }}`` variable interpolation in any ``docs/**/*.md`` file
+must be inside a ``{% raw %}...{% endraw %}`` envelope —
+*regardless* of whether the file claims ``render_with_liquid:
+false`` in its frontmatter, and *regardless* of whether the token
+sits inside a markdown backtick/code-fence (Liquid runs before the
+markdown pass, so backticks and fences mean nothing to it).
 
 Without this guard, a doc author adding HA template examples to
 the docs tree will silently break the Pages deployment on the next
@@ -82,6 +97,14 @@ _LIQUID_SAFE_TAGS = frozenset(
 # Matches ``{% <word> ...`` — captures the first token after ``{%``
 # so we can tell whether it's a Liquid-safe tag or not.
 _TAG_OPEN_RE = re.compile(r"\{%-?\s*(\w+)")
+# Matches ``{{`` — Liquid variable interpolation. ANY occurrence
+# outside a ``{% raw %}`` envelope will be parsed by Liquid as a
+# variable and will raise
+# ``Variable '...' was not properly terminated with regexp: /\}\}/``
+# if the inner tokens aren't valid Liquid. This is exactly the
+# failure mode GH CI run 25199109037 hit on the Python f-string
+# ``f"""() => {{ ... }}"""`` in the overview-card plan.
+_VAR_OPEN_RE = re.compile(r"\{\{")
 # Matches ``{% raw %}`` and ``{% endraw %}`` (with optional whitespace
 # trimmers ``-``).
 _RAW_OPEN_RE = re.compile(r"\{%-?\s*raw\s*-?%\}")
@@ -129,9 +152,18 @@ def _body_and_frontmatter_lines(text: str) -> tuple[str, int]:
 
 
 def _unescaped_jinja_tags(text: str) -> list[tuple[int, str]]:
-    """Return ``(line_number, tag_token)`` pairs for every Liquid-
-    incompatible ``{% ... %}`` tag that sits outside a
+    """Return ``(line_number, token)`` pairs for every Liquid-
+    incompatible token that sits outside a
     ``{% raw %}...{% endraw %}`` envelope.
+
+    Two classes of offender are reported:
+
+    * ``{% <tag> ... %}`` where ``<tag>`` is not in
+      ``_LIQUID_SAFE_TAGS`` — reported as the tag token
+      (``"set"``, ``"for"``, etc.).
+    * Any ``{{`` — Liquid parses it as variable interpolation and
+      blows up if the inner tokens aren't a valid Liquid
+      expression. Reported as the literal ``"{{"``.
 
     Lines are 1-based to match Liquid's error reporting.
     """
@@ -139,8 +171,8 @@ def _unescaped_jinja_tags(text: str) -> list[tuple[int, str]]:
     in_raw = False
     for lineno, line in enumerate(text.splitlines(), start=1):
         # Walk the line character-by-character so that ``{% raw %}``
-        # and the offending tag on the same line are handled in
-        # order.  (In practice, our docs put each tag on its own
+        # and the offending token on the same line are handled in
+        # order.  (In practice, our docs put each token on its own
         # line, but a robust scanner handles both.)
         idx = 0
         while idx < len(line):
@@ -152,19 +184,33 @@ def _unescaped_jinja_tags(text: str) -> list[tuple[int, str]]:
                 in_raw = False
                 idx += close.end()
                 continue
-            # Not in raw — look for the next ``{%``.
-            open_ = _TAG_OPEN_RE.search(remainder)
-            if open_ is None:
+            # Not in raw — look for the next ``{%`` or ``{{``,
+            # whichever comes first.
+            tag_open = _TAG_OPEN_RE.search(remainder)
+            var_open = _VAR_OPEN_RE.search(remainder)
+            if tag_open is None and var_open is None:
                 break
-            # Is this ``{% raw %}``?
-            if _RAW_OPEN_RE.match(remainder, open_.start()):
-                in_raw = True
-                idx += open_.end()
-                continue
-            tag = open_.group(1)
-            if tag not in _LIQUID_SAFE_TAGS:
-                offenders.append((lineno, tag))
-            idx += open_.end()
+            # Pick whichever is earlier in the remainder.
+            if tag_open is not None and (
+                var_open is None or tag_open.start() < var_open.start()
+            ):
+                # ``{% ... %}`` branch.
+                if _RAW_OPEN_RE.match(remainder, tag_open.start()):
+                    in_raw = True
+                    idx += tag_open.end()
+                    continue
+                tag = tag_open.group(1)
+                if tag not in _LIQUID_SAFE_TAGS:
+                    offenders.append((lineno, tag))
+                idx += tag_open.end()
+            else:
+                # ``{{`` variable-interpolation branch. Any
+                # occurrence outside a raw block is a risk —
+                # Liquid will try to parse the inside as a
+                # variable expression.
+                assert var_open is not None  # for type-checkers
+                offenders.append((lineno, "{{"))
+                idx += var_open.end()
     return offenders
 
 
@@ -203,16 +249,20 @@ def test_docs_markdown_is_jekyll_liquid_safe(md_file: Path) -> None:
     offenders = _unescaped_jinja_tags(body)
     rel = md_file.relative_to(REPO_ROOT)
 
-    def _render(ln: int, tag: str) -> str:
+    def _render(ln: int, token: str) -> str:
         # Report both Liquid's body-relative line number (what CI
         # logs) and the absolute source line (what editors jump to).
         absolute = ln + frontmatter_lines
-        return f"  body line {ln} (source line {absolute}): {{% {tag} ... %}}"
+        if token == "{{":
+            display = "{{ ... }} (variable interpolation)"
+        else:
+            display = f"{{% {token} ... %}}"
+        return f"  body line {ln} (source line {absolute}): {display}"
 
     assert not offenders, (
-        f"{rel} contains Liquid-incompatible tags that will break the "
+        f"{rel} contains Liquid-incompatible tokens that will break the "
         f"Jekyll/GitHub-Pages build:\n"
-        + "\n".join(_render(ln, tag) for ln, tag in offenders)
+        + "\n".join(_render(ln, token) for ln, token in offenders)
         + "\n\nFix options:\n"
         "  (a) wrap the Jinja region(s) in {% raw %}...{% endraw %}\n"
         "      (this is the ONLY mechanism that works on the\n"
