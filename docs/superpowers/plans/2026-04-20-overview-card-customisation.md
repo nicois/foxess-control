@@ -527,6 +527,7 @@ Update `tests/e2e/ha_config/.storage/lovelace`:
 
 - [ ] **Step 2: Add E2E test verifying hidden boxes don't render**
 
+{% raw %}
 ```python
 def test_custom_boxes_hides_unconfigured(
     self,
@@ -576,9 +577,11 @@ def test_custom_boxes_hides_unconfigured(
     assert "house" not in result, "House box should be hidden"
     assert "grid" not in result, "Grid box should be hidden"
 ```
+{% endraw %}
 
 - [ ] **Step 3: Add E2E test verifying custom label renders**
 
+{% raw %}
 ```python
 def test_custom_boxes_label_override(
     self,
@@ -616,9 +619,11 @@ def test_custom_boxes_label_override(
     assert label is not None, "Solar label not found in custom card"
     assert "PV" in label, f"Expected 'PV' label, got '{label}'"
 ```
+{% endraw %}
 
 - [ ] **Step 4: Add E2E test verifying box order matches config**
 
+{% raw %}
 ```python
 def test_custom_boxes_order(
     self,
@@ -664,6 +669,7 @@ def test_custom_boxes_order(
         f"Expected [battery, solar] order, got {order}"
     )
 ```
+{% endraw %}
 
 - [ ] **Step 5: Run pre-commit and unit tests**
 
@@ -686,6 +692,7 @@ git commit -m "test(overview): E2E tests for box show/hide, order, and label ove
 
 - [ ] **Step 1: Add test that default card (no `boxes` key) still renders all four nodes**
 
+{% raw %}
 ```python
 def test_default_config_renders_all_four_boxes(
     self,
@@ -718,6 +725,7 @@ def test_default_config_renders_all_four_boxes(
         f"Default card should show all 4 boxes in order, got {types}"
     )
 ```
+{% endraw %}
 
 - [ ] **Step 2: Run full pre-commit + unit tests**
 
