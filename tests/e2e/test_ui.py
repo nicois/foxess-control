@@ -2593,14 +2593,23 @@ class TestGalleryScreenshots:
         ha_e2e: HAClient,
         connection_mode: str,
     ) -> None:
-        """Overview card: during active discharge with battery output visible."""
+        """Overview card: during active discharge with battery output visible.
+
+        The 15-minute window is deliberately tight relative to the battery's
+        natural drain time (SoC=65% → min_soc=20% is ~45 min at 12 kW inverter
+        with 1.3 kW net consumption).  This forces the deferred-start algorithm
+        to clamp to the window ``start`` regardless of coordinator-data
+        freshness at service-call time, eliminating the boundary fragility
+        that caused the 2026-04-30 flake in GH CI run 25195325664.  See
+        ``TestGalleryDischargingScenarioBoundary`` for the contract.
+        """
         set_inverter_state(
             connection_mode, foxess_sim, ha_e2e, soc=65, solar_kw=0.5, load_kw=1.8
         )
         ha_e2e.wait_for_numeric_state(
             "sensor.foxess_battery_soc", "ge", 64, timeout_s=90
         )
-        start, end = _tight_window(30)
+        start, end = _tight_window(15)
         ha_e2e.call_service(
             "foxess_control",
             "smart_discharge",

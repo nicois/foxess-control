@@ -1007,12 +1007,13 @@ class TestGalleryDischargingScenarioBoundary:
 
     # Mirror the gallery test's parameters verbatim so regressions in
     # the test's setup are caught here as algorithmic expectations.
+    # If the gallery test is retuned, update these constants too.
     SOC = 65.0
     MIN_SOC = 20
     BATTERY_KWH = 10.0
     MAX_POWER_W = 12_000  # DEFAULT_INVERTER_POWER when not set in options
     HEADROOM = 0.10
-    WINDOW_MINUTES = 30
+    WINDOW_MINUTES = 15  # see test_gallery_overview_discharging in tests/e2e/test_ui.py
     START_OFFSET_MINUTES = 2  # _tight_window starts 2 min before now
 
     # Realistic coordinator-noise range: solar 0.3–0.7 kW, load 1.5–2.0
