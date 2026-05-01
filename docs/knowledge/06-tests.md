@@ -4,10 +4,11 @@ level: 6
 last_verified: 2026-04-27
 traces_up: [02-constraints.md, 04-design/]
 # This file describes the Jekyll/Liquid safety test and quotes the
-# Jinja tag names literally as examples.  Disable Jekyll's Liquid
-# preprocessing so the "inline" tag references don't collide with
-# the parser on publish.
-render_with_liquid: false
+# Jinja tag names literally as examples.  The section that quotes
+# those tokens wraps them in a ``{% raw %}...{% endraw %}`` envelope
+# so Jekyll's Liquid parser treats them as literal text on publish.
+# (``render_with_liquid: false`` was tried here but is a Jekyll-4.0+
+# feature and is silently ignored by github-pages / Jekyll 3.10.)
 ---
 # Test Inventory
 
@@ -436,14 +437,18 @@ table (so post-mortem analysis isn't reduced to a bare counter).
 **Source**: `tests/test_docs_jekyll_liquid.py` (25 tests,
 parametrised over every `docs/**/*.md`)
 
+{% raw %}
 A static-scan test that blocks Jekyll/Liquid syntax errors in
 published docs *before* they break the GitHub Pages build.  The
 `pages-build-deployment` workflow processes `docs/` via
 Jekyll+Liquid on every push to `main`, and HA template examples
 (`{% set %}`, `{% if %}`, `{% for %}` — legitimate Jinja that
 users copy into Lovelace markdown cards) collide with Liquid's
-tag parser.  Files can opt out with `render_with_liquid: false`
-frontmatter or wrap Jinja in `{% raw %}` blocks.
+tag parser.  Fix: wrap Jinja regions in `{% raw %}...{% endraw %}`.
+(Note: `render_with_liquid: false` frontmatter is a Jekyll-4.0+
+feature and is silently ignored by github-pages, which is pinned
+to Jekyll 3.10 — `{% raw %}` is the only reliable escape.)
+{% endraw %}
 
 | Test | Verifies | Constraint |
 |---|---|---|

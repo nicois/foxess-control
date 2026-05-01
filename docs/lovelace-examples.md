@@ -3,12 +3,12 @@
 # the ``content: |`` blocks below). Jekyll's Liquid preprocessor
 # does not understand Jinja's ``{% set %}`` / ``{% if %}`` / ``{% for %}``
 # tags and errors out on them, which breaks the GitHub Pages build.
-# ``render_with_liquid: false`` tells Jekyll to skip its Liquid
-# pass for this one file — markdown rendering still happens
-# normally, so the page still publishes, just without Liquid
-# interpretation of the HA template examples (which is what we
-# want: users should see the literal HA syntax to copy/paste).
-render_with_liquid: false
+# Fix: the Jinja-heavy code blocks below are wrapped in a
+# ``{% raw %}...{% endraw %}`` envelope so Liquid treats the
+# content literally. (``render_with_liquid: false`` was tried
+# here first but is a Jekyll-4.0+ feature silently ignored by
+# github-pages / Jekyll 3.10 — ``{% raw %}`` is the only reliable
+# escape.)
 ---
 # Lovelace templates for FoxESS Control attributes
 
@@ -43,6 +43,7 @@ conditional rendering — sections disappear cleanly when the
 attribute is absent, so it works in every session phase (idle,
 charge, discharge, deferred, suspended) without error.
 
+{% raw %}
 ```yaml
 type: markdown
 title: FoxESS session reasoning
@@ -100,6 +101,7 @@ content: |
   *(lower ratio = BMS accepting less than requested; `·` marks low-count bins)*
   {% endif %}
 ```
+{% endraw %}
 
 ### What each section does
 
