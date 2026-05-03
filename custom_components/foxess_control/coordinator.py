@@ -69,6 +69,41 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._soc_last_bat_kw: float = 0.0  # net: positive=charging
         # Periodic SoC extrapolation between REST polls
         self._soc_interp_cancel: Callable[[], None] | None = None
+        # Solar-seen runtime state: True once any pvPower > 0 has been
+        # observed from any source (REST or WS).  Sticky — never reverts
+        # within the process lifetime (does not persist across restarts).
+        # Used by the overview card to swap the solar box for a
+        # gen-load display on AC-coupled / battery-only inverters where
+        # PV fields are permanently zero.  See C-020.
+        self._solar_seen: bool = False
+
+    @property
+    def solar_seen(self) -> bool:
+        """Return True if any pvPower > 0 has been observed this process.
+
+        Sticky — once True, never reverts.  Consumed by the overview
+        card via the ``solar_seen`` attribute on the ``pv_power``
+        sensor to suppress the stuck-zero solar reading on
+        AC-coupled / battery-only installations.
+        """
+        return self._solar_seen
+
+    def _observe_pv_power(self, value: Any) -> None:
+        """Update the sticky ``solar_seen`` flag from a raw pvPower reading.
+
+        Defensive against garbage: only a numeric value strictly
+        greater than zero counts.  ``None``, missing keys, negatives,
+        and non-numeric values are ignored.  Once True, the flag
+        cannot be cleared by subsequent zero/garbage readings.
+        """
+        if self._solar_seen or value is None:
+            return
+        try:
+            numeric = float(value)
+        except (ValueError, TypeError):
+            return
+        if numeric > 0:
+            self._solar_seen = True
 
     def _get_capacity_kwh(self) -> float:
         """Read battery capacity from config (needed for SoC integration)."""
@@ -330,6 +365,10 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._ws_last_time = now
         data["_data_source"] = "api"
         data["_data_last_update"] = dt_util.utcnow().isoformat()
+        # Update sticky solar-seen flag from this REST poll and expose
+        # the current state on every data tick (see _observe_pv_power).
+        self._observe_pv_power(data.get("pvPower"))
+        data["_solar_seen"] = self._solar_seen
         self._schedule_soc_extrapolation()
         return data
 
@@ -498,6 +537,14 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._soc_interpolated is not None:
             ws_data = dict(ws_data) if not isinstance(ws_data, dict) else ws_data
             ws_data["_soc_interpolated"] = self._soc_interpolated
+
+        # Update sticky solar-seen flag from this WS message.  Always
+        # expose the current flag state in ws_data so the merged
+        # coordinator data reflects it on every tick (sensors read
+        # _solar_seen to surface a solar_seen attribute to the card).
+        self._observe_pv_power(ws_data.get("pvPower"))
+        ws_data = dict(ws_data) if not isinstance(ws_data, dict) else ws_data
+        ws_data["_solar_seen"] = self._solar_seen
 
         ws_data["_data_source"] = "ws"
         ws_data["_data_last_update"] = dt_util.utcnow().isoformat()
