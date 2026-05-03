@@ -601,6 +601,18 @@ boxes:
 
 Each entry in `boxes` can be a string shorthand (`"solar"`) or an object with `type`, `label`, and `icon` properties. Boxes not listed are hidden. Omit `boxes` entirely to show all four with defaults.
 
+#### Gen Load fallback for sites with no solar
+
+If the inverter has not reported positive `pvPower` since Home Assistant started, the solar box renders as **Gen Load** — showing house consumption and a ⚡ icon in place of the usual sun. The moment any positive solar reading arrives, the box reverts to its normal Solar rendering and stays there for the rest of the process lifetime (a later zero-solar reading does not flip back).
+
+This is automatic and needs no configuration. It's designed for:
+
+- AC-coupled inverters (e.g. the AC1 series) that have no MPPT inputs at all
+- Battery-only hybrid installs where the PV strings are disconnected
+- Any site where a permanently-stuck `0.0 kW` solar reading is noise rather than information
+
+If you set an explicit `label` or `icon` on the solar box, your overrides win — the fallback only applies to the default rendering.
+
 #### Entity overrides
 
 All entities are auto-discovered. To override:
