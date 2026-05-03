@@ -621,14 +621,19 @@ class TestOverviewCard:
         set_inverter_state(
             connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5, solar_kw=1.0
         )
-        # In cloud mode, set_inverter_state() returns as soon as the
-        # simulator has been updated; wait for the next REST poll to
-        # propagate solar_kw into the FoxESS coordinator (which sets
-        # solar_seen=True and is what keeps the solar box rendered
-        # under D-052).
-        ha_e2e.wait_for_numeric_state(
-            "sensor.foxess_solar_power", "ge", 0.9, timeout_s=60
-        )
+        # In cloud mode, set_inverter_state() writes to the simulator
+        # but does not trigger a coordinator poll — the next scheduled
+        # REST poll is up to 60s away.  Reload the integration to force
+        # an immediate poll, then wait for solar_power to reflect the
+        # simulator value.  The coordinator's _observe_pv_power() will
+        # flip solar_seen=True on that poll, which keeps the solar box
+        # rendered under D-052.  Mirrors the pattern in
+        # test_pv_values_consistent_with_solar_total.
+        if connection_mode == "cloud":
+            ha_e2e.reload_integration()
+            ha_e2e.wait_for_numeric_state(
+                "sensor.foxess_solar_power", "ge", 0.9, timeout_s=120
+            )
         _robust_reload(page, settle_ms=2000)
 
         types = page.wait_for_function(
