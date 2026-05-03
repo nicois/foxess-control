@@ -610,8 +610,17 @@ class TestOverviewCard:
         ha_e2e: HAClient,
         connection_mode: str,
     ) -> None:
-        """Card with no boxes config renders all four nodes in default order."""
-        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
+        """Card with no boxes config renders all four nodes in default order.
+
+        Requires a positive ``solar_kw`` because the solar box auto-hides
+        (D-052) when the integration has not observed a pvPower reading
+        above SOLAR_SEEN_THRESHOLD_KW recently — default simulator has
+        no solar, so without this setup the solar box would be hidden
+        by design.
+        """
+        set_inverter_state(
+            connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5, solar_kw=1.0
+        )
         _robust_reload(page, settle_ms=2000)
 
         types = page.wait_for_function(
