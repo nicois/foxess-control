@@ -24,7 +24,6 @@ const _OV_TRANSLATIONS = {
   en: {
     title: "FoxESS Overview",
     solar: "Solar",
-    gen_load: "Gen Load",
     house: "House",
     grid: "Grid",
     battery: "Battery",
@@ -38,7 +37,6 @@ const _OV_TRANSLATIONS = {
   de: {
     title: "FoxESS Übersicht",
     solar: "Solar",
-    gen_load: "Gen Load",
     house: "Haus",
     grid: "Netz",
     battery: "Batterie",
@@ -52,7 +50,6 @@ const _OV_TRANSLATIONS = {
   fr: {
     title: "FoxESS Aperçu",
     solar: "Solaire",
-    gen_load: "Gen Load",
     house: "Maison",
     grid: "Réseau",
     battery: "Batterie",
@@ -66,7 +63,6 @@ const _OV_TRANSLATIONS = {
   nl: {
     title: "FoxESS Overzicht",
     solar: "Zon",
-    gen_load: "Gen Load",
     house: "Huis",
     grid: "Net",
     battery: "Batterij",
@@ -80,7 +76,6 @@ const _OV_TRANSLATIONS = {
   es: {
     title: "FoxESS Resumen",
     solar: "Solar",
-    gen_load: "Gen Load",
     house: "Casa",
     grid: "Red",
     battery: "Batería",
@@ -94,7 +89,6 @@ const _OV_TRANSLATIONS = {
   it: {
     title: "FoxESS Panoramica",
     solar: "Solare",
-    gen_load: "Gen Load",
     house: "Casa",
     grid: "Rete",
     battery: "Batteria",
@@ -108,7 +102,6 @@ const _OV_TRANSLATIONS = {
   pl: {
     title: "FoxESS Przegląd",
     solar: "Solar",
-    gen_load: "Gen Load",
     house: "Dom",
     grid: "Sieć",
     battery: "Bateria",
@@ -122,7 +115,6 @@ const _OV_TRANSLATIONS = {
   pt: {
     title: "FoxESS Visão geral",
     solar: "Solar",
-    gen_load: "Gen Load",
     house: "Casa",
     grid: "Rede",
     battery: "Bateria",
@@ -136,7 +128,6 @@ const _OV_TRANSLATIONS = {
   "zh-hans": {
     title: "FoxESS 概览",
     solar: "光伏",
-    gen_load: "Gen Load",
     house: "家庭",
     grid: "电网",
     battery: "电池",
@@ -150,7 +141,6 @@ const _OV_TRANSLATIONS = {
   ja: {
     title: "FoxESS 概要",
     solar: "太陽光",
-    gen_load: "Gen Load",
     house: "家庭",
     grid: "系統",
     battery: "バッテリー",
@@ -322,12 +312,13 @@ class FoxESSOverviewCard extends HTMLElement {
 
   /** Read the solar_seen attribute from the pv_power entity.
    *
-   * Returns ``true`` when the integration has observed a positive
-   * pvPower at least once in the current process (sticky).  When the
-   * attribute is absent (older integration, entity not yet discovered),
-   * we default to ``true`` so the solar box renders as it always has
-   * — only an *explicit* ``solar_seen === false`` triggers the
-   * gen-load fallback.
+   * Returns ``true`` when the integration has recently observed a
+   * pvPower reading above SOLAR_SEEN_THRESHOLD_KW; the flag reverts
+   * to ``false`` after SOLAR_SEEN_TIMEOUT_MIN minutes of no such
+   * reading.  When the attribute is absent (older integration,
+   * entity not yet discovered), we default to ``true`` so the solar
+   * box renders as it always has — only an *explicit*
+   * ``solar_seen === false`` hides the default solar rendering.
    */
   _solarSeen(solarEntityId) {
     if (!solarEntityId || !this._hass) return true;
@@ -377,23 +368,19 @@ class FoxESSOverviewCard extends HTMLElement {
     const t = box.type;
     if (!t) return "";
     if (t === "solar") {
-      // Gen-load fallback: while the integration has never observed a
-      // pvPower > 0 (AC-coupled, battery-only, or permanently-zero PV
-      // installs), swap the solar box for a house/generator-load
-      // display using ``loadsPower``.  This is driven by the sticky
-      // ``solar_seen`` attribute published on the pv_power sensor —
-      // see coordinator.solar_seen / _observe_pv_power.  Config-level
+      // Hide the solar box while the integration has not observed a
+      // real-ish pvPower reading recently (AC-coupled, battery-only,
+      // or permanently-zero PV installs; overnight on sites with
+      // solar).  The ``solar_seen`` attribute on the pv_power sensor
+      // is True iff a reading above SOLAR_SEEN_THRESHOLD_KW arrived
+      // within SOLAR_SEEN_TIMEOUT_MIN minutes — see
+      // coordinator.solar_seen / _observe_pv_power.  Config-level
       // overrides (box.label / box.icon) still take precedence so
-      // power users can force either mode.
+      // power users can repurpose the solar slot for another sensor
+      // (see D-036 box customisation).
       const solarSeen = this._solarSeen(eid.solar_entity);
       if (!solarSeen && box.label == null && box.icon == null) {
-        const load = this._num(eid.house_entity);
-        const found = this._exists(eid.house_entity);
-        return this._renderNode(
-          "solar gen-load", "⚡", this._t("gen_load"),
-          found, this._formatKw(load), load != null && load > 0.01,
-          "", eid.house_entity
-        );
+        return "";
       }
       const solar = this._num(eid.solar_entity);
       const pv1 = this._num(eid.pv1_entity);

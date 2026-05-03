@@ -2,10 +2,10 @@
 project: FoxESS Control
 created: 2026-04-14
 last_updated: 2026-05-03
-last_reflection: 2026-05-03T16:20:00+10:00
+last_reflection: 2026-05-03T20:30:00+10:00
 workflow_state:
-  last_check: 2026-05-03T16:20:00+10:00
-  last_update: 2026-05-03T16:20:00+10:00
+  last_check: 2026-05-03T20:30:00+10:00
+  last_update: 2026-05-03T20:30:00+10:00
   last_coverage: 2026-05-03T16:20:00+10:00
   last_review: null
   last_auto: null
@@ -1085,6 +1085,62 @@ driven by user review" rather than a mid-beta bug fix — the old
 behaviour wasn't broken, it was wrong for the problem. The beta
 release-train is the right place for this kind of correction:
 no user has pinned 1.0.15-beta.1 as a stable-dependency yet.
+
+### 2026-05-03 — Mid-beta pivot #2 (D-052 Gen Load swap → hide)
+
+**Change**: The "Gen Load" swap introduced in 1.0.15-beta.1 and
+refined in beta.2 is replaced by a plain hide-the-box rule. When
+`solar_seen=False` and the user has not overridden the solar box,
+the overview card renders nothing in that slot and the
+responsive grid reflows to 3 boxes (House / Grid / Battery).
+Explicit `boxes:` config with a `solar` entry and a custom
+`label`/`icon` still renders — the escape hatch for users who
+want to repurpose the slot for a genuinely different sensor
+(e.g. a generator).
+
+**Why the Gen Load swap was wrong**: the user asked "what is
+the difference between house and gen load?" — and the honest
+answer was "none; both read `loadsPower`." The swap displayed
+duplicate information under two different labels in the default
+4-box layout, which violates C-020 (operational transparency)
+by creating uncertainty about whether two boxes measure
+different quantities. The swap's framing made sense verbally
+("show the gen load instead of solar"); it failed the moment
+both boxes were visible on the same dashboard.
+
+**Survey of alternatives**: before committing to hide, surveyed
+the other data the integration exposes (session phase, daily
+energy totals, battery forecast, inverter model, net flow
+direction). None offered a "genuinely different, single-number,
+session-agnostic, viewport-friendly" fit — each either
+duplicated existing cards, suited a chart not a single cell, or
+belonged on the dedicated forecast/control/taper cards. Hiding
+the slot with an opt-in override via D-036 is the right default.
+
+**Pattern noted**: this is the second mid-beta pivot on the
+same feature (sticky→timeout in beta.2, swap→hide in beta.3),
+driven in both cases by the user's review of what the feature
+*does on a live dashboard* rather than what it *says on paper*.
+The original fix-agent brief was internally consistent; it just
+specified the wrong observable outcomes. Worth flagging this as
+a recurring pattern: when a feature touches a visible dashboard
+slot, the "does this feel right once I'm looking at it" loop
+with the user is shorter and more reliable than trying to
+anticipate everything in advance.
+
+**Tree update**: D-052 Decision / Rationale / Alternatives
+rewritten. Added both the Gen Load swap (beta.1/beta.2) and
+the "net load" option to rejected alternatives with concrete
+reasons. Traces line updated to point at the new test class
+`TestOverviewCardSolarHiddenMode` (was `TestOverviewCardGenLoadMode`).
+`06-tests.md` section for the card test class updated: +1
+case (escape-hatch test), renamed class, docstring reflects
+hide-not-swap.
+
+**Code**: `_renderBox("solar")` returns `""` when `solar_seen`
+is False and no user override is present; the `gen_load` i18n
+key has been removed from all 10 locales; no references remain.
+Full non-slow suite 1006 green.
 
 ### Structure refinement: "listener commits, sensor reads"
 

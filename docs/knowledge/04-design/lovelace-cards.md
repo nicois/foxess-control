@@ -304,7 +304,7 @@ BMS-taper concern don't need.
 
 **Traces**: D-040 (targeted DOM updates depend on this constraint)
 
-### D-052: "No solar yet seen" detection with Gen Load fallback
+### D-052: Hide solar box on the overview card when no solar is detected
 
 **Decision**: `FoxESSDataCoordinator` tracks the timestamp
 `_solar_last_seen` of the most recent `pvPower` reading strictly
@@ -321,15 +321,18 @@ payload as `data["_solar_seen"]` and lifted onto the `pv_power`
 sensor via `extra_state_attributes["solar_seen"]` — no other
 sensor carries it (no attribute pollution), no new HA entity, no
 persistence across restarts. `foxess-overview-card` reads the
-attribute: while it is `False`, `_renderBox("solar")` substitutes
-label `"Gen Load"` (i18n key `gen_load`, translated across all 10
-locales), value `loadsPower`, and icon `⚡` in place of the usual
-sun. Once the flag flips, the box reverts to the canonical Solar
-rendering; if solar subsequently goes quiet for longer than the
-timeout, the box swaps back to Gen Load automatically. User-
-supplied `box.label` / `box.icon` overrides still win; a missing
-attribute defaults to `True` in the card so legacy installs that
-pre-date this change see no visible difference.
+attribute: while it is `False` **and the user has not supplied an
+explicit `label` or `icon` override for the solar box**,
+`_renderBox("solar")` returns `""` — the solar node is omitted and
+the responsive CSS grid reflows to a 3-box layout (House / Grid /
+Battery) per D-036. Once the flag flips to `True`, the box renders
+canonically; if solar subsequently goes quiet for longer than the
+timeout, it hides again. Explicit user config (a `solar` entry in
+`boxes:` with a custom `label` or `icon`) always renders — this is
+the documented escape hatch for users who want to repurpose the
+slot for, e.g., a generator power sensor. A missing attribute
+defaults to `True` in the card so legacy installs that pre-date
+this change see no visible difference.
 
 **Context**: AC-coupled FoxESS models (AC1 series) have no MPPT
 inputs; battery-only hybrid installs may have the PV strings
@@ -360,6 +363,21 @@ Placing the state on the brand-specific coordinator rather than
 is trivially liftable when a second brand needs the same
 behaviour.
 
+**Why hide and not swap**: the 1.0.15-beta.1 / beta.2 versions
+rendered a "Gen Load" box over `loadsPower` in place of the solar
+reading. That value is exactly what the House box shows, so the
+default 4-box layout displayed two boxes with the same number,
+differently labelled — duplicate information, which is
+operational *noise* (C-020 failure mode: the UI creates
+uncertainty about whether two boxes are really measuring the same
+thing). Hiding the slot and letting the card reflow to 3 boxes is
+both cleaner and more honest: the site doesn't have solar
+generation right now, and the UI reflects that. Users who want to
+repurpose the slot for something genuinely distinct — a
+generator power sensor, a secondary load meter — can do so via
+D-036 box customisation. The default should be the honest
+minimal layout, not a relabelled duplicate.
+
 **Tuning constants** (both in `coordinator.py`):
 - `SOLAR_SEEN_THRESHOLD_KW = 0.05` — the minimum positive reading
   that counts. Any strictly-lower value (including zero) is
@@ -379,11 +397,27 @@ behaviour.
 **Classification**: other
 
 **Alternatives considered**:
-- **Sticky for the lifetime of the process** (the original 1.0.15-
-  beta.1 design) — rejected because it kept claiming "solar" on
-  AC-coupled / unwired installs that happened to see a single
-  transient positive reading during the day. The timeout-based
-  version is honest overnight without being brittle to cloud dips.
+- **"Gen Load" swap** (1.0.15-beta.1 / beta.2) — rejected in
+  beta.3: the swapped box read `loadsPower`, which is exactly
+  what the House box already shows, so the default layout ended
+  up with two visually-distinct boxes displaying the same number.
+  Users rightly asked "what's the difference?" — a direct C-020
+  failure. Hiding the slot entirely is more honest, and D-036
+  box customisation provides the escape hatch for users who
+  want to repurpose it for a genuinely different sensor.
+- **Sticky for the lifetime of the process** (1.0.15-beta.1) —
+  rejected in beta.2: on AC-coupled / unwired installs that saw
+  a single transient positive reading, the flag stayed `True`
+  and the card kept claiming solar for the rest of the process —
+  opposite of the feature's intent. The timeout-based version is
+  honest overnight without being brittle to cloud dips.
+- **Net load** (loadsPower − batDischargePower) in the hidden
+  slot — rejected: genuinely distinct from the House box, but
+  (a) the Grid box already shows whether grid is importing,
+  (b) the number is negative when battery covers the house, which
+  is confusing at a glance, and (c) the combination of "what
+  fraction of load is coming from where" is better served by
+  the ApexCharts energy-flow example in `lovelace-examples.md`.
 - **Persisted flag** (survives HA restarts) — rejected: locks in
   historical state against today's hardware; a newly commissioned
   PV install would stay in Gen Load mode forever without a manual
@@ -412,7 +446,7 @@ behaviour.
 C-026 (meaningful state surfaced via sensor attribute rather than
 log inspection), tests in `tests/test_solar_seen.py`
 (TestCoordinatorSolarSeenFlag, TestPvPowerSensorSolarSeenAttribute,
-TestOverviewCardGenLoadMode).
+TestOverviewCardSolarHiddenMode).
 
 ### D-053: Locale-safe operations_entity via `_resolve(key)`
 

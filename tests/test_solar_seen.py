@@ -447,13 +447,19 @@ def _mount_overview(
     pv_power: float | None,
     loads_power: float | None,
     solar_seen: bool,
+    boxes: list[Any] | None = None,
 ) -> dict[str, Any]:
     """Mount the card with a fresh hass and return the solar node's
-    rendered text + label + value for assertion."""
+    rendered text + label + value for assertion (or ``solarRendered=False``
+    when the solar box has been hidden)."""
     result = page.evaluate(
         """async (opts) => {
             const card = document.createElement("foxess-overview-card");
-            card.setConfig({});
+            const config = {};
+            if (opts.boxes !== null) {
+                config.boxes = opts.boxes;
+            }
+            card.setConfig(config);
             document.getElementById("root").appendChild(card);
             card.hass = window.makeHass(opts);
             // entity_map fetch is async — wait a tick then reassign hass
@@ -465,9 +471,10 @@ def _mount_overview(
             const solarNode = sr.querySelector(".node.solar");
             return {
                 fullText: sr.textContent || "",
+                solarRendered: solarNode !== null,
                 solarLabel: solarNode
                     ? (solarNode.querySelector(".node-label")?.textContent || "")
-                    : "__no-solar-node__",
+                    : "",
                 solarValue: solarNode
                     ? (solarNode.querySelector(".node-value")?.textContent || "")
                     : "",
@@ -476,19 +483,27 @@ def _mount_overview(
                     : "",
             };
         }""",
-        {"pvPower": pv_power, "loadsPower": loads_power, "solarSeen": solar_seen},
+        {
+            "pvPower": pv_power,
+            "loadsPower": loads_power,
+            "solarSeen": solar_seen,
+            "boxes": boxes,
+        },
     )
     return dict(result)
 
 
-class TestOverviewCardGenLoadMode:
-    """Overview card renders 'Gen Load' in place of solar until the
-    coordinator flag flips true.
+class TestOverviewCardSolarHiddenMode:
+    """Overview card hides the solar box while the coordinator flag is
+    False — any default 'gen load' rendering duplicates the House box
+    and is not useful.  Power users can restore / repurpose the slot
+    via the existing ``boxes:`` config (D-036).
     """
 
-    def test_fresh_start_shows_gen_load_instead_of_solar(self, page: Page) -> None:
-        """solar_seen=False → solar box shows 'Gen Load' and the
-        loadsPower value instead of the pvPower value.
+    def test_fresh_start_hides_solar_box(self, page: Page) -> None:
+        """solar_seen=False with default config → solar box is NOT
+        rendered at all.  The card's responsive grid handles the 3-box
+        layout (House / Grid / Battery) via D-036.
         """
         _inject_overview_card(page)
         result = _mount_overview(
@@ -497,19 +512,41 @@ class TestOverviewCardGenLoadMode:
             loads_power=1.2,
             solar_seen=False,
         )
-        assert "Gen Load" in result["solarLabel"], (
-            "Solar box should show 'Gen Load' label when solar_seen=False. "
+        assert result["solarRendered"] is False, (
+            "Solar box must be hidden when solar_seen=False with default "
+            "config — showing the house load under a different label "
+            "duplicates the existing House box.  "
+            f"Got label: {result['solarLabel']!r}, value: {result['solarValue']!r}"
+        )
+
+    def test_explicit_solar_box_config_renders_even_when_hidden(
+        self, page: Page
+    ) -> None:
+        """solar_seen=False BUT the user has listed a custom solar box
+        with label/icon overrides in ``boxes:`` → the box renders using
+        the user's config.  This is the escape hatch for users who
+        want to repurpose the solar slot (e.g. for a generator sensor).
+        """
+        _inject_overview_card(page)
+        result = _mount_overview(
+            page,
+            pv_power=0.0,
+            loads_power=1.2,
+            solar_seen=False,
+            boxes=[
+                {"type": "solar", "label": "Generator", "icon": "⚙"},
+                "house",
+                "grid",
+                "battery",
+            ],
+        )
+        assert result["solarRendered"] is True, (
+            "Solar box must render when the user has explicitly "
+            "overridden it in boxes: config, even if solar_seen=False."
+        )
+        assert "Generator" in result["solarLabel"], (
+            "User-supplied label must be honoured.  "
             f"Got label: {result['solarLabel']!r}"
-        )
-        assert "1.20 kW" in result["solarValue"], (
-            "Solar box should show the loadsPower value (1.2 kW) when in "
-            f"gen-load mode. Got value: {result['solarValue']!r}"
-        )
-        # The sun icon should be replaced — any non-sun fallback is
-        # acceptable, but the default "☀️" is explicitly NOT appropriate.
-        assert "☀" not in result["solarIcon"], (
-            "Solar box icon should not be the sun when in gen-load mode. "
-            f"Got icon: {result['solarIcon']!r}"
         )
 
     def test_after_solar_seen_shows_normal_solar(self, page: Page) -> None:
