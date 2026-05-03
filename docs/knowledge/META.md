@@ -1,8 +1,14 @@
 ---
 project: FoxESS Control
 created: 2026-04-14
-last_updated: 2026-04-27
-last_reflection: 2026-04-27T08:34:52+10:00
+last_updated: 2026-05-03
+last_reflection: 2026-05-03T16:20:00+10:00
+workflow_state:
+  last_check: 2026-05-03T16:20:00+10:00
+  last_update: 2026-05-03T16:20:00+10:00
+  last_coverage: 2026-05-03T16:20:00+10:00
+  last_review: null
+  last_auto: null
 ---
 # Knowledge Tree Meta
 
@@ -955,3 +961,101 @@ collisions; it is now retired.
 no `[RETIRED]` marker documents its removal.  Tolerated, not fixed,
 because adding a tombstone now would just add noise; the gap in the
 numbering sequence is harmless.
+
+### 2026-05-03 — Update pass (1.0.14 release + solar-seen feature)
+
+**Changes detected**: 22 commits since 2026-04-27 (3c71d91..981a276),
+culminating in the 1.0.14 release and the same-day addition of the
+solar-seen runtime flag + Gen Load card fallback.
+
+**Actions taken**:
+- `04-design/lovelace-cards.md`: added **D-052** (solar-seen runtime
+  flag with Gen Load card fallback — coordinator-internal boolean,
+  not an HA sensor, not persisted; surfaced via the pv_power sensor
+  attribute; card label/icon swap while flag is False) and **D-053**
+  (locale-safe `_resolve(key)` for control + taper cards — fixes the
+  DE/FR "no active operations" bug by consulting the `entity_map` WS
+  command before falling back to the English default).
+- `04-design/websocket-realtime.md`: added **D-054** (3-sample
+  rolling median on the seven WS-fed display power channels — lives
+  on `FoxESSPolledSensor`, filter sits below the C-038 parity
+  boundary so listeners / safety continue to read raw values, only
+  instantaneous power filtered not energy / SoC / voltage / current /
+  temperature / frequency).
+- `04-design/smart-charge.md`: added **D-055** (charge listener
+  commits `deferred_start_committed` each tick and
+  `is_effectively_charging()` reads it rather than recomputing —
+  fixes the phase-flapping defect observed 2026-04-27; same formula
+  both sides so C-038 parity preserved, but the sensor becomes a
+  stable read-only view).
+- `05-coverage.md`: D-052/D-053/D-054/D-055 added to P-005 row;
+  D-052 added to C-026 row; D-054/D-055 added to C-038 row; D-052/
+  D-053/D-054/D-055 added to C-020 row. Classification summary
+  updated to 17 safety / 14 pacing / 28 other (57 entries total;
+  54 unique IDs + 3 known collisions). Summary footer totals
+  refreshed.
+- `06-tests.md`: added five new sections — "Rolling-Median WS Power
+  Display Filter (D-054)", "Solar-Seen Flag and Gen Load Card
+  Fallback (D-052)", "Locale-Safe Operations Entity Resolution
+  (D-053)", "is_effectively_charging Stability (D-055)", plus two
+  rows extending the Test Infrastructure Guards table for the
+  pytest-playwright event-loop isolation fix and the
+  `_safe_screenshot` / `_safe_evaluate` retry helpers.
+
+**Priority / inversion check**: no inversions introduced. All four
+new D-NNNs serve P-005 with `Trades against: none`. Classification
+spread: D-052 other, D-053 other, D-054 pacing, D-055 other.
+
+**Audit state at end of pass** (`scripts/knowledge_audit.py`):
+clean — same three pre-existing tolerated collisions (D-014,
+D-015, D-041), same silently-retired D-024, same 1 UNCONSTRAINED
+priority (P-004 — aspirational by design), no new upward gaps.
+
+**Observations**:
+- This pass establishes a recurring useful pattern: the "listener
+  commits, sensor reads" structure (D-055 for charge phase, D-051
+  for discharge transparency attributes). Worth generalising as a
+  design principle if a third instance appears — "sensor-side
+  phase / state derivation is a read of the listener's committed
+  decision, not an independent recomputation with the same
+  formula".
+- D-054 is the project's first pure display-layer smoothing
+  decision. Classification = pacing because it trades precision
+  for display stability; the C-038 boundary clarification (filter
+  sits below parity) is important — explicitly documenting that
+  the listener and the sensor continue to call the same function
+  with the same arguments, but the sensor adds a post-hoc smoother,
+  preserves the "single source of truth" intuition without
+  breaking the useful filter.
+- D-052's removal-style question ("could we *just not render* the
+  solar box when the inverter has never reported solar?") was
+  considered but rejected in the fix-agent's brief: substituting
+  Gen Load conveys more information to the user (they get house
+  load in the spot where solar would live) and avoids reflowing
+  the card layout for the common AC-coupled case. This aligns
+  with the "removal D-NNNs are powerful" heuristic — it was
+  checked, just not selected.
+
+**Rank / priority changes**: none. P-001..P-007 unchanged.
+
+**Recommended for next pass**: no review triggers fired this
+pass (5 D-NNN threshold: we added 4). If one more significant
+D-NNN lands or >90 days elapse, `/project-overview review` is due.
+
+### Structure refinement: "listener commits, sensor reads"
+
+Added as a recurring pattern worth promoting to a constraint if
+a third instance appears. Current instances:
+- D-051 (pacing transparency attributes — charge and discharge
+  listeners commit `*_deferred_reason`, `discharge_safety_floor_w`,
+  etc.; the card renders the attributes verbatim).
+- D-055 (charge phase — listener commits `deferred_start_committed`;
+  `is_effectively_charging()` reads it).
+
+Both fixes eliminated sensor/listener divergence caused by
+re-running the same algorithm at different cadences with different
+inputs. A future constraint candidate: "display-path phase and
+transparency state is a read of the listener's most recent
+committed decision, not a sensor-side recomputation." Not added as
+C-NNN yet — will graduate from this meta-observation if a third
+instance fires.

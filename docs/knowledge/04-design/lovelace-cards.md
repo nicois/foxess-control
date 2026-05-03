@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 4
-last_verified: 2026-04-27
+last_verified: 2026-05-03
 traces_up: [../02-constraints.md]
 traces_down: [../06-tests.md]
 ---
@@ -303,3 +303,143 @@ BMS-taper concern don't need.
 `detail-row` pattern).
 
 **Traces**: D-040 (targeted DOM updates depend on this constraint)
+
+### D-052: "No solar yet seen" detection with Gen Load fallback
+
+**Decision**: `FoxESSDataCoordinator` tracks a single boolean
+`solar_seen` flag initialised `False` on every process start. The
+first `pvPower > 0` observation on either the REST update path
+(`_async_update_data`) or the WS injection path
+(`inject_realtime_data`) flips the flag to `True`; it remains `True`
+for the lifetime of the process and cannot revert. Zero, `None`,
+negative, and missing `pvPower` readings are defensive no-ops (the
+helper `_observe_pv_power` early-returns once the flag is set, so
+subsequent ticks pay no further cost). The flag is surfaced on
+every coordinator payload as `data["_solar_seen"]` and lifted onto
+the `pv_power` sensor via `extra_state_attributes["solar_seen"]` —
+no other sensor carries it (no attribute pollution), no new HA
+entity is introduced, and no persistence crosses restarts per the
+feature spec. `foxess-overview-card` reads the attribute: while it
+is `False`, `_renderBox("solar")` substitutes label `"Gen Load"`
+(i18n key `gen_load`, translated across all 10 locales), value
+`loadsPower`, and icon `⚡` in place of the usual sun. Once the
+flag flips, the box reverts to the canonical Solar rendering.
+User-supplied `box.label` / `box.icon` overrides still win; a
+missing attribute defaults to `True` in the card so legacy installs
+that pre-date this change see no visible difference.
+
+**Context**: AC-coupled FoxESS models (AC1 series) have no MPPT
+inputs; battery-only hybrid installs may have the PV strings
+physically disconnected. On all these configurations the overview
+card showed a permanently-stuck `0.0 kW` solar reading with a sun
+icon, which is pure noise — a user glancing at the dashboard
+couldn't tell whether their panels had failed or whether the
+inverter genuinely had no PV capability.
+
+**Rationale**: The cheapest signal that distinguishes "panels
+attached but dark" from "no panels" is "has the inverter ever
+reported positive PV power since HA started?". A fresh start in
+daylight will flip the flag within one poll cycle on any working
+PV install; an AC-coupled or unwired install never flips. Storing
+process-lifetime runtime state (not persisted) is deliberate: on
+restart we optimistically re-check rather than locking in a
+historical mode that may have become wrong (e.g. new panels
+commissioned). Making the flag sticky WITHIN a process prevents
+night-time / cloud flicker from re-hiding the solar display on
+normal installs. Placing it on the brand-specific coordinator
+rather than `smart_battery/` respects C-039 (no brand leakage) —
+the helper is trivially liftable when a second brand needs the
+same behaviour.
+
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: other
+
+**Alternatives considered**:
+- **Persisted flag** (survives HA restarts) — rejected: locks in
+  historical state against today's hardware; a newly commissioned
+  PV install would stay in Gen Load mode forever without a manual
+  reset.
+- **New HA sensor entity** for solar-seen — rejected: adds an entity
+  with a single boolean value the card is the only consumer of, and
+  pollutes the entity registry. Surfacing as an `extra_state_attribute`
+  on the existing `pv_power` sensor gives the card exactly what it
+  needs without a registry entry.
+- **Query `pv1Volt`/`pv2Volt` from Open API** to definitively detect
+  unwired MPPT strings — rejected as premature: the daylight-power
+  signal is sufficient for the UX problem, adds no new API calls, and
+  doesn't require a separate sunny-noon sampling heuristic. The
+  voltage query remains available if a future brand needs hardware-
+  definitive detection.
+- **AC-coupled model list** — rejected: hard-coded model maps rot as
+  FoxESS ships variants, and brand-portability (P-007) is easier to
+  maintain with a behavioural detector.
+
+**Traces**: C-020 (replace stuck-zero noise with actionable state),
+C-026 (meaningful state surfaced via sensor attribute rather than
+log inspection), tests in `tests/test_solar_seen.py`
+(TestCoordinatorSolarSeenFlag, TestPvPowerSensorSolarSeenAttribute,
+TestOverviewCardGenLoadMode).
+
+### D-053: Locale-safe operations_entity via `_resolve(key)`
+
+**Decision**: Both `foxess-control-card` and `foxess-taper-card`
+resolve the smart_operations sensor entity ID through the shared
+`_resolve(key)` helper used by the forecast and history cards.
+Resolution order is explicit: (1) user-supplied
+`operations_entity:` YAML config if present; (2)
+`_entityMap["smart_operations"]` returned by the
+`foxess_control/entity_map` WS command; (3) the English default
+`sensor.foxess_smart_operations` as a last-resort fallback. The
+taper card previously didn't fetch the entity map at all — the
+fix wires the WS subscription into its `hass.connection.subscribeMessage`
+call so the map is available before first render.
+
+**Context**: A user running HA in German saw "Keine aktiven
+Vorgänge" on the control card despite `charge_active=true` and
+`charge_phase=scheduled` on the backing sensor. HA derives entity
+IDs from the *translated* friendly name when the entity is first
+created — in DE the real entity is
+`sensor.foxess_intelligente_steuerung`, in FR
+`sensor.foxess_operations_intelligentes`, and so on. The control
+and taper cards had a hard-coded English default for
+`operations_entity`, so on every non-English install they read an
+entity that didn't exist and rendered the "idle" placeholder.
+
+**Rationale**: The integration already publishes an authoritative
+`entity_map` via a WS command; two of the four custom cards
+(forecast, history) already consulted it via `_resolve(key)`. The
+remaining two cards were inconsistently hard-coded. Centralising
+resolution through the same helper (a) fixes the bug everywhere it
+manifests, (b) preserves explicit YAML overrides for users with
+pinned dashboards, and (c) structurally prevents regression into
+direct `this._config.operations_entity` reads — enforced by a
+source-level test that greps the card JS for the disallowed
+pattern.
+
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: other
+
+**Alternatives considered**:
+- **Hard-code every supported locale** — rejected: rots with every
+  FoxESS rename, and new HA locales silently break. The entity_map
+  is the authoritative runtime source; reading it is O(1) per
+  render.
+- **Ask the user to pin `operations_entity` in YAML** — rejected:
+  non-English users were the ones hitting the bug, and asking them
+  to debug an entity-registry mismatch before the card works is a
+  direct C-020 violation (users can't determine system state from
+  the UI alone).
+- **Compute entity ID from `translation_key`** — rejected: HA exposes
+  translation keys but the transform from key to entity ID happens
+  inside the registry using the friendly-name slugification rules at
+  *entity creation time*, which a card can't replay deterministically.
+
+**Traces**: C-020 (operational transparency across locales),
+tests in `tests/test_card_entity_resolution.py` — four cases fail
+against pre-fix card code (DE/FR control card, DE taper card,
+taper map subscription), three passed throughout (backwards-compat
+YAML override, graceful degradation when WS command fails, source-
+level guard against direct `this._config.operations_entity`
+reads).

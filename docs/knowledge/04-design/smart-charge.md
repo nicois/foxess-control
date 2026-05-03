@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: Smart Charge
-last_verified: 2026-04-21
+last_verified: 2026-05-03
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -157,6 +157,81 @@ analogue for charge).
 software complement); D-006 (trajectory tracking still applies after
 re-deferral);
 `tests/test_smart_battery_algorithms.py::TestCalculateChargePower`
+
+### D-055: Listener commits `deferred_start` for sensor stability
+
+**Decision**: The charge listener writes its tick-local
+`calculate_deferred_start()` result to the charge-session state as
+`deferred_start_committed` on every tick (normal path, re-deferral
+path, and post-completion clear). The phase-display helper
+`is_effectively_charging()` (`smart_battery/sensor_base.py`) reads
+the committed value instead of independently recomputing the
+deferral. Both sides still call the same algorithm with the same
+parameters, preserving C-038 parameter parity — the sensor
+becomes a **stable read-only view of the listener's most recent
+decision**, not a second recomputation. When the committed value is
+absent (never populated, or post-completion clear), the sensor
+falls back to the pre-commit recomputation for the next tick at
+most and degrades gracefully.
+
+**Context**: Observed 2026-04-27 on a live charge session
+(11:00–13:59 window) — `sensor.foxess_smart_operations` flipped
+phase many times per minute (including a 5-second flip at
+02:39:01 → 02:39:36) while the inverter's actual work mode only
+transitioned twice in the same 3 hours. The control-card title
+("Smart Charge" vs "Charge Deferred") faithfully tracked the
+sensor's thrashing state, so the user saw the card flap with no
+corresponding real-world state change. Root cause:
+`is_effectively_charging()` recomputed `calculate_deferred_start()`
+from live coordinator data on every ~5s WS refresh; input jitter
+of ±1 kW in `net_consumption_kw` (appliances cycling, solar
+flicker) swung the computed `deferred_start` by 10–30 minutes
+tick-to-tick, crossing the `now >= deferred` threshold in both
+directions. SoC jitter of 0.1% (BMS reporting granularity /
+interpolation noise) had the same effect. The listener itself,
+which runs at the slower charge-adjustment cadence (5 min), was
+not flapping — the sensor was.
+
+**Rationale**: The listener's per-tick decision IS the state that
+matters; the display should reflect it rather than race it with a
+parallel computation at a different cadence. Writing
+`deferred_start_committed` to the same session-state dict the
+sensor reads is a single scalar field with no additional cost.
+C-038 is preserved at a finer granularity: both sides use the same
+formula and the same inputs, but the sensor no longer recomputes
+with different (stale or jittery) inputs than the listener saw.
+This mirrors the discharge-side pattern introduced earlier, where
+pacing-transparency attributes are committed by the listener and
+read verbatim by the sensor (D-051).
+
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: other
+
+**Alternatives considered**:
+- **Hysteresis in the sensor's recomputed threshold** — rejected:
+  adds a tuning parameter, still lets the sensor's phase diverge
+  from the listener's last actual decision under pathological
+  input sequences, and violates the single-source-of-truth
+  intuition.
+- **Low-pass filter on `net_consumption_kw`** — rejected: the
+  listener legitimately needs the raw value to pace correctly
+  (C-001, C-017); smoothing would affect pacing as well as
+  display.
+- **Move phase computation fully into the listener and eliminate
+  the sensor-side fallback** — considered but rejected for this
+  change: preserving a graceful fallback for the first tick after
+  startup / re-enable is worthwhile; removing the fallback would
+  block the sensor from ever reporting phase before the first
+  committed value landed.
+
+**Traces**: C-038 (sensor-listener parameter parity — both sides
+call the same algorithm with the same inputs; the sensor now
+reads the listener's committed result rather than re-running it);
+`tests/test_is_effectively_charging_stability.py::TestIsEffectivelyChargingStability`
+(four cases: no flip under ±0.1% SoC + ±0.4 kW consumption noise,
+plus neighbourhood cases confirming real qualitative changes
+still flip phase promptly).
 
 ## Key Behaviours
 

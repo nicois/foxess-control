@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 6
-last_verified: 2026-04-27
+last_verified: 2026-05-03
 traces_up: [02-constraints.md, 04-design/]
 # This file describes the Jekyll/Liquid safety test and quotes the
 # Jinja tag names literally as examples.  The section that quotes
@@ -304,6 +304,79 @@ Key tests:
   interaction, feedin deadline
 - Graceful degradation when data missing
 
+## Rolling-Median WS Power Display Filter (D-054)
+
+**Constraints**: C-020, C-038
+**Source**: `tests/test_sensor.py::TestFoxESSPolledSensor` (rolling-median
+cases, 2026-04-28)
+
+Verifies the 3-sample rolling median applied in `FoxESSPolledSensor.
+native_value` to the seven WS-fed display power channels
+(batChargePower, batDischargePower, loadsPower, pvPower,
+gridConsumptionPower, feedinPower, meterPower). Tests cover: fewer
+than three samples returns the most recent value (no latency for the
+first push); three-sample window returns the median, rejecting a
+single-frame outlier; cumulative energy counters / SoC / voltage /
+current / temperature / frequency are NOT filtered; `coordinator.data`
+retains raw values for the control path (C-038 parity preserved);
+`None` raw readings surface as unavailability rather than a stale
+median.
+
+## Solar-Seen Flag and Gen Load Card Fallback (D-052)
+
+**Constraints**: C-020, C-026
+**Source**: `tests/test_solar_seen.py` (16 tests, 2026-05-03)
+
+Three test classes across Python + Playwright:
+
+- `TestCoordinatorSolarSeenFlag` (10): fresh coordinator starts with
+  `solar_seen=False`; `_observe_pv_power` flips on first positive via
+  both REST (`_async_update_data`) and WS (`inject_realtime_data`)
+  paths; sticky once true — subsequent zero / None / negative /
+  missing readings do not revert; tiny positive (0.001 kW) counts as
+  "seen"; neighbourhood cases confirm defensive no-ops.
+- `TestPvPowerSensorSolarSeenAttribute` (3): the pv_power sensor
+  exposes `solar_seen` as an `extra_state_attribute`; it reflects the
+  current flag state; non-pv sensors do NOT expose the attribute (no
+  attribute pollution).
+- `TestOverviewCardGenLoadMode` (3, Playwright): with `solar_seen=False`
+  the solar box renders `Gen Load` label + `loadsPower` value + `⚡`
+  icon; with `solar_seen=True` it renders normal Solar; sticky —
+  `solar_seen=True` with `pvPower=0` still shows Solar.
+
+## Locale-Safe Operations Entity Resolution (D-053)
+
+**Constraints**: C-020
+**Source**: `tests/test_card_entity_resolution.py` (7 tests,
+2026-04-25)
+
+Drives the control-card + taper-card JS in a Playwright-chromium
+stub, reproducing the exact DE-locale symptom where the hard-coded
+English default prevented the card from finding the translated
+`smart_operations` entity ID. Four cases fail against pre-fix card
+code (DE and FR control-card resolution, DE taper-card resolution,
+taper-card entity_map WS subscription); three passed throughout
+(backwards-compat for explicit `operations_entity:` YAML overrides,
+graceful degradation when the WS command fails, source-level guard
+that greps card JS for direct `this._config.operations_entity`
+reads).
+
+## is_effectively_charging Stability (D-055)
+
+**Constraints**: C-038, C-020
+**Source**: `tests/test_is_effectively_charging_stability.py::TestIsEffectivelyChargingStability`
+(4 tests, 2026-04-28)
+
+Drives `is_effectively_charging()` with realistic input-noise
+sequences — ±0.1% SoC jitter (BMS reporting granularity) and
+±0.4 kW `net_consumption_kw` jitter (appliance cycling, solar
+flicker) — and asserts the phase does NOT flip under noise once
+the listener has committed a `deferred_start`. Neighbourhood cases
+confirm that a real qualitative change (deadline crossed, SoC
+reaching target) flips phase promptly. The listener's
+`deferred_start_committed` writes at the normal-path, re-deferral,
+and post-completion clear points each get a dedicated case.
+
 ## Entity Mode (Modbus Interop)
 
 **Constraints**: --
@@ -430,6 +503,8 @@ table (so post-mortem analysis isn't reduced to a bare counter).
 | `TestWaitForLovelacePanelCloudVariantSignalStability::*` (2) | `hui-root` presence is sufficient (stronger than `panel.hass` which races with navigation wire-up) | C-031 |
 | `TestSaveRunViolationPersistence::test_violations_persisted_as_events` | Each InvariantViolation persisted as event_type='violation' with rule + detail | C-020 |
 | `TestSaveRunViolationPersistence::test_no_violation_events_when_clean` | Clean run produces zero violation events (not a tautology fix) | C-020 |
+| `TestPlaywrightFixtureIsolation::*` | pytest-playwright session fixture leaks the greenlet-backed event loop on the xdist main-thread worker; function-scoped override in `tests/conftest.py` releases the context per-test. Deterministic reproduction under `-p no:randomly` (2026-04-28) | C-031 |
+| `TestSafeScreenshot::*` + `TestSafeEvaluate::*` | `_safe_screenshot` / `_safe_evaluate` retry on "Element is not attached to the DOM" / "Execution context was destroyed" / "Target closed" after `networkidle`; unrelated errors (genuine `Timeout`, etc.) propagate unchanged. Mirrors the `_find_card` retry pattern so all gallery-screenshot and card-injection tests inherit the recovery (2026-04-28) | C-031 |
 
 ## CI Hygiene
 

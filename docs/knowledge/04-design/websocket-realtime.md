@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: WebSocket Real-Time Data
-last_verified: 2026-04-21
+last_verified: 2026-05-03
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -206,6 +206,84 @@ without being disruptive.
   clutters the card for the common (non-stale) case
 **Traces**: C-020;
 `tests/e2e/test_ui.py::TestOverviewCard::test_data_source_badge_matches_mode`
+
+### D-054: Rolling-median filter on WS-fed display power sensors
+
+**Decision**: `FoxESSPolledSensor` applies a 3-sample rolling median
+to the seven WS-fed instantaneous power channels at the **display
+layer only**: `batChargePower`, `batDischargePower`, `loadsPower`,
+`pvPower`, `gridConsumptionPower`, `feedinPower`, `meterPower`
+(declared in `_WS_MEDIAN_FILTERED_VARIABLES`). Each filtered
+sensor owns its own `collections.deque(maxlen=3)`; `native_value`
+appends the latest coordinator value and returns `_median_of_three()`
+— the most recent sample while the window holds fewer than three
+entries, otherwise the median. Cumulative energy counters, SoC,
+voltage, current, temperature, and frequency are **not** filtered
+because smoothing distorts their semantics (long-term statistics,
+monotonicity, physical lag). `coordinator.data[...]` retains the
+raw values at all times; listeners, safety guards, and the pacing
+algorithms continue to read unfiltered data via
+`_get_coordinator_value`. When the raw reading is `None` the
+filter window is preserved (so recovery returns to a clean median
+as soon as data resumes) but the displayed state becomes
+unavailable — unavailability surfaces through the filter rather
+than being papered over with a stale sample.
+
+**Context**: Production incident 2026-04-27 during a smart
+discharge session — the display sensors for discharge power, grid
+export and house load showed 49 single-sample dips within a 2-hour
+window (11 below 2 kW, down to 0.82 kW while real output was
+~5.4 kW). Root cause was a mix of partial / stale ~5 s WS frames
+and energy-counter quantisation glitches. The control loop was
+unaffected because it reads unfiltered `gridConsumptionPower`,
+which stayed at 0 throughout — C-001 (no grid import) held — but
+the dashboard experience was severely degraded.
+
+**Rationale**: A 3-sample rolling median masks exactly the class
+of defect observed (single-frame outliers) while introducing at
+most one WS tick of display latency — ~5 s on the cadence the WS
+already runs at, and zero latency for the very first sample after
+a reconnect. The filter sits **below the C-038 listener-formula-
+parity boundary**: listeners and the sensor's public display path
+both still compute the same quantity; the filter intercepts only
+the sensor's `native_value` output. Energy totals and non-power
+channels are deliberately excluded — any smoothing on a monotonic
+total would either inject monotonicity violations or lag the HA
+statistics integration. An alternative location (coordinator-level
+filtering before the listener reads it) was rejected because the
+listener's safety math (C-001, C-017) must see the raw high-frequency
+truth; any coordinator-level smoothing would mask genuine grid
+events that pacing is supposed to react to.
+
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none (within-priority precision/latency tradeoff;
+display lag bounded by one WS tick)
+**Classification**: pacing
+
+**Alternatives considered**:
+- **Coordinator-level smoothing** — rejected: would change what
+  listeners and safety guards see, breaking C-038 parity and
+  potentially masking the real-time truth pacing needs to react
+  to.
+- **Longer window (5 or 7 samples)** — rejected: the single-frame
+  defect is by construction a 1-sample event; a 3-median
+  eliminates it while keeping the display within one WS tick of
+  truth. A longer window adds perceptible lag during genuine
+  rapid changes (cloud burst, EV charger starting).
+- **IIR low-pass filter** (exponentially-weighted mean) — rejected:
+  bleeds the outlier's effect across subsequent frames and
+  requires a decay-rate tuning parameter the median avoids
+  entirely.
+- **Filter only the specific channels that dipped in 2026-04-27**
+  — rejected: the defect mechanism (partial frames, quantisation)
+  is shared by all seven WS power channels; filtering only some
+  would leave the others unprotected.
+
+**Traces**: C-020 (display quality under glitchy WS frames),
+C-038 (filter sits below the parity boundary — same formula both
+sides, sensor path adds a post-hoc smoother);
+`tests/test_sensor.py::TestFoxESSPolledSensor` rolling-median
+cases.
 
 ## Key Behaviours
 
