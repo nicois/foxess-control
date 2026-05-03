@@ -220,7 +220,10 @@ class TestCoordinatorSolarSeenFlag:
 
         now = datetime.datetime(2026, 5, 3, 12, 0, tzinfo=datetime.UTC)
         coord._observe_pv_power(2.5, now=now)
-        assert coord.solar_seen is True
+        # Verify at the same simulated moment (the ``solar_seen`` property
+        # uses live UTC, so we call the explicit ``_solar_seen_at`` form
+        # to keep the assertion time-consistent with ``_observe_pv_power``).
+        assert coord._solar_seen_at(now=now) is True
 
         # Just before timeout — still True.
         nearly = now + datetime.timedelta(minutes=SOLAR_SEEN_TIMEOUT_MIN - 1)
