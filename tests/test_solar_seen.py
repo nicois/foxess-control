@@ -16,17 +16,33 @@ Behaviour contract
    ``False`` and the card renders "Gen Load" with ``loadsPower`` in
    place of the solar value and icon.
 2. **Solar observed** — once any WS or REST update carries
-   ``pvPower > 0``, the flag flips to ``True`` (exposed on the
-   ``pv_power`` sensor as the ``solar_seen`` attribute).  The card
-   reverts to the normal solar rendering.
-3. **Sticky** — subsequent ``pvPower = 0.0`` readings (e.g. overnight)
-   do *not* revert the flag.  Once true, always true for the lifetime
-   of the process.  A fresh start (integration reload) begins again in
-   "not yet seen" mode; the flag must not persist across restarts.
+   ``pvPower`` above the noise threshold (``SOLAR_SEEN_THRESHOLD_KW``,
+   default 0.05 kW / 50 W), the flag flips to ``True`` and the last-
+   seen timestamp is refreshed (exposed on the ``pv_power`` sensor as
+   the ``solar_seen`` attribute).  The card reverts to the normal
+   solar rendering.
+3. **Sticky within window** — subsequent zero / sub-threshold readings
+   keep the flag ``True`` as long as the most recent positive
+   observation is less than ``SOLAR_SEEN_TIMEOUT_MIN`` minutes old
+   (default 20 min).  This absorbs brief cloud dips and WS flicker
+   without flapping the display.
+4. **Reverts after timeout** — if no reading above threshold has been
+   seen for ``SOLAR_SEEN_TIMEOUT_MIN`` minutes, the flag goes back to
+   ``False`` and the card switches back to Gen Load.  This is what
+   makes the display honest overnight / on permanently-unwired PV
+   installs that previously saw a transient during the day.
+5. **Re-flips on new positive reading** — a subsequent above-threshold
+   reading flips the flag back to ``True`` and refreshes the
+   timestamp, following the same rule as step 2.
+
+A fresh start (integration reload) begins again in "not yet seen"
+mode; the flag must not persist across restarts.
 
 Defensive cases
 ---------------
-- A tiny positive reading (e.g. 1 W = 0.001 kW) counts as "seen".
+- A tiny positive reading below the noise threshold (e.g. 0.01 kW)
+  does NOT count — sensor noise near dawn/dusk shouldn't flap the
+  display.
 - ``None``, missing key, and negative readings do NOT count — the
   detector is defensive against garbage data.
 
@@ -45,13 +61,18 @@ sensors but are read by sensor ``extra_state_attributes``).
 
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.foxess_control.coordinator import FoxESSDataCoordinator
+from custom_components.foxess_control.coordinator import (
+    SOLAR_SEEN_THRESHOLD_KW,
+    SOLAR_SEEN_TIMEOUT_MIN,
+    FoxESSDataCoordinator,
+)
 from custom_components.foxess_control.foxess.inverter import Inverter, WorkMode
 from custom_components.foxess_control.sensor import (
     POLLED_SENSOR_DESCRIPTIONS,
@@ -171,8 +192,8 @@ class TestCoordinatorSolarSeenFlag:
         assert coord.data is not None
         assert coord.data["_solar_seen"] is True
 
-    def test_flag_is_sticky_across_zero_readings(self) -> None:
-        """Once True, subsequent pvPower=0 must NOT revert the flag."""
+    def test_flag_is_sticky_within_timeout_window(self) -> None:
+        """Within the timeout window, subsequent pvPower=0 keeps True."""
         coord = _make_coordinator()
         coord.data = {"SoC": 50.0, "_solar_seen": False}
 
@@ -180,24 +201,103 @@ class TestCoordinatorSolarSeenFlag:
         coord.inject_realtime_data({"SoC": 50.0, "pvPower": 2.0})
         assert coord.solar_seen is True
 
-        # Overnight: solar drops to zero
-        coord.inject_realtime_data({"SoC": 50.0, "pvPower": 0.0})
+        # A handful of zero readings arriving back-to-back (seconds
+        # apart) must NOT revert — that'd flap the display on every
+        # cloud dip.
+        for _ in range(5):
+            coord.inject_realtime_data({"SoC": 50.0, "pvPower": 0.0})
         assert coord.solar_seen is True
         assert coord.data is not None
         assert coord.data["_solar_seen"] is True
 
-        # Multiple subsequent zero readings
-        for _ in range(5):
-            coord.inject_realtime_data({"SoC": 50.0, "pvPower": 0.0})
-        assert coord.solar_seen is True
-
-    def test_tiny_positive_pv_counts_as_seen(self) -> None:
-        """1 W (0.001 kW) is still a real solar signal — flag flips."""
+    def test_flag_reverts_after_timeout(self) -> None:
+        """After SOLAR_SEEN_TIMEOUT_MIN with no reading above threshold,
+        the flag MUST revert to False — otherwise the display keeps
+        claiming the inverter saw solar on a permanently-dark site.
+        """
         coord = _make_coordinator()
         coord.data = {"SoC": 50.0, "_solar_seen": False}
 
-        coord.inject_realtime_data({"SoC": 50.0, "pvPower": 0.001})
+        now = datetime.datetime(2026, 5, 3, 12, 0, tzinfo=datetime.UTC)
+        coord._observe_pv_power(2.5, now=now)
+        assert coord.solar_seen is True
 
+        # Just before timeout — still True.
+        nearly = now + datetime.timedelta(minutes=SOLAR_SEEN_TIMEOUT_MIN - 1)
+        assert coord._solar_seen_at(now=nearly) is True
+
+        # At / past timeout with no refresh — reverts to False.
+        past = now + datetime.timedelta(minutes=SOLAR_SEEN_TIMEOUT_MIN + 1)
+        assert coord._solar_seen_at(now=past) is False
+
+    def test_positive_reading_after_timeout_re_flips_flag(self) -> None:
+        """A fresh positive reading after the flag reverted flips it
+        back on and refreshes the timestamp — same rule as startup.
+        """
+        coord = _make_coordinator()
+        coord.data = {"SoC": 50.0, "_solar_seen": False}
+
+        now = datetime.datetime(2026, 5, 3, 12, 0, tzinfo=datetime.UTC)
+        coord._observe_pv_power(2.5, now=now)
+
+        # Fast-forward past the timeout — flag has effectively reverted.
+        later = now + datetime.timedelta(minutes=SOLAR_SEEN_TIMEOUT_MIN + 5)
+        assert coord._solar_seen_at(now=later) is False
+
+        # New positive reading at `later` — flips back to True.
+        coord._observe_pv_power(1.0, now=later)
+        assert coord._solar_seen_at(now=later) is True
+
+        # And stays True within the new window anchored to `later`.
+        later_plus_10 = later + datetime.timedelta(minutes=10)
+        assert coord._solar_seen_at(now=later_plus_10) is True
+
+    def test_zero_reading_does_not_refresh_timestamp(self) -> None:
+        """A zero reading within the window must NOT refresh the
+        last-seen timestamp — otherwise the timeout never triggers on
+        installs that see transient positive readings then go quiet.
+        """
+        coord = _make_coordinator()
+        coord.data = {"SoC": 50.0, "_solar_seen": False}
+
+        t0 = datetime.datetime(2026, 5, 3, 12, 0, tzinfo=datetime.UTC)
+        coord._observe_pv_power(2.5, now=t0)
+
+        # Many zero readings well within the window.
+        t1 = t0 + datetime.timedelta(minutes=5)
+        for _ in range(10):
+            coord._observe_pv_power(0.0, now=t1)
+
+        # Timestamp is anchored at t0, not t1 — so past t0+timeout
+        # the flag reverts even though a zero arrived at t1.
+        past = t0 + datetime.timedelta(minutes=SOLAR_SEEN_TIMEOUT_MIN + 1)
+        assert coord._solar_seen_at(now=past) is False
+
+    def test_sub_threshold_positive_does_not_flip_flag(self) -> None:
+        """A reading below SOLAR_SEEN_THRESHOLD_KW (noise) must NOT
+        flip the flag.  The threshold exists so that sensor noise near
+        dawn/dusk does not keep the solar display alive on sites with
+        no real generation.
+        """
+        coord = _make_coordinator()
+        coord.data = {"SoC": 50.0, "_solar_seen": False}
+
+        # 0.01 kW = 10 W, below the 50 W threshold.
+        coord.inject_realtime_data({"SoC": 50.0, "pvPower": 0.01})
+        assert coord.solar_seen is False
+
+        # At the threshold: also does NOT count (strict greater-than).
+        coord.inject_realtime_data({"SoC": 50.0, "pvPower": SOLAR_SEEN_THRESHOLD_KW})
+        assert coord.solar_seen is False
+
+    def test_above_threshold_positive_flips_flag(self) -> None:
+        """A reading strictly above SOLAR_SEEN_THRESHOLD_KW counts."""
+        coord = _make_coordinator()
+        coord.data = {"SoC": 50.0, "_solar_seen": False}
+
+        coord.inject_realtime_data(
+            {"SoC": 50.0, "pvPower": SOLAR_SEEN_THRESHOLD_KW + 0.001}
+        )
         assert coord.solar_seen is True
 
     def test_negative_pv_does_not_flip_flag(self) -> None:

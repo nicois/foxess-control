@@ -603,13 +603,13 @@ Each entry in `boxes` can be a string shorthand (`"solar"`) or an object with `t
 
 #### Gen Load fallback for sites with no solar
 
-If the inverter has not reported positive `pvPower` since Home Assistant started, the solar box renders as **Gen Load** — showing house consumption and a ⚡ icon in place of the usual sun. The moment any positive solar reading arrives, the box reverts to its normal Solar rendering and stays there for the rest of the process lifetime (a later zero-solar reading does not flip back).
+If the inverter has not reported solar above 50 W in the last 20 minutes, the solar box renders as **Gen Load** — showing house consumption and a ⚡ icon in place of the usual sun. Any real solar reading (above 50 W) swaps the box back to the normal Solar rendering and starts the 20-minute window again. Brief cloud dips don't flap the display; sustained absence of solar — overnight, or on sites with no PV at all — does.
 
 This is automatic and needs no configuration. It's designed for:
 
 - AC-coupled inverters (e.g. the AC1 series) that have no MPPT inputs at all
 - Battery-only hybrid installs where the PV strings are disconnected
-- Any site where a permanently-stuck `0.0 kW` solar reading is noise rather than information
+- Any site where you'd rather see house load than a stuck `0.0 kW` solar reading outside of generating hours
 
 If you set an explicit `label` or `icon` on the solar box, your overrides win — the fallback only applies to the default rendering.
 

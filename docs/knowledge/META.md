@@ -1042,6 +1042,50 @@ priority (P-004 — aspirational by design), no new upward gaps.
 pass (5 D-NNN threshold: we added 4). If one more significant
 D-NNN lands or >90 days elapse, `/project-overview review` is due.
 
+### 2026-05-03 — Mid-beta pivot (D-052 sticky → timeout)
+
+**Change**: The "sticky for the lifetime of the process" rule in
+D-052 (introduced in 1.0.15-beta.1 earlier today) was replaced
+with a time-windowed rule: the flag is `True` only if a reading
+above `SOLAR_SEEN_THRESHOLD_KW` (50 W) has arrived within the
+last `SOLAR_SEEN_TIMEOUT_MIN` (20 min). Triggered by the
+observation that overnight or on AC-coupled installs that saw a
+single transient positive daytime reading, the sticky design
+would keep claiming "solar" when none was happening — the
+opposite of what the feature is for.
+
+**Why the sticky design was wrong**: it confused "has this
+inverter ever had working solar in this process" with "is this
+inverter generating solar right now". The latter is what the
+card is meant to communicate. The sticky version was defensible
+*only* if daytime readings were guaranteed to be real on every
+install — but the whole point of the feature is sites where
+that isn't true.
+
+**Why this didn't surface earlier**: the original fix-agent
+brief explicitly required "sticky — subsequent pvPower=0
+readings do NOT revert the flag", and the test suite was
+written to match. The user's follow-up ("switch back if no solar
+for 10–30 min") refined the spec after seeing the implementation
+in context — a healthy correction path.
+
+**Tree update**: D-052 rewritten (Decision, Rationale,
+Alternatives — added the sticky-lifetime option as a rejected
+alternative with the rationale "kept claiming solar on sites that
+never really had it"). Tuning constants (threshold + timeout)
+documented in the design doc and colocated with the
+implementation.
+
+**Test suite update**: 4 new cases and 1 rewrite in
+`tests/test_solar_seen.py`. Total coordinator-level cases now 14
+(was 10). All cases pass; full non-slow suite 1005 green.
+
+**Pattern worth noting**: this is an example of "mid-beta pivot
+driven by user review" rather than a mid-beta bug fix — the old
+behaviour wasn't broken, it was wrong for the problem. The beta
+release-train is the right place for this kind of correction:
+no user has pinned 1.0.15-beta.1 as a stable-dependency yet.
+
 ### Structure refinement: "listener commits, sensor reads"
 
 Added as a recurring pattern worth promoting to a constraint if

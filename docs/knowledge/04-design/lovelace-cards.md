@@ -306,27 +306,30 @@ BMS-taper concern don't need.
 
 ### D-052: "No solar yet seen" detection with Gen Load fallback
 
-**Decision**: `FoxESSDataCoordinator` tracks a single boolean
-`solar_seen` flag initialised `False` on every process start. The
-first `pvPower > 0` observation on either the REST update path
-(`_async_update_data`) or the WS injection path
-(`inject_realtime_data`) flips the flag to `True`; it remains `True`
-for the lifetime of the process and cannot revert. Zero, `None`,
-negative, and missing `pvPower` readings are defensive no-ops (the
-helper `_observe_pv_power` early-returns once the flag is set, so
-subsequent ticks pay no further cost). The flag is surfaced on
-every coordinator payload as `data["_solar_seen"]` and lifted onto
-the `pv_power` sensor via `extra_state_attributes["solar_seen"]` —
-no other sensor carries it (no attribute pollution), no new HA
-entity is introduced, and no persistence crosses restarts per the
-feature spec. `foxess-overview-card` reads the attribute: while it
-is `False`, `_renderBox("solar")` substitutes label `"Gen Load"`
-(i18n key `gen_load`, translated across all 10 locales), value
-`loadsPower`, and icon `⚡` in place of the usual sun. Once the
-flag flips, the box reverts to the canonical Solar rendering.
-User-supplied `box.label` / `box.icon` overrides still win; a
-missing attribute defaults to `True` in the card so legacy installs
-that pre-date this change see no visible difference.
+**Decision**: `FoxESSDataCoordinator` tracks the timestamp
+`_solar_last_seen` of the most recent `pvPower` reading strictly
+above `SOLAR_SEEN_THRESHOLD_KW` (default 0.05 kW / 50 W). Both the
+REST update path (`_async_update_data`) and the WS injection path
+(`inject_realtime_data`) call `_observe_pv_power()` on every tick:
+a reading above threshold refreshes the timestamp to UTC now;
+zero, sub-threshold, `None`, negative, missing, and non-numeric
+readings are defensive no-ops. The `solar_seen` property returns
+`True` iff the timestamp is non-`None` AND
+`now - _solar_last_seen < SOLAR_SEEN_TIMEOUT_MIN minutes` (default
+20 minutes). The current verdict is published on every coordinator
+payload as `data["_solar_seen"]` and lifted onto the `pv_power`
+sensor via `extra_state_attributes["solar_seen"]` — no other
+sensor carries it (no attribute pollution), no new HA entity, no
+persistence across restarts. `foxess-overview-card` reads the
+attribute: while it is `False`, `_renderBox("solar")` substitutes
+label `"Gen Load"` (i18n key `gen_load`, translated across all 10
+locales), value `loadsPower`, and icon `⚡` in place of the usual
+sun. Once the flag flips, the box reverts to the canonical Solar
+rendering; if solar subsequently goes quiet for longer than the
+timeout, the box swaps back to Gen Load automatically. User-
+supplied `box.label` / `box.icon` overrides still win; a missing
+attribute defaults to `True` in the card so legacy installs that
+pre-date this change see no visible difference.
 
 **Context**: AC-coupled FoxESS models (AC1 series) have no MPPT
 inputs; battery-only hybrid installs may have the PV strings
@@ -336,26 +339,51 @@ icon, which is pure noise — a user glancing at the dashboard
 couldn't tell whether their panels had failed or whether the
 inverter genuinely had no PV capability.
 
-**Rationale**: The cheapest signal that distinguishes "panels
-attached but dark" from "no panels" is "has the inverter ever
-reported positive PV power since HA started?". A fresh start in
-daylight will flip the flag within one poll cycle on any working
-PV install; an AC-coupled or unwired install never flips. Storing
-process-lifetime runtime state (not persisted) is deliberate: on
-restart we optimistically re-check rather than locking in a
-historical mode that may have become wrong (e.g. new panels
-commissioned). Making the flag sticky WITHIN a process prevents
-night-time / cloud flicker from re-hiding the solar display on
-normal installs. Placing it on the brand-specific coordinator
-rather than `smart_battery/` respects C-039 (no brand leakage) —
-the helper is trivially liftable when a second brand needs the
-same behaviour.
+**Rationale**: A cheap behavioural signal distinguishes "panels
+attached, currently generating" from "no panels / not generating":
+"has the inverter reported solar above 50 W within the last 20
+minutes?" On any working PV install in daylight the flag clears
+within one poll cycle and refreshes continuously; on an AC-coupled
+or unwired install it never flips. On a normal install after
+sunset it relaxes to `False` about half an hour past real sunset
+— which is what we want, because the card is now *honest* about
+whether solar is currently happening, not just whether the
+inverter has ever seen solar in this process. Storing runtime
+state (not persisted) is deliberate: on restart we optimistically
+re-check rather than locking in a historical mode that may have
+become wrong (e.g. new panels commissioned). The 20-minute window
+absorbs brief cloud dips and ~5 s WS flicker; the 50 W threshold
+rejects sensor noise near dawn/dusk on battery-only sites where
+the ADC sometimes reports a few milliwatts of "solar" at night.
+Placing the state on the brand-specific coordinator rather than
+`smart_battery/` respects C-039 (no brand leakage) — the helper
+is trivially liftable when a second brand needs the same
+behaviour.
+
+**Tuning constants** (both in `coordinator.py`):
+- `SOLAR_SEEN_THRESHOLD_KW = 0.05` — the minimum positive reading
+  that counts. Any strictly-lower value (including zero) is
+  treated as "no solar right now" and does NOT refresh the
+  timestamp. Chosen so sensor noise on battery-only inverters
+  does not keep the solar display alive; real solar on any
+  working install clears this by orders of magnitude within
+  seconds of sunrise.
+- `SOLAR_SEEN_TIMEOUT_MIN = 20` — the window during which a
+  single positive reading keeps the flag `True`. Chosen so a
+  brief cloud dip + the ~5 s WS cadence cannot exhaust it during
+  the day, and so the display reflects reality by roughly half
+  an hour past real sunset.
 
 **Priority served**: P-005 (Operational transparency)
 **Trades against**: none
 **Classification**: other
 
 **Alternatives considered**:
+- **Sticky for the lifetime of the process** (the original 1.0.15-
+  beta.1 design) — rejected because it kept claiming "solar" on
+  AC-coupled / unwired installs that happened to see a single
+  transient positive reading during the day. The timeout-based
+  version is honest overnight without being brittle to cloud dips.
 - **Persisted flag** (survives HA restarts) — rejected: locks in
   historical state against today's hardware; a newly commissioned
   PV install would stay in Gen Load mode forever without a manual
@@ -374,6 +402,11 @@ same behaviour.
 - **AC-coupled model list** — rejected: hard-coded model maps rot as
   FoxESS ships variants, and brand-portability (P-007) is easier to
   maintain with a behavioural detector.
+- **Smoothing the pvPower reading instead of thresholding it** —
+  rejected: the purpose is to detect "no real solar", not to filter
+  noise for display. D-054 handles display-layer smoothing for
+  readings that are plausibly real. Here we want a yes/no classifier,
+  not a smoothed signal.
 
 **Traces**: C-020 (replace stuck-zero noise with actionable state),
 C-026 (meaningful state surfaced via sensor attribute rather than

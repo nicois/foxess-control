@@ -17,6 +17,29 @@ from .const import DOMAIN, POLLED_VARIABLES
 from .smart_battery.coordinator import EntityCoordinator as _EntityCoordinator
 from .smart_battery.coordinator import get_coordinator_soc as _get_coordinator_soc
 
+# ---------------------------------------------------------------------------
+# Solar-seen flag tuning
+# ---------------------------------------------------------------------------
+#
+# ``solar_seen`` flips True on any pvPower reading strictly above
+# SOLAR_SEEN_THRESHOLD_KW, and reverts to False if no such reading has
+# been observed for SOLAR_SEEN_TIMEOUT_MIN minutes.  The window absorbs
+# brief cloud dips and WS flicker without flapping the display, while
+# the timeout keeps the display honest overnight / on sites where a
+# transient positive reading was observed during the day but no real
+# solar ever arrived (AC-coupled inverters, unwired PV strings).
+#
+# Threshold is 50 W so that sensor noise near dawn/dusk on battery-only
+# sites does not keep the solar display alive.  Real solar on any
+# working PV install clears this by multiple orders of magnitude within
+# seconds of sunrise.
+#
+# Timeout is 20 minutes — long enough that a brief cloud-dip plus the
+# ~5 s WS cadence cannot exhaust it during the day; short enough that
+# the display reflects reality by roughly half an hour after sunset.
+SOLAR_SEEN_THRESHOLD_KW = 0.05
+SOLAR_SEEN_TIMEOUT_MIN = 20
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -69,41 +92,63 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._soc_last_bat_kw: float = 0.0  # net: positive=charging
         # Periodic SoC extrapolation between REST polls
         self._soc_interp_cancel: Callable[[], None] | None = None
-        # Solar-seen runtime state: True once any pvPower > 0 has been
-        # observed from any source (REST or WS).  Sticky — never reverts
-        # within the process lifetime (does not persist across restarts).
-        # Used by the overview card to swap the solar box for a
-        # gen-load display on AC-coupled / battery-only inverters where
-        # PV fields are permanently zero.  See C-020.
-        self._solar_seen: bool = False
+        # Solar-seen runtime state: timestamp of the most recent pvPower
+        # reading above SOLAR_SEEN_THRESHOLD_KW.  The flag is considered
+        # True iff such a reading was observed within the last
+        # SOLAR_SEEN_TIMEOUT_MIN minutes.  Used by the overview card to
+        # swap the solar box for a gen-load display on AC-coupled /
+        # battery-only inverters and on any site once real solar stops
+        # for the day.  Does not persist across restarts.  See C-020.
+        self._solar_last_seen: datetime.datetime | None = None
 
     @property
     def solar_seen(self) -> bool:
-        """Return True if any pvPower > 0 has been observed this process.
+        """Return True if a positive pvPower reading was observed recently.
 
-        Sticky — once True, never reverts.  Consumed by the overview
-        card via the ``solar_seen`` attribute on the ``pv_power``
-        sensor to suppress the stuck-zero solar reading on
-        AC-coupled / battery-only installations.
+        Specifically: returns True iff a pvPower reading strictly above
+        SOLAR_SEEN_THRESHOLD_KW has been observed within the last
+        SOLAR_SEEN_TIMEOUT_MIN minutes.  Consumed by the overview card
+        via the ``solar_seen`` attribute on the ``pv_power`` sensor to
+        suppress the stuck-zero solar reading on non-solar sites and
+        overnight.
         """
-        return self._solar_seen
+        return self._solar_seen_at()
 
-    def _observe_pv_power(self, value: Any) -> None:
-        """Update the sticky ``solar_seen`` flag from a raw pvPower reading.
+    def _solar_seen_at(self, *, now: datetime.datetime | None = None) -> bool:
+        """Return the solar_seen verdict as of *now* (default: UTC now).
 
-        Defensive against garbage: only a numeric value strictly
-        greater than zero counts.  ``None``, missing keys, negatives,
-        and non-numeric values are ignored.  Once True, the flag
-        cannot be cleared by subsequent zero/garbage readings.
+        Factored so that tests can observe the time-sensitive revert
+        behaviour deterministically without monkeypatching the clock.
         """
-        if self._solar_seen or value is None:
+        if self._solar_last_seen is None:
+            return False
+        if now is None:
+            now = dt_util.utcnow()
+        return (now - self._solar_last_seen) < datetime.timedelta(
+            minutes=SOLAR_SEEN_TIMEOUT_MIN
+        )
+
+    def _observe_pv_power(
+        self, value: Any, *, now: datetime.datetime | None = None
+    ) -> None:
+        """Refresh the last-seen timestamp from a raw pvPower reading.
+
+        A numeric value strictly greater than SOLAR_SEEN_THRESHOLD_KW
+        records *now* as the new last-seen timestamp.  ``None``,
+        missing keys, negatives, zero / sub-threshold values, and
+        non-numeric values are all defensive no-ops — they do not
+        extend the window.  This matters: if zero readings refreshed
+        the window, the timeout would never fire on installs that
+        saw a transient positive reading and then went quiet.
+        """
+        if value is None:
             return
         try:
             numeric = float(value)
         except (ValueError, TypeError):
             return
-        if numeric > 0:
-            self._solar_seen = True
+        if numeric > SOLAR_SEEN_THRESHOLD_KW:
+            self._solar_last_seen = now if now is not None else dt_util.utcnow()
 
     def _get_capacity_kwh(self) -> float:
         """Read battery capacity from config (needed for SoC integration)."""
@@ -365,10 +410,11 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._ws_last_time = now
         data["_data_source"] = "api"
         data["_data_last_update"] = dt_util.utcnow().isoformat()
-        # Update sticky solar-seen flag from this REST poll and expose
-        # the current state on every data tick (see _observe_pv_power).
+        # Refresh solar-seen timestamp from this REST poll and expose
+        # the current time-aware verdict on every data tick (see
+        # _observe_pv_power / solar_seen).
         self._observe_pv_power(data.get("pvPower"))
-        data["_solar_seen"] = self._solar_seen
+        data["_solar_seen"] = self.solar_seen
         self._schedule_soc_extrapolation()
         return data
 
@@ -538,13 +584,13 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ws_data = dict(ws_data) if not isinstance(ws_data, dict) else ws_data
             ws_data["_soc_interpolated"] = self._soc_interpolated
 
-        # Update sticky solar-seen flag from this WS message.  Always
-        # expose the current flag state in ws_data so the merged
+        # Refresh solar-seen timestamp from this WS message and expose
+        # the current time-aware verdict in ws_data so the merged
         # coordinator data reflects it on every tick (sensors read
         # _solar_seen to surface a solar_seen attribute to the card).
         self._observe_pv_power(ws_data.get("pvPower"))
         ws_data = dict(ws_data) if not isinstance(ws_data, dict) else ws_data
-        ws_data["_solar_seen"] = self._solar_seen
+        ws_data["_solar_seen"] = self.solar_seen
 
         ws_data["_data_source"] = "ws"
         ws_data["_data_last_update"] = dt_util.utcnow().isoformat()
