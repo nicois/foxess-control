@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: Smart Discharge
-last_verified: 2026-04-24
+last_verified: 2026-05-07
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -364,6 +364,20 @@ path, lines ~1373–1414),
 - Circuit breaker protection (D-025): discharge checks are wrapped in
   `_with_circuit_breaker`. With 1-minute ticks, tier 1 opens at 3 min,
   tier 2 aborts at 8 min.
+- Dynamic `min_soc` from an external HA automation is a first-class
+  control mechanism, not a configuration value the user sets once.
+  External automations (e.g. cold-night heating-reserve policies,
+  pre-cloudy-day charging) legitimately raise `min_soc` to encode
+  knowledge the integration itself does not have (weather forecasts,
+  HVAC load predictions, utility schedules). Expected behaviour when
+  a session runs at or near the current floor: the algorithm defers
+  or refuses to force-discharge, the SoC drains only via SelfUse to
+  meet house load, the session closes cleanly when the floor is hit
+  with zero forced export. This is C-002 working *with* the external
+  policy — no drama, no grid import, no attempt to negotiate past
+  the floor. The user may see sessions that achieve no export; that
+  is the correct outcome when the reserve policy leaves no spare
+  energy for the session's window.
 
 ## Edge Cases
 

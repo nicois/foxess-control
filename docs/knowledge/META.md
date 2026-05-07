@@ -1,14 +1,14 @@
 ---
 project: FoxESS Control
 created: 2026-04-14
-last_updated: 2026-05-03
-last_reflection: 2026-05-03T20:30:00+10:00
+last_updated: 2026-05-07
+last_reflection: 2026-05-07T19:30:00+10:00
 workflow_state:
-  last_check: 2026-05-03T20:30:00+10:00
-  last_update: 2026-05-03T20:30:00+10:00
+  last_check: 2026-05-07T19:30:00+10:00
+  last_update: 2026-05-07T19:30:00+10:00
   last_coverage: 2026-05-03T16:20:00+10:00
   last_review: null
-  last_auto: null
+  last_auto: 2026-05-04T11:45:00+10:00
 ---
 # Knowledge Tree Meta
 
@@ -1141,6 +1141,51 @@ hide-not-swap.
 is False and no user override is present; the `gen_load` i18n
 key has been removed from all 10 locales; no references remain.
 Full non-slow suite 1006 green.
+
+### 2026-05-07 — Integration-pattern note: dynamic min_soc is a control input
+
+**Trigger**: Live-tracing a discharge session
+(`5f5281c8-d3f9-4e34-89f3-372f57b40d96`, 2026-05-07 18:51–19:08
+AEST) that ran entirely deferred, achieved zero forced export,
+and ended when SoC hit `min_soc=60`. The starting SoC was only
+62% because an external HA automation had raised `min_soc`
+overnight to reserve heating budget on a cold-night forecast.
+
+**What this revealed**: the design already treats `min_soc` as a
+respected input, but `04-design/smart-discharge.md` didn't
+document the *integration pattern* where external HA automations
+legitimately raise `min_soc` to encode knowledge the integration
+doesn't have (weather forecasts, HVAC load predictions, utility
+schedules). A live session like this one — smart discharge
+running but achieving nothing — is the correct behaviour under
+that pattern, not a bug.
+
+**Tree update**: added a Key Behaviour bullet to
+`smart-discharge.md` documenting that "dynamic `min_soc` from an
+external HA automation is a first-class control mechanism, not a
+configuration value the user sets once." Expected behaviour is
+the algorithm deferring / refusing to force-discharge, SoC
+draining only via SelfUse, session closing cleanly at the floor
+with zero forced export — this is C-002 working *with* the
+external policy, not against it.
+
+**Why no new D-NNN or C-NNN**: the behaviour is already
+invariant-enforced (C-002) and the decisions to defer and to
+respect `min_soc` are already captured (D-001, D-002, D-003).
+What was missing was the *framing* that the user's min_soc can
+be dynamic and that an external automation's raise is not a
+signal to question but an authority to follow. A Key Behaviour
+bullet on the feature doc is the right level — the invariant
+didn't change; the integration-pattern description did.
+
+**Lesson worth keeping**: when a live session produces a
+correct-but-surprising outcome (zero export from an active
+smart-discharge window), the first question should be "what
+inputs produced this, and does the tree document that those
+inputs can come from an external policy?" The answer here was
+"yes to the first, no to the second" — classic gap where the
+algorithm was right but the documentation left a human without
+the framing to explain why.
 
 ### Structure refinement: "listener commits, sensor reads"
 
