@@ -733,3 +733,341 @@ class TestWaitForLovelacePanelCloudVariantSignalStability:
             "that survives the panel.hass wire-up race.\n\n"
             f"Predicate source:\n{final_predicate}"
         )
+
+
+class TestWaitForLovelacePanelEntityModeInitRace:
+    """The final-stage predicate must survive the entity-mode init race
+    (C-031: no flaky tests).
+
+    **Background** (diagnosed 2026-05-03 from Flaky Test Detection run,
+    victim ``test_time_picker_stays_open_during_rerender[entity]``):
+    the page fixture setup timed out at ``74951ms`` — virtually the
+    entire 75000ms overall budget consumed without the final-stage
+    predicate ever converging.  Same worker (gw2) succeeded for the
+    ``[cloud]`` variant in 15.2s and failed for the ``[entity]``
+    variant in 84.9s (75s wait + ~10s container init).
+
+    **Root-cause diagnosis (what entity-mode does that cloud doesn't)**:
+    The stage-3 predicate requires THREE signals to be *simultaneously*
+    true on a single poll:
+
+      (a) ``main.hass.connected === true`` — HA frontend WS session.
+      (b) ``ha-panel-lovelace`` attached inside the main shadow root.
+      (c) ``hui-root`` mounted inside ``panel.shadowRoot``.
+
+    Signal (a) is a live JS property that reflects the *current* state
+    of HA's WebSocket connection.  Under entity-mode configuration the
+    YAML seed adds multiple ``input_number`` / ``input_select`` /
+    ``input_boolean`` helpers.  Their registration and initial state
+    burst (plus the foxess ``EntityCoordinator``'s first refresh
+    reading each mapped entity) produces a heavier state-change
+    stream than cloud mode's single REST poll.  That churn can cause
+    HA's frontend WS session to transiently drop ``connected = false``
+    for long enough to miss several Playwright polls — while signals
+    (b) and (c) are stable synchronous DOM facts that persist through
+    the churn.
+
+    The failure mode: by the time entity-mode init has fully settled
+    (``connected`` stably true again), the Playwright poll budget has
+    been consumed scanning transient-falsy snapshots.  ``hui-root``'s
+    presence is strictly stronger proof than ``hass.connected``: the
+    Lit render that produced ``hui-root`` required ``hass.connected``
+    to be true at render time, so ``hui-root`` implies the connection
+    was live when the panel rendered — the runtime transient flip does
+    not retroactively invalidate the render.
+
+    **Fix contract** (what these tests assert):
+    1. When ``hui-root`` is mounted inside ``panel.shadowRoot`` AND
+       the rest of the shadow-DOM chain resolves, the predicate must
+       return truthy even if ``main.hass.connected`` is transiently
+       ``false`` at poll time.  This is the entity-mode race.
+    2. The cloud-mode-shaped snapshot (all signals stably truthy) must
+       continue to succeed — the fix must not regress the working
+       variant.
+    """
+
+    def _run_predicate(self, js_source: str) -> bool:
+        """Execute the predicate JS via node and return its boolean result.
+
+        Raises pytest.skip if node is unavailable (CI environment
+        guard — the syntactic check in the sibling test is the
+        fallback).
+        """
+        import json  # noqa: PLC0415
+        import shutil  # noqa: PLC0415
+        import subprocess  # noqa: PLC0415
+
+        node_bin = shutil.which("node")
+        if node_bin is None:
+            pytest.skip("node.js unavailable — cannot execute predicate JS")
+
+        completed = subprocess.run(  # noqa: S603
+            [node_bin, "-e", js_source],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        if completed.returncode != 0:
+            pytest.fail(
+                f"Node evaluation failed: {completed.stderr}\nsource:\n{js_source}"
+            )
+        payload = json.loads(completed.stdout.strip().splitlines()[-1])
+        return bool(payload["result"])
+
+    def test_predicate_truthy_when_hui_root_present_despite_connected_false(
+        self,
+    ) -> None:
+        """Predicate must return truthy when ``hui-root`` is mounted
+        even if ``main.hass.connected`` is transiently false.
+
+        This is the exact entity-mode race: by the time the final
+        stage's ``wait_for_function`` is polling, the Lovelace panel
+        has rendered (``hui-root`` is in the DOM), but the heavy
+        state-change churn from entity mode's input-helper bursts
+        has briefly flipped ``main.hass.connected`` to false.
+
+        A predicate that gates on ``main.hass.connected`` rejects
+        this snapshot and keeps polling.  If the churn outlasts the
+        budget (74951ms observed), the whole fixture times out.
+
+        The fix: ``hui-root`` being mounted is itself proof the
+        connection was established at render time.  The predicate
+        should accept it without also requiring the live
+        ``connected`` flag to be true at poll time.
+        """
+        from tests.e2e import conftest  # noqa: PLC0415
+
+        stages = getattr(conftest, "_LOVELACE_PANEL_STAGES", None)
+        assert stages is not None, "Helper missing _LOVELACE_PANEL_STAGES"
+        _final_stage_name, final_predicate = stages[-1]
+
+        # Adversarial entity-mode snapshot: every DOM signal resolves,
+        # hui-root is mounted, BUT main.hass.connected is transiently
+        # false (WS reconnect during input-helper state-burst).
+        dom_setup = r"""
+        const panel_shadow = {
+            querySelector: (sel) => (
+                sel === 'hui-root' ? {nodeName: 'HUI-ROOT'} : null
+            ),
+        };
+        const panel = {
+            shadowRoot: panel_shadow,
+            hass: { connected: true, states: { 'sensor.x': {} } },
+        };
+        const ham_shadow = {
+            querySelector: (sel) => (
+                sel === 'ha-panel-lovelace' ? panel : null
+            ),
+        };
+        const ham = { shadowRoot: ham_shadow };
+        const main_shadow = {
+            querySelector: (sel) => (
+                sel === 'home-assistant-main' ? ham : null
+            ),
+        };
+        const main = {
+            shadowRoot: main_shadow,
+            // The entity-mode race: connected is transiently false
+            // while HA's WS reconnects during input-helper state flux,
+            // even though hui-root has already rendered.
+            hass: { connected: false, states: { 'sensor.x': {} } },
+        };
+        global.document = {
+            querySelector: (sel) => (
+                sel === 'home-assistant' ? main : null
+            ),
+        };
+        """
+        js_source = (
+            dom_setup
+            + "\nconst predicate = "
+            + final_predicate
+            + ";\nconsole.log(JSON.stringify({ result: Boolean(predicate()) }));"
+        )
+        result = self._run_predicate(js_source)
+        assert result is True, (
+            "Final-stage predicate returned FALSE when given the "
+            "entity-mode adversarial snapshot: hui-root mounted inside "
+            "panel.shadowRoot, but main.hass.connected transiently "
+            "false.\n\n"
+            "This is the exact race that drove the 74951ms timeout on "
+            "test_time_picker_stays_open_during_rerender[entity] — "
+            "entity mode's additional input-helper registrations plus "
+            "EntityCoordinator first-refresh state bursts cause HA's "
+            "frontend WS to flap connected=true→false→true, and a "
+            "predicate that requires connected=true at poll time "
+            "cannot converge if the churn outlasts the budget.\n\n"
+            "hui-root being mounted is STRICTLY STRONGER: the Lit "
+            "render that produced it required hass.connected to be "
+            "true at render time, so hui-root's DOM presence is proof "
+            "the connection was established — the transient flap does "
+            "not retroactively invalidate the render.\n\n"
+            f"Predicate source:\n{final_predicate}"
+        )
+
+    def test_predicate_still_truthy_on_cloud_happy_path(self) -> None:
+        """Neighbourhood guard: the cloud-mode-shaped snapshot (every
+        signal stably truthy) must continue to succeed.
+
+        This ensures the fix for entity-mode does not regress the
+        cloud variant, which today succeeds in ~15s.  If the fix
+        accidentally weakened the predicate to always-true, this test
+        would still pass; the guard against that is the sibling
+        ``test_predicate_falsy_when_panel_not_mounted`` below.
+        """
+        from tests.e2e import conftest  # noqa: PLC0415
+
+        stages = getattr(conftest, "_LOVELACE_PANEL_STAGES", None)
+        assert stages is not None, "Helper missing _LOVELACE_PANEL_STAGES"
+        _final_stage_name, final_predicate = stages[-1]
+
+        dom_setup = r"""
+        const panel_shadow = {
+            querySelector: (sel) => (
+                sel === 'hui-root' ? {nodeName: 'HUI-ROOT'} : null
+            ),
+        };
+        const panel = {
+            shadowRoot: panel_shadow,
+            hass: { connected: true, states: { 'sensor.x': {} } },
+        };
+        const ham_shadow = {
+            querySelector: (sel) => (
+                sel === 'ha-panel-lovelace' ? panel : null
+            ),
+        };
+        const ham = { shadowRoot: ham_shadow };
+        const main_shadow = {
+            querySelector: (sel) => (
+                sel === 'home-assistant-main' ? ham : null
+            ),
+        };
+        const main = {
+            shadowRoot: main_shadow,
+            hass: { connected: true, states: { 'sensor.x': {} } },
+        };
+        global.document = {
+            querySelector: (sel) => (
+                sel === 'home-assistant' ? main : null
+            ),
+        };
+        """
+        js_source = (
+            dom_setup
+            + "\nconst predicate = "
+            + final_predicate
+            + ";\nconsole.log(JSON.stringify({ result: Boolean(predicate()) }));"
+        )
+        assert self._run_predicate(js_source) is True, (
+            "Cloud-happy-path snapshot (every signal stably truthy) "
+            "failed — fix regressed the working variant."
+        )
+
+    def test_predicate_falsy_when_panel_not_mounted(self) -> None:
+        """Negative guard: when ``ha-panel-lovelace`` has NOT yet
+        attached, the predicate must return falsy — regardless of
+        whether ``main.hass.connected`` is true.
+
+        This prevents the fix from degenerating to "always return
+        true": the predicate still needs to wait for the panel to
+        actually mount before reporting ready.
+        """
+        from tests.e2e import conftest  # noqa: PLC0415
+
+        stages = getattr(conftest, "_LOVELACE_PANEL_STAGES", None)
+        assert stages is not None, "Helper missing _LOVELACE_PANEL_STAGES"
+        _final_stage_name, final_predicate = stages[-1]
+
+        # Panel has NOT yet mounted — stage-3 early-boot snapshot.
+        dom_setup = r"""
+        const ham_shadow = {
+            querySelector: (sel) => null, // panel not yet attached
+        };
+        const ham = { shadowRoot: ham_shadow };
+        const main_shadow = {
+            querySelector: (sel) => (
+                sel === 'home-assistant-main' ? ham : null
+            ),
+        };
+        const main = {
+            shadowRoot: main_shadow,
+            hass: { connected: true, states: { 'sensor.x': {} } },
+        };
+        global.document = {
+            querySelector: (sel) => (
+                sel === 'home-assistant' ? main : null
+            ),
+        };
+        """
+        js_source = (
+            dom_setup
+            + "\nconst predicate = "
+            + final_predicate
+            + ";\nconsole.log(JSON.stringify({ result: Boolean(predicate()) }));"
+        )
+        assert self._run_predicate(js_source) is False, (
+            "Predicate returned TRUE when ha-panel-lovelace was not "
+            "mounted — fix weakened the predicate to always-true, "
+            "which would cause the fixture to return before the "
+            "panel is actually ready."
+        )
+
+    def test_predicate_falsy_when_hui_root_not_mounted(self) -> None:
+        """Negative guard: when ``hui-root`` has NOT yet rendered,
+        the predicate must return falsy.
+
+        Rationale: without ``hui-root``, there is no proof the panel
+        has completed a render cycle.  Even a live
+        ``main.hass.connected`` + attached panel is insufficient —
+        the test body would still race the first render on entry.
+        This ensures the fix does not accept a bare-attach snapshot.
+        """
+        from tests.e2e import conftest  # noqa: PLC0415
+
+        stages = getattr(conftest, "_LOVELACE_PANEL_STAGES", None)
+        assert stages is not None, "Helper missing _LOVELACE_PANEL_STAGES"
+        _final_stage_name, final_predicate = stages[-1]
+
+        # Panel mounted but hui-root has NOT yet rendered inside it.
+        dom_setup = r"""
+        const panel_shadow = {
+            querySelector: (sel) => null, // hui-root not yet rendered
+        };
+        const panel = {
+            shadowRoot: panel_shadow,
+            hass: { connected: true, states: { 'sensor.x': {} } },
+        };
+        const ham_shadow = {
+            querySelector: (sel) => (
+                sel === 'ha-panel-lovelace' ? panel : null
+            ),
+        };
+        const ham = { shadowRoot: ham_shadow };
+        const main_shadow = {
+            querySelector: (sel) => (
+                sel === 'home-assistant-main' ? ham : null
+            ),
+        };
+        const main = {
+            shadowRoot: main_shadow,
+            hass: { connected: true, states: { 'sensor.x': {} } },
+        };
+        global.document = {
+            querySelector: (sel) => (
+                sel === 'home-assistant' ? main : null
+            ),
+        };
+        """
+        js_source = (
+            dom_setup
+            + "\nconst predicate = "
+            + final_predicate
+            + ";\nconsole.log(JSON.stringify({ result: Boolean(predicate()) }));"
+        )
+        assert self._run_predicate(js_source) is False, (
+            "Predicate returned TRUE when hui-root was not mounted — "
+            "fix weakened the predicate to always-true or dropped "
+            "the hui-root check, which would cause the fixture to "
+            "return before the panel has completed a render cycle."
+        )
