@@ -692,21 +692,12 @@ class FoxESSPolledSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        # The pv_power sensor always exposes the sticky solar_seen
-        # flag so the overview card can decide whether to render the
-        # solar box or swap in a gen-load fallback (see C-020).  This
-        # path runs regardless of _has_multiple_sources because the
-        # flag is meaningful for single-source installs too.
-        attrs: dict[str, Any] = {}
-        if self._variable == "pvPower" and self.coordinator.data is not None:
-            solar_seen = self.coordinator.data.get("_solar_seen")
-            if solar_seen is not None:
-                attrs["solar_seen"] = bool(solar_seen)
-        if self._has_multiple_sources and self.coordinator.data is not None:
-            source = self.coordinator.data.get("_data_source")
-            if source is not None:
-                attrs["data_source"] = source
-        return attrs or None
+        if not self._has_multiple_sources or self.coordinator.data is None:
+            return None
+        source = self.coordinator.data.get("_data_source")
+        if source is None:
+            return None
+        return {"data_source": source}
 
 
 class FoxESSWorkModeSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntity):

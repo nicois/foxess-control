@@ -205,14 +205,7 @@ class FoxESSOverviewCard extends HTMLElement {
   }
 
   _parseBoxes(raw) {
-    // When the user supplies no boxes: config, fall back to the default
-    // four.  The ``_fromDefault`` marker distinguishes this case so
-    // ``_renderBox`` can auto-hide the solar slot only when the user
-    // hasn't opted into a specific layout.  Any explicit user entry
-    // (bare string or object) always renders, matching D-036 semantics.
-    if (!Array.isArray(raw) || raw.length === 0) {
-      return _DEFAULT_BOXES.map((b) => ({ ...b, _fromDefault: true }));
-    }
+    if (!Array.isArray(raw) || raw.length === 0) return _DEFAULT_BOXES;
     const seen = new Set();
     const result = [];
     for (const entry of raw) {
@@ -223,13 +216,9 @@ class FoxESSOverviewCard extends HTMLElement {
         type,
         icon: entry?.icon || null,
         label: entry?.label || null,
-        _fromDefault: false,
       });
     }
-    if (result.length === 0) {
-      return _DEFAULT_BOXES.map((b) => ({ ...b, _fromDefault: true }));
-    }
-    return result;
+    return result.length > 0 ? result : _DEFAULT_BOXES;
   }
 
   set hass(hass) {
@@ -321,25 +310,6 @@ class FoxESSOverviewCard extends HTMLElement {
     return `${w} W`;
   }
 
-  /** Read the solar_seen attribute from the pv_power entity.
-   *
-   * Returns ``true`` when the integration has recently observed a
-   * pvPower reading above SOLAR_SEEN_THRESHOLD_KW; the flag reverts
-   * to ``false`` after SOLAR_SEEN_TIMEOUT_MIN minutes of no such
-   * reading.  When the attribute is absent (older integration,
-   * entity not yet discovered), we default to ``true`` so the solar
-   * box renders as it always has — only an *explicit*
-   * ``solar_seen === false`` hides the default solar rendering.
-   */
-  _solarSeen(solarEntityId) {
-    if (!solarEntityId || !this._hass) return true;
-    const e = this._hass.states[solarEntityId];
-    if (!e || !e.attributes) return true;
-    const flag = e.attributes.solar_seen;
-    if (flag === false) return false;
-    return true;
-  }
-
   /** Read the data_source attribute from any resolved entity. */
   _getDataSource(eid) {
     for (const key of Object.keys(_ROLE_MAP)) {
@@ -379,22 +349,6 @@ class FoxESSOverviewCard extends HTMLElement {
     const t = box.type;
     if (!t) return "";
     if (t === "solar") {
-      // Hide the solar box while the integration has not observed a
-      // real-ish pvPower reading recently (AC-coupled, battery-only,
-      // or permanently-zero PV installs; overnight on sites with
-      // solar).  The ``solar_seen`` attribute on the pv_power sensor
-      // is True iff a reading above SOLAR_SEEN_THRESHOLD_KW arrived
-      // within SOLAR_SEEN_TIMEOUT_MIN minutes — see
-      // coordinator.solar_seen / _observe_pv_power.  Auto-hide only
-      // applies when the box comes from the default four (user didn't
-      // supply boxes: config); any explicit user config — bare
-      // ``"solar"`` string or object with label/icon — opts in and
-      // always renders.  D-036 box customisation is the escape hatch
-      // for repurposing the slot.
-      const solarSeen = this._solarSeen(eid.solar_entity);
-      if (!solarSeen && box._fromDefault) {
-        return "";
-      }
       const solar = this._num(eid.solar_entity);
       const pv1 = this._num(eid.pv1_entity);
       const pv2 = this._num(eid.pv2_entity);

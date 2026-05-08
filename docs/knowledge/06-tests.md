@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 6
-last_verified: 2026-05-03
+last_verified: 2026-05-08
 traces_up: [02-constraints.md, 04-design/]
 # This file describes the Jekyll/Liquid safety test and quotes the
 # Jinja tag names literally as examples.  The section that quotes
@@ -322,33 +322,6 @@ retains raw values for the control path (C-038 parity preserved);
 `None` raw readings surface as unavailability rather than a stale
 median.
 
-## Solar-Seen Flag and Gen Load Card Fallback (D-052)
-
-**Constraints**: C-020, C-026
-**Source**: `tests/test_solar_seen.py` (21 tests, 2026-05-03)
-
-Three test classes across Python + Playwright:
-
-- `TestCoordinatorSolarSeenFlag` (14): fresh coordinator starts with
-  `solar_seen=False`; `_observe_pv_power` refreshes the last-seen
-  timestamp on any `pvPower > SOLAR_SEEN_THRESHOLD_KW` reading via
-  both REST (`_async_update_data`) and WS (`inject_realtime_data`)
-  paths; flag stays True within the `SOLAR_SEEN_TIMEOUT_MIN` window,
-  reverts to False after; a fresh positive reading re-flips and
-  refreshes the window; zero / sub-threshold / None / negative /
-  missing readings are defensive no-ops (and do NOT extend the
-  window — otherwise the timeout never fires).
-- `TestPvPowerSensorSolarSeenAttribute` (3): the pv_power sensor
-  exposes `solar_seen` as an `extra_state_attribute`; it reflects the
-  current flag state; non-pv sensors do NOT expose the attribute (no
-  attribute pollution).
-- `TestOverviewCardSolarHiddenMode` (4, Playwright): with
-  `solar_seen=False` and default config, the solar node is NOT
-  rendered (card reflows to 3-box layout); with `solar_seen=True`
-  it renders normal Solar; sticky — `solar_seen=True` with
-  `pvPower=0` still shows Solar; an explicit `boxes:` override
-  with a custom `solar` entry always renders regardless of
-  `solar_seen` (escape hatch per D-036).
 
 ## Locale-Safe Operations Entity Resolution (D-053)
 

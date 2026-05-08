@@ -1,12 +1,12 @@
 ---
 project: FoxESS Control
 created: 2026-04-14
-last_updated: 2026-05-07
-last_reflection: 2026-05-07T19:30:00+10:00
+last_updated: 2026-05-08
+last_reflection: 2026-05-08T12:00:00+10:00
 workflow_state:
-  last_check: 2026-05-07T19:30:00+10:00
-  last_update: 2026-05-07T19:30:00+10:00
-  last_coverage: 2026-05-03T16:20:00+10:00
+  last_check: 2026-05-08T12:00:00+10:00
+  last_update: 2026-05-08T12:00:00+10:00
+  last_coverage: 2026-05-08T12:00:00+10:00
   last_review: null
   last_auto: 2026-05-04T11:45:00+10:00
 ---
@@ -1186,6 +1186,80 @@ inputs can come from an external policy?" The answer here was
 "yes to the first, no to the second" — classic gap where the
 algorithm was right but the documentation left a human without
 the framing to explain why.
+
+### 2026-05-08 — D-052 retired: solar-seen feature wound back
+
+**Change**: The entire solar-seen / Gen Load / hide-solar
+dashboard feature (1.0.15-beta.1, beta.2, beta.3) has been
+reverted to v1.0.14 behaviour. D-052 is marked `[RETIRED]`;
+coordinator plumbing, sensor attribute, and card reader paths
+are deleted as dead code. Other 1.0.15-beta.* improvements
+(D-053 locale-safe `_resolve(key)`, D-054 rolling median, D-055
+`deferred_start_committed`) are kept — the revert is scoped to
+the dashboard-surface feature.
+
+**Why**: two prior mid-beta pivots (sticky → timeout, swap →
+hide) tried to preserve the feature by refining its behaviour.
+Live review of beta.3 showed the underlying question the
+feature could never answer well: "what goes in the solar slot
+when the inverter has no solar?" House / Grid / Battery already
+cover the useful information. A "Gen Load" label was
+duplication. An empty slot was a reflow with no educational
+value. The least-bad default is the v1.0.14 behaviour: render
+all four boxes, tolerate the stuck-zero solar reading on
+non-solar installs. Users who find the stuck-zero noisy can
+already use `boxes:` config (D-036) to hide the solar box per
+site.
+
+**Lesson** (worth keeping): a visible dashboard feature that
+can't survive "show it to the user on their real hardware" is
+worse than no feature at all. Three pivots on the same feature
+— driven each time by user review finding a new shortcoming —
+was the stronger signal than any of the individual pivots. The
+pattern: when two pivots don't converge, the third should be a
+revert, not a third iteration. Adding this as a structure
+refinement below.
+
+**Tree updates**:
+- `04-design/lovelace-cards.md`: D-052 marked `[RETIRED]` with
+  retirement note; historical Decision body preserved.
+- `05-coverage.md`: P-005, C-020, C-026 rows no longer reference
+  D-052. Classification totals updated (57 → 56 active entries;
+  28 → 27 `other`). Summary rewrites narrative counts.
+- `06-tests.md`: "Solar-Seen Flag and Gen Load Card Fallback"
+  section removed.
+- `README.md`: "Solar box hidden when no solar is detected"
+  subsection removed.
+- `CHANGELOG.md`: new `## 1.0.15-beta.4` section with the
+  "Reverted" entry explaining the wind-back; beta.1/2/3
+  sections preserved as historical record.
+- `manifest.json`: bumped to 1.0.15-beta.4. No tag push this
+  session — user explicitly asked for a commit, not a release.
+
+**Audit state**: `knowledge_audit.py --strict` clean. 56 active
+D-NNN entries + 1 `[RETIRED]` marker (D-052). Same pre-existing
+collisions (D-014, D-015, D-041). No new upward gaps.
+
+**Git tags**: `v1.0.15-beta.1`, `v1.0.15-beta.2`, `v1.0.15-beta.3`
+are left pointing at the historical commits per the project's
+"never move git tags" policy. Anyone on those HACS pre-release
+channels gets exactly what was shipped.
+
+### Structure refinement: third pivot is a revert, not a pivot
+
+When a feature ships, survives user review, gets a corrective
+pivot, survives again, gets a second corrective pivot, and
+*then* surfaces a fresh problem on user review — the third
+"pivot" should be a revert. The signal is no longer "the
+implementation needs tuning" but "the feature's shape doesn't
+fit the problem." The solar-seen feature (D-052,
+2026-05-03 → 2026-05-08) is the concrete example:
+- beta.1 → beta.2: sticky → timeout (implementation pivot)
+- beta.2 → beta.3: swap → hide (behaviour pivot)
+- beta.3 → beta.4: revert (shape pivot — the feature shouldn't exist)
+
+If a future feature follows the same three-pivot trajectory,
+the right response is the same: revert, not a fourth iteration.
 
 ### Structure refinement: "listener commits, sensor reads"
 

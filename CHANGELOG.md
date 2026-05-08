@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.15-beta.4
+
+### Reverted
+- **Solar-seen / Gen Load / hide-solar dashboard feature reverted to v1.0.14 behaviour.** The feature shipped across three betas (beta.1 Gen Load swap → beta.2 20-min timeout → beta.3 hide-by-default) and each iteration exposed a fresh way the dashboard surface fell short of its intent. Live review of beta.3 kept surfacing the same underlying question — "what's the genuinely useful thing to show in that slot when the inverter has no solar?" — and the honest answer was "nothing the existing House / Grid / Battery boxes don't already cover." The four-box overview card now renders unconditionally as it did in v1.0.14; stuck-zero solar readings on AC-coupled / unwired-PV installs are tolerated as the lesser of two evils. The entire solar-seen plumbing (`SOLAR_SEEN_THRESHOLD_KW` / `SOLAR_SEEN_TIMEOUT_MIN` constants, `_solar_last_seen` field, `solar_seen` property, `_solar_seen_at` helper, `_observe_pv_power` observer, both coordinator call-site writes, the `pv_power` sensor attribute, and the card's `_solarSeen` / `_fromDefault` paths) is removed as dead code. D-052 is marked `[RETIRED]` in the knowledge tree. Other 1.0.15-beta.* improvements — locale-safe `_resolve(key)` for control + taper cards (D-053), 3-sample rolling median on WS-fed power display sensors (D-054), and the `deferred_start_committed` sensor-stability fix (D-055) — are unaffected and remain in place. Deleting `tests/test_solar_seen.py` drops 21 tests; full non-slow suite holds at 985 passing.
+
 ## 1.0.15-beta.3
 
 ### Changed

@@ -601,31 +601,6 @@ boxes:
 
 Each entry in `boxes` can be a string shorthand (`"solar"`) or an object with `type`, `label`, and `icon` properties. Boxes not listed are hidden. Omit `boxes` entirely to show all four with defaults.
 
-#### Solar box hidden when no solar is detected
-
-If the inverter has not reported solar above 50 W in the last 20 minutes, the solar box is **hidden** — the card reflows to a 3-box layout (House / Grid / Battery). Any real solar reading (above 50 W) brings the box back, and it remains for 20 minutes after the most recent positive reading. Brief cloud dips don't flap the display; sustained absence of solar — overnight, or on sites with no PV at all — does.
-
-This is automatic and needs no configuration. It's designed for:
-
-- AC-coupled inverters (e.g. the AC1 series) that have no MPPT inputs at all
-- Battery-only hybrid installs where the PV strings are disconnected
-- Any site where you'd rather a clean 3-box layout at night than a stuck `0.0 kW` solar reading
-
-To **repurpose the slot** (for example, to surface a generator power sensor), list the `solar` box in `boxes:` with your own `label` and `icon`:
-
-```yaml
-type: custom:foxess-overview-card
-boxes:
-  - type: solar
-    label: Generator
-    icon: "⚙"
-  - house
-  - grid
-  - battery
-```
-
-Explicit overrides always render — the auto-hide only applies to the default configuration.
-
 #### Entity overrides
 
 All entities are auto-discovered. To override:

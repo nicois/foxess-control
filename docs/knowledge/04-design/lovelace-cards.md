@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 4
-last_verified: 2026-05-03
+last_verified: 2026-05-08
 traces_up: [../02-constraints.md]
 traces_down: [../06-tests.md]
 ---
@@ -304,7 +304,38 @@ BMS-taper concern don't need.
 
 **Traces**: D-040 (targeted DOM updates depend on this constraint)
 
-### D-052: Hide solar box on the overview card when no solar is detected
+### D-052: Hide solar box on the overview card when no solar is detected [RETIRED]
+
+**Status**: retired 2026-05-08. Rationale preserved below for
+historical context; the behaviour it describes does NOT apply to
+the current code.
+
+**Retirement reason**: the feature shipped across three betas
+(v1.0.15-beta.1 Gen Load swap → beta.2 20-min timeout → beta.3
+hide-by-default) and each iteration exposed a fresh way the
+dashboard surface fell short of its intent. The final beta.3
+version hid the solar box when no recent pvPower was observed,
+but live review kept surfacing the same underlying question:
+"what is the genuinely distinct, useful information to show in
+that slot when the inverter has no solar?" — and the honest
+answer was "nothing the existing House / Grid / Battery boxes
+don't already cover." Rather than carry a visible-dashboard
+feature that duplicates information by design, the feature was
+reverted to v1.0.14 behaviour: solar box renders
+unconditionally, stuck-zero readings on non-solar installs are
+tolerated as the lesser of two evils. The solar-seen coordinator
+plumbing (constant tuning, timestamp field, observe helper, two
+call-site writes, pv_power sensor attribute, card reader) is
+removed as dead code.
+
+**Lesson kept in META.md** (2026-05-08 reflection): a visible
+dashboard feature that can't survive "show it to the user on
+their real hardware" is worse than no feature at all. Two
+mid-beta pivots (beta.1→2 sticky→timeout, beta.2→3 swap→hide)
+were the first signal; the final revert is the acknowledgement
+that the third pivot didn't fix it either.
+
+**Historical Decision** (no longer applies): `FoxESSDataCoordinator`
 
 **Decision**: `FoxESSDataCoordinator` tracks the timestamp
 `_solar_last_seen` of the most recent `pvPower` reading strictly
