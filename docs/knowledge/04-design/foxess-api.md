@@ -220,6 +220,79 @@ schedule write must respect);
 `tests/test_events.py::TestInverterScheduleWriteReachesParentHandler` (3),
 `tests/replay_traces/sample_schedule_write.jsonl` (replay regression fixture).
 
+### D-056: Entity-mode writes convert watts to target entity's native unit
+**Decision**: Before `FoxESSEntityAdapter.apply_mode` and
+`FoxESSEntityAdapter.set_export_limit_w` call
+`number.set_value` on a foxess_modbus (or equivalent) `number.*`
+entity, the watts value produced by the pacing algorithm is converted
+to the target entity's declared `unit_of_measurement` and clamped to
+its `min` / `max` attributes. The conversion lives in the helper
+`_convert_and_clamp_power_for_write(hass, entity_id, value_w)` in
+`foxess_adapter.py`, built on HA's built-in `PowerConverter`. Rules:
+(a) target unit `W` → passthrough; (b) target unit `kW` (or any
+`PowerConverter.VALID_UNITS` member) → convert from watts; (c)
+missing or unrecognised unit → passthrough **with a warning**;
+(d) after conversion, clamp to `max`/`min` with a warning when the
+requested value exceeded `max`. The helper is applied only to
+**power** writes; `min_soc` (percent) writes and `select.*` work-mode
+writes are untouched.
+**Context**: The `foxess_modbus` integration publishes a "Force
+Charge Power" entity with `unit_of_measurement: "kW"`, `min: 0`,
+`max: 15`, `step: 0.001`, and silently clamps out-of-range
+`number.set_value` calls. When FoxESS Control asked for `value=3500`
+(i.e. 3.5 kW expressed in watts), foxess_modbus clamped 3500 → 15 kW
+— the inverter ran at max power on every write and the pacing
+algorithm had no effective control. The same bug affected the
+force-discharge power entity and the Max Grid Export Limit entity.
+**Rationale**: The read side (`EntityCoordinator._convert_unit`)
+already uses HA's `PowerConverter` to translate source-unit → expected
+unit when reading inverter state from external entities; the write
+side needs the symmetric converter. HA's `PowerConverter` is
+authoritative for unit conversion, is already a runtime dependency
+(D-010 read path), and handles all `UnitOfPower` members — so
+foreign integrations using `MW`/`GW`/etc. also work. Clamping to the
+target's declared `max` inside the adapter (rather than trusting the
+remote integration's clamp) surfaces "pacing wanted N but target
+saturates at M" as a warning instead of a silent saturation — C-020
+operational transparency.
+**Evolution**: Initial read-path converter shipped in the D-010 era;
+the write path was missed because cloud mode (the primary FoxESS
+control path) writes watts natively to the FoxESS schedule API's
+`fdPwr` field. The entity-mode write path was a latent bug until
+confirmed in production (user report: all pacing writes saturated at
+the foxess_modbus `max=15`).
+**Priority served**: P-005 (operational transparency — the inverter
+does what the pacing algorithm asked, visibly)
+**Trades against**: none — cloud mode is unaffected (watts are the
+FoxESS API's native unit); entity mode was broken for any target in
+kW.
+**Classification**: safety (enforces command-correctness invariant —
+pacing intent = inverter behaviour)
+**Alternatives considered**:
+- Require users to configure a watts-valued number entity in
+  foxess_modbus: rejected because foxess_modbus does not expose one,
+  and the integration boundary rule is that FoxESS Control adapts to
+  the remote integration, not vice versa.
+- Put the helper in `smart_battery/`: rejected per C-021 / C-039 —
+  `smart_battery/` must not know about brand-level entity-unit
+  conventions. The helper touches `hass.states.get(entity_id)` to
+  read foxess_modbus-shaped target attributes; that coupling belongs
+  in the brand layer.
+- Convert unconditionally (watts / 1000): rejected — the same
+  adapter is also used with entity backends whose target is already
+  in watts (e.g. `input_number` helpers users configure themselves).
+  Silent always-divide would corrupt those writes.
+- Store the target unit in config: rejected — forces users to know
+  the remote integration's entity semantics, and is wrong when the
+  remote integration updates its unit declaration. Reading the unit
+  at write time follows the authoritative source.
+**Traces**: C-020 (operational transparency), C-021 / C-039
+(helper lives in brand layer);
+`custom_components/foxess_control/foxess_adapter.py::_convert_and_clamp_power_for_write`,
+`custom_components/foxess_control/foxess_adapter.py::FoxESSEntityAdapter.apply_mode`,
+`custom_components/foxess_control/foxess_adapter.py::FoxESSEntityAdapter.set_export_limit_w`;
+`tests/test_entity_mode_write_units.py` (9).
+
 ## Key Behaviours
 
 - Rate limit handling: errno 40400 retried up to `RATE_LIMIT_RETRIES`

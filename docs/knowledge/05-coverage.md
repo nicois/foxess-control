@@ -24,7 +24,7 @@ serving it.
 | P-002 Respect minimum state of charge | C-002, C-003, C-012, C-013, C-016, C-018, C-019, C-024, C-025, C-027 | D-001, D-016 | ENFORCED |
 | P-003 Meet the user's energy target | C-007, C-008, C-009, C-010, C-011, C-014, C-022, C-023, C-037 | D-005, D-006, D-007, D-011, D-012, D-013, D-014, D-015 (taper), D-019, D-032, D-033, D-037, D-042, D-043, D-044, D-046 | ENFORCED |
 | P-004 Maximise feed-in revenue | (aspirational — no C-NNN) | (no D-NNN currently declares P-004 as primary; D-044 serves P-003 but advances P-004 as a secondary effect) | ASPIRATIONAL |
-| P-005 Operational transparency | C-004, C-005, C-006, C-020, C-022, C-026, C-038 | D-008, D-009, D-010, D-020, D-021, D-027, D-028, D-029, D-030, D-035, D-036, D-038, D-039, D-040, D-041 (ws), D-048, D-050, D-051, D-053, D-054, D-055 | ENFORCED |
+| P-005 Operational transparency | C-004, C-005, C-006, C-020, C-022, C-026, C-038 | D-008, D-009, D-010, D-020, D-021, D-027, D-028, D-029, D-030, D-035, D-036, D-038, D-039, D-040, D-041 (ws), D-048, D-050, D-051, D-053, D-054, D-055, D-056 | ENFORCED |
 | P-006 Brand portability | C-015, C-021, C-039, C-040 | D-022 | ENFORCED |
 | P-007 Engineering process integrity | C-015, C-028, C-029, C-030, C-031, C-032, C-033, C-034, C-035, C-036 | D-019, D-031, D-034, D-041 (lovelace), D-045, D-049 | ENFORCED |
 
@@ -63,16 +63,16 @@ declaration.
 
 ## Classification Summary
 
-Across 56 active decision entries (IDs D-001..D-055 with D-024
+Across 57 active decision entries (IDs D-001..D-056 with D-024
 silently retired without marker and D-052 carrying a `[RETIRED]`
 marker since 2026-05-08; D-014, D-015, and D-041 each reuse the
 same ID for two distinct decisions in different design files —
-collisions tracked in META.md; 53 unique active IDs + 3 collisions
-= 56 active entries).
+collisions tracked in META.md; 54 unique active IDs + 3 collisions
+= 57 active entries).
 
 | Classification | Count | Meaning |
 |---|---|---|
-| safety   | 17 | Enforces a C-NNN invariant; non-negotiable without changing the C-NNN |
+| safety   | 18 | Enforces a C-NNN invariant; non-negotiable without changing the C-NNN |
 | pacing   | 14 | Optimises a target; tunable, reviewable when assumptions change |
 | other    | 27 | Infrastructure / observability / architectural decisions |
 
@@ -106,7 +106,7 @@ against a scenario that the system couldn't actually reach.
 | C-017 End-of-discharge guard | D-003 | `TestShouldSuspendDischarge::test_high_consumption_suspends` | COVERED |
 | C-018 Unmanaged work mode protection | D-016 | `TestCheckScheduleSafe` (7), `test_rejects_schedule_with_backup_mode` | COVERED |
 | C-019 Discharge SoC unavailability abort | D-019 | `TestDischargeSocUnavailability` (2) | COVERED |
-| C-020 Operational transparency | D-008, D-009, D-021, D-027, D-028, D-029, D-030, D-033, D-035, D-036, D-038, D-039, D-040, D-051, D-053, D-054, D-055 | `TestSessionContextFilter` (7), `TestInstallRemove` (2), `TestDebugLogHandlerWithSession` (3), `TestBMSBatteryTemperature` (3 mapped), `TestBatteryDetailEndpoint` (2 mapped), `TestCompoundIdFromWebSocket` (1 mapped), `TestSmartDischargeExportLimitSensor` (2), `TestSmartOperationsOverviewAttribute`, `test_all_locales_cover_english_keys` (2, parametrized), `test_parser_finds_expected_locales`, `test_new_keys_present_in_every_locale`, `TestSaveRunViolationPersistence` (2, soak-recorder observability), E2E: `test_data_source_badge_matches_mode` (3), `test_stale_badge_shown_for_old_api_data` (3), `test_api_source_when_idle`, `test_ws_always_connects_without_session`, `test_ws_mode_persists_via_options_flow`, `test_ws_linger_captures_post_discharge_data`, `test_house_load_never_greyed`, `test_pv_values_consistent_with_solar_total` (3), `test_node_click_opens_more_info`, `test_default_config_renders_all_four_boxes`, `test_custom_boxes_*` (3), `test_progress_hidden_when_idle`, `test_progress_visible_during_discharge` (3), `test_clamp_split_power_row_renders_when_export_limit_configured`, `test_clamp_active_class_toggles_with_attribute`, `test_safety_floor_row_appears_when_tracked`, `test_safety_floor_row_is_expandable_and_shows_peak`, `test_discharge_deferred_reason_renders_when_attribute_present`, `test_charge_deferred_reason_renders_when_attribute_present`, `TestTaperCard` (3), `TestFormInputPersistence` (5) | COVERED |
+| C-020 Operational transparency | D-008, D-009, D-021, D-027, D-028, D-029, D-030, D-033, D-035, D-036, D-038, D-039, D-040, D-051, D-053, D-054, D-055, D-056 | `TestSessionContextFilter` (7), `TestInstallRemove` (2), `TestDebugLogHandlerWithSession` (3), `TestBMSBatteryTemperature` (3 mapped), `TestBatteryDetailEndpoint` (2 mapped), `TestCompoundIdFromWebSocket` (1 mapped), `TestSmartDischargeExportLimitSensor` (2), `TestSmartOperationsOverviewAttribute`, `test_all_locales_cover_english_keys` (2, parametrized), `test_parser_finds_expected_locales`, `test_new_keys_present_in_every_locale`, `TestSaveRunViolationPersistence` (2, soak-recorder observability), E2E: `test_data_source_badge_matches_mode` (3), `test_stale_badge_shown_for_old_api_data` (3), `test_api_source_when_idle`, `test_ws_always_connects_without_session`, `test_ws_mode_persists_via_options_flow`, `test_ws_linger_captures_post_discharge_data`, `test_house_load_never_greyed`, `test_pv_values_consistent_with_solar_total` (3), `test_node_click_opens_more_info`, `test_default_config_renders_all_four_boxes`, `test_custom_boxes_*` (3), `test_progress_hidden_when_idle`, `test_progress_visible_during_discharge` (3), `test_clamp_split_power_row_renders_when_export_limit_configured`, `test_clamp_active_class_toggles_with_attribute`, `test_safety_floor_row_appears_when_tracked`, `test_safety_floor_row_is_expandable_and_shows_peak`, `test_discharge_deferred_reason_renders_when_attribute_present`, `test_charge_deferred_reason_renders_when_attribute_present`, `TestTaperCard` (3), `TestFormInputPersistence` (5), `TestApplyModePowerConversion` (5), `TestSetExportLimitConversion` (3), `TestNonPowerWritesUntouched` (1) | COVERED |
 | C-021 Brand-agnostic code in common package | D-022 | `test_smart_battery_has_no_brand_imports`, `test_vendored_copy_matches_canonical` | COVERED |
 | C-022 Unreachable charge target surfaced | D-028 | `TestIsChargeTargetReachable` (7) | COVERED |
 | C-024 Safe state on failure | D-023, D-025, D-026, D-031, D-032, D-034, D-042, D-045 | `TestTransientApiErrorResilience` (3), `TestStaleWorkModeAfterCleanupFailure` (2), `TestRecoverSessions` (13), E2E: `test_ws_recovers_after_stream_stolen`, `test_ws_reconnects_after_reload_at_max_power`, `TestReloadRecovery` (7), `test_deferred_to_discharging_triggers_ws` | COVERED |
@@ -231,16 +231,20 @@ C-014.
 
 - **Priorities**: 7 (P-001..P-007, introduced 2026-04-24)
 - **Total constraints**: 40 (all active; C-023 reclassified as hardware-satisfied; C-039 and C-040 added 2026-04-25)
-- **Design decisions**: 53 unique active (D-001..D-055, D-024
+- **Design decisions**: 54 unique active (D-001..D-056, D-024
   retired, D-052 retired 2026-05-08; D-014, D-015, and D-041 each
   refer to two different entries in different design files — ID
   collisions tracked in META.md). 2026-05-03 additions still in
   effect: D-053 (locale-safe `_resolve(key)` for control + taper
   cards), D-054 (rolling-median filter on WS-fed display power
   channels), D-055 (listener commits deferred_start for sensor-side
-  phase stability). D-052 (solar-seen / Gen Load / hide solar box)
-  retired after three mid-beta pivots failed to land on a
-  genuinely-useful dashboard surface — see META reflection 2026-05-08.
+  phase stability). D-056 (2026-05-03) converts entity-mode power
+  writes to the target entity's unit, fixing the production
+  foxess_modbus-interop bug where every force-charge / force-discharge /
+  export-limit write saturated at the declared `max` because raw watts
+  were written to a kW-unit number entity. D-052 (solar-seen / Gen Load
+  / hide solar box) retired after three mid-beta pivots failed to land
+  on a genuinely-useful dashboard surface — see META reflection 2026-05-08.
 - **Fully covered**: 26 (67%)
 - **Partial (actionable)**: 0
 - **Accepted (non-actionable)**: 14 (33%) — C-009, C-013, C-015, C-023,
@@ -255,7 +259,7 @@ C-014.
 - **Priority inversions**: 0
 - **Unconstrained priorities**: 1 (P-004 — aspirational by design)
 - **Unprioritised constraints**: 0 (all 40 C-NNN name P-NNN)
-- **Unprioritised decisions**: 0 (all 56 active D-NNN entries name P-NNN + classification; 53 unique active IDs + 3 collisions; D-024 silently retired; D-052 retired 2026-05-08 with `[RETIRED]` marker; D-014 / D-015 / D-041 each carry two distinct entries in different design files — ID reuse collisions noted below under Classification Summary)
+- **Unprioritised decisions**: 0 (all 57 active D-NNN entries name P-NNN + classification; 54 unique active IDs + 3 collisions; D-024 silently retired; D-052 retired 2026-05-08 with `[RETIRED]` marker; D-014 / D-015 / D-041 each carry two distinct entries in different design files — ID reuse collisions noted below under Classification Summary)
 - **Active regression**: none
 - **Orphan tests**: ~160 unit (display, plumbing, lifecycle tests)
 - **Test counts**: run `python scripts/test_summary.py` for

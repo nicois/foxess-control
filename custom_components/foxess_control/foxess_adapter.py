@@ -22,6 +22,7 @@ from homeassistant.helpers.issue_registry import (
     async_delete_issue,
 )
 from homeassistant.util import dt as dt_util
+from homeassistant.util.unit_conversion import PowerConverter
 
 from .const import (
     CONF_CHARGE_POWER_ENTITY,
@@ -541,6 +542,92 @@ def _entity_service_domain(entity_id: str, default: str) -> str:
     return prefix if prefix.startswith("input_") else default
 
 
+def _convert_and_clamp_power_for_write(
+    hass: HomeAssistant,
+    entity_id: str,
+    value_w: int | float,
+) -> float | int:
+    """Return *value_w* in the target entity's unit, clamped to its min/max.
+
+    Entity-mode control writes power values to foxess_modbus (and similar)
+    ``number.*`` entities. Those entities declare their own
+    ``unit_of_measurement`` — commonly ``kW`` with ``max=15`` — and
+    silently clamp out-of-range writes. Passing raw watts to a kW target
+    therefore saturates every write at the clamp ceiling, disabling the
+    pacing algorithm. See D-056.
+
+    Rules:
+
+    * Target unit ``W`` (or unit matches watts): passthrough.
+    * Target unit ``kW`` / another ``PowerConverter`` unit: convert from
+      watts to that unit using HA's built-in ``PowerConverter``.
+    * Unknown / missing unit: passthrough and emit a warning — the user
+      needs to know the integration cannot validate the write.
+    * After conversion, clamp to ``min``/``max`` attributes when present;
+      log a warning when the requested value exceeded ``max``.
+
+    This helper lives in the brand layer (C-021 / C-039): it touches
+    foxess_modbus-style target-entity attributes and must not be added to
+    ``smart_battery/``.
+    """
+    state = hass.states.get(entity_id)
+    attrs: dict[str, Any]
+    raw_attrs = getattr(state, "attributes", None) if state is not None else None
+    attrs = raw_attrs if isinstance(raw_attrs, dict) else {}
+
+    raw_unit = attrs.get("unit_of_measurement")
+    unit: str | None = raw_unit if isinstance(raw_unit, str) and raw_unit else None
+
+    # Step 1: unit conversion.
+    if unit is None:
+        _LOGGER.warning(
+            "Target entity %s has no unit_of_measurement; passing %s W "
+            "through unchanged. Set the entity's unit (kW or W) to allow "
+            "FoxESS Control to scale writes correctly.",
+            entity_id,
+            value_w,
+        )
+        converted: float | int = value_w
+    elif unit == "W":
+        converted = value_w
+    elif unit in PowerConverter.VALID_UNITS:
+        converted = PowerConverter.convert(float(value_w), "W", unit)
+    else:
+        _LOGGER.warning(
+            "Target entity %s has unrecognised power unit %r; passing "
+            "%s W through unchanged.",
+            entity_id,
+            unit,
+            value_w,
+        )
+        converted = value_w
+
+    # Step 2: clamp to the entity's declared range when present.
+    def _to_float(val: Any) -> float | None:
+        if not isinstance(val, int | float):
+            return None
+        return float(val)
+
+    max_f = _to_float(attrs.get("max"))
+    if max_f is not None and converted > max_f:
+        _LOGGER.warning(
+            "Requested %s (from %s W) exceeds %s max=%s; "
+            "clamping to max. Pacing may be capped by the target "
+            "entity's declared range.",
+            converted,
+            value_w,
+            entity_id,
+            max_f,
+        )
+        converted = max_f
+
+    min_f = _to_float(attrs.get("min"))
+    if min_f is not None and converted < min_f:
+        converted = min_f
+
+    return converted
+
+
 class FoxESSEntityAdapter:
     """InverterAdapter for FoxESS entity-mode (foxess_modbus) control.
 
@@ -625,15 +712,19 @@ class FoxESSEntityAdapter:
                 else self._opts.get(CONF_DISCHARGE_POWER_ENTITY)
             )
             if power_entity:
+                # Convert watts to the target entity's declared unit and clamp
+                # to its min/max. Prevents foxess_modbus's range-clamp from
+                # saturating every write at the ceiling (D-056).
+                value = _convert_and_clamp_power_for_write(hass, power_entity, power_w)
                 try:
                     await hass.services.async_call(
                         _entity_service_domain(power_entity, "number"),
                         "set_value",
-                        {"entity_id": power_entity, "value": power_w},
+                        {"entity_id": power_entity, "value": value},
                     )
-                    self._log_first_write(power_entity, "set_value", power_w)
+                    self._log_first_write(power_entity, "set_value", value)
                 except Exception as err:
-                    self._log_first_write(power_entity, "set_value", power_w, err)
+                    self._log_first_write(power_entity, "set_value", value, err)
                     raise
 
         min_soc_entity = self._opts.get(CONF_MIN_SOC_ENTITY)
@@ -673,16 +764,19 @@ class FoxESSEntityAdapter:
                 self._warned_missing_export_limit = True
             return
         domain = _entity_service_domain(entity_id, "number")
+        # Convert watts to the target entity's declared unit and clamp to
+        # its min/max (D-056).
+        value = _convert_and_clamp_power_for_write(hass, entity_id, value_w)
         try:
             await hass.services.async_call(
                 domain,
                 "set_value",
-                {"entity_id": entity_id, "value": int(value_w)},
+                {"entity_id": entity_id, "value": value},
                 blocking=True,
             )
-            self._log_first_write(entity_id, "set_value", value_w)
+            self._log_first_write(entity_id, "set_value", value)
         except Exception as err:
-            self._log_first_write(entity_id, "set_value", value_w, err)
+            self._log_first_write(entity_id, "set_value", value, err)
             raise
 
     async def get_export_limit_w(
