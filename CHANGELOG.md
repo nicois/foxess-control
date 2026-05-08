@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.15-beta.5
+
+### Fixed
+- **Entity-mode force-charge / force-discharge / export-limit writes now respect the target entity's `unit_of_measurement`** (D-056). When running in entity mode (typically against `foxess_modbus`), the integration writes power commands via `number.set_value` to user-configured target entities. Every power entity published by `foxess_modbus` declares `unit_of_measurement: "kW"` with `min: 0, max: 15` (values 0–15 kW). Previous releases wrote raw watts (e.g. `10500` for 10.5 kW) into these targets; `foxess_modbus` clamped every such write to its declared max of 15, so force-charge / force-discharge / export-limit all ran at the clamp ceiling (15 kW) regardless of what the pacing algorithm requested — the user had no effective control. Fix: `FoxESSEntityAdapter` now routes every power write through a new `_convert_and_clamp_power_for_write` helper, which reads the target's `unit_of_measurement` + `min` + `max` attributes, converts watts via HA's `PowerConverter`, and clamps to the declared range. Missing or unrecognised units pass through unchanged with a visible warning (so a 1000× misconfiguration can't be silent); over-max requests are clamped with a warning so the user sees when pacing is capped by the target's declared max. Non-power writes (SoC percent, work-mode select) are untouched. Cloud mode — which writes `fdPwr` in watts natively via the FoxESS Open API — is unaffected. Nine-test regression suite in `tests/test_entity_mode_write_units.py` drives the real `FoxESSEntityAdapter` against a foxess_modbus-shaped number entity (kW/W/missing-unit) covering charge, discharge, export-limit, and a guard that the `min_soc` percent write is never re-scaled. Restores pacing control for every entity-mode user — the algorithm's decisions now actually take effect on the inverter.
+
 ## 1.0.15-beta.4
 
 ### Reverted
