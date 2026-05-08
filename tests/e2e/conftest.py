@@ -604,50 +604,69 @@ _STAGE_HOME_ASSISTANT_MAIN = """() => {
 # the DOM`` as observed in test_gallery_overview_idle[entity] on
 # v1.0.13-beta.1 (run 24921297745).
 #
-# Semantic signals used to prove the panel is past HA's initial
-# navigation churn:
-#   (a) main.hass.connected === true — WS session established with HA
-#       core.  Only true once HA's initial navigation churn has settled
-#       and auth refresh completed.
-#   (b) ha-panel-lovelace attached inside the main shadow root.
-#   (c) hui-root mounted inside panel.shadowRoot — the DOM-observable
+# The predicate settles on TWO synchronous DOM facts:
+#   (a) ha-panel-lovelace attached inside the main shadow root.
+#   (b) hui-root mounted inside panel.shadowRoot — the DOM-observable
 #       proof that the panel has completed at least one full render
 #       cycle.  hui-root cannot exist unless panel.hass was assigned
-#       AND a Lit render cycle ran, so its presence implies panel.hass
-#       was set, but without the transient wire-up race.
+#       AND main.hass.connected was true at render time AND a Lit
+#       render cycle ran, so its presence implies both connectivity
+#       and wiring — without any of the transient JS-property races.
 #
-# Why (c) instead of panel.hass?  Diagnosed 2026-04-26 from Flaky Test
-# Detection run 24956110840 (v1.0.13), victim
-# test_gallery_control_charging[cloud]: stage 3 timed out at 74958ms
-# (virtually the entire 75s overall budget).  The prior predicate
-# required panel.hass to be truthy, but panel.hass is a JS property
-# assigned by HA's partial-panel-resolver between panel mount and first
-# render.  Under adversarial cloud-variant CI timing (12 xdist workers,
-# extra integration-startup async work, navigation bursts) the
-# predicate cycled through retries without ever observing panel.hass
-# simultaneously truthy with the other signals.
+# Evolution of this predicate:
+#
+# - Initial version: bare ``!!panel`` attach check.  Failed on
+#   navigation-detach in test_gallery_overview_idle[entity]
+#   (v1.0.13-beta.1).
+#
+# - 2026-04-26 fix (run 24956110840): replaced ``panel.hass`` with
+#   ``hui-root`` as the stability signal.  ``panel.hass`` is a JS
+#   property assigned by HA's partial-panel-resolver BETWEEN panel
+#   mount and first render; under adversarial cloud-variant CI
+#   timing the predicate cycled through retries without ever
+#   observing panel.hass simultaneously truthy with the other
+#   signals.
+#
+# - 2026-05-03 fix (test_time_picker_stays_open_during_rerender
+#   [entity], 74951ms timeout in Flaky Test Detection): dropped
+#   ``main.hass.connected`` from the gate.  main.hass.connected is
+#   a live JS property reflecting the CURRENT state of HA's
+#   frontend WebSocket.  Under entity-mode configuration (extra
+#   input_number / input_select / input_boolean helpers plus the
+#   EntityCoordinator reading each mapped entity on first refresh)
+#   the state-change burst is heavier than cloud mode's single
+#   REST poll, causing the frontend WS to transiently drop
+#   connected=true→false→true for long enough to miss multiple
+#   Playwright polls.  hui-root is STRICTLY STRONGER: once mounted,
+#   it is proof the connection was live at render time, and the
+#   runtime transient flip does not retroactively invalidate the
+#   render.  Keeping connected in the gate produced a predicate
+#   that could never converge when the churn outlasted the 75s
+#   budget — the exact symptom observed in CI.
 #
 # hui-root is a synchronous DOM fact — once mounted inside
-# panel.shadowRoot, it survives the partial-panel-resolver wire-up
-# race that can transiently null panel.hass during navigation.  We do
-# NOT require panel.hass; panel.shadowRoot.querySelector('hui-root')
-# being non-null is strictly stronger (the Lit render that produced
-# hui-root required panel.hass to be set at render time).
+# panel.shadowRoot, it survives both the partial-panel-resolver
+# wire-up race and the entity-mode state-burst WS flap.  We do NOT
+# require panel.hass or main.hass.connected at poll time; hui-root's
+# presence is strictly stronger than either (the Lit render that
+# produced hui-root required both to be true at render time).
 _STAGE_HA_PANEL_LOVELACE = """() => {
     const main = document.querySelector('home-assistant');
     if (!main || !main.shadowRoot) return false;
-    // (a) hass WebSocket session established — only true once HA's
-    // initial navigation churn has settled and auth refresh completed.
-    if (!main.hass || !main.hass.connected) return false;
     const ham = main.shadowRoot.querySelector('home-assistant-main');
     if (!ham || !ham.shadowRoot) return false;
-    // (b) ha-panel-lovelace attached.
+    // (a) ha-panel-lovelace attached.
     const panel = ham.shadowRoot.querySelector('ha-panel-lovelace');
     if (!panel || !panel.shadowRoot) return false;
-    // (c) hui-root mounted inside panel.shadowRoot — DOM-observable
-    // proof the panel completed a render cycle.  Stronger than
-    // panel.hass (which has a wire-up race under cloud-variant CI
-    // timing).  See comment block above for rationale.
+    // (b) hui-root mounted inside panel.shadowRoot — DOM-observable
+    // proof the panel completed a render cycle.  Strictly stronger
+    // than checking live JS properties (panel.hass or
+    // main.hass.connected): hui-root's existence proves the Lit
+    // render occurred, which required those properties to be true
+    // at render time.  Using DOM facts instead of JS properties
+    // avoids the entity-mode WS-flap race and the cloud-mode
+    // partial-panel-resolver wire-up race.  See comment block
+    // above for the full evolution.
     const huiRoot = panel.shadowRoot.querySelector('hui-root');
     if (!huiRoot) return false;
     return true;
@@ -773,14 +792,23 @@ def _wait_for_lovelace_panel(page: Any, timeout_ms: int = 75000) -> None:
     without masking genuine hangs.
 
     **Stage-3 stability signal**: the ha-panel-lovelace predicate
-    requires ``main.hass.connected`` AND ``hui-root`` mounted inside
-    ``panel.shadowRoot``, not ``panel.hass`` (the earlier attempt).
-    ``hui-root`` is a synchronous DOM fact that cannot exist unless
-    ``panel.hass`` was assigned and a render cycle completed, so it
-    is strictly stronger than a JS-property check and does not suffer
-    the wire-up race observed on run 24956110840 (cloud variant, 74958ms
-    timeout).  See ``TestWaitForLovelacePanelCloudVariantSignalStability``
-    for the regression test.
+    settles on two synchronous DOM facts — ``ha-panel-lovelace``
+    attached inside the main shadow root, and ``hui-root`` mounted
+    inside ``panel.shadowRoot``.  It does NOT gate on live JS
+    properties (``panel.hass``, ``main.hass.connected``) because
+    those can transiently flip under CI churn:
+      - ``panel.hass`` flaps during the partial-panel-resolver wire-up
+        race (run 24956110840, cloud variant, 74958ms timeout).
+      - ``main.hass.connected`` flaps during entity-mode's heavier
+        state-change bursts (test_time_picker_stays_open_during_rerender
+        [entity], 74951ms timeout in Flaky Test Detection).
+    ``hui-root`` is strictly stronger than either: the Lit render
+    that produced it required both properties to be true at render
+    time, so its DOM presence is proof of the wired-and-connected
+    state without being vulnerable to the runtime flap.  See
+    ``TestWaitForLovelacePanelCloudVariantSignalStability`` and
+    ``TestWaitForLovelacePanelEntityModeInitRace`` for regression
+    tests.
 
     Raises ``TimeoutError`` if any stage fails within its bounded
     budget (stage name appears in the error message).  Unrelated

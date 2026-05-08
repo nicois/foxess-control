@@ -558,7 +558,12 @@ HA-dependent behaviour); `tests/e2e/ha_client.py::HAEventStream`
 overall budget — encoded from the beta.3 page-fixture diagnosis);
 `tests/test_e2e_page_fixture.py::TestWaitForLovelacePanelCloudVariantSignalStability`
 (`hui-root` is stronger than `panel.hass` — DOM fact vs racy JS
-property — encoded from the cloud-variant diagnosis)
+property — encoded from the cloud-variant diagnosis);
+`tests/test_e2e_page_fixture.py::TestWaitForLovelacePanelEntityModeInitRace`
+(`hui-root` is also stronger than `main.hass.connected` — the live
+WS flag flaps during entity-mode's heavier state-change burst; DOM
+facts survive the churn — encoded from the 2026-05-03 entity-mode
+diagnosis)
 
 ### C-032: Reproduce failure before fixing
 **Priority enforced**: P-007 (engineering process integrity) —

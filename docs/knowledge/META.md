@@ -1278,3 +1278,84 @@ transparency state is a read of the listener's most recent
 committed decision, not a sensor-side recomputation." Not added as
 C-NNN yet — will graduate from this meta-observation if a third
 instance fires.
+
+### 2026-05-03 — Page-fixture predicate: entity-mode init race (C-031)
+
+**Context**: CI's Flaky Test Detection workflow surfaced a new
+page-fixture setup timeout on
+`test_time_picker_stays_open_during_rerender[entity]` — worker gw2,
+74951ms in `wait_for_function`, essentially the full 75s budget.
+The paired `[cloud]` variant setup on the same worker succeeded in
+15.2s. Same page fixture, same predicate, same worker — only the
+integration mode differed.
+
+**Root cause**: The final-stage predicate
+(`_STAGE_HA_PANEL_LOVELACE`) required THREE signals simultaneously
+true at each Playwright poll:
+1. `main.hass.connected === true` — HA frontend WebSocket live.
+2. `ha-panel-lovelace` attached (DOM fact).
+3. `hui-root` mounted inside `panel.shadowRoot` (DOM fact).
+
+Signals 2 and 3 are synchronous DOM facts that persist through CI
+churn. Signal 1 is a live JS property reflecting the current state
+of the HA frontend's WS connection. Under entity-mode configuration
+(extra `input_number` / `input_select` / `input_boolean` helpers,
+plus the `EntityCoordinator` reading each mapped entity on first
+refresh) the state-change stream is heavier than cloud-mode's
+single REST poll. That churn can cause HA's frontend WS to
+transiently drop `connected=true→false→true` for a duration that
+spans multiple Playwright polls.
+
+During such a flap window, the predicate returns false — not
+because the panel isn't ready (it is — `hui-root` is rendered),
+but because `main.hass.connected` is momentarily false at poll
+time. If the flap outlasts the budget, the fixture times out.
+
+**Fix** (tests/e2e/conftest.py): dropped the
+`main.hass.connected` gate from the final predicate. `hui-root`'s
+presence is strictly stronger proof — the Lit render that produced
+it required both `panel.hass` and `main.hass.connected` to be true
+at render time, so its DOM presence is proof of the
+wired-and-connected state without being vulnerable to the runtime
+flap. Same rationale as the 2026-04-26 fix (which replaced
+`panel.hass` with `hui-root`): live JS properties are racy; DOM
+facts are not.
+
+**Regression tests**
+(`tests/test_e2e_page_fixture.py::TestWaitForLovelacePanelEntityModeInitRace`):
+four deterministic Node-driven predicate tests — one that fails on
+the current code (entity-mode adversarial snapshot: hui-root
+mounted, `hass.connected=false`), three neighbourhood guards
+(cloud-happy-path still passes; panel-not-mounted still rejects;
+hui-root-not-rendered still rejects) — so the fix can't degenerate
+to always-true.
+
+**Meta-observation — the "live JS property" anti-pattern**: this
+is the SECOND time a live JS property gate has been diagnosed as
+the flake driver (first was `panel.hass` in 2026-04-26). Both
+times the fix replaced the JS property with a DOM fact that
+DOWNSTREAM of the property. The pattern is now clear enough to
+state as a rule:
+
+> When writing a Playwright predicate that waits for a UI
+> component to be "ready", prefer DOM facts over live JS
+> properties. If a property P must be true at render time for
+> some DOM element E to exist, then waiting for E is strictly
+> stronger than waiting for P — because E's presence proves P
+> was true at render time, and E survives any subsequent flap of
+> P under runtime churn.
+
+Not promoted to C-NNN: the rule is test-infrastructure guidance,
+not a product constraint. The existing C-031 ("fix root causes,
+don't mask symptoms") already requires this class of diagnosis;
+the pattern documented here is a concrete shape of what fixes
+under C-031 look like for Playwright predicates. If a third
+instance fires (a third live-JS-property race), consider promoting
+to C-031 as a sub-bullet or a dedicated infrastructure constraint.
+
+**No priority or constraint changes**; pure test-infrastructure
+fix traced under C-031. `06-tests.md` Test Infrastructure Guards
+section updated: 11 → 15 page-fixture tests, new row for
+`TestWaitForLovelacePanelEntityModeInitRace`. C-031 Traces line in
+`02-constraints.md` now cites the new class alongside the two
+prior page-fixture test classes.

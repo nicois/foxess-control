@@ -461,7 +461,7 @@ missing locale key leaves the user looking at the raw key name.
 ## Test Infrastructure Guards (C-031)
 
 **Constraints**: C-031 (no flaky tests), C-020 (observability)
-**Source**: `tests/test_e2e_page_fixture.py` (11 tests),
+**Source**: `tests/test_e2e_page_fixture.py` (15 tests),
 `tests/test_soak_results_db.py::TestSaveRunViolationPersistence` (2)
 
 Unit tests that guard the *test infrastructure itself* — helpers
@@ -480,6 +480,7 @@ table (so post-mortem analysis isn't reduced to a bare counter).
 | `TestWaitForLovelacePanelRetries::*` (4) | Retry on execution-context-destroyed / navigating errors; propagate unrelated errors | C-031 |
 | `TestWaitForLovelacePanelNavigationDuringPanelRender::*` (2) | Final-stage predicate must include a stable signal beyond bare attach; post-nav retry must use remaining overall budget | C-031 |
 | `TestWaitForLovelacePanelCloudVariantSignalStability::*` (2) | `hui-root` presence is sufficient (stronger than `panel.hass` which races with navigation wire-up) | C-031 |
+| `TestWaitForLovelacePanelEntityModeInitRace::*` (4) | Final-stage predicate accepts `hui-root` as settled signal even when `main.hass.connected` is transiently false (entity-mode WS flap during input-helper state burst, 74951ms timeout in Flaky Test Detection) | C-031 |
 | `TestSaveRunViolationPersistence::test_violations_persisted_as_events` | Each InvariantViolation persisted as event_type='violation' with rule + detail | C-020 |
 | `TestSaveRunViolationPersistence::test_no_violation_events_when_clean` | Clean run produces zero violation events (not a tautology fix) | C-020 |
 | `TestPlaywrightFixtureIsolation::*` | pytest-playwright session fixture leaks the greenlet-backed event loop on the xdist main-thread worker; function-scoped override in `tests/conftest.py` releases the context per-test. Deterministic reproduction under `-p no:randomly` (2026-04-28) | C-031 |
