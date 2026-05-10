@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from homeassistant.components.sensor import SensorDeviceClass
 
 from custom_components.foxess_control.const import DOMAIN
 from custom_components.foxess_control.domain_data import (
@@ -23,6 +24,7 @@ from custom_components.foxess_control.sensor import (
     DischargePowerSensor,
     DischargeRemainingSensor,
     DischargeWindowSensor,
+    FoxESSDataFreshnessSensor,
     FoxESSPolledSensor,
     FoxESSWorkModeSensor,
     InfoLogSensor,
@@ -35,6 +37,7 @@ from custom_components.foxess_control.sensor import (
 )
 from smart_battery.sensor_base import format_duration
 from smart_battery.taper import TaperProfile
+from smart_battery.types import WorkMode
 
 
 def _make_hass(
@@ -2814,3 +2817,190 @@ class TestTaperProfileAttribute:
         # is absent (not empty). Distinguishes "not yet initialised"
         # from "initialised but empty".
         assert "taper_profile" not in attrs
+
+
+# ---------------------------------------------------------------------------
+# Enum sensor options coverage — work-mode and data-freshness sensors
+# ---------------------------------------------------------------------------
+#
+# Pattern mirrors TestSmartOperationsSensorOptionsCoverage above.  When a
+# sensor reports an enumerated value (work mode, data source) without
+# declaring `_attr_device_class = SensorDeviceClass.ENUM` plus a populated
+# `_attr_options`, HA's automation editor falls back to a free-text input
+# instead of a dropdown of the valid states (C-020 — operational
+# transparency).  In the more severe failure mode this is also the same
+# class of bug as the 2026-04-25 SmartOperations sensor freeze (C-026 —
+# proactive error surfacing): HA's `SensorEntity.state` raises
+# `ValueError` when `device_class == ENUM` and `native_value` isn't in
+# `options`, and that exception escapes `async_update_listeners` and
+# stops every later listener.
+
+
+class TestWorkModeSensorOptionsCoverage:
+    """`FoxESSWorkModeSensor` must declare ENUM options sourced from `WorkMode`.
+
+    Without `_attr_device_class = ENUM` + `_attr_options`, HA's automation
+    editor cannot offer the valid work-mode values when authoring a
+    state-trigger / state-condition (C-020).  Sourcing the options from
+    the `WorkMode` enum (rather than hard-coding the strings) is the
+    structural guarantee that future additions to the enum automatically
+    propagate to the sensor.
+    """
+
+    def test_class_attributes(self) -> None:
+        """Class-attribute contract: device_class=ENUM, options match WorkMode.
+
+        Note: HA's ``SensorEntity`` uses ``CachedProperties`` so
+        ``_attr_options`` and ``_attr_device_class`` resolve through the
+        descriptor protocol on instances, not on the class object — at
+        class-attribute level you get back the property descriptor.
+        We therefore exercise the contract on an instance, which is what
+        HA itself reads when emitting state.
+        """
+        coordinator = MagicMock()
+        coordinator.data = None
+        sensor = FoxESSWorkModeSensor(coordinator, _make_entry())
+        assert sensor._attr_device_class == SensorDeviceClass.ENUM, (
+            "FoxESSWorkModeSensor must declare device_class=ENUM so HA's "
+            "automation editor offers a dropdown of valid work modes."
+        )
+        assert sensor._attr_options is not None, (
+            "FoxESSWorkModeSensor must declare _attr_options so HA's "
+            "automation editor knows the valid set of work-mode states."
+        )
+        assert set(sensor._attr_options) == {m.value for m in WorkMode}, (
+            f"_attr_options={sensor._attr_options!r} must equal "
+            f"the WorkMode enum values {[m.value for m in WorkMode]!r}."
+        )
+
+    def test_options_sourced_from_workmode_enum_not_hardcoded(self) -> None:
+        """Structural guard: options must derive from `WorkMode`, not literals.
+
+        If a future contributor adds a new `WorkMode` member but hard-codes
+        the option list as `["SelfUse", "ForceCharge", ...]`, this test
+        fails — keeping the enum as the single source of truth.
+        """
+        coordinator = MagicMock()
+        coordinator.data = None
+        sensor = FoxESSWorkModeSensor(coordinator, _make_entry())
+        expected = {m.value for m in WorkMode}
+        assert set(sensor._attr_options or ()) == expected
+
+    @pytest.mark.parametrize(
+        "work_mode",
+        [m.value for m in WorkMode],
+        ids=[m.name for m in WorkMode],
+    )
+    def test_native_value_for_every_workmode_is_in_options(
+        self, work_mode: str
+    ) -> None:
+        """Every `WorkMode` value the coordinator can write must be in options."""
+        coordinator = MagicMock()
+        coordinator.data = {"_work_mode": work_mode}
+        sensor = FoxESSWorkModeSensor(coordinator, _make_entry())
+        value = sensor.native_value
+        assert value == work_mode, (
+            f"native_value should return the coordinator's _work_mode={work_mode!r}, "
+            f"got {value!r}"
+        )
+        assert sensor._attr_options is not None
+        assert value in sensor._attr_options, (
+            f"native_value returned {value!r} but it is missing from "
+            f"_attr_options={sensor._attr_options!r}; HA's automation editor "
+            f"will fall back to a free-text input (C-020) and "
+            f"SensorEntity.state may raise ValueError (C-026)."
+        )
+
+
+class TestDataFreshnessSensorOptionsCoverage:
+    """`FoxESSDataFreshnessSensor` must declare ENUM options for ws/api/modbus.
+
+    The sensor reports the data source ("ws", "api", or "modbus") — these
+    are the only three values the coordinator ever writes (see
+    coordinator.py and smart_battery/coordinator.py).  Declaring them as
+    ENUM options lets HA's automation editor offer a dropdown when the
+    user authors a state-trigger / state-condition (C-020).
+    """
+
+    EXPECTED_OPTIONS = {"ws", "api", "modbus"}
+
+    def test_class_attributes(self) -> None:
+        """Class-attribute contract: device_class=ENUM, options={ws,api,modbus}.
+
+        Resolved on an instance because HA's ``SensorEntity`` uses
+        ``CachedProperties`` — see the work-mode sensor's same test.
+        """
+        coordinator = MagicMock()
+        coordinator.data = None
+        sensor = FoxESSDataFreshnessSensor(coordinator, _make_entry())
+        assert sensor._attr_device_class == SensorDeviceClass.ENUM, (
+            "FoxESSDataFreshnessSensor must declare device_class=ENUM so HA's "
+            "automation editor offers a dropdown of valid data sources."
+        )
+        assert sensor._attr_options is not None, (
+            "FoxESSDataFreshnessSensor must declare _attr_options so HA's "
+            "automation editor knows the valid set of data-source states."
+        )
+        assert set(sensor._attr_options) == self.EXPECTED_OPTIONS, (
+            f"_attr_options={sensor._attr_options!r} must equal "
+            f"{self.EXPECTED_OPTIONS!r} (the only values written to "
+            f"coordinator.data['_data_source'])."
+        )
+
+    @pytest.mark.parametrize("data_source", sorted(EXPECTED_OPTIONS))
+    def test_native_value_for_every_data_source_is_in_options(
+        self, data_source: str
+    ) -> None:
+        """Every value coordinator.data['_data_source'] can hold is in options."""
+        coordinator = MagicMock()
+        coordinator.data = {"_data_source": data_source}
+        sensor = FoxESSDataFreshnessSensor(coordinator, _make_entry())
+        value = sensor.native_value
+        assert value == data_source, (
+            f"native_value should return _data_source={data_source!r}, got {value!r}"
+        )
+        assert sensor._attr_options is not None
+        assert value in sensor._attr_options, (
+            f"native_value returned {value!r} but it is missing from "
+            f"_attr_options={sensor._attr_options!r}; HA's automation editor "
+            f"will fall back to a free-text input (C-020)."
+        )
+
+
+class TestNonEnumSensorsRetainFreeFormState:
+    """Negative guard: free-form display sensors must NOT declare `_attr_options`.
+
+    Sensors that return dynamic display strings — like `ChargeWindowSensor`
+    ("11:00 - 13:59"), charge-/discharge-remaining time strings, and
+    status display strings — must remain free-form.  Declaring options on
+    them would constrain a continuously-varying value space and cause
+    `SensorEntity.state` to raise `ValueError` on every render.
+
+    This test prevents a blanket-enum-applying refactor from accidentally
+    sweeping these sensors into the enum bucket alongside the genuine
+    enum sensors above.
+    """
+
+    def test_charge_window_sensor_is_not_enum(self) -> None:
+        """ChargeWindowSensor returns dynamic 'HH:MM - HH:MM' strings, not an enum.
+
+        We check the class's own ``vars()`` rather than ``getattr``: HA's
+        ``SensorEntity`` defines ``_attr_options`` and ``_attr_device_class``
+        as default property descriptors that resolve to ``None`` on
+        instances unless a subclass overrides them.  The relevant question
+        is "did THIS subclass set them?" — i.e. is the name in the
+        subclass's own ``__dict__``, distinct from the inherited default.
+        """
+        own = vars(ChargeWindowSensor)
+        assert "_attr_options" not in own, (
+            "ChargeWindowSensor returns dynamic time-range display strings; "
+            "it MUST NOT declare _attr_options (would break SensorEntity.state)."
+        )
+        # Either the subclass doesn't declare device_class at all, or it
+        # declares something other than ENUM.  ENUM specifically is what
+        # would activate the options-validation code path.
+        own_device_class = own.get("_attr_device_class")
+        assert own_device_class != SensorDeviceClass.ENUM, (
+            "ChargeWindowSensor returns dynamic time-range strings; "
+            "device_class MUST NOT be ENUM."
+        )
