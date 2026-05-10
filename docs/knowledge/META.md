@@ -1359,3 +1359,66 @@ section updated: 11 → 15 page-fixture tests, new row for
 `TestWaitForLovelacePanelEntityModeInitRace`. C-031 Traces line in
 `02-constraints.md` now cites the new class alongside the two
 prior page-fixture test classes.
+
+### 2026-05-03 — Second instance of "enum sensor missing options" pattern
+
+**Context**: User reported that `sensor.foxess_betriebsmodus` (the
+work-mode sensor) does not offer valid-state suggestions in HA's
+automation editor when the user picks the entity for a state-trigger
+or state-condition: the dropdown that should list `SelfUse` /
+`ForceCharge` / `ForceDischarge` / `Backup` / `Feedin` is just a
+free-text input. Same shape for `sensor.foxess_data_freshness`
+(`ws` / `api` / `modbus`). HA's automation editor uses
+`device_class=enum` + populated `_attr_options` to drive that
+dropdown; without them it falls back to free-text — degrading
+C-020 (operational transparency: the user should be able to author
+automations from the UI alone).
+
+**Fix**: declared `_attr_device_class = SensorDeviceClass.ENUM` and
+`_attr_options` on both `FoxESSWorkModeSensor` and
+`FoxESSDataFreshnessSensor` in
+`custom_components/foxess_control/sensor.py`. WorkMode options are
+sourced from `[m.value for m in WorkMode]` so future enum additions
+propagate automatically. Data-source options are the literal three
+values the coordinator ever writes (`"ws"`, `"api"`, `"modbus"`).
+Regression tests in `tests/test_sensor.py`:
+`TestWorkModeSensorOptionsCoverage` (parametrised over every
+`WorkMode` member, plus a structural-source-of-truth assertion),
+`TestDataFreshnessSensorOptionsCoverage` (parametrised over the
+three data-source values), and `TestNonEnumSensorsRetainFreeFormState`
+(negative guard so a blanket refactor doesn't sweep dynamic
+display-string sensors into enum bucket).
+
+**Pattern recognition — second instance**: This is the **second**
+instance of the "enum-shaped sensor missing `_attr_options`"
+pattern. The first was the 2026-04-25
+`SmartOperationsOverviewSensor` freeze (C-026 entry, fixed in
+1.0.12, regression test `TestSmartOperationsSensorOptionsCoverage`)
+where the failure mode was more severe — HA's `SensorEntity.state`
+raised `ValueError` and froze every later listener in the
+coordinator's fan-out. Today's instance is the milder form: no
+exception, just a degraded automation-editor UX and an unstated
+contract violation (the editor's dropdown can't enumerate the
+states because nobody told it the set).
+
+**Watching, not constraining**: Two instances is a warning, not yet
+a rule. Per the project's "three instances minimum before graduating
+to a C-NNN" heuristic (this META log, 2026-04-25 entry), the
+"every enum-shaped sensor declares `_attr_options` from a single
+source of truth" principle is now under watch. A third instance —
+any future sensor with a finite-set `native_value` shipped without
+`_attr_options` — is the trigger to graduate this to a constraint
+(probably as a peer to C-038 sensor-listener parity, or under
+C-020 operational transparency). The cheap mechanical guard would
+be a parametrised "every value `native_value` returns is in
+`_attr_options`" test class for any new enum sensor — exactly the
+pattern of the three regression-test classes that exist today.
+
+**No priority, design-decision, or constraint changes** in this
+pass. The fix is mechanical (declare two existing class attributes
+on each sensor), no design alternatives were considered (the only
+question was "where to source the option list" — answered by C-038's
+single-source-of-truth heuristic: from the `WorkMode` enum, not
+hard-coded). The watch-this-pattern note above is recorded here
+in META.md and intentionally NOT promoted to a C-NNN until the
+third instance arrives.

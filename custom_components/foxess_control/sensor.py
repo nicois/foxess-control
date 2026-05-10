@@ -55,6 +55,7 @@ from .smart_battery.sensor_base import (
     get_coordinator_value,
     get_soc_value,
 )
+from .smart_battery.types import WorkMode
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -705,6 +706,13 @@ class FoxESSWorkModeSensor(CoordinatorEntity[FoxESSDataCoordinator], SensorEntit
 
     _attr_has_entity_name = True
     _attr_icon = "mdi:state-machine"
+    # ENUM device-class + options are required for HA's automation editor
+    # to surface a dropdown of valid states when authoring a state-trigger
+    # or state-condition (C-020).  Sourcing the options from the WorkMode
+    # enum keeps a single source of truth — adding a new WorkMode value
+    # automatically propagates here.
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = [m.value for m in WorkMode]
 
     def __init__(
         self,
@@ -729,6 +737,11 @@ class FoxESSDataFreshnessSensor(CoordinatorEntity[FoxESSDataCoordinator], Sensor
 
     _attr_has_entity_name = True
     _attr_icon = "mdi:clock-check-outline"
+    # ENUM device-class + options for the automation-editor dropdown
+    # (C-020).  The three values come from coordinator.py /
+    # smart_battery/coordinator.py — the only writers of _data_source.
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["ws", "api", "modbus"]
 
     def __init__(
         self,
