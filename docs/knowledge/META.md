@@ -1261,6 +1261,43 @@ fit the problem." The solar-seen feature (D-052,
 If a future feature follows the same three-pivot trajectory,
 the right response is the same: revert, not a fourth iteration.
 
+### 2026-05-10 — Reference docs for SaaS / multi-brand consumers
+
+Wrote four language-agnostic reference docs in this pass:
+
+- docs/api/foxess-cloud-api.md — single consolidated FoxESS
+  Cloud API reference.  Consolidates API_DEVIATIONS.md +
+  docs/wasm-signature.md + the relevant docstrings from
+  foxess/inverter.py and foxess/web_session.py into one
+  doc someone implementing the API client in any language can
+  read end-to-end.
+- docs/control/smart-discharge-contract.md — the discharge
+  algorithm as decisions and math.  Cites every rule back to
+  P-NNN / C-NNN / D-NNN.  933 lines.
+- docs/control/smart-charge-contract.md — same shape for
+  charge.  Includes the taper-model subsystem.  1022 lines.
+- docs/control/coarse-pacing-rules.md — what changes when you
+  only have 5-minute polls and no WebSocket.  Hammers the
+  fail-safe direction: "suspend earlier, do not discharge harder".
+  674 lines.
+
+**Why now**: the foxess-cf SaaS spinoff (initialised 2026-05-10
+at ~/code/foxess-cf) needs the algorithm contracts in a form
+that can survive a TypeScript reimplementation.  The decision
+captured in foxess-cf's META: "JS reuse buys nothing real; a
+code-agnostic spec is strictly better."  These docs are the
+single source of truth for both repos; foxess-control is the
+canonical home, foxess-cf consumes via copy-with-provenance.
+
+**The same docs serve the multi-brand initiative**: a future
+Huawei / GoodWe / SolaX adapter can read the contract docs to
+implement smart-charge and smart-discharge in a brand-agnostic
+way without reading any FoxESS-specific Python.
+
+**No new D-NNNs or C-NNNs** — these docs are reference material,
+not design decisions.  The decisions they describe already exist
+as D-NNNs in 04-design/*.
+
 ### Structure refinement: "listener commits, sensor reads"
 
 Added as a recurring pattern worth promoting to a constraint if
