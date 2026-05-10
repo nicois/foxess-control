@@ -347,8 +347,8 @@ The integration polls inverter data at a configurable interval and creates the f
 | `sensor.foxess_grid_current` | Grid current | A |
 | `sensor.foxess_grid_frequency` | Grid frequency | Hz |
 | `sensor.foxess_eps_power` | EPS / backup output power | kW |
-| `sensor.foxess_work_mode` | Current inverter work mode (SelfUse, ForceCharge, etc.) | — |
-| `sensor.foxess_data_freshness` | Current data source (`ws`, `api`, or `modbus`) with `last_update` and `age_seconds` attributes | — |
+| `sensor.foxess_work_mode` | Current inverter work mode. Enum sensor — valid states (`SelfUse`, `ForceCharge`, `ForceDischarge`, `Backup`, `Feedin`) appear as a dropdown in HA's automation editor when used as a state trigger or condition. | — |
+| `sensor.foxess_data_freshness` | Current data source. Enum sensor — valid states (`ws`, `api`, `modbus`) appear as a dropdown in HA's automation editor. Also exposes `last_update` and `age_seconds` attributes. | — |
 
 The cumulative energy sensors use `SensorStateClass.TOTAL_INCREASING` and are compatible with Home Assistant's Energy Dashboard.
 
