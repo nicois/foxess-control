@@ -89,3 +89,10 @@ WebSocket, WASM signatures). `InverterAdapter` protocol is the abstraction bound
 
 See [`docs/knowledge/`](docs/knowledge/) for the full project knowledge tree:
 vision, constraints, architecture, design decisions, test coverage, and gap analysis.
+
+Language-agnostic reference specs (citing P-/C-/D- IDs) for re-implementers
+and future brand adapters:
+- [`docs/api/foxess-cloud-api.md`](docs/api/foxess-cloud-api.md) — FoxESS Cloud + web-portal API contract
+- [`docs/control/smart-charge-contract.md`](docs/control/smart-charge-contract.md) — charge algorithm
+- [`docs/control/smart-discharge-contract.md`](docs/control/smart-discharge-contract.md) — discharge algorithm
+- [`docs/control/coarse-pacing-rules.md`](docs/control/coarse-pacing-rules.md) — pacing without WebSocket (5-min poll fallback)
