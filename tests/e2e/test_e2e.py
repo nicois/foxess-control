@@ -30,16 +30,67 @@ pytestmark = pytest.mark.slow
 def _tight_window(minutes: int = 30) -> tuple[str, str]:
     """Return a tight window starting ~2 min before now (UTC).
 
-    Avoids midnight crossings (C-009): clamps end to 23:59 and
-    ensures start >= 00:00.  When ``now`` is near midnight the
-    window shifts so the current minute always falls inside [start, end).
+    Avoids midnight crossings (C-009): start and end are minute-of-day
+    strings, so the inverter schedule must end on the same calendar day
+    it starts.  C-031 also requires that the returned window has enough
+    remaining duration *after* ``now`` for the test's longest
+    ``wait_for_state`` call to succeed before the schedule's ``end``
+    fires ``_on_timer_expire`` and cancels the session — otherwise the
+    sensor reverts to 'idle' mid-test.
+
+    When ``now`` is too close to midnight to fit ``minutes`` of window
+    AND have at least ``minutes - 2`` minutes remaining after ``now``,
+    we sleep until 00:00:05 of the next UTC day before computing the
+    window.  The sleep is bounded by 60 seconds (the worst case: ``now``
+    is at 23:59:00).  This is the only realistic way to satisfy both
+    invariants simultaneously — the FoxESS API rejects midnight-crossing
+    schedules so we cannot return tomorrow's date for ``end``.
+
+    Reproduces CI run 26006442121 (2026-05-17 23:58 UTC, 16/20 shards
+    failed) — the previous implementation clamped ``end_min`` to 23:59
+    without checking remaining time, so calling ``_tight_window(10)``
+    at ``now=23:58:58`` returned ``("23:49:00", "23:59:00")`` and the
+    schedule's ``_on_timer_expire`` fired ~2 seconds after the service
+    call, cancelling every session before any wait_for_state could see
+    the discharging/charging transition.
     """
     now = datetime.datetime.now(tz=datetime.UTC)
     now_min = now.hour * 60 + now.minute
+
+    # Required remaining minutes after ``now``.  The helper documents a
+    # 2-minute backshift on ``start`` so up to 2 minutes of the
+    # requested ``minutes`` is consumed by the backshift; the rest must
+    # remain *after* ``now`` for the test's wait_for_state to succeed
+    # before _on_timer_expire fires.  With clamping at 23:59 the
+    # remaining minutes after ``now`` could fall to zero — the bug we
+    # are fixing.
+    min_remaining = max(1, minutes - 2)
+
+    # If clamping at 23:59 would leave us with less than ``min_remaining``
+    # minutes after ``now``, sleep into the new UTC day and recompute.
+    # The check ``now_min + min_remaining > 23*60 + 59`` is equivalent
+    # to "less than min_remaining minutes left until 23:59"; we add
+    # the seconds part so the bound is inclusive of the second-precision
+    # remainder of the current minute.
+    last_min = 23 * 60 + 59
+    if now_min + min_remaining > last_min:
+        seconds_until_midnight = ((23 - now.hour) * 3600 + (59 - now.minute) * 60) + (
+            60 - now.second
+        )
+        # Add a 5-second safety margin so the post-sleep ``now`` is
+        # firmly inside the new day even if the system clock is
+        # adjusted slightly during the sleep.
+        time.sleep(seconds_until_midnight + 5)
+        now = datetime.datetime.now(tz=datetime.UTC)
+        now_min = now.hour * 60 + now.minute
+
     start_min = max(0, now_min - 2)
     end_min = start_min + minutes
-    if end_min > 23 * 60 + 59:
-        end_min = 23 * 60 + 59
+    if end_min > last_min:
+        # Defence-in-depth: shouldn't trigger after the sleep above,
+        # but keep the original clamp for any minutes value that would
+        # exceed 23:59 even from a 00:00 start (e.g. minutes=24*60+1).
+        end_min = last_min
         start_min = max(0, end_min - minutes)
     return (
         f"{start_min // 60:02d}:{start_min % 60:02d}:00",

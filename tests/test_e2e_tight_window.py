@@ -55,17 +55,40 @@ def _parse_hhmm(s: str) -> int:
     return int(h) * 60 + int(m)
 
 
-def _patch_now(target: datetime.datetime) -> Any:
-    """Patch ``datetime.datetime.now`` inside ``tests.e2e.test_e2e``.
+class _FakeClock:
+    """In-memory clock that advances on ``sleep``.
 
-    Returns the patcher; caller uses ``with`` or ``.start()/.stop()``.
-    The helper calls ``datetime.datetime.now(tz=datetime.UTC)``.  We
-    can't subclass ``datetime.datetime`` (mypy rejects the dynamic
-    base) — instead, patch the *attribute* ``test_e2e.datetime`` (the
-    module's bound name) with a stand-in that has a ``now`` classmethod
-    and a ``UTC`` constant.  The helper only uses
-    ``datetime.datetime.now(tz=datetime.UTC)``, so a small stand-in
-    suffices.
+    The fix in ``_tight_window`` calls ``time.sleep(N)`` to wait until
+    past midnight, then re-reads ``datetime.datetime.now``.  To verify
+    the post-sleep window correctness without actually sleeping, the
+    test patches BOTH the helper's ``datetime`` reference and its
+    ``time.sleep`` reference: ``sleep(N)`` advances this clock by N
+    seconds; the next ``datetime.now`` call returns the advanced time.
+    """
+
+    def __init__(self, start: datetime.datetime) -> None:
+        self._now = start
+
+    def sleep(self, seconds: float) -> None:
+        self._now = self._now + datetime.timedelta(seconds=seconds)
+
+    def now(self, tz: Any = None) -> datetime.datetime:
+        if tz is None:
+            return self._now.replace(tzinfo=None)
+        return self._now.astimezone(tz)
+
+
+def _install_fake_clock(clock: _FakeClock) -> tuple[Any, Any]:
+    """Patch ``datetime`` and ``time`` on ``tests.e2e.test_e2e``.
+
+    Returns the two patchers; caller activates with ``.__enter__()``
+    or ``.start()`` and balances on teardown.  We can't subclass
+    ``datetime.datetime`` (mypy rejects dynamic-base subclassing) —
+    instead, patch the bound module attribute with a thin stand-in
+    that exposes only ``datetime.now`` (the only ``datetime``
+    surface the helper uses) and ``UTC``.  Same approach for
+    ``time``: patch ``test_e2e.time`` with a stand-in exposing
+    ``sleep``.
     """
     from tests.e2e import test_e2e  # noqa: PLC0415
 
@@ -74,17 +97,23 @@ def _patch_now(target: datetime.datetime) -> Any:
     class _StandinDatetime:
         @staticmethod
         def now(tz: Any = None) -> datetime.datetime:
-            if tz is None:
-                return target.replace(tzinfo=None)
-            return target.astimezone(tz)
+            return clock.now(tz)
 
     _stand_dt = _StandinDatetime
 
-    class _StandinModule:
+    class _StandinDatetimeModule:
         datetime = _stand_dt
         UTC = _utc
 
-    return patch.object(test_e2e, "datetime", _StandinModule)
+    class _StandinTimeModule:
+        @staticmethod
+        def sleep(seconds: float) -> None:
+            clock.sleep(seconds)
+
+    return (
+        patch.object(test_e2e, "datetime", _StandinDatetimeModule),
+        patch.object(test_e2e, "time", _StandinTimeModule),
+    )
 
 
 class TestTightWindowFitsRequestedDurationAfterNow:
@@ -125,27 +154,30 @@ class TestTightWindowFitsRequestedDurationAfterNow:
         hhmm: str,
         minutes: int,
     ) -> None:
-        """``end - now`` must be >= ``minutes - 2`` minutes."""
+        """``end - now`` (after any midnight wait) must be >=
+        ``minutes - 2`` minutes."""
         tight_window = _get_tight_window()
 
         h, m = (int(x) for x in hhmm.split(":"))
-        # Use a fixed date so midnight maths are deterministic.  Pick a
-        # weekday far from any DST transition (UTC has none, but
-        # belt-and-braces).
-        now = datetime.datetime(2026, 5, 17, h, m, 0, tzinfo=datetime.UTC)
+        # Use a fixed date so midnight maths are deterministic.
+        now0 = datetime.datetime(2026, 5, 17, h, m, 0, tzinfo=datetime.UTC)
+        clock = _FakeClock(now0)
+        dt_patcher, time_patcher = _install_fake_clock(clock)
 
-        with _patch_now(now):
+        with dt_patcher, time_patcher:
             start_str, end_str = tight_window(minutes)
+            # Read the post-call ``now`` from the fake clock — the fix
+            # may have advanced it past midnight via mocked ``sleep``.
+            now_after = clock.now(datetime.UTC)
 
         end_min = _parse_hhmm(end_str)
-        now_min = h * 60 + m
+        now_after_min = now_after.hour * 60 + now_after.minute
 
-        # Compute remaining minutes accounting for possible midnight
-        # rollover (helper may return tomorrow's window).
-        if end_min >= now_min:
-            remaining_min = end_min - now_min
-        else:
-            remaining_min = (24 * 60 - now_min) + end_min
+        # The window must end on the same day as ``now_after`` (C-009)
+        # — if the helper slept past midnight we are now on day N+1
+        # and the window is on day N+1 too, so a simple subtraction
+        # in minute-of-day works.
+        remaining_min = end_min - now_after_min
 
         # The helper documents "starting ~2 min before now" so we lose
         # up to 2 minutes of remaining duration vs the requested
@@ -154,9 +186,10 @@ class TestTightWindowFitsRequestedDurationAfterNow:
         min_acceptable_remaining = minutes - 2
 
         assert remaining_min >= min_acceptable_remaining, (
-            f"_tight_window({minutes}) at now={hhmm} returned "
+            f"_tight_window({minutes}) at start_now={hhmm} returned "
             f"({start_str!r}, {end_str!r}) with only {remaining_min} "
-            f"minutes remaining after now — needs >= "
+            f"minutes remaining after the (post-sleep) now of "
+            f"{now_after.hour:02d}:{now_after.minute:02d} — needs >= "
             f"{min_acceptable_remaining}.  A test that calls a service "
             f"and waits for state transitions will hit "
             f"_on_timer_expire and see the session cancelled to "
@@ -166,7 +199,7 @@ class TestTightWindowFitsRequestedDurationAfterNow:
     def test_window_does_not_cross_midnight(self) -> None:
         """C-009: end_str's date must equal start_str's date.  The
         helper uses HH:MM:00 strings only (no date), so this is
-        encoded as ``end_min >= start_min`` — i.e. the helper must
+        encoded as ``end_min > start_min`` — i.e. the helper must
         not return values where ``end`` would naturally fall on the
         next day.
         """
@@ -175,8 +208,10 @@ class TestTightWindowFitsRequestedDurationAfterNow:
         # Test the late-night band where naïve arithmetic would cross.
         for hh in range(20, 24):
             for mm in (0, 15, 30, 45, 58, 59):
-                now = datetime.datetime(2026, 5, 17, hh, mm, 0, tzinfo=datetime.UTC)
-                with _patch_now(now):
+                now0 = datetime.datetime(2026, 5, 17, hh, mm, 0, tzinfo=datetime.UTC)
+                clock = _FakeClock(now0)
+                dt_patcher, time_patcher = _install_fake_clock(clock)
+                with dt_patcher, time_patcher:
                     start_str, end_str = tight_window(10)
                 start_min = _parse_hhmm(start_str)
                 end_min = _parse_hhmm(end_str)
@@ -186,3 +221,39 @@ class TestTightWindowFitsRequestedDurationAfterNow:
                     f"would mean the helper produced a midnight-crossing "
                     f"window, violating C-009."
                 )
+
+    def test_window_at_2358_sleeps_past_midnight(self) -> None:
+        """The fix's load-bearing behaviour: at ``now=23:58``,
+        ``_tight_window(10)`` must sleep ~2 minutes (until past 00:00)
+        and then return a window with ~10 minutes after the new now.
+
+        The 23:58:58 production failure case: with the fake clock
+        advanced by the helper's mocked sleep, the post-call now must
+        be after midnight.  The schedule ``end`` must be at least 8
+        minutes after the new now.
+        """
+        tight_window = _get_tight_window()
+
+        now0 = datetime.datetime(2026, 5, 17, 23, 58, 58, tzinfo=datetime.UTC)
+        clock = _FakeClock(now0)
+        dt_patcher, time_patcher = _install_fake_clock(clock)
+
+        with dt_patcher, time_patcher:
+            start_str, end_str = tight_window(10)
+            now_after = clock.now(datetime.UTC)
+
+        # Sleep advanced clock past midnight.
+        assert now_after.day == 18, (
+            f"Expected sleep to advance past midnight, but now is "
+            f"{now_after.isoformat()}"
+        )
+        # Window is now on day 18, fitting after now_after.
+        end_min = _parse_hhmm(end_str)
+        now_after_min = now_after.hour * 60 + now_after.minute
+        remaining_min = end_min - now_after_min
+        assert remaining_min >= 8, (
+            f"After midnight sleep, _tight_window(10) returned "
+            f"({start_str!r}, {end_str!r}) with {remaining_min} min "
+            f"remaining after now={now_after.hour:02d}:{now_after.minute:02d} "
+            f"— needs >= 8."
+        )
