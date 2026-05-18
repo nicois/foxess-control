@@ -697,6 +697,43 @@ def setup_smart_charge_listeners(
                 interval_seconds=SMART_CHARGE_ADJUST_SECONDS,
             )
 
+        def _maybe_clear_unreachable_on_early_return() -> None:
+            """Clear the unreachable Repair issue if the algorithm now
+            reports the target reachable.
+
+            Mirrors the post-adjust block at the end of this function
+            (the "Already charging — adjust power" branch) so that the
+            issue is also cleared when the listener exits via either
+            of the two early-return paths below — pre-start defer and
+            D-043 re-defer.  Without this, an issue raised during
+            active charge persists after a re-defer because subsequent
+            ticks exit via pre-start defer and never reach the
+            post-adjust clear (live failure 2026-05-18; C-022, C-026).
+
+            Same algorithm + same parameter list as the post-adjust
+            call (C-038 parity) so the listener and the operations
+            sensor see the same reachability verdict.
+            """
+            if not cur_state.get("unreachable_issued"):
+                return
+            reachable = call_algo(
+                _LOGGER,
+                is_charge_target_reachable,
+                "pre_return",
+                current_soc=cur_soc,
+                target_soc=cur_state["target_soc"],
+                battery_capacity_kwh=cur_state["battery_capacity_kwh"],
+                remaining_hours=remaining,
+                max_power_w=effective_max,
+                net_consumption_kw=net_consumption,
+                headroom=headroom,
+                taper_profile=taper,
+                bms_temp_c=bms_temp,
+            )
+            if reachable:
+                _clear_unreachable_issue(hass, domain)
+                cur_state["unreachable_issued"] = False
+
         if not cur_state["charging_started"]:
             # Check if it's time to start deferred charging
             deferred = call_algo(
@@ -734,6 +771,7 @@ def setup_smart_charge_listeners(
                     effective_max,
                     headroom * 100,
                 )
+                _maybe_clear_unreachable_on_early_return()
                 return
 
             # Time to start charging
@@ -822,6 +860,13 @@ def setup_smart_charge_listeners(
                 deferred.hour,
                 deferred.minute,
             )
+            # Clear the unreachable Repair issue if a previous tick
+            # raised it and the algorithm now reports the target
+            # reachable — the post-adjust clear at the bottom of this
+            # function is unreachable from this early return, so the
+            # issue would otherwise persist for the rest of the
+            # session (live failure 2026-05-18; C-022, C-026).
+            _maybe_clear_unreachable_on_early_return()
             await _remove_charge_override()
             if not _is_my_session():
                 return
