@@ -829,6 +829,24 @@ def setup_smart_charge_listeners(
                 state="started",
                 reason="deferred_end",
             )
+            # Notify the brand layer of the deferred→active transition
+            # so it can wake brand-specific machinery that depends on
+            # the session being active (e.g. starting a real-time
+            # WebSocket connection that ``_should_start_realtime_ws``
+            # only enables once a session is active).  Event-driven
+            # rather than waiting for the next periodic adjust tick —
+            # without this hook the brand-side WS-startup wrapper can
+            # lag the actual transition by up to
+            # ``SMART_CHARGE_ADJUST_SECONDS`` seconds (live observation
+            # 2026-05-19: 4 m 20 s gap between status flip and WS
+            # connect).  C-020 / C-039.
+            try:
+                adapter.on_session_started(session_type="charge")
+            except Exception:
+                _LOGGER.warning(
+                    "Smart charge: adapter.on_session_started raised: %s",
+                    _exc_summary(),
+                )
             await save_session(
                 _get_store(hass, domain),
                 "smart_charge",
@@ -1229,6 +1247,20 @@ def setup_smart_discharge_listeners(
             state="started",
             reason="deferred_end",
         )
+        # See the matching call in the charge listener (above) for
+        # the contract.  Symmetric for parity — discharge today has
+        # multiple paths to wake brand-side machinery (per-tick
+        # wrapper plus WS-message-arrival), but the Protocol hook is
+        # the documented event-driven channel and brand layers should
+        # be able to rely on it for any future brand-specific work
+        # tied to the transition.  C-020 / C-039.
+        try:
+            adapter.on_session_started(session_type="discharge")
+        except Exception:
+            _LOGGER.warning(
+                "Smart discharge: adapter.on_session_started raised: %s",
+                _exc_summary(),
+            )
         await save_session(
             _get_store(hass, domain),
             "smart_discharge",

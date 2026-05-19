@@ -1759,6 +1759,17 @@ class TestHandleSmartDischarge:
         must trigger _maybe_start_realtime_ws so WebSocket connects for
         real-time data.  Previously the timer ran the unwrapped callback,
         so WS never connected after a deferred start.
+
+        After the C-020 fix: WS startup now has TWO paths after a
+        transition — the brand-agnostic listener invokes
+        ``adapter.on_session_started`` (event-driven on the
+        deferred→active flip itself) and the brand-side wrapper
+        ``_ws_aware_discharge_cb`` still calls
+        ``_maybe_start_realtime_ws`` after each tick.  Both paths fire
+        on a transition tick; ``_maybe_start_realtime_ws`` is
+        idempotent (checks ``is_active``), so this is safe.  Test
+        asserts ``called`` (at least once) rather than
+        ``called_once``.
         """
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
@@ -1827,7 +1838,16 @@ class TestHandleSmartDischarge:
             await ws_cb(datetime.datetime(2026, 4, 7, 19, 40, 0))
 
         assert state["discharging_started"] is True
-        mock_ws.assert_called_once()
+        # Two paths after the C-020 fix: the on_session_started hook
+        # AND the brand-side wrapper. _maybe_start_realtime_ws is
+        # idempotent so this is safe.
+        assert mock_ws.called, (
+            "_maybe_start_realtime_ws must be called after transition"
+        )
+        assert mock_ws.call_count <= 2, (
+            "Expected at most 2 calls (on_session_started hook + "
+            f"brand wrapper); got {mock_ws.call_count}"
+        )
 
     @pytest.mark.asyncio
     async def test_deferred_discharge_does_not_start_before_window(self) -> None:

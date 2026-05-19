@@ -408,3 +408,174 @@ class TestWsStartupOnDeferredToActiveTransition:
             "session-started hook. Hook count grew from "
             f"{len(first_calls)} to {len(adapter.session_started_calls)}."
         )
+
+
+class TestFoxESSAdapterWiresWebSocketStartup:
+    """Brand-side wiring: ``FoxESSCloudAdapter.on_session_started`` must
+    fire the injected callback synchronously.
+
+    The brand-agnostic listener test above proves the listener invokes
+    the Protocol method on the adapter at the transition.  This test
+    proves the FoxESS adapter's implementation forwards that
+    invocation to its injected callback — i.e. the chain
+    listener→adapter→``_maybe_start_realtime_ws`` is wired end to
+    end.
+
+    Without this test, the brand-side hook (``on_session_started_cb``
+    parameter on ``FoxESSCloudAdapter``) could be silently dropped
+    during a refactor and the listener-side test would still pass —
+    leaving the original C-020 production bug unfixed.
+    """
+
+    def test_cloud_adapter_forwards_to_injected_callback(self) -> None:
+        """Constructing with a callback and calling on_session_started fires it.
+
+        Mirrors the wiring in ``_build_foxess_adapter``: the
+        callback is the channel the brand layer uses to hop from the
+        synchronous Protocol method into
+        ``hass.async_create_task(_maybe_start_realtime_ws(hass))``.
+        """
+        from custom_components.foxess_control.foxess_adapter import (
+            FoxESSCloudAdapter,
+        )
+
+        recorded: list[str] = []
+
+        def cb(session_type: str) -> None:
+            recorded.append(session_type)
+
+        adapter = FoxESSCloudAdapter(
+            hass=MagicMock(),
+            inverter=MagicMock(max_power_w=5000),
+            min_soc_on_grid=10,
+            api_min_soc=10,
+            start=datetime.datetime(2026, 5, 19, 0, 0, 0),
+            end=datetime.datetime(2026, 5, 19, 6, 0, 0),
+            on_session_started_cb=cb,
+        )
+
+        adapter.on_session_started(session_type="charge")
+        adapter.on_session_started(session_type="discharge")
+
+        assert recorded == ["charge", "discharge"], (
+            "FoxESSCloudAdapter.on_session_started must forward "
+            "session_type to the injected callback in order. "
+            f"Got {recorded!r}."
+        )
+
+    def test_cloud_adapter_no_callback_is_noop(self) -> None:
+        """Without a callback, on_session_started must not raise.
+
+        Defensive: legacy or test-only construction paths that omit
+        ``on_session_started_cb`` must be tolerated — the Protocol
+        method is still callable, just inert.
+        """
+        from custom_components.foxess_control.foxess_adapter import (
+            FoxESSCloudAdapter,
+        )
+
+        adapter = FoxESSCloudAdapter(
+            hass=MagicMock(),
+            inverter=MagicMock(max_power_w=5000),
+            min_soc_on_grid=10,
+            api_min_soc=10,
+            start=datetime.datetime(2026, 5, 19, 0, 0, 0),
+            end=datetime.datetime(2026, 5, 19, 6, 0, 0),
+        )
+
+        # Must not raise.
+        adapter.on_session_started(session_type="charge")
+
+    def test_build_foxess_adapter_injects_ws_startup(self) -> None:
+        """``_build_foxess_adapter`` must inject a callback that
+        triggers ``_maybe_start_realtime_ws``.
+
+        Simulates the full chain by constructing the adapter via
+        ``_build_foxess_adapter`` against a mocked hass + integration
+        config, then invoking ``on_session_started`` on the returned
+        adapter and asserting that ``hass.async_create_task`` was
+        called with a coroutine produced by ``_maybe_start_realtime_ws``.
+        """
+        from custom_components.foxess_control import _build_foxess_adapter
+
+        coordinator = MagicMock()
+        coordinator.data = {"SoC": 50.0}
+
+        from smart_battery.domain_data import EntryData, SmartBatteryDomainData
+
+        dd = SmartBatteryDomainData()
+        dd.entries["entry1"] = EntryData(
+            coordinator=coordinator,
+            inverter=None,
+            entry=MagicMock(),
+        )
+
+        hass = MagicMock()
+        hass.data = {"foxess_control": dd}
+
+        # Track scheduled coroutines so we can assert on type.
+        scheduled: list[Any] = []
+
+        def _create_task(coro: Any, **_kwargs: Any) -> MagicMock:
+            scheduled.append(coro)
+            # Close the coroutine so we don't get an "unawaited" warning.
+            coro.close()
+            return MagicMock()
+
+        hass.async_create_task = MagicMock(side_effect=_create_task)
+
+        cfg = MagicMock()
+        cfg.entity_mode = False
+        cfg.min_soc_on_grid = 10
+        cfg.api_min_soc = 10
+        cfg.export_limit_entity = None
+
+        state = {
+            "start": datetime.datetime(2026, 5, 19, 0, 0, 0),
+            "end": datetime.datetime(2026, 5, 19, 6, 0, 0),
+            "min_soc_on_grid": 10,
+            "api_min_soc": 10,
+            "force": False,
+            "battery_capacity_kwh": 10.0,
+            "groups": [],
+        }
+
+        with (
+            patch("custom_components.foxess_control._cfg", return_value=cfg),
+            patch(
+                "custom_components.foxess_control._first_entry_id",
+                return_value="entry1",
+            ),
+            patch(
+                "custom_components.foxess_control._get_inverter",
+                return_value=MagicMock(max_power_w=5000),
+            ),
+            patch(
+                "custom_components.foxess_control._dd",
+                return_value=dd,
+            ),
+        ):
+            adapter = _build_foxess_adapter(hass, MagicMock(max_power_w=5000), state)
+
+        # Sanity: cloud adapter (entity_mode=False).
+        assert hasattr(adapter, "on_session_started_cb") or hasattr(
+            adapter, "_on_session_started_cb"
+        ), "Cloud adapter must store the injected callback"
+
+        # Fire the hook the listener would fire.
+        adapter.on_session_started(session_type="charge")
+
+        # The injected callback must have scheduled exactly one task —
+        # the coroutine must come from _maybe_start_realtime_ws.
+        assert len(scheduled) == 1, (
+            "_build_foxess_adapter must inject a callback that "
+            "schedules exactly one task via hass.async_create_task. "
+            f"Got {len(scheduled)} task(s)."
+        )
+        coro = scheduled[0]
+        # qualname check is the cheapest way to identify the coroutine
+        # without awaiting it (which would require a running loop).
+        assert "_maybe_start_realtime_ws" in getattr(coro, "__qualname__", ""), (
+            "Injected callback must schedule _maybe_start_realtime_ws. "
+            f"Got coroutine: {coro!r}"
+        )

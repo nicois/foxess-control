@@ -72,6 +72,44 @@ class InverterAdapter(Protocol):
         """
         ...
 
+    def on_session_started(self, *, session_type: str) -> None:
+        """Notify the adapter that a session has transitioned to active.
+
+        Called by the brand-agnostic listener at the moment
+        ``charging_started`` / ``discharging_started`` flips to True
+        (deferred→active transition).  The brand layer uses this hook
+        to wake brand-specific machinery that depends on the session
+        being active — e.g. starting a real-time WebSocket connection
+        that ``_should_start_realtime_ws`` only enables once a session
+        is active.
+
+        Why a Protocol hook rather than the brand-side periodic timer:
+        the periodic adjust callback fires every
+        ``SMART_CHARGE_ADJUST_SECONDS`` (5 min); without an
+        event-driven hook on the transition itself, brand-side
+        machinery that should start at the transition can lag by up
+        to one full interval (live observation 2026-05-19: 4 m 20 s
+        WebSocket startup gap on a deferred→active charge).  The hook
+        is event-driven on the transition, so any correct adapter
+        implementation gets immediate notification regardless of what
+        timer or path triggered the transition.
+
+        ``session_type`` is ``"charge"`` or ``"discharge"``.
+
+        Implementations MUST be cheap and non-blocking — the listener
+        invokes this synchronously inside its tick.  Schedule
+        long-running work (HTTP, executor jobs) via
+        ``hass.async_create_task`` from inside the hook.
+
+        Default no-op: brands that do not need transition-time
+        notifications can leave this unimplemented.
+
+        Refs C-020 (UI must reflect actual system state without log
+        inspection), C-039 (no brand imports from ``smart_battery/``
+        — dependency inversion via this Protocol method).
+        """
+        ...
+
 
 class EntityAdapter:
     """Control an inverter via HA select/number entities.
@@ -203,3 +241,12 @@ class EntityAdapter:
     ) -> int | None:
         """Default no-op — brands without a hardware export-limit actuator."""
         return None
+
+    def on_session_started(self, *, session_type: str) -> None:
+        """Default no-op — entity-mode brands have no per-transition work.
+
+        Brands that need transition-time notifications (e.g. the FoxESS
+        cloud adapter, which starts a WebSocket) override this method
+        on a subclass.  See :meth:`InverterAdapter.on_session_started`
+        for the contract.
+        """

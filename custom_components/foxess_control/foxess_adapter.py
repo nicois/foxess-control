@@ -40,6 +40,8 @@ from .smart_battery.algorithms import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from homeassistant.core import HomeAssistant
 
     from .foxess.inverter import ScheduleGroup
@@ -347,6 +349,7 @@ class FoxESSCloudAdapter:
         capacity_kwh: float = 0,
         soc_getter: Any = None,
         export_limit_entity: str | None = None,
+        on_session_started_cb: Callable[[str], None] | None = None,
     ) -> None:
         self._hass = hass
         self._inverter = inverter
@@ -361,6 +364,7 @@ class FoxESSCloudAdapter:
         self._export_limit_entity = export_limit_entity
         self._warned_missing_export_limit = False
         self._first_export_write_logged = False
+        self._on_session_started_cb = on_session_started_cb
 
     def get_max_power_w(self) -> int:
         return self._inverter.max_power_w
@@ -534,6 +538,24 @@ class FoxESSCloudAdapter:
             return int(float(state.state))
         except (TypeError, ValueError):
             return None
+
+    def on_session_started(self, *, session_type: str) -> None:
+        """Forward the deferred→active transition to the brand layer.
+
+        The brand-agnostic listener invokes this synchronously inside
+        the tick that flips ``charging_started`` /
+        ``discharging_started`` to True.  Used by the FoxESS layer to
+        bring up the real-time WebSocket immediately rather than
+        waiting up to ``SMART_CHARGE_ADJUST_SECONDS`` (5 min) for the
+        next periodic adjust tick — see C-020.
+
+        The callback is injected by ``_build_foxess_adapter`` and
+        wraps ``_maybe_start_realtime_ws`` in
+        ``hass.async_create_task`` so the listener tick stays
+        non-blocking.
+        """
+        if self._on_session_started_cb is not None:
+            self._on_session_started_cb(session_type)
 
 
 def _entity_service_domain(entity_id: str, default: str) -> str:
@@ -794,3 +816,6 @@ class FoxESSEntityAdapter:
             return int(float(state.state))
         except (TypeError, ValueError):
             return None
+
+    def on_session_started(self, *, session_type: str) -> None:
+        """No-op for entity-mode brands — no WebSocket to bring up."""

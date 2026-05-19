@@ -262,6 +262,23 @@ def _build_foxess_adapter(
     inv = inverter or _get_inverter(hass)
     entry_id = _first_entry_id(hass)
     coordinator = _dd(hass).entries[entry_id].coordinator
+
+    def _on_session_started(session_type: str) -> None:
+        """Bring up the real-time WebSocket immediately on
+        deferred→active transition (C-020).
+
+        Called synchronously by the brand-agnostic listener inside the
+        tick that flips ``charging_started`` /
+        ``discharging_started`` to True.  Schedules
+        ``_maybe_start_realtime_ws`` as a task so the listener stays
+        non-blocking; the WS handshake itself runs on the event loop.
+        """
+        _LOGGER.debug(
+            "Session %s started (deferred→active); scheduling WS startup",
+            session_type,
+        )
+        hass.async_create_task(_maybe_start_realtime_ws(hass))
+
     adapter = FoxESSCloudAdapter(
         hass=hass,
         inverter=inv,
@@ -273,6 +290,7 @@ def _build_foxess_adapter(
         capacity_kwh=state.get("battery_capacity_kwh", 0),
         soc_getter=lambda: coordinator.data.get("SoC") if coordinator.data else None,
         export_limit_entity=_cfg(hass).export_limit_entity,
+        on_session_started_cb=_on_session_started,
     )
     # Seed the adapter with groups built by the service handler
     if state.get("groups"):

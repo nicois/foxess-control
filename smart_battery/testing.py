@@ -87,6 +87,7 @@ class FakeAdapter:
     remove_override_calls: list[RemoveOverrideCall] = field(default_factory=list)
     set_export_limit_calls: list[int] = field(default_factory=list)
     get_export_limit_calls: int = 0
+    on_session_started_calls: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self._export_limit_w: int | None = self.export_limit_w
@@ -131,6 +132,16 @@ class FakeAdapter:
         self.get_export_limit_calls += 1
         return self._export_limit_w
 
+    def on_session_started(self, *, session_type: str) -> None:
+        """Record a session-started notification from the listener.
+
+        See :meth:`InverterAdapter.on_session_started` for the contract.
+        Recorded as the ``session_type`` string in
+        ``on_session_started_calls`` for assertion in brand-agnostic
+        tests that need to prove the transition fired.
+        """
+        self.on_session_started_calls.append(session_type)
+
     # ------------------------------------------------------------------
     # Convenience accessors for assertions
     # ------------------------------------------------------------------
@@ -145,6 +156,7 @@ class FakeAdapter:
         self.remove_override_calls.clear()
         self.set_export_limit_calls.clear()
         self.get_export_limit_calls = 0
+        self.on_session_started_calls.clear()
 
     @property
     def last_apply_mode(self) -> ApplyModeCall | None:
