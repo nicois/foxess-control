@@ -83,7 +83,7 @@ def _safe_evaluate(
     expression: str,
     *,
     retries: int = 3,
-    settle_timeout_ms: int = 15000,
+    settle_timeout_ms: int = 3000,
 ) -> object:
     """Run ``page.evaluate`` with retry on navigation-induced context destruction.
 
@@ -95,9 +95,20 @@ def _safe_evaluate(
     24990047496 against
     ``TestTaperCard::test_bars_render_with_seeded_profile[cloud]``.
 
-    On each context-destroyed error we wait for ``networkidle`` (best
-    effort) to let the new page settle, then retry with a fresh
-    context.  Unrelated Playwright errors propagate unchanged.
+    On each context-destroyed error we wait for ``domcontentloaded``
+    (best effort) to let the new context attach, then retry with a
+    fresh context.  Unrelated Playwright errors propagate unchanged.
+
+    Per-retry settle is capped at 3000ms on ``domcontentloaded``, NOT
+    15000ms on ``networkidle``.  Under sustained CI churn (entity-mode
+    WS state-burst), ``networkidle`` may never fire — the suppressed
+    PlaywrightError would then consume the full 15000ms cap on every
+    retry, and 3 back-to-back retries would exhaust 45000ms of the
+    overall budget on settle waits alone.  ``domcontentloaded`` fires
+    synchronously on HTML parse and 3000ms is comfortably enough on any
+    realistic CI shard — same fix that landed in
+    ``conftest._wait_for_stage`` (commit 74d7f75) for the v1.0.17-beta.2
+    flake on ``test_card_renders[entity]``.
 
     Matches the pattern in ``_find_card`` (which wraps
     ``wait_for_function``) and ``TestFormInputPersistence._safe_evaluate``
@@ -119,7 +130,7 @@ def _safe_evaluate(
                 break
             # Wait for the post-navigation page to settle before retrying.
             with contextlib.suppress(PlaywrightError):
-                page.wait_for_load_state("networkidle", timeout=settle_timeout_ms)
+                page.wait_for_load_state("domcontentloaded", timeout=settle_timeout_ms)
     assert last_exc is not None  # noqa: S101
     raise last_exc
 
@@ -130,7 +141,7 @@ def _safe_screenshot(
     path: str | Path,
     *,
     retries: int = 3,
-    settle_timeout_ms: int = 15000,
+    settle_timeout_ms: int = 3000,
 ) -> None:
     """Screenshot a custom card, retrying on navigation-induced detach.
 
@@ -149,10 +160,19 @@ def _safe_screenshot(
 
     All three are the same root cause (DOM swap between resolve and
     use) and all three recover on a fresh locator.  On each, we wait
-    for ``networkidle`` (best-effort) to let the post-navigation page
-    settle, then re-resolve the locator and retry.  Observed on Flaky
+    for ``domcontentloaded`` (best-effort) to let the new context
+    attach, then re-resolve the locator and retry.  Observed on Flaky
     Test Detection run 24994690563 against
     ``test_gallery_control_charging[entity]``.
+
+    Per-retry settle is capped at 3000ms on ``domcontentloaded``, NOT
+    15000ms on ``networkidle``: under sustained CI churn (entity-mode
+    WS state-burst), ``networkidle`` may never fire and the suppressed
+    PlaywrightError would consume the full 15000ms cap every retry —
+    3 retries × 15000ms = 45000ms dead time.  ``domcontentloaded``
+    fires synchronously on HTML parse, so 3000ms is comfortably enough.
+    Same fix that landed in ``conftest._wait_for_stage`` (commit
+    74d7f75) for the v1.0.17-beta.2 ``test_card_renders[entity]`` flake.
 
     Mirrors the retry pattern in :func:`_safe_evaluate` and
     :func:`_find_card`.  Unrelated Playwright errors (e.g. a genuine
@@ -178,7 +198,7 @@ def _safe_screenshot(
                 break
             # Settle the post-navigation page before re-resolving.
             with contextlib.suppress(PlaywrightError):
-                page.wait_for_load_state("networkidle", timeout=settle_timeout_ms)
+                page.wait_for_load_state("domcontentloaded", timeout=settle_timeout_ms)
     assert last_exc is not None  # noqa: S101
     raise last_exc
 
@@ -236,12 +256,19 @@ def _wait_for_card_hass(page: Page, tag: str, timeout_ms: int = 30000) -> None:
             if "Execution context was destroyed" not in msg and "navigating" not in msg:
                 raise
             # Navigation churn — settle and retry within remaining budget.
+            #
+            # Per-retry cap is 3000ms on ``domcontentloaded``, NOT
+            # 15000ms on ``networkidle``: under sustained CI churn,
+            # ``networkidle`` may never fire and the suppressed timeout
+            # would consume the full cap every retry, dominating this
+            # 30000ms budget.  Same fix as ``conftest._wait_for_stage``
+            # (commit 74d7f75).
             with contextlib.suppress(PlaywrightError):
                 page.wait_for_load_state(
-                    "networkidle",
+                    "domcontentloaded",
                     timeout=min(
                         int((deadline - _time.monotonic()) * 1000),
-                        15000,
+                        3000,
                     ),
                 )
 
@@ -259,8 +286,10 @@ def _find_card(page: Page, tag: str, timeout: int = 30000) -> bool:
     ``wait_for_function`` is polling.  When this happens the call raises
     ``PlaywrightError("Execution context was destroyed")`` immediately —
     well before the card has had time to render.  To handle this, we
-    retry after waiting for the new page to settle (``networkidle``),
-    spending any remaining timeout budget on the next attempt.
+    retry after waiting briefly for the new context to attach
+    (``domcontentloaded``, capped at 3000ms — see settle-cap rationale
+    near the call site), spending any remaining timeout budget on the
+    next attempt.
     """
     import time as _time
 
@@ -289,15 +318,24 @@ def _find_card(page: Page, tag: str, timeout: int = 30000) -> bool:
             ) and "navigating" not in str(exc):
                 # Genuine timeout or unrelated error — give up.
                 return False
-            # Navigation destroyed the context.  Wait for the new page
-            # to settle and retry with remaining budget.
+            # Navigation destroyed the context.  Briefly let the new
+            # context attach via ``domcontentloaded`` (synchronous on
+            # HTML parse), then retry with remaining budget.
+            #
+            # Per-retry cap is 3000ms on ``domcontentloaded``, NOT
+            # 15000ms on ``networkidle``: under sustained CI churn
+            # (entity-mode WS state-burst), ``networkidle`` may never
+            # fire and the suppressed timeout would consume the full
+            # cap every retry — dominating this 30000ms budget before
+            # ``wait_for_function`` gets a chance to converge.  Same
+            # fix as ``conftest._wait_for_stage`` (commit 74d7f75).
             remaining_ms = int((deadline - _time.monotonic()) * 1000)
             if remaining_ms <= 0:
                 return False
             with contextlib.suppress(PlaywrightError):
                 page.wait_for_load_state(
-                    "networkidle",
-                    timeout=min(remaining_ms, 15000),
+                    "domcontentloaded",
+                    timeout=min(remaining_ms, 3000),
                 )
             remaining_ms = int((deadline - _time.monotonic()) * 1000)
             if remaining_ms <= 0:
