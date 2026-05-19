@@ -752,15 +752,33 @@ def _wait_for_stage(
             if not any(s in str(exc) for s in _CONTEXT_DESTROYED_SIGNALS):
                 # Unrelated playwright failure — propagate.
                 raise
-            # Navigation destroyed the context.  Settle on networkidle
-            # (best effort) and retry within the remaining budget.
+            # Navigation destroyed the context.  Briefly let the new
+            # context attach, then retry within the remaining budget.
+            #
+            # The per-retry settle MUST be modest (≤ 3000ms).  Earlier
+            # versions used ``networkidle`` with a 15000ms cap, but
+            # under sustained CI churn (entity-mode WS state-burst
+            # from input-helper registrations + EntityCoordinator first
+            # refresh) networkidle may never fire and the full 15000ms
+            # is consumed every retry — five back-to-back retries then
+            # exhaust the entire 75000ms overall budget on settle waits
+            # alone, leaving wait_for_function no time to observe
+            # hui-root after the churn subsides.  Diagnosed from the
+            # v1.0.17-beta.2 flake on ``test_card_renders[entity]``:
+            # 74969ms timeout, container ready 67s before the timeout
+            # fired (run 26070914568, e2e-shard-6, gw1).
+            #
+            # 3000ms is comfortably enough for the new context's
+            # ``domcontentloaded`` event under any realistic CI load,
+            # and a 5-retry storm consumes only 15000ms — leaving 60s+
+            # for the actual predicate poll to converge.
             settle_budget = int((deadline - time.monotonic()) * 1000)
             if settle_budget <= 0:
                 raise
             with contextlib.suppress(PlaywrightError):
                 page.wait_for_load_state(
-                    "networkidle",
-                    timeout=min(settle_budget, 15000),
+                    "domcontentloaded",
+                    timeout=min(settle_budget, 3000),
                 )
             # Loop back and retry wait_for_function with refreshed budget.
 
