@@ -308,6 +308,10 @@
       "title": "Smart {session_type} session aborted",
       "description": "The smart {session_type} session was aborted: {reason}.\n\nThe inverter has been reverted to Self Use mode."
     },
+    "charge_target_unreachable": {
+      "title": "Smart charge can't reach target SoC",
+      "description": "The smart charge session is unable to reach the target **{target_soc}%** before the window ends.\n\n- Current SoC: **{current_soc}%**\n- Remaining window: **{remaining_hours} h**\n- Maximum charge power: **{max_power_w} W**\n\nThe session will continue at maximum power. If this happens regularly, consider extending the charge window, lowering the target SoC, or checking that the configured maximum power matches your inverter."
+    },
     "sensor_write_failed": {
       "title": "Sensor {entity_id} failed to update",
       "description": "The sensor `{entity_id}` raised an error while writing its state and is no longer updating:\n\n`{error}`\n\nOther FoxESS sensors continue to update — this is a contained failure, but the named sensor's value may be stale. The issue will clear automatically when the sensor next writes successfully.\n\nIf it persists, consider restarting Home Assistant or reporting the error."

@@ -257,8 +257,21 @@ def _create_session_issue(
     )
 
 
-def _create_unreachable_issue(hass: HomeAssistant, domain: str) -> None:
-    """Surface an unreachable charge target as an HA Repair issue (C-022)."""
+def _create_unreachable_issue(
+    hass: HomeAssistant,
+    domain: str,
+    *,
+    current_soc: float,
+    target_soc: int,
+    remaining_hours: float,
+    max_power_w: int,
+) -> None:
+    """Surface an unreachable charge target as an HA Repair issue (C-022).
+
+    Passes translation_placeholders so the rendered title + description
+    can name the actual gap (current SoC, target, remaining window, max
+    power) instead of falling back to the raw translation key (C-020).
+    """
     try:
         from homeassistant.helpers.issue_registry import (
             IssueSeverity,
@@ -272,6 +285,12 @@ def _create_unreachable_issue(hass: HomeAssistant, domain: str) -> None:
             is_fixable=False,
             severity=IssueSeverity.WARNING,
             translation_key="charge_target_unreachable",
+            translation_placeholders={
+                "current_soc": f"{current_soc:.1f}",
+                "target_soc": str(target_soc),
+                "remaining_hours": f"{remaining_hours:.2f}",
+                "max_power_w": str(max_power_w),
+            },
         )
     except Exception:
         _LOGGER.debug("Failed to create unreachable issue (non-critical)")
@@ -989,7 +1008,14 @@ def setup_smart_charge_listeners(
                 cur_soc,
                 remaining,
             )
-            _create_unreachable_issue(hass, domain)
+            _create_unreachable_issue(
+                hass,
+                domain,
+                current_soc=cur_soc,
+                target_soc=cur_state["target_soc"],
+                remaining_hours=remaining,
+                max_power_w=effective_max,
+            )
             cur_state["unreachable_issued"] = True
         elif reachable and cur_state.get("unreachable_issued"):
             _clear_unreachable_issue(hass, domain)
