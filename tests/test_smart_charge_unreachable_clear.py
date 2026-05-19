@@ -369,3 +369,98 @@ class TestUnreachableIssueClearOnEarlyReturn:
             "masks other bugs"
         )
         assert not create_mock.called
+
+
+class TestUnreachableIssueRendersWithPlaceholders:
+    """C-020 / C-026: the Repair issue must surface the actual
+    user-relevant numbers (current SoC, target SoC, remaining hours,
+    max power) so the user can determine system state from the UI
+    alone — not "foxess_control: charge_target_unreachable" as a
+    bare key.
+
+    HA renders Repair issues by looking up ``translation_key`` against
+    the integration's ``strings.json`` ``issues`` block.  Without an
+    entry there, HA falls back to the raw key.  And without
+    ``translation_placeholders`` populated by the listener, even a
+    well-written translation cannot interpolate the actual gap
+    (current SoC, target SoC, remaining hours, max power).
+
+    These tests assert the contract on the listener's call — the
+    strings.json contents are tested separately by the existing
+    translation-coverage test suite.
+    """
+
+    @pytest.mark.asyncio
+    async def test_create_issue_passes_translation_placeholders(self) -> None:
+        """The listener must pass current_soc, target_soc, remaining_h,
+        max_power_w to ``async_create_issue`` so the translated
+        message can interpolate them."""
+        # Active charge with target out of reach in the remaining
+        # window — drives the post-adjust unreachable branch.
+        # Window 02:00-02:30 (30 min total), tick at 02:25 (5 min
+        # remaining); 30% SoC, 90% target, max 5000W, 10kWh capacity →
+        # reaching target needs ~6kWh, but max 5kW × 5min = ~0.42kWh.
+        now = datetime.datetime(2026, 5, 18, 2, 25, 0)
+        end = datetime.datetime(2026, 5, 18, 2, 30, 0)
+        hass = _build_hass(
+            coordinator_data={"SoC": 30.0, "loadsPower": 0.3, "pvPower": 0.0},
+            battery_capacity_kwh=10.0,
+        )
+        state = _make_charge_state(
+            now=now,
+            end=end,
+            target_soc=90,
+            battery_capacity_kwh=10.0,
+            max_power_w=5000,
+            current_soc=30.0,
+            charging_started=True,
+        )
+        hass.data[_DOMAIN].smart_charge_state = state
+
+        adapter = FakeAdapter(max_power_w=5000)
+        cb = await _capture_listener_callback(hass, adapter, end=end)
+
+        # Patch async_create_issue at its source so we observe the
+        # exact kwargs the listener constructs — one level deeper
+        # than the _create_unreachable_issue helper.
+        with (
+            patch(
+                "homeassistant.helpers.issue_registry.async_create_issue"
+            ) as create_issue_mock,
+            patch(f"{_LISTENERS}.dt_util.now", return_value=now),
+        ):
+            await cb(now)
+
+        # The post-adjust branch must have fired the create call.
+        assert create_issue_mock.called, (
+            "Test pre-condition: scenario must reach the unreachable "
+            "branch (target 90% from SoC 30% in 5 min at 5kW max)"
+        )
+
+        kwargs = create_issue_mock.call_args.kwargs
+        placeholders = kwargs.get("translation_placeholders")
+        assert placeholders is not None, (
+            "C-020 violation: async_create_issue must be called with "
+            "translation_placeholders so the rendered Repair message "
+            "can name the actual SoC/target/remaining/power numbers "
+            "instead of falling back to the bare translation key"
+        )
+
+        # Each placeholder must be present and carry a sensible value
+        # (formatted as a string per HA's translation contract).
+        for key in ("current_soc", "target_soc", "remaining_hours", "max_power_w"):
+            assert key in placeholders, (
+                f"translation_placeholders missing required key {key!r}: "
+                f"got {sorted(placeholders.keys())}"
+            )
+
+        # Spot-check the values. The listener may format these as
+        # strings; we accept either str or numeric and coerce for the
+        # comparison.
+        assert int(float(placeholders["target_soc"])) == 90
+        assert abs(float(placeholders["current_soc"]) - 30.0) < 1.0
+        # Remaining hours = 5 min ≈ 0.083h — accept anything in (0, 0.2).
+        rh = float(placeholders["remaining_hours"])
+        assert 0.0 < rh < 0.2, f"remaining_hours={rh} outside expected range"
+        # Max power was 5000W (the effective max in this scenario).
+        assert int(float(placeholders["max_power_w"])) == 5000
