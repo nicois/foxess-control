@@ -1071,3 +1071,190 @@ class TestWaitForLovelacePanelEntityModeInitRace:
             "the hui-root check, which would cause the fixture to "
             "return before the panel has completed a render cycle."
         )
+
+
+class TestWaitForLovelacePanelSustainedRetryBudget:
+    """The helper must survive a SUSTAINED context-destruction storm
+    without bleeding the overall budget on per-retry settle waits
+    (C-031: no flaky tests).
+
+    **Background** (diagnosed 2026-05-19 from Flaky Test Detection on
+    v1.0.17-beta.2, victim ``test_card_renders[entity]``): the page
+    fixture timed out at ``74969ms`` — virtually the entire 75000ms
+    overall budget consumed.  Container ready in 8.5s, so the gap is
+    in the predicate-settle phase.  Earlier hardenings already settled
+    the final-stage predicate on the synchronous DOM fact ``hui-root``
+    (commit 5cc74bf) — yet the predicate still failed to converge.
+
+    **Root-cause diagnosis**: the per-retry settle inside
+    ``_wait_for_stage`` calls
+    ``page.wait_for_load_state("networkidle", timeout=min(_, 15000))``.
+    Under sustained CI churn (entity-mode WS state-burst from input-
+    helper registrations + EntityCoordinator first refresh), HA's
+    frontend can fire several navigation events back-to-back.  Each
+    one destroys the JS execution context, our retry loop catches it,
+    and we sit in ``wait_for_load_state`` for its full timeout because
+    ``networkidle`` may never fire under sustained traffic — the
+    suppressed PlaywrightError consumes the cap on every retry.
+
+    Five such retries × 15000ms each = 75000ms — fully consumes the
+    overall budget without ever giving ``wait_for_function`` time to
+    actually observe ``hui-root`` once the churn subsides.  The
+    container reported ready 67s before the timeout fired, so HA had
+    plenty of wall-clock to render the panel — the helper just never
+    reached a stable poll because the budget was burned on settle
+    waits between retries.
+
+    **Fix contract** (what these tests assert):
+    1. The per-retry ``wait_for_load_state`` cap must be modest
+       (≤ 5000ms), not 15000ms.  All we need from settle is a brief
+       moment for the new context to attach — networkidle never firing
+       under sustained traffic must not eat the budget.
+    2. The total time the helper can spend in settle calls across all
+       retries must be bounded so a sustained retry storm cannot
+       dominate the overall budget — at least half of the overall
+       budget must remain available for the actual ``wait_for_function``
+       polls that observe the predicate becoming truthy.
+    """
+
+    def test_per_retry_settle_is_bounded_to_modest_cap(self) -> None:
+        """Each ``wait_for_load_state`` call after a context destruction
+        must be capped at ≤ 5000ms.
+
+        Why: ``networkidle`` may never fire under sustained WS / HTTP
+        traffic.  A 15000ms cap on each settle means 5 retries consume
+        the entire 75000ms budget before any successful predicate poll
+        can occur.  A 5000ms cap gives the new context time to attach
+        without dominating the budget.
+
+        This test injects three successive context-destruction errors
+        in the final stage and inspects the timeouts the helper
+        requested for ``wait_for_load_state``.  Every observed call
+        must be ≤ 5000ms.  A helper using the unbounded 15000ms cap
+        will fail this assertion.
+        """
+        helper = _get_helper()
+        page = MagicMock()
+        settle_timeouts: list[int] = []
+        fired = {"count": 0}
+        target_destructions = 3
+
+        def _wait_function(_pred: str, timeout: int = 30000) -> None:  # noqa: ARG001
+            # Simulate sustained context destruction in the final stage:
+            # raise on the first ``target_destructions`` calls that get a
+            # large remaining-budget timeout (final-stage signature).
+            if fired["count"] < target_destructions and timeout > 30000:
+                fired["count"] += 1
+                raise PlaywrightError(
+                    "Page.wait_for_function: Execution context was destroyed, "
+                    "most likely because of a navigation"
+                )
+            return None
+
+        def _wait_selector(_selector: str, timeout: int = 30000, **_kw: Any) -> Any:
+            if fired["count"] < target_destructions and timeout > 30000:
+                fired["count"] += 1
+                raise PlaywrightError(
+                    "Page.wait_for_selector: Execution context was destroyed, "
+                    "most likely because of a navigation"
+                )
+            return MagicMock()
+
+        def _wait_load_state(state: str, timeout: int = 30000, **_kw: Any) -> None:  # noqa: ARG001
+            settle_timeouts.append(timeout)
+            return None
+
+        page.wait_for_function.side_effect = _wait_function
+        page.wait_for_selector.side_effect = _wait_selector
+        page.wait_for_load_state.side_effect = _wait_load_state
+
+        helper(page, timeout_ms=75000)
+
+        assert settle_timeouts, (
+            "Expected helper to invoke wait_for_load_state at least once "
+            "during the context-destruction retry path; got no calls."
+        )
+        # The per-call cap must be modest — large enough for the new
+        # context to attach (~1-3s typical), small enough that several
+        # back-to-back retries cannot consume the overall budget.
+        for t in settle_timeouts:
+            assert t <= 5000, (
+                f"wait_for_load_state was called with timeout={t}ms.  Each "
+                f"per-retry settle must be capped at ≤ 5000ms — under "
+                f"sustained CI churn (entity-mode WS state-burst on a slow "
+                f"shard), networkidle may never fire and a 15000ms cap "
+                f"means 5 retries consume the entire 75000ms overall "
+                f"budget before any successful predicate poll occurs.  "
+                f"This is the v1.0.17-beta.2 flake on "
+                f"test_card_renders[entity] (74969ms timeout, container "
+                f"ready in 8.5s).  Observed all settle timeouts: "
+                f"{settle_timeouts}"
+            )
+
+    def test_total_settle_budget_does_not_dominate_overall(self) -> None:
+        """Across a sustained retry storm, the total time the helper
+        commits to ``wait_for_load_state`` settle calls must leave the
+        majority of the overall budget for the actual predicate polls.
+
+        Concretely: with ``timeout_ms=75000`` and 5 successive context-
+        destruction events, the SUM of per-call ``wait_for_load_state``
+        timeouts must not exceed ~50% of the overall budget.
+
+        This is a structural assertion — independent of how the fix is
+        shaped (per-call cap vs. cumulative cap vs. shorter ``state``
+        argument), the observable contract is "settle calls cannot
+        dominate the budget."
+        """
+        helper = _get_helper()
+        page = MagicMock()
+        settle_timeouts: list[int] = []
+        fired = {"count": 0}
+        target_destructions = 5
+
+        def _wait_function(_pred: str, timeout: int = 30000) -> None:  # noqa: ARG001
+            if fired["count"] < target_destructions and timeout > 30000:
+                fired["count"] += 1
+                raise PlaywrightError(
+                    "Page.wait_for_function: Execution context was destroyed, "
+                    "most likely because of a navigation"
+                )
+            return None
+
+        def _wait_selector(_selector: str, timeout: int = 30000, **_kw: Any) -> Any:
+            if fired["count"] < target_destructions and timeout > 30000:
+                fired["count"] += 1
+                raise PlaywrightError(
+                    "Page.wait_for_selector: Execution context was destroyed, "
+                    "most likely because of a navigation"
+                )
+            return MagicMock()
+
+        def _wait_load_state(state: str, timeout: int = 30000, **_kw: Any) -> None:  # noqa: ARG001
+            settle_timeouts.append(timeout)
+            return None
+
+        page.wait_for_function.side_effect = _wait_function
+        page.wait_for_selector.side_effect = _wait_selector
+        page.wait_for_load_state.side_effect = _wait_load_state
+
+        overall_budget_ms = 75000
+        helper(page, timeout_ms=overall_budget_ms)
+
+        assert settle_timeouts, (
+            "Expected helper to invoke wait_for_load_state during the "
+            "context-destruction retry path."
+        )
+        total_settle_ms = sum(settle_timeouts)
+        # The settle commitments across all retries must not exceed
+        # half of the overall budget — otherwise predicate polling has
+        # insufficient time to observe convergence.
+        assert total_settle_ms <= overall_budget_ms // 2, (
+            f"Helper committed {total_settle_ms}ms across "
+            f"{len(settle_timeouts)} wait_for_load_state calls — that is "
+            f"more than half of the {overall_budget_ms}ms overall budget. "
+            f"Under sustained CI churn (where networkidle may never fire "
+            f"and each settle consumes its full cap), this means the "
+            f"helper cannot give wait_for_function enough time to observe "
+            f"hui-root after the churn subsides.  Observed settle "
+            f"timeouts: {settle_timeouts}"
+        )
