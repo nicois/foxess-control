@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.17-beta.4
+
+### Added
+- **Repair issues + exception messages localised to all nine non-English locales** (de, es, fr, it, ja, nl, pl, pt, zh-Hans). Until now only `en.json` carried `issues` and `exceptions` blocks; HA's `LOCALE_EN`-fallback meant non-English users saw the English title and description — readable, but not localised. Each locale file now mirrors the EN structure with translations matching the file's established tone (formal Sie-implicit in German; French quote conventions; idiomatic Japanese with full-width punctuation; etc.). Technical units (`SoC`, `kW`, `kWh`, `W`) and project jargon are kept in their canonical form across all locales; placeholder tokens (`{current_soc}`, `{target_soc}`, `{remaining_hours}`, `{max_power_w}`, etc.) are preserved character-for-character. Seven-test parametrised regression suite (`tests/test_runtime_translations_issues.py::TestNonEnglishLocalesMirrorIssueKeys`) × 9 locales = 63 cases enforces the contract: every locale has both blocks, every key from EN is present, every placeholder is preserved, every title and description is non-empty, and a sentinel test catches accidental EN-passthrough. Future drift between EN and any locale fails the suite.
+
 ## 1.0.17-beta.3
 
 ### Fixed
