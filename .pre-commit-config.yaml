@@ -31,9 +31,9 @@ repos:
       - id: semgrep-architecture
         name: architectural lint (semgrep)
         language: system
-        entry: semgrep --config .semgrep/ --error custom_components/foxess_control/ smart_battery/
+        entry: semgrep --config .semgrep/ --error custom_components/foxess_control/ smart_battery/ tests/e2e/
         pass_filenames: false
-        files: ^(custom_components/foxess_control/|smart_battery/).*\.py$
+        files: ^(custom_components/foxess_control/|smart_battery/|tests/e2e/).*\.py$
         types: [python]
 
       - id: check-module-size

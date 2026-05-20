@@ -89,6 +89,86 @@ rules:
   #      user's current YAML config back into input fields, so reading
   #      this._config.<key> to populate an <input value="..."> is the
   #      correct behaviour (the config is the user's explicit override).
+  # E2E test bodies must route every Playwright primitive that is
+  # vulnerable to "Execution context was destroyed" through the
+  # dedicated retry helpers.  HA fires background navigations
+  # (WebSocket reconnect, dashboard auto-refresh, auth refresh ~1-15s
+  # after initial load) that destroy the JS execution context mid-
+  # call.  Without retry, a direct ``page.evaluate(...)`` /
+  # ``page.wait_for_function(...)`` / ``page.locator(...).screenshot(...)``
+  # in a test body fails immediately on the race.
+  #
+  # Release-blocker: v1.0.17-beta.4, run id 26137320539, against
+  # ``TestControlCard::test_safety_floor_row_appears_when_tracked[cloud]``
+  # — the test body's ``page.evaluate(...)`` at
+  # ``tests/e2e/test_ui.py:1528`` bypassed ``_safe_evaluate``.
+  #
+  # The helpers (``_safe_evaluate`` / ``_safe_screenshot`` /
+  # ``_find_card`` / ``_wait_for_card_hass`` in test_ui.py;
+  # ``_wait_for_lovelace_panel`` / ``_wait_for_stage`` in conftest.py)
+  # are excluded via ``pattern-not-inside`` so the primitive calls
+  # IN the helpers themselves remain legal.
+  - id: e2e-page-evaluate-must-use-helper
+    patterns:
+      - pattern-either:
+          - pattern: page.evaluate(...)
+          - pattern: page.wait_for_function(...)
+      - pattern-not-inside: |
+          def _safe_evaluate(...):
+            ...
+      - pattern-not-inside: |
+          def _safe_screenshot(...):
+            ...
+      - pattern-not-inside: |
+          def _find_card(...):
+            ...
+      - pattern-not-inside: |
+          def _wait_for_card_hass(...):
+            ...
+      - pattern-not-inside: |
+          def _wait_for_lovelace_panel(...):
+            ...
+      - pattern-not-inside: |
+          def _wait_for_stage(...):
+            ...
+    paths:
+      include:
+        - "**/tests/e2e/*.py"
+    message: >
+      Direct page.evaluate / page.wait_for_function in a test body
+      bypasses the context-destruction retry layer.  HA's background
+      navigations destroy the JS execution context mid-call (release-
+      blocker on v1.0.17-beta.4 against
+      test_safety_floor_row_appears_when_tracked[cloud], run id
+      26137320539).  Route through the matching helper:
+      _safe_evaluate / _safe_wait_for_function for evaluate-style
+      calls; _find_card / _wait_for_card_hass for shadow-DOM
+      readiness; _wait_for_lovelace_panel / _wait_for_stage for
+      pre-test panel readiness.
+    languages: [python]
+    severity: ERROR
+
+  - id: e2e-locator-screenshot-must-use-safe-screenshot
+    patterns:
+      - pattern-either:
+          - pattern: page.locator(...).screenshot(...)
+          - pattern: page.locator(...).first.screenshot(...)
+      - pattern-not-inside: |
+          def _safe_screenshot(...):
+            ...
+    paths:
+      include:
+        - "**/tests/e2e/*.py"
+    message: >
+      Direct page.locator(...).screenshot() in a test body bypasses
+      ``_safe_screenshot`` and races with HA's DOM swaps (Lit
+      detach/replace under WS state churn).  Route through
+      _safe_screenshot, which re-resolves the locator on
+      "Element is not attached to the DOM" / "Execution context was
+      destroyed" errors.
+    languages: [python]
+    severity: ERROR
+
   - id: card-entity-config-must-use-resolve
     patterns:
       - pattern-either:

@@ -1,0 +1,14 @@
+# Re-include selected test files for semgrep architectural-lint rules.
+#
+# Semgrep's built-in default .semgrepignore excludes ``test_*.py`` and
+# ``tests/`` so external rule packs aren't noisy on test code.  Our
+# ``e2e-page-evaluate-must-use-helper`` and
+# ``e2e-locator-screenshot-must-use-safe-screenshot`` rules in
+# ``.semgrep/foxess-architecture.yaml`` SPECIFICALLY target test-body
+# code, so the defaults must be overridden for that path.
+#
+# Pattern syntax: a leading ``!`` re-includes a path that an earlier
+# rule (or the implicit defaults) excluded.
+!tests/e2e/test_ui.py
+!tests/e2e/test_e2e.py
+!tests/e2e/conftest.py
