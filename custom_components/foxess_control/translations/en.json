@@ -348,5 +348,55 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "no_integration": {
+      "message": "No FoxESS Control integration configured."
+    },
+    "no_api_key": {
+      "message": "No API key configured and entity mode is not active. Provide a FoxESS Cloud API key or configure foxess_modbus entities."
+    },
+    "api_error": {
+      "message": "FoxESS API error: {error}"
+    },
+    "api_unreachable": {
+      "message": "Could not reach FoxESS Cloud API. Check your network connection."
+    },
+    "soc_unavailable": {
+      "message": "Battery SoC is not available. Wait for the API poll to complete."
+    },
+    "soc_below_min": {
+      "message": "Current SoC ({current_soc}%) is at or below the minimum SoC ({min_soc}%)."
+    },
+    "battery_capacity_not_configured": {
+      "message": "Battery capacity (kWh) not configured. Set it in the integration options before using smart charge."
+    },
+    "soc_above_target": {
+      "message": "Current SoC ({current_soc}%) already at or above target ({target_soc}%)."
+    },
+    "unmanaged_work_mode": {
+      "message": "The inverter schedule contains a {work_mode} group ({time_range}) not managed by this integration. Remove it via the FoxESS app, then retry."
+    },
+    "schedule_conflict": {
+      "message": "New {new_mode} window conflicts with an existing {existing_mode} override ({time_range})."
+    }
+  },
+  "issues": {
+    "unmanaged_work_mode": {
+      "title": "Unmanaged work mode detected",
+      "description": "The inverter schedule contains a **{work_mode}** group ({time_range}) which is not managed by this integration. FoxESS Control expects Self Use as the default work mode and will not modify the schedule while an unmanaged mode is present.\n\nPlease remove the \"{work_mode}\" schedule group via the FoxESS app, then retry the operation."
+    },
+    "session_aborted": {
+      "title": "Smart {session_type} session aborted",
+      "description": "The smart {session_type} session was aborted: {reason}.\n\nThe inverter has been reverted to Self Use mode."
+    },
+    "charge_target_unreachable": {
+      "title": "Smart charge can't reach target SoC",
+      "description": "The smart charge session is unable to reach the target **{target_soc}%** before the window ends.\n\n- Current SoC: **{current_soc}%**\n- Remaining window: **{remaining_hours} h**\n- Maximum charge power: **{max_power_w} W**\n\nThe session will continue at maximum power. If this happens regularly, consider extending the charge window, lowering the target SoC, or checking that the configured maximum power matches your inverter."
+    },
+    "sensor_write_failed": {
+      "title": "Sensor {entity_id} failed to update",
+      "description": "The sensor `{entity_id}` raised an error while writing its state and is no longer updating:\n\n`{error}`\n\nOther FoxESS sensors continue to update — this is a contained failure, but the named sensor's value may be stale. The issue will clear automatically when the sensor next writes successfully.\n\nIf it persists, consider restarting Home Assistant or reporting the error."
+    }
   }
 }

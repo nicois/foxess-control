@@ -286,6 +286,9 @@
     "soc_unavailable": {
       "message": "Battery SoC is not available. Wait for the API poll to complete."
     },
+    "soc_below_min": {
+      "message": "Current SoC ({current_soc}%) is at or below the minimum SoC ({min_soc}%)."
+    },
     "battery_capacity_not_configured": {
       "message": "Battery capacity (kWh) not configured. Set it in the integration options before using smart charge."
     },
