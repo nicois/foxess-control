@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.17-beta.3
+
+### Fixed
+- **Repair issues still rendered as the bare translation key in 1.0.17-beta.2** (C-020). The 1.0.17-beta.2 fix added the `issues.charge_target_unreachable` entry to `strings.json`, but live observation 2026-05-20 confirmed HA's Repair UI still showed `foxess_control: charge_target_unreachable` on the user's instance running v1.0.17-beta.2. Root cause: HA loads runtime UI translations from `<integration>/translations/<lang>.json`, **not** from `strings.json` (verified against `homeassistant.helpers.translation` lines 102-110 — `files_to_load[domain] = integration.file_path / "translations" / file_name`). `strings.json` is the developer-contribution source consumed by Lokalise/CI; the runtime cache only reads `translations/`. `translations/en.json` had no `issues` block at all (and no `exceptions` block), so HA's translation cache returned empty for every issue's title/description and the frontend fell back to the raw key. Locale fallback (DE → EN) didn't help because the EN file itself was incomplete. Fix: mirror the `issues` and `exceptions` blocks from `strings.json` into `translations/en.json`. Three other latent issue keys (`unmanaged_work_mode`, `sensor_write_failed`, `session_aborted`) had the same gap and now render correctly too. Also added the previously-undeclared `soc_below_min` exception entry to `strings.json` (the listener at `smart_battery/services.py` raises it but no entry existed). Nine-test regression suite in `tests/test_runtime_translations_issues.py`: covers the specific `charge_target_unreachable` symptom, asserts every callsite `translation_key=` has a matching runtime entry (catches future drift), and a parametrised `test_known_issue_keys_render_non_empty_title` that fails fast when any new issue key is added to `strings.json` without a runtime mirror.
+
 ## 1.0.17-beta.2
 
 ### Fixed
