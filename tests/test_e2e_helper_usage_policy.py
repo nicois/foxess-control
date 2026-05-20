@@ -47,10 +47,20 @@ import pytest
 _HELPER_FUNCTIONS: dict[str, frozenset[str]] = {
     "tests/e2e/test_ui.py": frozenset(
         {
+            # Module-level retry helpers — the canonical retry layer.
             "_safe_evaluate",
             "_safe_screenshot",
+            "_safe_wait_for_function",
             "_find_card",
             "_wait_for_card_hass",
+            # Class-scoped retry helpers with their own form-/screenshot-
+            # specific recovery semantics (re-open the form overlay,
+            # re-resolve the card locator) that the module-level
+            # ``domcontentloaded`` settle alone does not provide.  Each
+            # implements ``except PlaywrightError → settle/recover →
+            # retry`` at the method level.
+            "_wait_for_form",
+            "_screenshot_card",
         }
     ),
     "tests/e2e/conftest.py": frozenset(

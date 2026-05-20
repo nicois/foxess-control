@@ -11,7 +11,7 @@ import datetime
 import os
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from playwright.sync_api import Error as PlaywrightError
@@ -21,7 +21,7 @@ from .ha_client import FATAL_FOR_ACTIVE
 from .selectors import ControlCard, OverviewCard
 
 if TYPE_CHECKING:
-    from playwright.sync_api import Locator, Page
+    from playwright.sync_api import JSHandle, Locator, Page
 
     from .conftest import SimulatorHandle
     from .ha_client import HAClient
@@ -78,13 +78,17 @@ def _wait_for_card_text(
     return locator.first.text_content() or ""
 
 
+_UNSET: object = object()
+
+
 def _safe_evaluate(
     page: Page,
     expression: str,
+    arg: object = _UNSET,
     *,
     retries: int = 3,
     settle_timeout_ms: int = 3000,
-) -> object:
+) -> Any:
     """Run ``page.evaluate`` with retry on navigation-induced context destruction.
 
     HA fires background navigations (WebSocket reconnect, dashboard
@@ -116,11 +120,20 @@ def _safe_evaluate(
     used by evaluate blocks that mutate card state and read results in
     a single sync JS block — they cannot themselves resume where they
     left off on context destruction, so the whole evaluate must restart.
+
+    The optional ``arg`` parameter mirrors Playwright's
+    ``page.evaluate(expression, arg)`` two-argument form for JS
+    expressions that take a parameter (a single value or a tuple of
+    values destructured by the JS).  Backwards-compatible: the
+    sentinel default keeps the one-arg call shape identical to the
+    pre-extension signature.
     """
     last_exc: PlaywrightError | None = None
     for attempt in range(retries + 1):
         try:
-            return page.evaluate(expression)
+            if arg is _UNSET:
+                return page.evaluate(expression)
+            return page.evaluate(expression, arg)
         except PlaywrightError as exc:
             msg = str(exc)
             if "Execution context was destroyed" not in msg and "navigating" not in msg:
@@ -345,6 +358,60 @@ def _find_card(page: Page, tag: str, timeout: int = 30000) -> bool:
             return False
 
 
+def _safe_wait_for_function(
+    page: Page,
+    expression: str,
+    *,
+    timeout: int = 10000,
+    retries: int = 3,
+    settle_timeout_ms: int = 3000,
+) -> JSHandle:
+    """Run ``page.wait_for_function`` with retry on context destruction
+    and return the resolved JSHandle.
+
+    Mirrors ``_safe_evaluate`` for the ``page.wait_for_function`` primitive
+    in test bodies that need a return value (typically followed by
+    ``.json_value()``).  ``_find_card`` and ``_wait_for_card_hass`` already
+    cover the boolean / void variants of ``wait_for_function``; this
+    helper covers the value-returning variant — e.g. polling for a
+    rendered DOM property and reading it back as the test's observable.
+
+    Without this wrapper, every test-body
+    ``cursor = page.wait_for_function(...).json_value()`` fails on the
+    same ``Execution context was destroyed`` race that bit
+    ``test_safety_floor_row_appears_when_tracked[cloud]`` (run id
+    26137320539, v1.0.17-beta.4 release-blocker).
+
+    Per-retry settle is capped at ``settle_timeout_ms`` (default 3000ms)
+    on ``domcontentloaded`` — same justification as
+    :func:`_safe_evaluate` and :func:`_find_card`.
+    """
+    import time as _time
+
+    deadline = _time.monotonic() + (timeout / 1000) * (retries + 1)
+    last_exc: PlaywrightError | None = None
+    for attempt in range(retries + 1):
+        remaining = int((deadline - _time.monotonic()) * 1000)
+        if remaining <= 0:
+            break
+        try:
+            return page.wait_for_function(
+                expression,
+                timeout=min(remaining, timeout),
+            )
+        except PlaywrightError as exc:
+            msg = str(exc)
+            if "Execution context was destroyed" not in msg and "navigating" not in msg:
+                raise
+            last_exc = exc
+            if attempt == retries:
+                break
+            with contextlib.suppress(PlaywrightError):
+                page.wait_for_load_state("domcontentloaded", timeout=settle_timeout_ms)
+    assert last_exc is not None  # noqa: S101
+    raise last_exc
+
+
 def _parse_power_kw(text: str) -> float:
     """Parse a formatted power string like '3.00 kW' or '500 W' to kW."""
     m = re.search(r"([\d.]+)\s*(kW|W)", text)
@@ -414,7 +481,8 @@ class TestOverviewCard:
         _robust_reload(page, settle_ms=2000)
 
         assert _find_card(page, "foxess-overview-card"), "Overview card not found"
-        results = page.evaluate(
+        results = _safe_evaluate(
+            page,
             f"""() => {{
                 {_JS_FIND_OVERVIEW_CARD}
                 const card = findCard(document);
@@ -434,7 +502,7 @@ class TestOverviewCard:
                     node.click();
                 }}
                 return {{ clicked, captured }};
-            }}"""
+            }}""",
         )
         assert results is not None, "Overview card not found"
         assert len(results["clicked"]) >= 3, (
@@ -456,7 +524,8 @@ class TestOverviewCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
         _robust_reload(page, settle_ms=2000)
 
-        cursor = page.wait_for_function(
+        cursor = _safe_wait_for_function(
+            page,
             f"""() => {{
                 {_JS_FIND_OVERVIEW_CARD}
                 const card = findCard(document);
@@ -483,7 +552,8 @@ class TestOverviewCard:
         _robust_reload(page, settle_ms=2000)
 
         assert _find_card(page, "foxess-overview-card"), "Overview card not found"
-        results = page.evaluate(
+        results = _safe_evaluate(
+            page,
             f"""() => {{
                 {_JS_FIND_OVERVIEW_CARD}
                 const card = findCard(document);
@@ -503,7 +573,7 @@ class TestOverviewCard:
                     link.click();
                 }}
                 return {{ clicked, captured }};
-            }}"""
+            }}""",
         )
         assert results is not None, "Overview card not found"
         assert len(results["clicked"]) >= 1, (
@@ -525,7 +595,8 @@ class TestOverviewCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
         _robust_reload(page, settle_ms=2000)
 
-        node_types = page.wait_for_function(
+        node_types = _safe_wait_for_function(
+            page,
             """() => {
                 function findAllCards(root) {
                     const cards = [];
@@ -571,7 +642,8 @@ class TestOverviewCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, solar_kw=1.0)
         _robust_reload(page, settle_ms=2000)
 
-        label_text = page.wait_for_function(
+        label_text = _safe_wait_for_function(
+            page,
             """() => {
                 function findAllCards(root) {
                     const cards = [];
@@ -607,7 +679,8 @@ class TestOverviewCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
         _robust_reload(page, settle_ms=2000)
 
-        order = page.wait_for_function(
+        order = _safe_wait_for_function(
+            page,
             """() => {
                 function findAllCards(root) {
                     const cards = [];
@@ -652,7 +725,8 @@ class TestOverviewCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
         _robust_reload(page, settle_ms=2000)
 
-        types = page.wait_for_function(
+        types = _safe_wait_for_function(
+            page,
             f"""() => {{
                 {_JS_FIND_OVERVIEW_CARD}
                 const card = findCard(document);
@@ -702,7 +776,8 @@ class TestOverviewCard:
         # config patterns).  Before the fix, this would produce an
         # uncaught TypeError when _renderBox tries to access box.type
         # on an entry that has flow_from instead.
-        render_result = page.evaluate(
+        render_result = _safe_evaluate(
+            page,
             f"""() => {{
                 {_JS_FIND_OVERVIEW_CARD}
                 var card = findCard(document);
@@ -719,7 +794,7 @@ class TestOverviewCard:
                 }} catch (e) {{
                     return 'error: ' + e.message;
                 }}
-            }}"""
+            }}""",
         )
 
         # The card's _render() must not throw — it should handle
@@ -727,7 +802,8 @@ class TestOverviewCard:
         assert render_result == "ok", f"Overview card _render() threw: {render_result}"
 
         # The card should still show ha-card (graceful degradation)
-        has_card = page.wait_for_function(
+        has_card = _safe_wait_for_function(
+            page,
             f"""() => {{
                 {_JS_FIND_OVERVIEW_CARD}
                 const card = findCard(document);
@@ -810,7 +886,8 @@ class TestOverviewCard:
         )
         _robust_reload(page)
 
-        badge_text = page.wait_for_function(
+        badge_text = _safe_wait_for_function(
+            page,
             """() => {
                 function findCard(root) {
                     const c = root.querySelector(
@@ -866,7 +943,8 @@ class TestOverviewCard:
         page.wait_for_timeout(32000)
         _robust_reload(page)
 
-        badge_info = page.wait_for_function(
+        badge_info = _safe_wait_for_function(
+            page,
             """() => {
                 function findCard(root) {
                     const c = root.querySelector('foxess-overview-card');
@@ -921,7 +999,8 @@ class TestOverviewCard:
         _robust_reload(page, settle_ms=3000)
 
         # Extract solar node text from deep shadow DOM
-        solar_texts = page.wait_for_function(
+        solar_texts = _safe_wait_for_function(
+            page,
             """() => {
                 function findCard(root) {
                     const card = root.querySelector(
@@ -1015,7 +1094,8 @@ class TestControlCard:
         # Poll until the card renders a progress section — the card
         # may take several seconds to re-render after discharge starts,
         # especially in the WS data-source variant.
-        page.wait_for_function(
+        _safe_wait_for_function(
+            page,
             """() => {
                 function findCard(root) {
                     const card = root.querySelector('foxess-control-card');
@@ -1089,7 +1169,8 @@ class TestControlCard:
         # Verify the marker renders on the card
         _robust_reload(page)
 
-        has_marker = page.wait_for_function(
+        has_marker = _safe_wait_for_function(
+            page,
             """() => {
                 function findCard(root) {
                     const card = root.querySelector(
@@ -1143,7 +1224,8 @@ class TestControlCard:
         )
         _robust_reload(page, settle_ms=3000)
 
-        has_cancel = page.wait_for_function(
+        has_cancel = _safe_wait_for_function(
+            page,
             """() => {
                 function findCard(root) {
                     const card = root.querySelector('foxess-control-card');
@@ -1165,7 +1247,8 @@ class TestControlCard:
         ).json_value()
         assert has_cancel is True, "Cancel button should be visible by default"
 
-        page.evaluate(
+        _safe_evaluate(
+            page,
             """() => {
                 function findCard(root) {
                     const card = root.querySelector('foxess-control-card');
@@ -1183,10 +1266,11 @@ class TestControlCard:
                     card.setConfig({...card._config, show_cancel: false});
                     card._render();
                 }
-            }"""
+            }""",
         )
 
-        no_cancel = page.wait_for_function(
+        no_cancel = _safe_wait_for_function(
+            page,
             """() => {
                 function findCard(root) {
                     const card = root.querySelector('foxess-control-card');
@@ -1244,7 +1328,8 @@ class TestControlCard:
         def section_title_for_phase(phase: str) -> str | None:
             """Inject a charge-active state with the given phase and return
             the rendered section title (or None)."""
-            result = page.evaluate(
+            result = _safe_evaluate(
+                page,
                 """(phase) => {
                     function findCard(root) {
                         const card = root.querySelector(
@@ -1345,7 +1430,8 @@ class TestControlCard:
         _robust_reload(page, settle_ms=3000)
         assert _find_card(page, "foxess-control-card")
 
-        raw = page.evaluate(
+        raw = _safe_evaluate(
+            page,
             """() => {
                 function findCard(root) {
                     const card = root.querySelector('foxess-control-card');
@@ -1398,7 +1484,7 @@ class TestControlCard:
                     inv_text: inv ? inv.textContent : null,
                     exp_classes: exp ? exp.className : null,
                 };
-            }"""
+            }""",
         )
         result: dict[str, object] = dict(raw) if isinstance(raw, dict) else {}
         assert not result.get("no_card"), "control card not found"
@@ -1432,7 +1518,8 @@ class TestControlCard:
         assert _find_card(page, "foxess-control-card")
 
         def render_with(clamp_active: bool) -> dict[str, bool]:
-            result = page.evaluate(
+            result = _safe_evaluate(
+                page,
                 """(clampActive) => {
                     function findCard(root) {
                         const card = root.querySelector('foxess-control-card');
@@ -1525,7 +1612,8 @@ class TestControlCard:
         assert _find_card(page, "foxess-control-card")
 
         def render_with(floor_w: float, paced_w: float | None) -> dict[str, object]:
-            raw = page.evaluate(
+            raw = _safe_evaluate(
+                page,
                 """([floorW, pacedW]) => {
                     function findCard(root) {
                         const card = root.querySelector('foxess-control-card');
@@ -1629,7 +1717,8 @@ class TestControlCard:
         _robust_reload(page, settle_ms=3000)
         assert _find_card(page, "foxess-control-card")
 
-        raw = page.evaluate(
+        raw = _safe_evaluate(
+            page,
             """() => {
                 function findCard(root) {
                     const card = root.querySelector('foxess-control-card');
@@ -1691,7 +1780,7 @@ class TestControlCard:
                     expanded_before: beforeExpanded,
                     expanded_after: afterExpanded,
                 };
-            }"""
+            }""",
         )
         result: dict[str, object] = dict(raw) if isinstance(raw, dict) else {}
         assert not result.get("no_card"), "control card not found"
@@ -1729,7 +1818,8 @@ class TestControlCard:
         assert _find_card(page, "foxess-control-card")
 
         reason = "Feed-in limit reached — holding until more solar is available"
-        raw = page.evaluate(
+        raw = _safe_evaluate(
+            page,
             """(reason) => {
                 function findCard(root) {
                     const card = root.querySelector('foxess-control-card');
@@ -1804,7 +1894,8 @@ class TestControlCard:
         assert _find_card(page, "foxess-control-card")
 
         reason = "Paused — solar forecast exceeds target"
-        raw = page.evaluate(
+        raw = _safe_evaluate(
+            page,
             """(reason) => {
                 function findCard(root) {
                     const card = root.querySelector('foxess-control-card');
@@ -1882,7 +1973,8 @@ class TestTaperCard:
         """With no observations recorded yet, the empty-state text
         (translated) appears inside the card."""
         assert _find_card(page, "foxess-taper-card")
-        text = page.evaluate(
+        text = _safe_evaluate(
+            page,
             """() => {
                 function find(root) {
                     const el = root.querySelector('foxess-taper-card');
@@ -1899,7 +1991,7 @@ class TestTaperCard:
                 if (!card || !card.shadowRoot) return null;
                 const empty = card.shadowRoot.querySelector('.empty');
                 return empty ? empty.textContent.trim() : null;
-            }"""
+            }""",
         )
         # The empty state contains translated "no observations" text.
         # Accept any locale rendering by checking for a non-empty string.
@@ -2065,7 +2157,8 @@ class TestFormInputPersistence:
             page.wait_for_load_state("networkidle", timeout=30000)
             _find_card(page, "foxess-control-card")
             if self._current_form_action:
-                page.evaluate(
+                _safe_evaluate(
+                    page,
                     f"""() => {{
                         {_JS_FIND_CONTROL_CARD}
                         const card = findCard(document);
@@ -2074,7 +2167,7 @@ class TestFormInputPersistence:
                             '[data-action="{self._current_form_action}"]'
                         );
                         if (btn) btn.click();
-                    }}"""
+                    }}""",
                 )
                 # Restore previously-set form values into the new card
                 # instance.  Navigation creates a fresh card with empty
@@ -2103,7 +2196,8 @@ class TestFormInputPersistence:
         start = vals.get("form-start", "")
         end = vals.get("form-end", "")
         soc = vals.get("form-soc", "")
-        page.evaluate(
+        _safe_evaluate(
+            page,
             f"""() => {{
                 {_JS_FIND_CONTROL_CARD}
                 const card = findCard(document);
@@ -2129,7 +2223,7 @@ class TestFormInputPersistence:
                         el.dispatchEvent(new Event('input', {{ bubbles: true }}));
                     }}
                 }}
-            }}"""
+            }}""",
         )
 
     def _safe_evaluate(  # type: ignore[return]

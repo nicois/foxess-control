@@ -120,6 +120,9 @@ rules:
           def _safe_screenshot(...):
             ...
       - pattern-not-inside: |
+          def _safe_wait_for_function(...):
+            ...
+      - pattern-not-inside: |
           def _find_card(...):
             ...
       - pattern-not-inside: |
@@ -130,6 +133,15 @@ rules:
             ...
       - pattern-not-inside: |
           def _wait_for_stage(...):
+            ...
+      # Class-scoped retry helpers — same context-destroyed retry
+      # contract as the module-level helpers, with form- and
+      # screenshot-specific recovery semantics.
+      - pattern-not-inside: |
+          def _wait_for_form(self, ...):
+            ...
+      - pattern-not-inside: |
+          def _screenshot_card(self, ...):
             ...
     paths:
       include:
