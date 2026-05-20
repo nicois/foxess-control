@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.17-beta.5
+
+### Fixed
+- **`page.evaluate()` calls in E2E test bodies bypassed the context-destruction retry helper** (C-031). Live failure 2026-05-20 (1.0.17-beta.4 release blocker — release workflow gate failed because of this): `tests/e2e/test_ui.py::TestControlCard::test_safety_floor_row_appears_when_tracked[cloud]` errored with `Page.evaluate: Execution context was destroyed, most likely because of a navigation`. The test called `page.evaluate(...)` directly inside its `render_with` closure, bypassing the existing `_safe_evaluate` retry helper. Same root cause as the four `_safe_*` helper hardenings shipped in 1.0.17-beta.3 (commits a47677b/838e763), but at a NEW unprotected call site. Audit found 29 unprotected calls across `tests/e2e/test_ui.py` test bodies — every single one a latent flake of this exact shape. Fix: extended `_safe_evaluate` with an optional `arg=` parameter (drop-in replacement for `page.evaluate(expr, arg)`); added `_safe_wait_for_function` covering the value-returning variant; wrapped all 29 unprotected calls. Two semgrep rules in `.semgrep/foxess-architecture.yaml` (`e2e-page-evaluate-must-use-helper`, `e2e-locator-screenshot-must-use-safe-screenshot`) enforce the contract — direct primitive calls outside the helper allowlist now fail pre-commit. Pre-commit config extended to scan `tests/e2e/` (was previously only scanning the integration code). New AST-based unit test (`tests/test_e2e_helper_usage_policy.py::TestE2EHelperUsagePolicy`) walks `tests/e2e/*.py` and asserts no test body calls the primitives directly outside the helper functions — recurrence-prevention at unit-suite speed regardless of CI scheduling.
+
 ## 1.0.17-beta.4
 
 ### Added
