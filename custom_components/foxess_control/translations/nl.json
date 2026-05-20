@@ -315,5 +315,55 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "no_integration": {
+      "message": "Geen FoxESS Control-integratie geconfigureerd."
+    },
+    "no_api_key": {
+      "message": "Geen API-sleutel geconfigureerd en entiteitsmodus is niet actief. Geef een FoxESS Cloud API-sleutel op of configureer foxess_modbus-entiteiten."
+    },
+    "api_error": {
+      "message": "FoxESS API-fout: {error}"
+    },
+    "api_unreachable": {
+      "message": "Kan FoxESS Cloud API niet bereiken. Controleer uw netwerkverbinding."
+    },
+    "soc_unavailable": {
+      "message": "Batterij-SoC is niet beschikbaar. Wacht tot de API-poll is voltooid."
+    },
+    "soc_below_min": {
+      "message": "Huidige SoC ({current_soc}%) is gelijk aan of lager dan de minimale SoC ({min_soc}%)."
+    },
+    "battery_capacity_not_configured": {
+      "message": "Batterijcapaciteit (kWh) niet geconfigureerd. Stel deze in via de integratieopties voordat u slim laden gebruikt."
+    },
+    "soc_above_target": {
+      "message": "Huidige SoC ({current_soc}%) is al gelijk aan of hoger dan het doel ({target_soc}%)."
+    },
+    "unmanaged_work_mode": {
+      "message": "De omvormerplanning bevat een {work_mode}-groep ({time_range}) die niet door deze integratie wordt beheerd. Verwijder deze via de FoxESS-app en probeer het opnieuw."
+    },
+    "schedule_conflict": {
+      "message": "Nieuw {new_mode}-tijdvenster botst met een bestaande {existing_mode}-overschrijving ({time_range})."
+    }
+  },
+  "issues": {
+    "unmanaged_work_mode": {
+      "title": "Niet-beheerde werkmodus gedetecteerd",
+      "description": "De omvormerplanning bevat een **{work_mode}**-groep ({time_range}) die niet door deze integratie wordt beheerd. FoxESS Control verwacht Eigen verbruik (Self Use) als standaard werkmodus en zal de planning niet wijzigen zolang een niet-beheerde modus aanwezig is.\n\nVerwijder de \"{work_mode}\"-planningsgroep via de FoxESS-app en probeer de bewerking opnieuw."
+    },
+    "session_aborted": {
+      "title": "Slim {session_type} sessie afgebroken",
+      "description": "De slimme {session_type} sessie is afgebroken: {reason}.\n\nDe omvormer is teruggezet naar de modus Eigen verbruik."
+    },
+    "charge_target_unreachable": {
+      "title": "Slim laden kan doel-SoC niet bereiken",
+      "description": "De slim-laden sessie kan het doel van **{target_soc}%** niet bereiken voordat het tijdvenster afloopt.\n\n- Huidige SoC: **{current_soc}%**\n- Resterend tijdvenster: **{remaining_hours} h**\n- Maximaal laadvermogen: **{max_power_w} W**\n\nDe sessie gaat door op maximaal vermogen. Als dit regelmatig gebeurt, overweeg dan het laadtijdvenster te verlengen, het doel-SoC te verlagen of te controleren of het ingestelde maximale vermogen overeenkomt met uw omvormer."
+    },
+    "sensor_write_failed": {
+      "title": "Bijwerken van {entity_id} mislukt",
+      "description": "De meting `{entity_id}` veroorzaakte een fout bij het schrijven van zijn status en wordt niet meer bijgewerkt:\n\n`{error}`\n\nDe overige FoxESS-metingen worden nog steeds bijgewerkt — de storing is afgebakend, maar de waarde van de genoemde meting kan verouderd zijn. Het probleem wordt automatisch gesloten zodra de meting weer succesvol schrijft.\n\nAls het probleem aanhoudt, overweeg dan Home Assistant opnieuw te starten of de fout te melden."
+    }
   }
 }

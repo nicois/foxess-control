@@ -315,5 +315,55 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "no_integration": {
+      "message": "FoxESS Control 統合が設定されていません。"
+    },
+    "no_api_key": {
+      "message": "API キーが設定されておらず、エンティティモードも有効ではありません。FoxESS Cloud の API キーを設定するか、foxess_modbus エンティティを構成してください。"
+    },
+    "api_error": {
+      "message": "FoxESS API エラー: {error}"
+    },
+    "api_unreachable": {
+      "message": "FoxESS Cloud API に接続できません。ネットワーク接続を確認してください。"
+    },
+    "soc_unavailable": {
+      "message": "バッテリー残量を取得できません。次回の API ポーリング完了まで待ってください。"
+    },
+    "soc_below_min": {
+      "message": "現在の残量 ({current_soc}%) が最小残量 ({min_soc}%) 以下です。"
+    },
+    "battery_capacity_not_configured": {
+      "message": "バッテリー容量 (kWh) が設定されていません。スマート充電を使用する前に統合のオプションで設定してください。"
+    },
+    "soc_above_target": {
+      "message": "現在の残量 ({current_soc}%) はすでに目標値 ({target_soc}%) 以上です。"
+    },
+    "unmanaged_work_mode": {
+      "message": "インバーターのスケジュールに、本統合で管理されていない {work_mode} グループ ({time_range}) が含まれています。FoxESS アプリから削除した上で再実行してください。"
+    },
+    "schedule_conflict": {
+      "message": "新しい {new_mode} の時間帯が、既存の {existing_mode} オーバーライド ({time_range}) と競合しています。"
+    }
+  },
+  "issues": {
+    "unmanaged_work_mode": {
+      "title": "管理外の動作モードを検出しました",
+      "description": "インバーターのスケジュールに、本統合で管理されていない **{work_mode}** グループ ({time_range}) が含まれています。FoxESS Control は既定の動作モードとして自家消費 (Self Use) を想定しており、管理外モードが存在する間はスケジュールを変更しません。\n\nFoxESS アプリから「{work_mode}」スケジュールグループを削除したうえで、操作をやり直してください。"
+    },
+    "session_aborted": {
+      "title": "スマート{session_type}セッションが中止されました",
+      "description": "スマート{session_type}セッションは中止されました: {reason}。\n\nインバーターは自家消費モードに戻されました。"
+    },
+    "charge_target_unreachable": {
+      "title": "スマート充電が目標残量に到達できません",
+      "description": "スマート充電セッションは時間帯終了までに目標値 **{target_soc}%** へ到達できません。\n\n- 現在の残量: **{current_soc}%**\n- 残り時間帯: **{remaining_hours} h**\n- 最大充電電力: **{max_power_w} W**\n\nセッションは最大電力で継続します。頻繁に発生する場合は、充電時間帯の延長、目標残量の引き下げ、または設定された最大電力がインバーターと一致しているかの確認をご検討ください。"
+    },
+    "sensor_write_failed": {
+      "title": "センサー {entity_id} の更新に失敗しました",
+      "description": "センサー `{entity_id}` は状態を書き込む際にエラーを発生させ、更新が止まっています:\n\n`{error}`\n\n他の FoxESS センサーは引き続き更新されています — 影響は限定的ですが、対象センサーの値は古いままになる可能性があります。次回の書き込みが成功すると、この通知は自動的にクリアされます。\n\n問題が続く場合は、Home Assistant の再起動またはエラーの報告をご検討ください。"
+    }
   }
 }

@@ -311,5 +311,55 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "no_integration": {
+      "message": "Nie skonfigurowano integracji FoxESS Control."
+    },
+    "no_api_key": {
+      "message": "Brak skonfigurowanego klucza API, a tryb encji nie jest aktywny. Podaj klucz API FoxESS Cloud lub skonfiguruj encje foxess_modbus."
+    },
+    "api_error": {
+      "message": "Błąd API FoxESS: {error}"
+    },
+    "api_unreachable": {
+      "message": "Nie można połączyć się z API FoxESS Cloud. Sprawdź połączenie sieciowe."
+    },
+    "soc_unavailable": {
+      "message": "SoC baterii jest niedostępny. Poczekaj na zakończenie odpytania API."
+    },
+    "soc_below_min": {
+      "message": "Bieżący SoC ({current_soc}%) jest równy lub niższy od minimalnego SoC ({min_soc}%)."
+    },
+    "battery_capacity_not_configured": {
+      "message": "Pojemność baterii (kWh) nie została skonfigurowana. Ustaw ją w opcjach integracji przed użyciem inteligentnego ładowania."
+    },
+    "soc_above_target": {
+      "message": "Bieżący SoC ({current_soc}%) jest już równy lub wyższy od celu ({target_soc}%)."
+    },
+    "unmanaged_work_mode": {
+      "message": "Harmonogram falownika zawiera grupę {work_mode} ({time_range}), która nie jest zarządzana przez tę integrację. Usuń ją w aplikacji FoxESS i spróbuj ponownie."
+    },
+    "schedule_conflict": {
+      "message": "Nowe okno {new_mode} koliduje z istniejącym nadpisaniem {existing_mode} ({time_range})."
+    }
+  },
+  "issues": {
+    "unmanaged_work_mode": {
+      "title": "Wykryto niezarządzany tryb pracy",
+      "description": "Harmonogram falownika zawiera grupę **{work_mode}** ({time_range}), która nie jest zarządzana przez tę integrację. FoxESS Control oczekuje, że trybem domyślnym będzie autokonsumpcja (Self Use), i nie zmieni harmonogramu, dopóki obecny jest niezarządzany tryb.\n\nUsuń grupę harmonogramu \"{work_mode}\" w aplikacji FoxESS, a następnie spróbuj ponownie."
+    },
+    "session_aborted": {
+      "title": "Sesja inteligentnego {session_type} przerwana",
+      "description": "Sesja inteligentnego {session_type} została przerwana: {reason}.\n\nFalownik został przywrócony do trybu autokonsumpcji."
+    },
+    "charge_target_unreachable": {
+      "title": "Inteligentne ładowanie nie może osiągnąć docelowego SoC",
+      "description": "Sesja inteligentnego ładowania nie zdoła osiągnąć docelowych **{target_soc}%** przed końcem okna.\n\n- Bieżący SoC: **{current_soc}%**\n- Pozostałe okno: **{remaining_hours} h**\n- Maksymalna moc ładowania: **{max_power_w} W**\n\nSesja będzie kontynuowana z maksymalną mocą. Jeśli zdarza się to często, rozważ wydłużenie okna ładowania, obniżenie docelowego SoC lub sprawdzenie, czy skonfigurowana moc maksymalna odpowiada falownikowi."
+    },
+    "sensor_write_failed": {
+      "title": "Aktualizacja czujnika {entity_id} nie powiodła się",
+      "description": "Czujnik `{entity_id}` zgłosił błąd podczas zapisu stanu i nie jest już aktualizowany:\n\n`{error}`\n\nPozostałe czujniki FoxESS nadal się aktualizują — awaria jest ograniczona, ale wartość wskazanego czujnika może być nieaktualna. Powiadomienie zostanie automatycznie usunięte, gdy czujnik znów zapisze stan poprawnie.\n\nJeśli problem nadal występuje, rozważ ponowne uruchomienie Home Assistant lub zgłoszenie błędu."
+    }
   }
 }

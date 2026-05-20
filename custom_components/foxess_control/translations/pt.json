@@ -311,5 +311,55 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "no_integration": {
+      "message": "Nenhuma integração FoxESS Control configurada."
+    },
+    "no_api_key": {
+      "message": "Nenhuma chave de API configurada e o modo de entidades não está ativo. Forneça uma chave de API FoxESS Cloud ou configure entidades foxess_modbus."
+    },
+    "api_error": {
+      "message": "Erro da API FoxESS: {error}"
+    },
+    "api_unreachable": {
+      "message": "Não foi possível contactar a API FoxESS Cloud. Verifique a sua ligação de rede."
+    },
+    "soc_unavailable": {
+      "message": "O SoC da bateria não está disponível. Aguarde a conclusão da próxima consulta à API."
+    },
+    "soc_below_min": {
+      "message": "O SoC atual ({current_soc}%) é igual ou inferior ao SoC mínimo ({min_soc}%)."
+    },
+    "battery_capacity_not_configured": {
+      "message": "Capacidade da bateria (kWh) não configurada. Defina-a nas opções da integração antes de usar a carga inteligente."
+    },
+    "soc_above_target": {
+      "message": "O SoC atual ({current_soc}%) já está igual ou acima do alvo ({target_soc}%)."
+    },
+    "unmanaged_work_mode": {
+      "message": "O agendamento do inversor contém um grupo {work_mode} ({time_range}) que não é gerido por esta integração. Remova-o através da aplicação FoxESS e tente novamente."
+    },
+    "schedule_conflict": {
+      "message": "A nova janela {new_mode} conflitua com uma substituição {existing_mode} existente ({time_range})."
+    }
+  },
+  "issues": {
+    "unmanaged_work_mode": {
+      "title": "Modo de trabalho não gerido detetado",
+      "description": "O agendamento do inversor contém um grupo **{work_mode}** ({time_range}) que não é gerido por esta integração. FoxESS Control assume Autoconsumo (Self Use) como modo de trabalho predefinido e não alterará o agendamento enquanto existir um modo não gerido.\n\nRemova o grupo de agendamento \"{work_mode}\" através da aplicação FoxESS e repita a operação."
+    },
+    "session_aborted": {
+      "title": "Sessão de {session_type} inteligente abortada",
+      "description": "A sessão de {session_type} inteligente foi abortada: {reason}.\n\nO inversor foi reposto no modo Autoconsumo."
+    },
+    "charge_target_unreachable": {
+      "title": "A carga inteligente não consegue atingir o SoC alvo",
+      "description": "A sessão de carga inteligente não conseguirá atingir o alvo **{target_soc}%** antes do fim da janela.\n\n- SoC atual: **{current_soc}%**\n- Janela restante: **{remaining_hours} h**\n- Potência máxima de carga: **{max_power_w} W**\n\nA sessão prosseguirá à potência máxima. Se isto acontecer com frequência, pondere alargar a janela de carga, baixar o SoC alvo ou confirmar se a potência máxima configurada corresponde ao seu inversor."
+    },
+    "sensor_write_failed": {
+      "title": "O sensor {entity_id} não conseguiu atualizar-se",
+      "description": "O sensor `{entity_id}` gerou um erro ao escrever o seu estado e deixou de atualizar:\n\n`{error}`\n\nOs restantes sensores FoxESS continuam a atualizar — é uma falha contida, mas o valor do sensor indicado pode estar desatualizado. O alerta será removido automaticamente assim que o sensor escrever com sucesso de novo.\n\nSe persistir, pondere reiniciar o Home Assistant ou reportar o erro."
+    }
   }
 }

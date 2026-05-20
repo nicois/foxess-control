@@ -315,5 +315,55 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "no_integration": {
+      "message": "未配置 FoxESS Control 集成。"
+    },
+    "no_api_key": {
+      "message": "未配置 API 密钥且实体模式未启用。请提供 FoxESS Cloud API 密钥或配置 foxess_modbus 实体。"
+    },
+    "api_error": {
+      "message": "FoxESS API 错误：{error}"
+    },
+    "api_unreachable": {
+      "message": "无法访问 FoxESS Cloud API。请检查网络连接。"
+    },
+    "soc_unavailable": {
+      "message": "电池电量不可用。请等待下一次 API 轮询完成。"
+    },
+    "soc_below_min": {
+      "message": "当前电量（{current_soc}%）已等于或低于最低电量（{min_soc}%）。"
+    },
+    "battery_capacity_not_configured": {
+      "message": "未配置电池容量（kWh）。使用智能充电前，请在集成选项中设置。"
+    },
+    "soc_above_target": {
+      "message": "当前电量（{current_soc}%）已等于或高于目标值（{target_soc}%）。"
+    },
+    "unmanaged_work_mode": {
+      "message": "逆变器排程包含本集成未管理的 {work_mode} 时段（{time_range}）。请通过 FoxESS App 移除后重试。"
+    },
+    "schedule_conflict": {
+      "message": "新的 {new_mode} 时段与已存在的 {existing_mode} 覆盖（{time_range}）冲突。"
+    }
+  },
+  "issues": {
+    "unmanaged_work_mode": {
+      "title": "检测到未受管理的工作模式",
+      "description": "逆变器排程中包含本集成未管理的 **{work_mode}** 时段（{time_range}）。FoxESS Control 默认期望工作模式为自用（Self Use），在存在未管理模式时不会修改排程。\n\n请通过 FoxESS App 移除“{work_mode}”排程时段，然后重试操作。"
+    },
+    "session_aborted": {
+      "title": "智能{session_type}会话已中止",
+      "description": "智能{session_type}会话已中止：{reason}。\n\n逆变器已恢复至自用模式。"
+    },
+    "charge_target_unreachable": {
+      "title": "智能充电无法达到目标电量",
+      "description": "智能充电会话在时段结束前无法达到目标 **{target_soc}%**。\n\n- 当前电量：**{current_soc}%**\n- 剩余时段：**{remaining_hours} h**\n- 最大充电功率：**{max_power_w} W**\n\n会话将以最大功率继续。如经常出现此情况，请考虑延长充电时段、降低目标电量，或检查所配置的最大功率是否与您的逆变器一致。"
+    },
+    "sensor_write_failed": {
+      "title": "传感器 {entity_id} 更新失败",
+      "description": "传感器 `{entity_id}` 在写入状态时发生错误，已停止更新：\n\n`{error}`\n\n其他 FoxESS 传感器仍在持续更新——此故障已被隔离，但所指传感器的值可能已过时。当该传感器再次成功写入时，此提示将自动消除。\n\n如问题持续，请考虑重启 Home Assistant 或上报该错误。"
+    }
   }
 }

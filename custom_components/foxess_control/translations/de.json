@@ -311,5 +311,55 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "no_integration": {
+      "message": "Keine FoxESS Control Integration konfiguriert."
+    },
+    "no_api_key": {
+      "message": "Kein API-Schlüssel konfiguriert und der Entitätsmodus ist nicht aktiv. Bitte einen FoxESS Cloud API-Schlüssel angeben oder foxess_modbus-Entitäten konfigurieren."
+    },
+    "api_error": {
+      "message": "FoxESS API-Fehler: {error}"
+    },
+    "api_unreachable": {
+      "message": "FoxESS Cloud API nicht erreichbar. Bitte die Netzwerkverbindung prüfen."
+    },
+    "soc_unavailable": {
+      "message": "Batterie-SoC ist nicht verfügbar. Bitte auf den nächsten API-Abfragezyklus warten."
+    },
+    "soc_below_min": {
+      "message": "Aktueller SoC ({current_soc}%) liegt auf oder unter dem minimalen SoC ({min_soc}%)."
+    },
+    "battery_capacity_not_configured": {
+      "message": "Batteriekapazität (kWh) nicht konfiguriert. Bitte in den Optionen der Integration eintragen, bevor das intelligente Laden verwendet wird."
+    },
+    "soc_above_target": {
+      "message": "Aktueller SoC ({current_soc}%) liegt bereits auf oder über dem Ziel ({target_soc}%)."
+    },
+    "unmanaged_work_mode": {
+      "message": "Der Wechselrichter-Zeitplan enthält eine {work_mode}-Gruppe ({time_range}), die nicht von dieser Integration verwaltet wird. Bitte über die FoxESS-App entfernen und erneut versuchen."
+    },
+    "schedule_conflict": {
+      "message": "Neues {new_mode}-Zeitfenster steht in Konflikt mit einer bestehenden {existing_mode}-Übersteuerung ({time_range})."
+    }
+  },
+  "issues": {
+    "unmanaged_work_mode": {
+      "title": "Nicht verwalteter Betriebsmodus erkannt",
+      "description": "Der Wechselrichter-Zeitplan enthält eine **{work_mode}**-Gruppe ({time_range}), die nicht von dieser Integration verwaltet wird. FoxESS Control erwartet Eigenverbrauch (Self Use) als Standard-Betriebsmodus und ändert den Zeitplan nicht, solange ein nicht verwalteter Modus vorhanden ist.\n\nBitte die \"{work_mode}\"-Zeitplangruppe über die FoxESS-App entfernen und den Vorgang erneut starten."
+    },
+    "session_aborted": {
+      "title": "Smart-{session_type}-Sitzung abgebrochen",
+      "description": "Die Smart-{session_type}-Sitzung wurde abgebrochen: {reason}.\n\nDer Wechselrichter wurde in den Eigenverbrauchsmodus zurückgesetzt."
+    },
+    "charge_target_unreachable": {
+      "title": "Intelligentes Laden kann den Ziel-SoC nicht erreichen",
+      "description": "Die Sitzung des intelligenten Ladens kann den Ziel-SoC von **{target_soc}%** vor Ende des Zeitfensters nicht erreichen.\n\n- Aktueller SoC: **{current_soc}%**\n- Verbleibendes Zeitfenster: **{remaining_hours} h**\n- Maximale Ladeleistung: **{max_power_w} W**\n\nDie Sitzung wird mit maximaler Leistung fortgesetzt. Tritt dies regelmäßig auf, sollten Sie das Ladezeitfenster verlängern, den Ziel-SoC senken oder prüfen, ob die konfigurierte maximale Leistung zum Wechselrichter passt."
+    },
+    "sensor_write_failed": {
+      "title": "Sensor {entity_id} konnte nicht aktualisiert werden",
+      "description": "Der Sensor `{entity_id}` hat beim Schreiben seines Zustands einen Fehler ausgelöst und aktualisiert sich nicht mehr:\n\n`{error}`\n\nAndere FoxESS-Sensoren werden weiterhin aktualisiert — der Ausfall ist begrenzt, aber der Wert des genannten Sensors kann veraltet sein. Der Hinweis verschwindet automatisch, sobald der Sensor wieder erfolgreich schreibt.\n\nBesteht das Problem weiterhin, sollten Sie Home Assistant neu starten oder den Fehler melden."
+    }
   }
 }

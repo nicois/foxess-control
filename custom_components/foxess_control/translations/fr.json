@@ -311,5 +311,55 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "no_integration": {
+      "message": "Aucune intégration FoxESS Control configurée."
+    },
+    "no_api_key": {
+      "message": "Aucune clé API configurée et le mode entités n'est pas actif. Fournissez une clé API FoxESS Cloud ou configurez les entités foxess_modbus."
+    },
+    "api_error": {
+      "message": "Erreur de l'API FoxESS : {error}"
+    },
+    "api_unreachable": {
+      "message": "Impossible de joindre l'API FoxESS Cloud. Vérifiez votre connexion réseau."
+    },
+    "soc_unavailable": {
+      "message": "Le SoC de la batterie n'est pas disponible. Attendez la fin du prochain cycle d'interrogation de l'API."
+    },
+    "soc_below_min": {
+      "message": "Le SoC actuel ({current_soc}%) est égal ou inférieur au SoC minimum ({min_soc}%)."
+    },
+    "battery_capacity_not_configured": {
+      "message": "Capacité de la batterie (kWh) non configurée. Définissez-la dans les options de l'intégration avant d'utiliser la charge intelligente."
+    },
+    "soc_above_target": {
+      "message": "Le SoC actuel ({current_soc}%) est déjà égal ou supérieur à la cible ({target_soc}%)."
+    },
+    "unmanaged_work_mode": {
+      "message": "La planification de l'onduleur contient un groupe {work_mode} ({time_range}) non géré par cette intégration. Supprimez-le via l'application FoxESS, puis réessayez."
+    },
+    "schedule_conflict": {
+      "message": "La nouvelle fenêtre {new_mode} entre en conflit avec un forçage {existing_mode} existant ({time_range})."
+    }
+  },
+  "issues": {
+    "unmanaged_work_mode": {
+      "title": "Mode de fonctionnement non géré détecté",
+      "description": "La planification de l'onduleur contient un groupe **{work_mode}** ({time_range}) qui n'est pas géré par cette intégration. FoxESS Control attend Autoconsommation (Self Use) comme mode de fonctionnement par défaut et ne modifiera pas la planification tant qu'un mode non géré est présent.\n\nVeuillez supprimer le groupe de planification « {work_mode} » via l'application FoxESS, puis relancer l'opération."
+    },
+    "session_aborted": {
+      "title": "Session {session_type} intelligente interrompue",
+      "description": "La session {session_type} intelligente a été interrompue : {reason}.\n\nL'onduleur a été remis en mode Autoconsommation."
+    },
+    "charge_target_unreachable": {
+      "title": "La charge intelligente ne peut pas atteindre le SoC cible",
+      "description": "La session de charge intelligente ne peut pas atteindre la cible **{target_soc}%** avant la fin de la fenêtre.\n\n- SoC actuel : **{current_soc}%**\n- Fenêtre restante : **{remaining_hours} h**\n- Puissance de charge maximale : **{max_power_w} W**\n\nLa session continuera à puissance maximale. Si cela se produit régulièrement, envisagez d'allonger la fenêtre de charge, d'abaisser le SoC cible ou de vérifier que la puissance maximale configurée correspond à votre onduleur."
+    },
+    "sensor_write_failed": {
+      "title": "Le capteur {entity_id} n'a pas pu être mis à jour",
+      "description": "Le capteur `{entity_id}` a provoqué une erreur en écrivant son état et ne se met plus à jour :\n\n`{error}`\n\nLes autres capteurs FoxESS continuent à se mettre à jour — la défaillance est circonscrite, mais la valeur du capteur indiqué peut être obsolète. L'avertissement se dissipera automatiquement dès que le capteur écrira à nouveau avec succès.\n\nSi le problème persiste, envisagez de redémarrer Home Assistant ou de signaler l'erreur."
+    }
   }
 }
