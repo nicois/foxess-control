@@ -236,6 +236,35 @@ def is_charge_target_reachable(
     return buffered_hours <= remaining_hours
 
 
+def _buffered_charge_hours(
+    current_soc: float,
+    target_soc: int,
+    battery_capacity_kwh: float,
+    remaining_hours: float,
+    max_power_w: int,
+    net_consumption_kw: float = 0.0,
+    headroom: float = 0.10,
+    taper_profile: TaperProfile | None = None,
+    bms_temp_c: float | None = None,
+) -> float:
+    """Stub for the shared buffered-hours computation (commit 1 = TDD red).
+
+    The real refactor (commit 2) splits the body of
+    :func:`is_charge_target_reachable` so the listener (via that
+    function) and the sensor (via this helper directly) call the same
+    code path with the same inputs — the C-038 parity guarantee by
+    construction.
+
+    This stub returns ``inf`` so any reachability comparison against it
+    fails (target is "not reachable") — keeps the function importable
+    and type-correct while making every dependent test fail loudly until
+    the real implementation lands in commit 2.
+    """
+    raise NotImplementedError(
+        "_buffered_charge_hours: implement in commit 2 of the charge_slack feature"
+    )
+
+
 def _median_trusted_charge_ratio(
     taper_profile: TaperProfile, from_soc: int, to_soc: int
 ) -> float:

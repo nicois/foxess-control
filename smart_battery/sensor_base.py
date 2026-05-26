@@ -19,6 +19,7 @@ from homeassistant.components.sensor import (
     RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
+    SensorStateClass,
 )
 from homeassistant.util import dt as dt_util
 
@@ -548,6 +549,21 @@ def charge_time_slack_seconds(
         bms_temp_c=_get_bms_temp(hass, domain),
     )
     return max(0, int((deferred_start - now).total_seconds()))
+
+
+def charge_reachability_slack_minutes(
+    hass: HomeAssistant, domain: str, cs: dict[str, Any] | None
+) -> int | None:
+    """Stub for the active-charge reachability-slack helper (commit 1).
+
+    Real implementation lands in commit 2.  This stub satisfies the
+    import contract demanded by the new tests so ``mypy`` / pre-commit
+    pass on the test commit, while every test still fails (assertion
+    errors, not ImportError) until the implementation arrives.
+    """
+    raise NotImplementedError(
+        "charge_reachability_slack_minutes: implement in commit 2"
+    )
 
 
 def discharge_time_slack_seconds(
@@ -1501,6 +1517,46 @@ class ChargeRemainingSensor(SensorEntity):
         if cs is None:
             return _STATE_UNAVAILABLE
         return estimate_charge_remaining(self.hass, self._domain, cs)
+
+
+class ChargeSlackSensor(SensorEntity):
+    """Stub for the charge-slack sensor (commit 1 = TDD red).
+
+    Commit 2 implements the real sensor: minutes of margin between
+    ``buffered_hours`` (from the C-038 reachability check) and
+    ``remaining_hours``, exposed as a continuous numeric measurement
+    so other automations can throttle house consumption when margin
+    is thin.
+
+    This stub exists only to satisfy the import contract; calling
+    ``native_value`` raises NotImplementedError.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = True
+    _attr_icon = "mdi:gauge"
+    _attr_native_unit_of_measurement = "min"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        domain: str,
+        device_info: DeviceInfo,
+    ) -> None:
+        self._entry = entry
+        self._domain = domain
+        self._attr_unique_id = f"{entry.entry_id}_charge_slack"
+        self._attr_translation_key = "charge_slack"
+        self._attr_device_info = device_info
+        self.hass = hass
+
+    @property
+    def native_value(self) -> int | None:
+        raise NotImplementedError(
+            "ChargeSlackSensor.native_value: implement in commit 2"
+        )
 
 
 class DischargePowerSensor(SensorEntity):
