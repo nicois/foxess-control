@@ -439,6 +439,7 @@ When any session is active, error state attributes are also available:
 | `sensor.foxess_charge_power` | Current charge power in watts. | `6000` |
 | `sensor.foxess_charge_window` | Charge time window. | `02:00 – 06:00` |
 | `sensor.foxess_charge_remaining` | Time remaining in the charge window, or time until deferred charging begins. | `1h 30m`, `starts in 2h 15m`, `starting` |
+| `sensor.foxess_charge_slack` | **Minutes of margin** between the algorithm's projected finish time and the end of the charge window, while actively charging. Positive = comfortable margin; zero = exactly on the deadline at full power; negative = the algorithm reports the target unreachable. `unavailable` when no smart charge is active or during the deferred phase (the deferred phase has its own `charge_time_slack_s` countdown attribute on `sensor.foxess_smart_operations`). Useful for automations that throttle other loads when battery margin is thin — see [Throttle other loads when charge margin is thin](#throttle-other-loads-when-charge-margin-is-thin). | `45`, `8`, `-3` |
 
 #### Smart discharge sensors
 
@@ -758,6 +759,47 @@ automation:
           end_time: "20:00:00"
           min_soc: 30
 ```
+
+### Throttle other loads when charge margin is thin
+
+`sensor.foxess_charge_slack` reports the number of minutes of margin between the
+algorithm's projected finish time and the end of the charge window. When it
+drops low (or goes negative), the smart-charge target is at risk of not being
+hit — typically because house consumption (an EV pulling 7 kW, an oven, etc.)
+is leaving too little inverter headroom for the battery. Automations can react
+by reducing the offending load until margin recovers:
+
+```yaml
+automation:
+  - alias: "EV: throttle to 6 A while battery charge margin is thin"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.foxess_charge_slack
+        below: 10
+    action:
+      - action: number.set_value
+        target:
+          entity_id: number.ev_charge_amps
+        data:
+          value: 6
+
+  - alias: "EV: restore full charge speed when battery margin returns"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.foxess_charge_slack
+        above: 30
+    action:
+      - action: number.set_value
+        target:
+          entity_id: number.ev_charge_amps
+        data:
+          value: 32
+```
+
+The two thresholds (10 / 30) form a hysteresis band so the EV's amp setting
+doesn't flap on small fluctuations in projected finish time. Tune both numbers
+to your inverter and EV — a tighter charge window calls for a smaller band; a
+wide overnight window can use 5 / 60.
 
 ## How it works
 
