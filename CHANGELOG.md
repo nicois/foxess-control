@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.17-beta.6
+
+### Added
+- **`sensor.foxess_charge_slack` exposes minutes of margin to reach the charge target during an active smart-charge session** (C-020, C-038). Other automations can now threshold against a continuous reachability metric ("when slack < 10 minutes, cut house load") instead of only the binary `charge_target_reachable` flag. Positive = comfortable margin; zero = exactly on the deadline at full power; negative = the algorithm reports unreachable. Available only during the charging phase; `unavailable` when no smart-charge active or in the deferred phase (which has its own `charge_time_slack_s` semantics — distinct from this sensor; do not conflate). Localised in all ten translations (en + 9 non-EN). Implementation refactors `is_charge_target_reachable` to delegate to a new `_buffered_charge_hours` helper; both the listener's reachability check and the new sensor compute the same `buffered_hours` from the same parameter list, enforcing **C-038** sensor-listener parity by construction (cannot drift). Bounded to ±sane range (-1 day, +7 days) so dashboard graphs stay legible. 31-test brand-agnostic regression suite (`tests/test_charge_slack_sensor.py`) covers active-phase positive/negative slack, idle/deferred unavailable, parametrised parity (5 SoC × window scenarios where listener-says-reachable iff slack ≥ 0), high/low clamping, taper + temperature input threading, sensor-entity HA contract, and translation coverage across all 10 locales.
+
 ## 1.0.17-beta.5
 
 ### Fixed
