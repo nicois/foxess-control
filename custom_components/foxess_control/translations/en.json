@@ -123,6 +123,9 @@
       "charge_remaining": {
         "name": "Charge Remaining"
       },
+      "charge_slack": {
+        "name": "Charge Slack"
+      },
       "discharge_power": {
         "name": "Discharge Power"
       },

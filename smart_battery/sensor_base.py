@@ -551,19 +551,89 @@ def charge_time_slack_seconds(
     return max(0, int((deferred_start - now).total_seconds()))
 
 
+_CHARGE_SLACK_MAX_MINUTES = 60 * 24 * 7  # 7 days
+"""High-side cap for the slack sensor — keeps dashboard graphs sane
+when the remaining window is enormous relative to the energy still
+needed (e.g. SoC almost at target).
+"""
+
+_CHARGE_SLACK_MIN_MINUTES = -60 * 24  # -1 day
+"""Low-side floor for the slack sensor — bounds the negative axis
+when the target is wildly unreachable (tiny inverter, huge gap)."""
+
+
 def charge_reachability_slack_minutes(
     hass: HomeAssistant, domain: str, cs: dict[str, Any] | None
 ) -> int | None:
-    """Stub for the active-charge reachability-slack helper (commit 1).
+    """Return minutes of margin between *remaining_hours* and *buffered_hours*.
 
-    Real implementation lands in commit 2.  This stub satisfies the
-    import contract demanded by the new tests so ``mypy`` / pre-commit
-    pass on the test commit, while every test still fails (assertion
-    errors, not ImportError) until the implementation arrives.
+    Positive: the algorithm has spare time at the current effective
+    charge rate (consumption + headroom buffers already factored in).
+    Zero: exactly on the deadline.  Negative: the algorithm reports
+    the target unreachable — any further increase in load shrinks the
+    margin further into negative territory.
+
+    Returns ``None`` (sensor unavailable) when no smart-charge session
+    is active, when the session is still in its deferred phase
+    (deferred has its own ``charge_time_slack_seconds`` semantics —
+    not conflated here), or when the inputs needed to evaluate the
+    algorithm are missing.
+
+    C-038: this function calls
+    :func:`smart_battery.algorithms._buffered_charge_hours` with the
+    same parameter list as the listener's
+    :func:`is_charge_target_reachable` callsite, guaranteeing the
+    sensor and listener cannot disagree about reachability.
+
+    The result is clamped to
+    ``[_CHARGE_SLACK_MIN_MINUTES, _CHARGE_SLACK_MAX_MINUTES]`` to
+    keep the recorder graph readable.
     """
-    raise NotImplementedError(
-        "charge_reachability_slack_minutes: implement in commit 2"
+    if cs is None:
+        return None
+    if not is_effectively_charging(hass, domain, cs):
+        return None
+
+    soc = get_soc_value(hass, domain)
+    capacity_kwh = get_battery_capacity_kwh(hass, domain)
+    target_soc: int = cs.get("target_soc", 100)
+    max_power_w: int = cs.get("effective_max_power_w", cs.get("max_power_w", 0))
+    if soc is None or capacity_kwh <= 0 or max_power_w <= 0:
+        return None
+
+    now = dt_util.now()
+    end: datetime.datetime = cs["end"]
+    if end.tzinfo is None and now.tzinfo is not None:
+        now = now.replace(tzinfo=None)
+    remaining_hours = (end - now).total_seconds() / 3600.0
+    if remaining_hours <= 0:
+        # Window has ended — the listener will close out the session.
+        # Report unavailable rather than a misleading -∞ value.
+        return None
+
+    from .algorithms import _buffered_charge_hours
+
+    headroom = get_smart_headroom_fraction(hass, domain)
+    buffered_hours = _buffered_charge_hours(
+        current_soc=soc,
+        target_soc=target_soc,
+        battery_capacity_kwh=capacity_kwh,
+        remaining_hours=remaining_hours,
+        max_power_w=max_power_w,
+        net_consumption_kw=_get_net_consumption(hass, domain),
+        headroom=headroom,
+        taper_profile=_get_taper_profile(hass, domain),
+        bms_temp_c=_get_bms_temp(hass, domain),
     )
+    slack_minutes = (remaining_hours - buffered_hours) * 60.0
+    # Clamp to bounded display range.  ``inf`` (target met → buffered=0
+    # → slack ≈ remaining*60) won't trigger this; ``-inf`` cases
+    # (effective_charge_kw collapses) similarly clamp at the floor.
+    if slack_minutes > _CHARGE_SLACK_MAX_MINUTES:
+        return _CHARGE_SLACK_MAX_MINUTES
+    if slack_minutes < _CHARGE_SLACK_MIN_MINUTES:
+        return _CHARGE_SLACK_MIN_MINUTES
+    return int(slack_minutes)
 
 
 def discharge_time_slack_seconds(
@@ -1520,16 +1590,26 @@ class ChargeRemainingSensor(SensorEntity):
 
 
 class ChargeSlackSensor(SensorEntity):
-    """Stub for the charge-slack sensor (commit 1 = TDD red).
+    """Minutes of reachability margin during an active smart charge.
 
-    Commit 2 implements the real sensor: minutes of margin between
-    ``buffered_hours`` (from the C-038 reachability check) and
-    ``remaining_hours``, exposed as a continuous numeric measurement
-    so other automations can throttle house consumption when margin
-    is thin.
+    Continuous numeric sensor (unit: minutes) suitable for HA history
+    graphs and automation thresholds.  Other automations consume this
+    to throttle house consumption when the margin is thin (e.g. delay
+    a high-load appliance until the slack recovers).
 
-    This stub exists only to satisfy the import contract; calling
-    ``native_value`` raises NotImplementedError.
+    Semantics:
+      - Positive: comfortable margin (target reachable with time to spare)
+      - Zero: exactly on the deadline
+      - Negative: ``is_charge_target_reachable`` would return False
+        (the algorithm reports the target unreachable)
+      - Unavailable: no charge session active, or session is still in
+        its deferred phase (deferred has its own slack sensor —
+        ``charge_time_slack_s`` attribute on the operations sensor)
+
+    C-038 parity: the value is computed by
+    :func:`charge_reachability_slack_minutes`, which calls the same
+    :func:`smart_battery.algorithms._buffered_charge_hours` helper as
+    the listener's reachability check, with the same parameter list.
     """
 
     _attr_has_entity_name = True
@@ -1554,9 +1634,8 @@ class ChargeSlackSensor(SensorEntity):
 
     @property
     def native_value(self) -> int | None:
-        raise NotImplementedError(
-            "ChargeSlackSensor.native_value: implement in commit 2"
-        )
+        cs = get_charge_state(self.hass, self._domain)
+        return charge_reachability_slack_minutes(self.hass, self._domain, cs)
 
 
 class DischargePowerSensor(SensorEntity):

@@ -117,6 +117,9 @@
       "charge_remaining": {
         "name": "Ładowanie pozostałe"
       },
+      "charge_slack": {
+        "name": "Margines ładowania"
+      },
       "discharge_power": {
         "name": "Moc rozładowania (Smart)"
       },

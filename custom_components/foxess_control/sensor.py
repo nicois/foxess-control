@@ -31,6 +31,9 @@ from .smart_battery.sensor_base import (
     ChargeRemainingSensor as _ChargeRemainingSensor,
 )
 from .smart_battery.sensor_base import (
+    ChargeSlackSensor as _ChargeSlackSensor,
+)
+from .smart_battery.sensor_base import (
     ChargeWindowSensor as _ChargeWindowSensor,
 )
 from .smart_battery.sensor_base import (
@@ -138,6 +141,13 @@ class ChargeRemainingSensor(_ChargeRemainingSensor):
         super().__init__(hass, entry, DOMAIN, _device_info(entry))
 
 
+class ChargeSlackSensor(_ChargeSlackSensor):
+    """FoxESS charge reachability-slack sensor (minutes of margin)."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        super().__init__(hass, entry, DOMAIN, _device_info(entry))
+
+
 class DischargePowerSensor(_DischargePowerSensor):
     """FoxESS discharge power sensor."""
 
@@ -205,6 +215,7 @@ async def async_setup_entry(
         ChargePowerSensor(hass, entry),
         ChargeWindowSensor(hass, entry),
         ChargeRemainingSensor(hass, entry),
+        ChargeSlackSensor(hass, entry),
         DischargePowerSensor(hass, entry),
         DischargeWindowSensor(hass, entry),
         DischargeRemainingSensor(hass, entry),

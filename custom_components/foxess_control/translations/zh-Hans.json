@@ -117,6 +117,9 @@
       "charge_remaining": {
         "name": "充电剩余时间"
       },
+      "charge_slack": {
+        "name": "充电余量"
+      },
       "discharge_power": {
         "name": "智能放电功率"
       },

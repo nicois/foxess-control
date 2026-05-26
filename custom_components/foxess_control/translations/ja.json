@@ -117,6 +117,9 @@
       "charge_remaining": {
         "name": "充電残り時間"
       },
+      "charge_slack": {
+        "name": "充電マージン"
+      },
       "discharge_power": {
         "name": "スマート放電電力"
       },

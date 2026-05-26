@@ -117,6 +117,9 @@
       "charge_remaining": {
         "name": "Ladezeit verbleibend"
       },
+      "charge_slack": {
+        "name": "Ladereserve"
+      },
       "discharge_power": {
         "name": "Entladeleistung (Smart)"
       },

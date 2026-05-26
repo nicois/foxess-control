@@ -158,6 +158,74 @@ def calculate_charge_power(
     return max(MIN_CHARGE_POWER_W, min(int(power_w), max_power_w))
 
 
+def _buffered_charge_hours(
+    current_soc: float,
+    target_soc: int,
+    battery_capacity_kwh: float,
+    remaining_hours: float,
+    max_power_w: int,
+    net_consumption_kw: float = 0.0,
+    headroom: float = 0.10,
+    taper_profile: TaperProfile | None = None,
+    bms_temp_c: float | None = None,
+) -> float:
+    """Return the headroom-adjusted hours needed to reach *target_soc*.
+
+    Shared computation backing both the listener's reachability check
+    (:func:`is_charge_target_reachable`) and the sensor's slack helper
+    (``charge_reachability_slack_minutes``).  The C-038 parity
+    guarantee is structural: there is exactly one place this number is
+    computed; both consumers use that single computation.
+
+    Returns ``0.0`` if the target is already met (no charging needed),
+    and ``math.inf`` if no charge window remains (anything > 0 of
+    energy still required is unreachable in zero time).
+
+    The taper-aware path mirrors :func:`is_charge_target_reachable`
+    pre-refactor: the minimum of the integrated taper hours and the
+    median-ratio linear estimate is used (see that function's
+    docstring for the rationale on why median-ratio is the floor).
+    """
+    energy_needed_kwh = (target_soc - current_soc) / 100.0 * battery_capacity_kwh
+    if energy_needed_kwh <= 0:
+        return 0.0
+    if remaining_hours <= 0:
+        return float("inf")
+
+    max_power_kw = max_power_w / 1000.0
+    consumption_headroom_kw = max(0.0, net_consumption_kw)
+    min_headroom_kw = max_power_kw * headroom
+    headroom_kw = max(consumption_headroom_kw, min_headroom_kw)
+    effective_charge_kw = max_power_kw - headroom_kw
+    if effective_charge_kw <= 0:
+        effective_charge_kw = max_power_kw * headroom
+
+    if taper_profile is not None:
+        integrated_hours = taper_profile.estimate_charge_hours(
+            current_soc,
+            target_soc,
+            battery_capacity_kwh,
+            int(effective_charge_kw * 1000),
+            temp_c=bms_temp_c,
+        )
+        # Median-ratio linear estimate: represents a typical (non-outlier)
+        # scenario across the traversed range.  Combines with the
+        # multiplicative temperature factor in the same way estimate_charge_hours
+        # does internally, so warm vs cold is still distinguished.
+        median_ratio = _median_trusted_charge_ratio(
+            taper_profile, int(current_soc), int(target_soc)
+        )
+        temp_factor = taper_profile.charge_temp_factor(bms_temp_c)
+        effective_ratio = max(0.05, min(1.0, median_ratio * temp_factor))
+        median_hours = energy_needed_kwh / (effective_charge_kw * effective_ratio)
+        charge_hours = min(integrated_hours, median_hours)
+    else:
+        charge_hours = energy_needed_kwh / effective_charge_kw
+
+    denom = 1 - headroom
+    return charge_hours / denom if denom > 0 else charge_hours
+
+
 def is_charge_target_reachable(
     current_soc: float,
     target_soc: int,
@@ -194,75 +262,26 @@ def is_charge_target_reachable(
     HA Repair issues — without masking genuinely unreachable targets,
     since a short window or uniformly low ratios produce a large
     median-ratio estimate too.
+
+    The numeric calculation is delegated to
+    :func:`_buffered_charge_hours` — the sensor (via
+    :func:`charge_reachability_slack_minutes`) calls that helper
+    directly with the same parameter list, so listener and sensor
+    cannot diverge on whether the algorithm believes the target is
+    reachable (C-038).
     """
-    energy_needed_kwh = (target_soc - current_soc) / 100.0 * battery_capacity_kwh
-    if energy_needed_kwh <= 0:
-        return True
-    if remaining_hours <= 0:
-        return False
-
-    max_power_kw = max_power_w / 1000.0
-    consumption_headroom_kw = max(0.0, net_consumption_kw)
-    min_headroom_kw = max_power_kw * headroom
-    headroom_kw = max(consumption_headroom_kw, min_headroom_kw)
-    effective_charge_kw = max_power_kw - headroom_kw
-    if effective_charge_kw <= 0:
-        effective_charge_kw = max_power_kw * headroom
-
-    if taper_profile is not None:
-        integrated_hours = taper_profile.estimate_charge_hours(
-            current_soc,
-            target_soc,
-            battery_capacity_kwh,
-            int(effective_charge_kw * 1000),
-            temp_c=bms_temp_c,
-        )
-        # Median-ratio linear estimate: represents a typical (non-outlier)
-        # scenario across the traversed range.  Combines with the
-        # multiplicative temperature factor in the same way estimate_charge_hours
-        # does internally, so warm vs cold is still distinguished.
-        median_ratio = _median_trusted_charge_ratio(
-            taper_profile, int(current_soc), int(target_soc)
-        )
-        temp_factor = taper_profile.charge_temp_factor(bms_temp_c)
-        effective_ratio = max(0.05, min(1.0, median_ratio * temp_factor))
-        median_hours = energy_needed_kwh / (effective_charge_kw * effective_ratio)
-        charge_hours = min(integrated_hours, median_hours)
-    else:
-        charge_hours = energy_needed_kwh / effective_charge_kw
-
-    denom = 1 - headroom
-    buffered_hours = charge_hours / denom if denom > 0 else charge_hours
-    return buffered_hours <= remaining_hours
-
-
-def _buffered_charge_hours(
-    current_soc: float,
-    target_soc: int,
-    battery_capacity_kwh: float,
-    remaining_hours: float,
-    max_power_w: int,
-    net_consumption_kw: float = 0.0,
-    headroom: float = 0.10,
-    taper_profile: TaperProfile | None = None,
-    bms_temp_c: float | None = None,
-) -> float:
-    """Stub for the shared buffered-hours computation (commit 1 = TDD red).
-
-    The real refactor (commit 2) splits the body of
-    :func:`is_charge_target_reachable` so the listener (via that
-    function) and the sensor (via this helper directly) call the same
-    code path with the same inputs — the C-038 parity guarantee by
-    construction.
-
-    This stub returns ``inf`` so any reachability comparison against it
-    fails (target is "not reachable") — keeps the function importable
-    and type-correct while making every dependent test fail loudly until
-    the real implementation lands in commit 2.
-    """
-    raise NotImplementedError(
-        "_buffered_charge_hours: implement in commit 2 of the charge_slack feature"
+    buffered_hours = _buffered_charge_hours(
+        current_soc=current_soc,
+        target_soc=target_soc,
+        battery_capacity_kwh=battery_capacity_kwh,
+        remaining_hours=remaining_hours,
+        max_power_w=max_power_w,
+        net_consumption_kw=net_consumption_kw,
+        headroom=headroom,
+        taper_profile=taper_profile,
+        bms_temp_c=bms_temp_c,
     )
+    return buffered_hours <= remaining_hours
 
 
 def _median_trusted_charge_ratio(

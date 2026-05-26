@@ -117,6 +117,9 @@
       "charge_remaining": {
         "name": "Charge restante"
       },
+      "charge_slack": {
+        "name": "Marge de charge"
+      },
       "discharge_power": {
         "name": "Puissance de décharge (Smart)"
       },

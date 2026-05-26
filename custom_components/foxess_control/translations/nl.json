@@ -117,6 +117,9 @@
       "charge_remaining": {
         "name": "Laden resterend"
       },
+      "charge_slack": {
+        "name": "Laadmarge"
+      },
       "discharge_power": {
         "name": "Slim ontlaadvermogen"
       },

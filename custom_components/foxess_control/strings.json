@@ -51,6 +51,7 @@
       "charge_power": { "name": "Charge Power" },
       "charge_window": { "name": "Charge Window" },
       "charge_remaining": { "name": "Charge Remaining" },
+      "charge_slack": { "name": "Charge Slack" },
       "discharge_power": { "name": "Discharge Power" },
       "discharge_window": { "name": "Discharge Window" },
       "discharge_remaining": { "name": "Discharge Remaining" },
