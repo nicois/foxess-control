@@ -7,6 +7,7 @@ import datetime
 import logging
 import os
 import time as _time
+import traceback
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -1012,6 +1013,16 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
 
 async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
     """Start the WebSocket if conditions are met and it's not running."""
+    # Diagnostic (beta.8): capture every call site of WS-startup so we
+    # can identify what is keeping the connection alive during long
+    # idle periods.  Removed in a follow-up beta once the leak is
+    # fixed.  Tag "WS-DIAG:" so the user can grep the debug log.
+    _stack = "".join(traceback.format_stack(limit=12)[:-1])
+    _LOGGER.warning(
+        "WS-DIAG: _maybe_start_realtime_ws called; would_start=%s; stack:\n%s",
+        _should_start_realtime_ws(hass),
+        _stack,
+    )
     if not _should_start_realtime_ws(hass):
         return
     dd = _dd(hass)
@@ -1092,6 +1103,15 @@ async def _stop_realtime_ws(hass: HomeAssistant) -> None:
     the fresh post-session values into the coordinator so the overview card
     immediately reflects reality.
     """
+    # Diagnostic (beta.8): capture every call site of WS-stop so we
+    # can correlate against _maybe_start_realtime_ws calls during the
+    # leak investigation.  Removed in a follow-up beta.
+    _stack = "".join(traceback.format_stack(limit=12)[:-1])
+    _LOGGER.warning(
+        "WS-DIAG: _stop_realtime_ws called; ws_present=%s; stack:\n%s",
+        DOMAIN in hass.data and _dd(hass).realtime_ws is not None,
+        _stack,
+    )
     if DOMAIN not in hass.data:
         return
     dd = _dd(hass)

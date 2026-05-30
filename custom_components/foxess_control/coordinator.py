@@ -291,6 +291,21 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_update_data(self) -> dict[str, Any]:
         from .foxess.client import FoxESSApiError
 
+        # Diagnostic (beta.8): on every REST poll, snapshot the WS /
+        # session correlation so we can see whether WS was alive while
+        # the system was idle.  Removed in a follow-up beta.
+        _dd_obj = self.hass.data.get(DOMAIN)
+        if _dd_obj is not None:
+            _ws_obj = _dd_obj.realtime_ws
+            _LOGGER.warning(
+                "WS-DIAG: REST poll: ws_obj_present=%s ws_connected=%s "
+                "smart_charge=%s smart_discharge=%s",
+                _ws_obj is not None,
+                _ws_obj is not None and _ws_obj.is_connected,
+                _dd_obj.smart_charge_state is not None,
+                _dd_obj.smart_discharge_state is not None,
+            )
+
         try:
             data: dict[str, Any] = await self.hass.async_add_executor_job(
                 self._fetch_all
