@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.17-beta.7
+
+### Fixed
+- **`sensor.foxess_data_freshness` flapped between `ws` and `api` every ~5 minutes during normal operation** (C-020). Live observation 2026-05-30: the badge oscillated `ws → api → ws` on a ~5m30s cadence (matching `DEFAULT_POLLING_INTERVAL = 300s`) while WebSocket frames were arriving normally. Root cause: `coordinator.py::_async_update_data` unconditionally set `_data_source = "api"` after every REST poll, even when the WebSocket was alive and pumping fresh frames. The next ~5 s WS frame would flip the badge back to `"ws"`, then the next REST poll repeated the cycle. The badge therefore lied — it claimed "api-only" data for ~5–10 seconds out of every 5 minutes despite WebSocket continuity. Fix: the coordinator now records the monotonic timestamp of every WS injection (`_ws_last_inject_monotonic`) and consults it during REST poll completion. If the WebSocket object reports `is_connected` and the most recent inject was within `_WS_FRESH_INJECT_WINDOW_S = 30 s` (matching the upstream `realtime_ws.STALE_TIMEOUT`), the REST poll preserves `_data_source = "ws"` instead of clobbering it. Stale or absent WS still degrades cleanly to `"api"`. Four-test regression suite in `tests/test_coordinator.py::TestDataSourceTracking` covers the main flap, the boundary (WS connected but >30 s since last inject → `"api"`), the inverse (no WS object → `"api"`), and the inject-time-tracking primitive. **Note**: the underlying WebSocket-stays-alive-during-idle bug is still under investigation — the badge fix makes the sensor honest about the connection's actual state.
+
 ## 1.0.17-beta.6
 
 ### Added
