@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.17-beta.8
+
+### Added (diagnostic, will be removed in a follow-up beta)
+- **Three WARNING-level diagnostic log lines** tagged `WS-DIAG:` to identify the call path keeping the WebSocket connected during long idle periods (observed 16h+ of continuous WS frames during pure idle on a live HA, 2026-05-30; static analysis ruled out every documented path including session-cancel ordering, async_disconnect's _stop_event, expired-session restoration filter, multi-config-entry race, replay-timer service-call, on_session_started task race, force-mode service restart, options-reload reentry, and zombie wrapper timers — the leak persists). The diagnostic captures every call site that even attempts to bring WS up: (1) entry of `_maybe_start_realtime_ws` logs the would-start guard verdict plus a 12-frame stack trace; (2) entry of `_stop_realtime_ws` logs whether a WS object was present plus a stack trace, so we can correlate stop-coverage against starts; (3) `coordinator._async_update_data` logs the `(ws_obj_present, ws_connected, smart_charge_state_present, smart_discharge_state_present)` tuple on every REST poll — reveals whether WS is alive while session state is None. All entries are tagged `WS-DIAG:` so users can grep the rolling debug-log sensor (`sensor.foxess_debug_protokoll` / `sensor.foxess_debug_log`). To use: install this beta on the leaking instance, let it run during a normal idle period, then send the `WS-DIAG:` entries from the debug-log sensor — the stack trace on the first `_maybe_start_realtime_ws` entry during idle names the bug. Removed in a follow-up beta after the leak is fixed.
+
 ## 1.0.17-beta.7
 
 ### Fixed
