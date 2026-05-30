@@ -367,7 +367,7 @@ class TestDataSourceTracking:
         dd.realtime_ws.is_connected = True
         coord.hass.data = {DOMAIN: dd}  # type: ignore[assignment]
         # WS just delivered a frame — _ws_last_inject_monotonic is freshly set
-        coord._ws_last_inject_monotonic = time.monotonic()  # type: ignore[attr-defined]
+        coord._ws_last_inject_monotonic = time.monotonic()
         # Existing data has _data_source = "ws" from the recent injection
         coord.data = {"SoC": 50.0, "_data_source": "ws"}
 
@@ -401,7 +401,7 @@ class TestDataSourceTracking:
         dd.realtime_ws.is_connected = True
         coord.hass.data = {DOMAIN: dd}  # type: ignore[assignment]
         # Last WS inject was 10 minutes ago — definitely stale
-        coord._ws_last_inject_monotonic = time.monotonic() - 600.0  # type: ignore[attr-defined]
+        coord._ws_last_inject_monotonic = time.monotonic() - 600.0
         coord.data = {"SoC": 50.0, "_data_source": "ws"}
 
         result = await coord._async_update_data()
@@ -419,7 +419,7 @@ class TestDataSourceTracking:
         before = time.monotonic()
         coord.inject_realtime_data({"SoC": 55.0})
         after = time.monotonic()
-        last_inject = coord._ws_last_inject_monotonic  # type: ignore[attr-defined]
+        last_inject = coord._ws_last_inject_monotonic
         assert last_inject is not None
         assert before <= last_inject <= after
 

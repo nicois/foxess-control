@@ -43,6 +43,14 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # as a safety net and to throttle portal-side requests.
     _BMS_REDISCOVERY_BACKOFF = 300.0
 
+    # Window for considering a WS injection "fresh enough" to suppress the
+    # data_freshness flap.  WS pushes every ~5s; the matching realtime_ws
+    # STALE_TIMEOUT is 30s, so anything injected in the last 30s means WS is
+    # actively delivering data and the REST poll must not downgrade
+    # _data_source to "api".  Beyond this the REST poll is the more
+    # authoritative source.
+    _WS_FRESH_INJECT_WINDOW_S = 30.0
+
     def __init__(
         self,
         hass: HomeAssistant,
@@ -59,6 +67,13 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # WebSocket feed-in energy integration state
         self._ws_last_time: float | None = None
         self._ws_feedin_power_kw: float = 0.0
+        # Monotonic timestamp of the most recent WS inject — distinct from
+        # _ws_last_time, which is also written by REST polls and so cannot
+        # answer "was the most recent update from WS or REST?".  Used by
+        # _async_update_data to suppress the data_freshness flap (C-020):
+        # when WS is healthy and pushed recently, the REST poll must not
+        # downgrade _data_source to "api".
+        self._ws_last_inject_monotonic: float | None = None
         # BMS temperature polling state (separate from REST poll timer)
         self._bms_last_fetch: float = 0.0
         self._bms_fetch_in_flight: bool = False
@@ -78,6 +93,31 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return _cfg(self.hass).battery_capacity_kwh
         except Exception:
             return 0.0
+
+    def _is_ws_alive(self) -> bool:
+        """Return True if a WebSocket object is currently connected.
+
+        Used by ``_async_update_data`` to decide whether the REST poll
+        should preserve the ``_data_source = "ws"`` badge or downgrade it.
+        """
+        domain_data = self.hass.data.get(DOMAIN)
+        if domain_data is None:
+            return False
+        ws = getattr(domain_data, "realtime_ws", None)
+        if ws is None:
+            return False
+        return bool(getattr(ws, "is_connected", False))
+
+    def _ws_recently_injected(self, now_monotonic: float) -> bool:
+        """Return True if a WS inject occurred within ``_WS_FRESH_INJECT_WINDOW_S``.
+
+        Distinct from ``_ws_last_time``, which is also written by REST polls
+        and so cannot answer "was the most recent update from WS?".
+        """
+        last = self._ws_last_inject_monotonic
+        if last is None:
+            return False
+        return (now_monotonic - last) < self._WS_FRESH_INJECT_WINDOW_S
 
     @property
     def _bms_fetch_interval(self) -> float:
@@ -328,7 +368,17 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self._soc_last_bat_kw = net_bat_kw
         self._ws_last_time = now
-        data["_data_source"] = "api"
+        # Set _data_source = "api" UNLESS WS is currently alive and just
+        # delivered a frame, in which case keep the previous "ws" badge
+        # to suppress the data_freshness flap (C-020 — operational
+        # transparency).  Live failure 2026-05-29: every 5-min REST poll
+        # downgraded the badge to "api" even though WS was healthy and
+        # pushing every ~5s; the next WS frame ~8s later flipped it back,
+        # producing a 16h-long ws → api → ws oscillation.
+        if self._ws_recently_injected(now) and self._is_ws_alive():
+            data["_data_source"] = "ws"
+        else:
+            data["_data_source"] = "api"
         data["_data_last_update"] = dt_util.utcnow().isoformat()
         self._schedule_soc_extrapolation()
         return data
@@ -493,6 +543,10 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # next message.  Unconditional — SoC interpolation needs
         # timing even when feedin data is absent.
         self._ws_last_time = now
+        # Record a "last WS inject" timestamp distinct from _ws_last_time
+        # (which is also written by REST polls).  _async_update_data uses
+        # this to suppress the data_freshness flap when WS is healthy.
+        self._ws_last_inject_monotonic = now
 
         # Expose interpolated SoC for display (sensors, progress bars)
         if self._soc_interpolated is not None:
