@@ -310,15 +310,118 @@ class TestDataSourceTracking:
         assert coord.data["_data_source"] == "ws"
 
     @pytest.mark.asyncio
-    async def test_rest_poll_resets_source_after_ws(self) -> None:
+    async def test_rest_poll_keeps_api_when_ws_not_alive(self) -> None:
+        """REST poll sets 'api' when there is no live WS object.
+
+        Stale ``_data_source = "ws"`` left over from a past WS session
+        should be replaced with 'api' once the WS layer is gone — the
+        user is back to REST-only polling.
+        """
+        from custom_components.foxess_control.const import DOMAIN
+
         inv = MagicMock(spec=Inverter)
         inv.get_real_time.return_value = {"SoC": 50.0}
         inv.get_current_mode.return_value = WorkMode.SELF_USE
         coord = _make_coordinator(inverter=inv)
-        # Simulate WS having set the source
+        # Simulate WS having set the source previously, but WS is now gone
         coord.data = {"SoC": 50.0, "_data_source": "ws"}
+        # Domain data exists but realtime_ws is None
+        dd = FoxESSControlData()
+        coord.hass.data = {DOMAIN: dd}  # type: ignore[assignment]
         result = await coord._async_update_data()
         assert result["_data_source"] == "api"
+
+    @pytest.mark.asyncio
+    async def test_rest_poll_does_not_flap_data_source_when_ws_alive(self) -> None:
+        """REST poll must NOT downgrade 'ws' to 'api' when WS is alive.
+
+        Live failure (2026-05-29): a user with ws_mode != always observed
+        `sensor.foxess_data_freshness` flapping ws → api → ws every ~5
+        minutes for 16+ hours of pure idle.  The cadence matched the REST
+        polling interval (DEFAULT_POLLING_INTERVAL=300s), and the WS
+        layer was healthy throughout (entladeleistung recorded 2366 history
+        points in 4h, i.e. one every 10s — definite WS-fed).
+
+        The flap was caused by ``_async_update_data`` unconditionally
+        setting ``_data_source = "api"`` even when the WS object was
+        connected and recently delivered data.  The next WS frame ~8s
+        later would flip it back to "ws".  This is operationally opaque
+        (C-020): the user cannot tell whether WS is really degraded or
+        just being clobbered by REST.
+
+        The contract: as long as WS is currently providing data
+        (``realtime_ws.is_connected`` and a recent inject), the REST poll
+        completing must NOT change ``_data_source``.
+        """
+        from custom_components.foxess_control.const import DOMAIN
+
+        inv = MagicMock(spec=Inverter)
+        inv.get_real_time.return_value = {"SoC": 50.0}
+        inv.get_current_mode.return_value = WorkMode.SELF_USE
+        coord = _make_coordinator(inverter=inv)
+
+        # Set up a "live" WS state via the coordinator's recent-inject
+        # tracker AND the dd.realtime_ws sentinel.
+        dd = FoxESSControlData()
+        dd.realtime_ws = MagicMock()
+        dd.realtime_ws.is_connected = True
+        coord.hass.data = {DOMAIN: dd}  # type: ignore[assignment]
+        # WS just delivered a frame — _ws_last_inject_monotonic is freshly set
+        coord._ws_last_inject_monotonic = time.monotonic()  # type: ignore[attr-defined]
+        # Existing data has _data_source = "ws" from the recent injection
+        coord.data = {"SoC": 50.0, "_data_source": "ws"}
+
+        result = await coord._async_update_data()
+        # WS is alive and just delivered data — REST poll must NOT flip to "api"
+        assert result["_data_source"] == "ws", (
+            "REST poll downgraded _data_source from 'ws' to 'api' even though "
+            "WS is alive and recently delivered data. This causes the "
+            "data_freshness sensor to flap every 5 minutes (live failure)."
+        )
+
+    @pytest.mark.asyncio
+    async def test_rest_poll_sets_api_when_ws_connected_but_stale(self) -> None:
+        """REST poll DOES downgrade to 'api' when WS hasn't pushed recently.
+
+        If the WS object reports is_connected=True but no fresh frame has
+        arrived for longer than the staleness window, the REST poll is
+        the more authoritative source and should flip _data_source to
+        'api'.  This is the inverse of the no-flap test above and ensures
+        we don't pin the badge to "ws" forever after a silent WS hang.
+        """
+        from custom_components.foxess_control.const import DOMAIN
+
+        inv = MagicMock(spec=Inverter)
+        inv.get_real_time.return_value = {"SoC": 50.0}
+        inv.get_current_mode.return_value = WorkMode.SELF_USE
+        coord = _make_coordinator(inverter=inv)
+
+        dd = FoxESSControlData()
+        dd.realtime_ws = MagicMock()
+        dd.realtime_ws.is_connected = True
+        coord.hass.data = {DOMAIN: dd}  # type: ignore[assignment]
+        # Last WS inject was 10 minutes ago — definitely stale
+        coord._ws_last_inject_monotonic = time.monotonic() - 600.0  # type: ignore[attr-defined]
+        coord.data = {"SoC": 50.0, "_data_source": "ws"}
+
+        result = await coord._async_update_data()
+        assert result["_data_source"] == "api"
+
+    def test_ws_injection_records_inject_time(self) -> None:
+        """inject_realtime_data must record the monotonic time of the inject.
+
+        The REST-poll flap-suppression check needs a "last WS inject" timestamp
+        that is NOT also written by the REST poll itself (the existing
+        ``_ws_last_time`` is updated by both paths and so cannot answer
+        "was the most recent update from WS or REST?").
+        """
+        coord = self._make_coord_with_data({"SoC": 50.0, "_data_source": "api"})
+        before = time.monotonic()
+        coord.inject_realtime_data({"SoC": 55.0})
+        after = time.monotonic()
+        last_inject = coord._ws_last_inject_monotonic  # type: ignore[attr-defined]
+        assert last_inject is not None
+        assert before <= last_inject <= after
 
 
 class TestSocInterpolationDuringDischarge:
