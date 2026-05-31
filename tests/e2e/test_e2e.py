@@ -779,6 +779,142 @@ class TestDataSource:
             timeout_s=60,
         )
 
+    def test_ws_disconnects_after_natural_session_end_and_stays_disconnected(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """After natural session-end the WS must disconnect and stay disconnected.
+
+        Reproduces the 2026-05-31 leak: when a smart-discharge session
+        ends via its end-time timer (``_on_timer_expire``), the
+        WebSocket goes through ``_stop_realtime_ws`` and its 30s
+        linger phase, then ``async_disconnect`` is awaited.  In
+        production this leaves the WS in a state where the listen
+        loop's reconnect path (``_try_reconnect``) re-establishes
+        the connection ~13s later and keeps pumping data
+        indefinitely — even though no smart session is running.
+
+        Contract under test (the test asserts only on observable
+        behaviour, not internals): after the session goes ``idle``
+        via natural timer expiry, ``sensor.foxess_battery_soc``'s
+        ``data_source`` attribute must remain ``"api"`` for at
+        least 60 seconds.  The first ``"ws"`` reading fails the
+        test — there is no path on which the WS should re-emerge
+        without a new session.
+
+        Contrast with ``test_ws_linger_captures_post_discharge_data``
+        which exercises ``clear_overrides`` (explicit cancel) — that
+        path does not trigger the leak because the override-removal
+        sequence completes synchronously before the linger.
+        """
+        if connection_mode != "cloud":
+            pytest.skip("WS lifecycle is cloud-specific")
+        assert foxess_sim is not None
+        ha_e2e.set_options(ws_mode="smart_sessions")
+        foxess_sim.set(soc=80, solar_kw=0, load_kw=0.5)
+
+        # Use a deliberately short window so the natural timer fires
+        # within the test's lifetime.  ~3 minutes from now: long
+        # enough to reach ``discharging`` + WS-up, short enough that
+        # the timer fires while we're watching.
+        now = datetime.datetime.now(tz=datetime.UTC)
+        # Backshift start by 1 minute so the schedule is "live" the
+        # moment we write it; end ~3 minutes from now.  Floor seconds
+        # so the time strings are minute-precise (HH:MM:00 form).
+        start_dt = (now - datetime.timedelta(minutes=1)).replace(
+            second=0, microsecond=0
+        )
+        end_dt = (now + datetime.timedelta(minutes=3)).replace(second=0, microsecond=0)
+        # Avoid midnight crossing (C-009): if start is on day N and
+        # end would land on day N+1 we cannot represent it as a
+        # single-day window.  In that case skip the test rather than
+        # introduce timing flakiness — the next CI run should miss
+        # the boundary.
+        if end_dt.date() != start_dt.date():
+            pytest.skip("midnight boundary — would require cross-day schedule (C-009)")
+        start = start_dt.strftime("%H:%M:%S")
+        end = end_dt.strftime("%H:%M:%S")
+
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        ha_e2e.wait_for_attribute(
+            "sensor.foxess_battery_soc",
+            "data_source",
+            "ws",
+            timeout_s=90,
+        )
+
+        # Wait for the natural timer to fire — do NOT call
+        # clear_overrides.  ``_on_timer_expire`` runs at ``end_dt``
+        # and transitions the session to idle via
+        # ``cancel_smart_discharge`` + the deferred ``_stop_realtime_ws``
+        # coroutine.  Allow a generous timeout (window plus slack)
+        # because the underlying ``async_track_point_in_time`` may
+        # fire a few seconds late under container load.
+        timer_remaining_s = (
+            end_dt - datetime.datetime.now(tz=datetime.UTC)
+        ).total_seconds()
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "idle",
+            timeout_s=max(120.0, timer_remaining_s + 60.0),
+        )
+
+        # Now poll continuously for 60s asserting data_source stays
+        # "api".  Allow a brief grace period (linger is up to 30s,
+        # plus the post-linger ``async_disconnect`` settle) before
+        # the first assertion to give ``_stop_realtime_ws`` time to
+        # complete normally — the bug is about RECONNECT, not about
+        # the linger itself, so we measure 60s AFTER the linger
+        # would have completed under any reasonable timing.
+        deadline = time.monotonic() + 90.0  # 30s linger window + 60s observation
+        first_observed_at: float | None = None
+        observation_start = time.monotonic()
+        observed_values: list[tuple[float, str | None]] = []
+        while time.monotonic() < deadline:
+            attrs = ha_e2e.get_attributes("sensor.foxess_battery_soc")
+            ds = attrs.get("data_source")
+            elapsed = time.monotonic() - observation_start
+            observed_values.append((elapsed, ds))
+            # During the first 30s, allow data_source to be either
+            # "ws" (linger still running, captured a post-session
+            # frame) or "api" (linger completed / session reverted).
+            # After 30s, the WS must be fully torn down — any "ws"
+            # reading is the bug.
+            if elapsed >= 30.0:
+                if first_observed_at is None:
+                    first_observed_at = elapsed
+                if ds == "ws":
+                    sample_summary = ", ".join(
+                        f"t={t:.1f}s:{v!r}" for t, v in observed_values[-10:]
+                    )
+                    raise AssertionError(
+                        "data_source returned to 'ws' "
+                        f"{elapsed:.1f}s after session-end "
+                        f"(first observation at {first_observed_at:.1f}s; "
+                        f"recent samples: {sample_summary}). "
+                        "Expected 'api' continuously — natural session-end "
+                        "must leave the WebSocket disconnected."
+                    )
+            time.sleep(5.0)
+
+        # Sanity: confirm we observed at least one post-30s sample
+        assert first_observed_at is not None, (
+            f"observation loop completed without any post-30s samples "
+            f"(captured {len(observed_values)} samples)"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Entity-mode-only tests

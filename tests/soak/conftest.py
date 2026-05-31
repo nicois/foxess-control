@@ -81,6 +81,11 @@ class SoakSample:
     bat_discharge_kw: float
     grid_consumption_kwh: float = 0.0
     sim_time: str = ""
+    # data_source attribute on sensor.foxess_battery_soc — "ws" while
+    # the WebSocket is delivering live frames, "api" when REST polling
+    # is the source.  Tracked so post-session invariants can verify
+    # that the WS does not reconnect after a session ends naturally.
+    data_source: str = ""
 
 
 @dataclass
@@ -100,6 +105,12 @@ class SoakRecorder:
     samples: list[SoakSample] = field(default_factory=list)
     violations: list[InvariantViolation] = field(default_factory=list)
     _start: float = field(default_factory=time.monotonic)
+    # Marker: ``elapsed_s`` of the first sample where the session
+    # became ``idle`` after running.  Used by post-session
+    # invariants (e.g. WS-stays-disconnected) to scope assertions
+    # to the post-end window.  ``None`` if the session never
+    # transitioned to idle within the recorded run.
+    session_end_elapsed_s: float | None = None
 
     def elapsed(self) -> float:
         return time.monotonic() - self._start
@@ -137,6 +148,7 @@ class SoakRecorder:
                     "bat_discharge_kw",
                     "grid_consumption_kwh",
                     "sim_time",
+                    "data_source",
                 ]
             )
             for s in self.samples:
@@ -155,6 +167,7 @@ class SoakRecorder:
                         f"{s.bat_discharge_kw:.3f}",
                         f"{s.grid_consumption_kwh:.3f}",
                         s.sim_time,
+                        s.data_source,
                     ]
                 )
 
@@ -261,6 +274,11 @@ def _sample_from_ha_and_sim(
         power_w = float(attrs.get("power_w", 0))
     except (requests.RequestException, KeyError, ValueError, TypeError):
         power_w = 0.0
+    try:
+        soc_attrs = ha.get_attributes("sensor.foxess_battery_soc")
+        data_source = str(soc_attrs.get("data_source", ""))
+    except (requests.RequestException, KeyError, ValueError, TypeError):
+        data_source = ""
 
     return SoakSample(
         elapsed_s=elapsed_s,
@@ -276,6 +294,7 @@ def _sample_from_ha_and_sim(
         bat_discharge_kw=sim_state.get("bat_discharge_kw", 0.0),
         grid_consumption_kwh=sim_state.get("grid_consumption_total_kwh", 0.0),
         sim_time=sim_state.get("sim_time", ""),
+        data_source=data_source,
     )
 
 
@@ -402,6 +421,22 @@ def run_scenario(
     final_sample = _sample_from_ha_and_sim(ha, sim, time.monotonic() - wall_start)
     recorder.record(final_sample)
 
+    # Post-session tail: continue sampling for 5 minutes after the
+    # session reaches idle so post-session invariants (e.g.
+    # WS-stays-disconnected after natural session end) have data
+    # to assert against.  Only run the tail if the session actually
+    # ended naturally (state == "idle"); on error/unavailable we
+    # skip it because the integration is in an undefined state.
+    if final_sample.state == "idle":
+        recorder.session_end_elapsed_s = final_sample.elapsed_s
+        tail_deadline = time.monotonic() + 300.0  # 5 min
+        while time.monotonic() < tail_deadline:
+            time.sleep(poll_interval_s)
+            tail_sample = _sample_from_ha_and_sim(
+                ha, sim, time.monotonic() - wall_start
+            )
+            recorder.record(tail_sample)
+
 
 def check_charge_invariants(recorder: SoakRecorder, config: ScenarioConfig) -> None:
     """Verify charge session invariants from recorded samples."""
@@ -453,6 +488,11 @@ def check_charge_invariants(recorder: SoakRecorder, config: ScenarioConfig) -> N
                 f"Final SoC {final.soc:.1f}% < target {config.target_soc}% - 5%",
             )
 
+    # Post-session WS lifecycle invariant: when the session reaches
+    # idle naturally, no WS reconnect should happen during the
+    # post-session tail.  No-op if the session never reached idle.
+    check_ws_disconnected_after_session_end(recorder, config)
+
 
 def check_discharge_invariants(recorder: SoakRecorder, config: ScenarioConfig) -> None:
     """Verify discharge session invariants from recorded samples."""
@@ -473,6 +513,11 @@ def check_discharge_invariants(recorder: SoakRecorder, config: ScenarioConfig) -
                 f"SoC went from {start_soc:.1f}% to {end_soc:.1f}%",
             )
 
+    # Post-session WS lifecycle invariant: when the session reaches
+    # idle naturally, no WS reconnect should happen during the
+    # post-session tail.  No-op if the session never reached idle.
+    check_ws_disconnected_after_session_end(recorder, config)
+
 
 def check_grid_import_during_discharge(recorder: SoakRecorder) -> None:
     """C-001 derivative: no sustained grid import during discharge."""
@@ -489,6 +534,62 @@ def check_grid_import_during_discharge(recorder: SoakRecorder) -> None:
                 consecutive_import = 0
         else:
             consecutive_import = 0
+
+
+def check_ws_disconnected_after_session_end(
+    recorder: SoakRecorder,
+    config: ScenarioConfig,
+) -> None:
+    """After natural session end the WebSocket must stay disconnected.
+
+    Asserts that no sample recorded during the post-session tail
+    (samples taken after ``recorder.session_end_elapsed_s``, with a
+    ``WS_GRACE_S`` grace period to allow the linger to complete and
+    ``data_source`` to settle to ``"api"``) reports
+    ``data_source == "ws"``.
+
+    Reproduces the 2026-05-31 leak: after a session ends naturally
+    (timer expiry → ``_on_timer_expire`` → ``_stop_realtime_ws``)
+    the WebSocket reconnects ~13s later via the listen loop's
+    ``_try_reconnect`` path and keeps streaming data even though no
+    smart session is active.
+    """
+    if recorder.session_end_elapsed_s is None:
+        # Session never reached idle in this scenario — nothing to
+        # check.  Don't violate; just no-op.  Scenarios that exercise
+        # the post-end window should configure ``window_minutes``
+        # short enough to terminate within the run.
+        return
+
+    # Grace period after session-end before we start asserting
+    # data_source == "api".  The linger is up to 30s; allow another
+    # 30s for the post-linger settle (async_disconnect + coordinator
+    # update propagation through HA).  After this point any "ws"
+    # reading represents a re-established WS connection — the bug.
+    ws_grace_s = 60.0
+    cutoff = recorder.session_end_elapsed_s + ws_grace_s
+
+    first_violation: SoakSample | None = None
+    ws_count = 0
+    post_end_count = 0
+    for s in recorder.samples:
+        if s.elapsed_s < cutoff:
+            continue
+        post_end_count += 1
+        if s.data_source == "ws":
+            ws_count += 1
+            if first_violation is None:
+                first_violation = s
+
+    if first_violation is not None:
+        recorder.violate(
+            "WS_RECONNECTED_AFTER_SESSION_END",
+            f"data_source='ws' at {first_violation.elapsed_s:.0f}s "
+            f"({first_violation.elapsed_s - recorder.session_end_elapsed_s:.0f}s "
+            f"after session end); {ws_count}/{post_end_count} post-end "
+            f"samples showed 'ws'.  Expected 'api' continuously — "
+            f"natural session end must leave the WebSocket disconnected.",
+        )
 
 
 @pytest.fixture(scope="session")
