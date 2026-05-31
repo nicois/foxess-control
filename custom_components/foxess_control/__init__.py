@@ -1120,6 +1120,17 @@ async def _stop_realtime_ws(hass: HomeAssistant) -> None:
     if ws is None:
         return
 
+    # Disable reconnect BEFORE entering the linger phase.  The listen
+    # loop is still alive during the linger so it can deliver one
+    # final post-session frame, but if it instead hits a CLOSED frame,
+    # stale-detection timeout, or receive error, ``_try_reconnect``
+    # would otherwise re-establish the connection — escaping the
+    # session-end teardown and leaving a leaked WS streaming forever.
+    # ``request_stop`` is synchronous and idempotent: it only sets a
+    # flag, it does not close the connection.  ``async_disconnect``
+    # below performs the full teardown.
+    ws.request_stop()
+
     if ws.is_connected:
         received = asyncio.Event()
         original_on_data = ws._on_data  # noqa: SLF001

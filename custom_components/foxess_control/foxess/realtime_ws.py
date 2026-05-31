@@ -236,6 +236,18 @@ class FoxESSRealtimeWS:
         self._listen_task: asyncio.Task[None] | None = None
         self._connected = False
         self._stop_event = asyncio.Event()
+        # Set by ``request_stop`` to prevent ``_try_reconnect`` from
+        # re-establishing the connection once a shutdown has been
+        # requested.  Distinct from ``_stop_event`` (which terminates
+        # the listen loop) so a caller can hold the listen loop alive
+        # for a brief "linger" phase while guaranteeing the
+        # connection will not be revived if the listen loop hits an
+        # error path during that window.  Once set, every entry to
+        # ``_try_reconnect`` short-circuits before scheduling any
+        # network I/O — fixing the leak where a CLOSED/stale event
+        # during the linger triggered a fresh connection that
+        # outlived the stop sequence.
+        self._no_reconnect = False
         self._last_useful_data: float = asyncio.get_event_loop().time()
         self._last_accepted: dict[str, Any] | None = None
 
@@ -253,9 +265,26 @@ class FoxESSRealtimeWS:
         if self._connected:
             return
         self._stop_event.clear()
+        self._no_reconnect = False
         token = await self._web_session.async_ensure_token()
         await self._do_connect(token)
         self._listen_task = asyncio.ensure_future(self._listen_loop())
+
+    def request_stop(self) -> None:
+        """Disable reconnect for this instance.
+
+        Sets the ``_no_reconnect`` flag so ``_try_reconnect`` exits
+        before scheduling any reconnect attempt.  Intended to be
+        called by the stop coordinator (``_stop_realtime_ws``) before
+        the optional linger phase: once requested, no error path
+        inside the listen loop can resurrect the connection while
+        the linger is waiting for a final data frame.
+
+        Idempotent and synchronous — safe to call from any context.
+        Does NOT terminate the listen loop or close the WS; use
+        ``async_disconnect`` for full teardown.
+        """
+        self._no_reconnect = True
 
     async def _do_connect(self, token: str) -> None:
         """Establish the WebSocket connection."""
@@ -369,7 +398,20 @@ class FoxESSRealtimeWS:
         self._on_disconnect()
 
     async def _try_reconnect(self) -> None:
-        """Attempt to reconnect with exponential backoff."""
+        """Attempt to reconnect with exponential backoff.
+
+        Short-circuits immediately if shutdown has been requested
+        (``request_stop`` was called or ``async_disconnect`` set
+        ``_stop_event``).  This is the primary guard against the
+        2026-05-31 leak: when the listen loop hit a stale-detection
+        or server-CLOSED frame during ``_stop_realtime_ws``'s linger
+        phase, the previous code ran ``on_disconnect`` and entered
+        the reconnect for-loop with ``_stop_event`` still unset,
+        successfully reconnecting and outliving the stop sequence.
+        """
+        if self._no_reconnect or self._stop_event.is_set():
+            self._connected = False
+            return
         self._connected = False
         # Signal that WS data is no longer flowing so the coordinator
         # can update data_source immediately (e.g. badge shows "API").
@@ -377,7 +419,7 @@ class FoxESSRealtimeWS:
         await self._close_ws()
 
         for attempt in range(self.RECONNECT_MAX_ATTEMPTS):
-            if self._stop_event.is_set():
+            if self._no_reconnect or self._stop_event.is_set():
                 return
 
             delay = min(
@@ -392,7 +434,7 @@ class FoxESSRealtimeWS:
             )
             await asyncio.sleep(delay)
 
-            if self._stop_event.is_set():
+            if self._no_reconnect or self._stop_event.is_set():
                 return
 
             try:
@@ -416,6 +458,14 @@ class FoxESSRealtimeWS:
 
     async def async_disconnect(self) -> None:
         """Cleanly disconnect and stop the listen loop."""
+        # Set both flags BEFORE any await so that any concurrently
+        # running ``_try_reconnect`` exits at its next checkpoint
+        # without scheduling further network I/O.  Setting
+        # ``_no_reconnect`` here in addition to ``_stop_event`` is
+        # defensive: a caller that uses ``async_disconnect`` directly
+        # (without going through ``_stop_realtime_ws``'s linger
+        # phase) gets the same guarantee.
+        self._no_reconnect = True
         self._stop_event.set()
         self._connected = False
         await self._close_ws()
