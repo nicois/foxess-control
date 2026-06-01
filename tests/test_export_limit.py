@@ -687,3 +687,227 @@ class TestListenerNoEntityUnchangedBehaviour:
             await tick(datetime.datetime(2026, 4, 7, 17, 5, 0))
 
         spy.set_export_limit_w.assert_not_called()
+
+
+def _last_force_discharge_power(spy: MagicMock) -> int | None:
+    """Return the power_w of the most recent FORCE_DISCHARGE apply_mode call.
+
+    apply_mode is called positionally: (hass, work_mode, power_w, fd_soc=...).
+    Returns None if no FORCE_DISCHARGE call was made.
+    """
+    from smart_battery.types import WorkMode
+
+    for call in reversed(spy.apply_mode.await_args_list):
+        args = call.args
+        if len(args) >= 3 and args[1] == WorkMode.FORCE_DISCHARGE:
+            return int(args[2])
+    return None
+
+
+class TestExportLimitConfiguredButNoActuatorPaces:
+    """Regression for C-037 / D-047 actuator-presence gate (C-001, P-001..P-004).
+
+    Live bug (session 44b31626): the grid export limit was configured
+    (5000 W) but NO export-limit actuator *entity* was present.  The
+    deferred-start and per-tick power gates pinned fdPwr at the inverter
+    max because they tested ``_get_grid_export_limit() > 0`` (limit
+    *value*) instead of ``_has_export_limit_entity()`` (actuator
+    *presence*).  Result: full-power forced discharge, early min-SoC,
+    grid import — the software pacing path was entirely bypassed.
+
+    The contract (smart-discharge-contract §G6c, D-047): the
+    two-channel actuator scheme only applies when a hardware
+    export-limit *entity* is configured.  Absent the entity, the
+    algorithm must fall back to SOFTWARE pacing via
+    ``calculate_discharge_power`` — exactly as when no export limit is
+    set at all.
+    """
+
+    @staticmethod
+    async def _start_and_arm(
+        hass: MagicMock,
+        inv: MagicMock,
+        *,
+        end_time: datetime.time,
+    ) -> tuple[Any, MagicMock, dict[str, Any]]:
+        """Start an immediate discharge session and arm it for pacing.
+
+        Starts at now=17:00 with SoC 80 / min 30 (which begins
+        discharging immediately, so ``discharging_started`` is True),
+        then widens the window and enables pacing so the next tick
+        exercises ``_apply_discharge_power``.
+        """
+        tick, spy = await _start_discharge_session_with_spy(
+            hass,
+            inv,
+            {
+                "start_time": datetime.time(17, 0),
+                "end_time": datetime.time(20, 0),
+                "min_soc": 30,
+            },
+        )
+        ds = hass.data[DOMAIN].smart_discharge_state
+        assert ds is not None
+        assert ds.get("discharging_started") is True
+        # Widen the window so paced power is comfortably below max_power_w.
+        ds["end"] = datetime.datetime(2026, 4, 7, end_time.hour, end_time.minute, 0)
+        ds["pacing_enabled"] = True
+        return tick, spy, ds
+
+    @pytest.mark.asyncio
+    async def test_limit_configured_no_actuator_uses_software_pacing(self) -> None:
+        """THE BUG: limit configured, no actuator entity → paced, not max."""
+        from smart_battery.algorithms import calculate_discharge_power
+
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        hass = _make_listener_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 80.0, "loadsPower": 0.5, "pvPower": 0.0},
+            export_limit_entity=None,
+            grid_export_limit_w=5000,
+        )
+        tick, spy, ds = await self._start_and_arm(
+            hass, inv, end_time=datetime.time(23, 0)
+        )
+
+        spy.apply_mode.reset_mock()
+        now = datetime.datetime(2026, 4, 7, 17, 0, 0)
+        with patch(
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+            return_value=now,
+        ):
+            await tick(now)
+
+        remaining_h = (ds["end"] - now).total_seconds() / 3600.0
+        expected = calculate_discharge_power(
+            80.0,
+            30,
+            60.0,
+            remaining_h,
+            10500,
+            net_consumption_kw=0.5,
+            headroom=DEFAULT_SMART_HEADROOM / 100.0,
+            consumption_peak_kw=ds.get("consumption_peak_kw", 0.0),
+        )
+        written = _last_force_discharge_power(spy)
+        # Sanity: the paced target the algorithm produces is well below max.
+        assert expected < 10500
+        # The actuator must never be touched (no entity configured).
+        spy.set_export_limit_w.assert_not_called()
+        # Observable contract: the schedule must carry the PACED power,
+        # not the pinned inverter maximum.
+        assert written == expected, (
+            f"expected paced {expected}W, got {written}W "
+            "(bug pins fdPwr at max_power_w)"
+        )
+        assert written is not None and written < 10500
+
+    @pytest.mark.asyncio
+    async def test_actuator_present_pins_fdpwr_at_max(self) -> None:
+        """Intended D-047: actuator present → fdPwr pinned, actuator written."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        hass = _make_listener_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 80.0, "loadsPower": 0.5, "pvPower": 0.0},
+            export_limit_entity="number.foxess_max_grid_export_limit",
+            grid_export_limit_w=5000,
+        )
+        tick, spy, ds = await self._start_and_arm(
+            hass, inv, end_time=datetime.time(23, 0)
+        )
+
+        spy.apply_mode.reset_mock()
+        spy.set_export_limit_w.reset_mock()
+        now = datetime.datetime(2026, 4, 7, 17, 0, 0)
+        with patch(
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+            return_value=now,
+        ):
+            await tick(now)
+
+        # fdPwr stays pinned at the inverter max via the schedule, while the
+        # paced feed-in target is enforced through the hardware actuator.
+        assert ds["last_power_w"] == 10500
+        spy.set_export_limit_w.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_no_limit_no_actuator_uses_software_pacing(self) -> None:
+        """Regression guard: the pre-existing else branch still paces."""
+        from smart_battery.algorithms import calculate_discharge_power
+
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        hass = _make_listener_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 80.0, "loadsPower": 0.5, "pvPower": 0.0},
+            export_limit_entity=None,
+            grid_export_limit_w=0,
+        )
+        tick, spy, ds = await self._start_and_arm(
+            hass, inv, end_time=datetime.time(23, 0)
+        )
+
+        spy.apply_mode.reset_mock()
+        now = datetime.datetime(2026, 4, 7, 17, 0, 0)
+        with patch(
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+            return_value=now,
+        ):
+            await tick(now)
+
+        remaining_h = (ds["end"] - now).total_seconds() / 3600.0
+        expected = calculate_discharge_power(
+            80.0,
+            30,
+            60.0,
+            remaining_h,
+            10500,
+            net_consumption_kw=0.5,
+            headroom=DEFAULT_SMART_HEADROOM / 100.0,
+            consumption_peak_kw=ds.get("consumption_peak_kw", 0.0),
+        )
+        written = _last_force_discharge_power(spy)
+        spy.set_export_limit_w.assert_not_called()
+        assert expected < 10500
+        assert written == expected
+
+    @pytest.mark.asyncio
+    async def test_short_window_paces_toward_max(self) -> None:
+        """Inverse: a tight window legitimately drives paced power up to max.
+
+        Confirms the test is asserting real pacing, not merely "always low".
+        """
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        hass = _make_listener_hass(
+            inverter=inv,
+            coordinator_data={"SoC": 80.0, "loadsPower": 0.5, "pvPower": 0.0},
+            export_limit_entity=None,
+            grid_export_limit_w=5000,
+        )
+        # Keep the original 20:00 window: 30 kWh over ~3 h paces to max.
+        tick, spy = await _start_discharge_session_with_spy(
+            hass,
+            inv,
+            {
+                "start_time": datetime.time(17, 0),
+                "end_time": datetime.time(20, 0),
+                "min_soc": 30,
+            },
+        )
+        ds = hass.data[DOMAIN].smart_discharge_state
+        assert ds is not None
+        ds["pacing_enabled"] = True
+
+        spy.apply_mode.reset_mock()
+        now = datetime.datetime(2026, 4, 7, 17, 0, 0)
+        with patch(
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+            return_value=now,
+        ):
+            await tick(now)
+
+        written = _last_force_discharge_power(spy)
+        assert written == 10500
