@@ -53,6 +53,7 @@ from .events import SERVICE_CALL, emit_event, emit_schedule_write, normalise_inp
 from .listeners import (
     _get_current_soc,
     _get_net_consumption,
+    _has_export_limit_entity,
     cancel_smart_charge,
     cancel_smart_discharge,
     setup_smart_charge_listeners,
@@ -395,12 +396,14 @@ def register_services(
             )
             initial_power = 0
         else:
-            grid_export_limit = int(
-                _get_entry_option(
-                    hass, domain, CONF_GRID_EXPORT_LIMIT, DEFAULT_GRID_EXPORT_LIMIT
-                )
-            )
-            if pacing_enabled and current_soc is not None and grid_export_limit == 0:
+            # The export-limit actuator path (D-047) pins fdPwr at max and
+            # modulates feed-in via the actuator entity.  That only applies
+            # when an actuator *entity* is configured — gate on presence,
+            # not on the configured limit value.  A configured limit with no
+            # actuator must software-pace via fdPwr, else the battery drains
+            # to min SoC far ahead of the window and imports (C-037 / C-001).
+            use_export_actuator = _has_export_limit_entity(hass, domain)
+            if pacing_enabled and current_soc is not None and not use_export_actuator:
                 from .algorithms import calculate_discharge_power
 
                 remaining = (end - now).total_seconds() / 3600.0

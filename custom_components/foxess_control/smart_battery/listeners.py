@@ -1212,10 +1212,14 @@ def setup_smart_discharge_listeners(
 
         remaining_h = (cur_state["end"] - now_dt).total_seconds() / 3600.0
         use_export_actuator = _has_export_limit_entity(hass, domain)
-        if _get_grid_export_limit(hass, domain) > 0:
-            # Hardware-actuator path: fdPwr stays pinned at the HW max so
-            # the cloud schedule never restricts discharge; feed-in is
-            # modulated later via adapter.set_export_limit_w.
+        if use_export_actuator:
+            # Hardware-actuator path (D-047): fdPwr stays pinned at the HW
+            # max so the cloud schedule never restricts discharge; feed-in
+            # is modulated later via adapter.set_export_limit_w.  Gated on
+            # actuator *presence*, not on the configured export-limit value
+            # — a configured limit without an actuator entity cannot
+            # modulate feed-in, so it must fall through to software pacing
+            # (C-037 / C-001).
             new_power = cur_state["max_power_w"]
         else:
             new_power = call_algo(
@@ -1555,23 +1559,26 @@ def setup_smart_discharge_listeners(
                 )
             return
 
-        if _get_grid_export_limit(hass, domain) > 0:
-            new_power = cur_state["max_power_w"]
-        else:
-            new_power = call_algo(
-                _LOGGER,
-                calculate_discharge_power,
-                "adjust",
-                current_soc=soc_value,
-                min_soc=cur_state["min_soc"],
-                battery_capacity_kwh=cur_state["battery_capacity_kwh"],
-                remaining_hours=remaining_h,
-                max_power_w=cur_state["max_power_w"],
-                net_consumption_kw=net_consumption,
-                headroom=headroom,
-                feedin_remaining_kwh=feedin_remaining,
-                consumption_peak_kw=peak,
-            )
+        # No export-limit actuator entity: pace via fdPwr in software.
+        # The export limit (if any configured) is a cloud-side cap with no
+        # actuator to modulate feed-in, so it must not pin fdPwr at max —
+        # doing so bypasses calculate_discharge_power and drains the battery
+        # to min SoC far ahead of the window, causing grid import once the
+        # forced-discharge override is removed (C-037 / C-001 / P-001).
+        new_power = call_algo(
+            _LOGGER,
+            calculate_discharge_power,
+            "adjust",
+            current_soc=soc_value,
+            min_soc=cur_state["min_soc"],
+            battery_capacity_kwh=cur_state["battery_capacity_kwh"],
+            remaining_hours=remaining_h,
+            max_power_w=cur_state["max_power_w"],
+            net_consumption_kw=net_consumption,
+            headroom=headroom,
+            feedin_remaining_kwh=feedin_remaining,
+            consumption_peak_kw=peak,
+        )
         min_change = cur_state.get("min_power_change", DEFAULT_MIN_POWER_CHANGE)
         cur_state["target_power_w"] = new_power
 
