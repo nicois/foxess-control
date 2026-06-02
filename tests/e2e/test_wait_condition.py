@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from playwright.sync_api import Error as PlaywrightError
 
 from tests.e2e import conftest as cf
 
@@ -107,6 +108,27 @@ def test_fail_check_aborts_before_timeout(
         )
     assert _time.monotonic() - start < 5
     assert "capture" in str(ei.value)
+    assert list(tmp_path.glob("*.html"))
+
+
+def test_safe_evaluate_captures_on_final_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.e2e import test_ui
+
+    monkeypatch.setattr(cf, "_failure_capture_dir", lambda: tmp_path)
+
+    class _AlwaysDestroyed(_StubPage):
+        def evaluate(self, expr: str, *a: Any) -> Any:
+            raise PlaywrightError("Execution context was destroyed")
+
+        def wait_for_load_state(self, *a: Any, **k: Any) -> None:
+            return None
+
+    with pytest.raises(PlaywrightError):
+        test_ui._safe_evaluate(
+            _AlwaysDestroyed(), "() => 1", retries=1, settle_timeout_ms=1
+        )
     assert list(tmp_path.glob("*.html"))
 
 

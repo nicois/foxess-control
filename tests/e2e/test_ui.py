@@ -148,6 +148,9 @@ def _safe_evaluate(
             # Wait for the post-navigation page to settle before retrying.
             with contextlib.suppress(PlaywrightError):
                 page.wait_for_load_state("domcontentloaded", timeout=settle_timeout_ms)
+    from .conftest import _capture_failure
+
+    _capture_failure(page, "safe_evaluate")
     assert last_exc is not None  # noqa: S101
     raise last_exc
 
