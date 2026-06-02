@@ -16,7 +16,11 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from playwright.sync_api import Error as PlaywrightError
 
-from .conftest import set_inverter_state
+from .conftest import (
+    E2EConditionTimeout,
+    set_inverter_state,
+    wait_for_condition,
+)
 from .ha_client import FATAL_FOR_ACTIVE
 from .selectors import ControlCard, OverviewCard
 
@@ -253,60 +257,32 @@ def _wait_for_card_hass(page: Page, tag: str, timeout_ms: int = 30000) -> None:
             && card.shadowRoot.childNodes.length > 0
         );
     }}"""
-    import time as _time
-
-    deadline = _time.monotonic() + timeout_ms / 1000
-    while True:
-        remaining = int((deadline - _time.monotonic()) * 1000)
-        if remaining <= 0:
-            msg = f"card {tag!r} did not reach _hass-ready within {timeout_ms}ms"
-            raise TimeoutError(msg)
-        try:
-            page.wait_for_function(js, timeout=remaining)
-            return
-        except PlaywrightError as exc:
-            msg = str(exc)
-            if "Execution context was destroyed" not in msg and "navigating" not in msg:
-                raise
-            # Navigation churn — settle and retry within remaining budget.
-            #
-            # Per-retry cap is 3000ms on ``domcontentloaded``, NOT
-            # 15000ms on ``networkidle``: under sustained CI churn,
-            # ``networkidle`` may never fire and the suppressed timeout
-            # would consume the full cap every retry, dominating this
-            # 30000ms budget.  Same fix as ``conftest._wait_for_stage``
-            # (commit 74d7f75).
-            with contextlib.suppress(PlaywrightError):
-                page.wait_for_load_state(
-                    "domcontentloaded",
-                    timeout=min(
-                        int((deadline - _time.monotonic()) * 1000),
-                        3000,
-                    ),
-                )
+    # Delegates to ``wait_for_condition``, which retries on Playwright
+    # context-destroyed navigation churn and captures the DOM on failure.
+    # Preserves the contract: raises (E2EConditionTimeout) on failure.
+    wait_for_condition(
+        page,
+        js,
+        timeout_ms=timeout_ms,
+        description=f"card-hass:{tag}",
+    )
 
 
 def _find_card(page: Page, tag: str, timeout: int = 30000) -> bool:
-    """Check if a custom card element exists anywhere in the page DOM.
+    """Return True if a custom card element exists anywhere in the page DOM.
 
     HA nests custom cards deep inside shadow DOM hierarchies
     (home-assistant >>> home-assistant-main >>> ha-panel-lovelace >>>
-    hui-root >>> hui-view >>> hui-card >>> {card}).
-    Playwright's `>>>` pierce selector handles this.
+    hui-root >>> hui-view >>> hui-card >>> {card}); this predicate pierces
+    every shadow root rather than relying on Playwright's ``>>>`` selector.
 
-    Under CI load, HA can trigger a page navigation (WebSocket reconnect,
-    dashboard auto-refresh) that destroys the JS execution context while
-    ``wait_for_function`` is polling.  When this happens the call raises
-    ``PlaywrightError("Execution context was destroyed")`` immediately —
-    well before the card has had time to render.  To handle this, we
-    retry after waiting briefly for the new context to attach
-    (``domcontentloaded``, capped at 3000ms — see settle-cap rationale
-    near the call site), spending any remaining timeout budget on the
-    next attempt.
+    Delegates to ``wait_for_condition``, which polls the predicate, retries
+    on Playwright context-destroyed navigation churn (WebSocket reconnect,
+    dashboard auto-refresh), and captures the DOM (HTML + screenshot +
+    summary) on failure.  Preserves the original contract: returns ``False``
+    on timeout (never raises) by swallowing ``E2EConditionTimeout``.
     """
-    import time as _time
-
-    _JS_FIND = f"""() => {{
+    js = f"""() => {{
         function findInShadows(root, tag) {{
             if (root.querySelector(tag)) return true;
             for (const el of root.querySelectorAll('*')) {{
@@ -317,45 +293,17 @@ def _find_card(page: Page, tag: str, timeout: int = 30000) -> bool:
         }}
         return findInShadows(document, '{tag}');
     }}"""
-
-    deadline = _time.monotonic() + timeout / 1000
-    remaining_ms = timeout
-
-    while True:
-        try:
-            page.wait_for_function(_JS_FIND, timeout=remaining_ms)
-            return True
-        except PlaywrightError as exc:
-            if "Execution context was destroyed" not in str(
-                exc
-            ) and "navigating" not in str(exc):
-                # Genuine timeout or unrelated error — give up.
-                return False
-            # Navigation destroyed the context.  Briefly let the new
-            # context attach via ``domcontentloaded`` (synchronous on
-            # HTML parse), then retry with remaining budget.
-            #
-            # Per-retry cap is 3000ms on ``domcontentloaded``, NOT
-            # 15000ms on ``networkidle``: under sustained CI churn
-            # (entity-mode WS state-burst), ``networkidle`` may never
-            # fire and the suppressed timeout would consume the full
-            # cap every retry — dominating this 30000ms budget before
-            # ``wait_for_function`` gets a chance to converge.  Same
-            # fix as ``conftest._wait_for_stage`` (commit 74d7f75).
-            remaining_ms = int((deadline - _time.monotonic()) * 1000)
-            if remaining_ms <= 0:
-                return False
-            with contextlib.suppress(PlaywrightError):
-                page.wait_for_load_state(
-                    "domcontentloaded",
-                    timeout=min(remaining_ms, 3000),
-                )
-            remaining_ms = int((deadline - _time.monotonic()) * 1000)
-            if remaining_ms <= 0:
-                return False
-            # Loop back to retry wait_for_function.
-        except TimeoutError:
-            return False
+    try:
+        return bool(
+            wait_for_condition(
+                page,
+                js,
+                timeout_ms=timeout,
+                description=f"find-card:{tag}",
+            )
+        )
+    except E2EConditionTimeout:
+        return False
 
 
 def _safe_wait_for_function(
@@ -388,6 +336,8 @@ def _safe_wait_for_function(
     """
     import time as _time
 
+    from .conftest import _capture_failure
+
     deadline = _time.monotonic() + (timeout / 1000) * (retries + 1)
     last_exc: PlaywrightError | None = None
     for attempt in range(retries + 1):
@@ -402,12 +352,14 @@ def _safe_wait_for_function(
         except PlaywrightError as exc:
             msg = str(exc)
             if "Execution context was destroyed" not in msg and "navigating" not in msg:
+                _capture_failure(page, "safe_wait_for_function")
                 raise
             last_exc = exc
             if attempt == retries:
                 break
             with contextlib.suppress(PlaywrightError):
                 page.wait_for_load_state("domcontentloaded", timeout=settle_timeout_ms)
+    _capture_failure(page, "safe_wait_for_function")
     assert last_exc is not None  # noqa: S101
     raise last_exc
 
