@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+from contextlib import ExitStack
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
@@ -163,6 +164,72 @@ async def _capture_listener_callback(
 
     assert captured, "setup_smart_charge_listeners did not register the periodic CB"
     return captured[0]
+
+
+class _PointInTimeRegistry:
+    """Records every ``async_track_point_in_time`` registration.
+
+    Each entry is ``(when, callback)``.  The interval callback (the
+    300 s adjust tick) is captured separately so the test can assert
+    that the *prompt* transition trigger is a point-in-time wake at
+    the committed deferred-start deadline — not merely the slow
+    periodic interval.
+    """
+
+    def __init__(self) -> None:
+        self.point_in_time: list[tuple[datetime.datetime, Any]] = []
+        self.interval: list[Any] = []
+
+    @staticmethod
+    def _naive(when: datetime.datetime) -> datetime.datetime:
+        """Normalise to naive for comparison against naive test clocks.
+
+        The end-of-window timer is registered as a tz-aware UTC time
+        (``dt_util.as_utc``); the test drives a naive clock.  Strip
+        tzinfo so ``<=`` comparisons don't raise.
+        """
+        return when.replace(tzinfo=None) if when.tzinfo is not None else when
+
+    def track_point_in_time(self, _h: Any, cb: Any, when: Any) -> MagicMock:
+        self.point_in_time.append((when, cb))
+        return MagicMock()
+
+    def track_interval(self, _h: Any, cb: Any, _i: Any) -> MagicMock:
+        self.interval.append(cb)
+        return MagicMock()
+
+
+async def _setup_with_registry(
+    hass: MagicMock,
+    adapter: FakeAdapter,
+    stack: ExitStack,
+) -> tuple[Any, _PointInTimeRegistry]:
+    """Run ``setup_smart_charge_listeners`` capturing both timer kinds.
+
+    Returns the periodic interval callback and the registry of all
+    point-in-time / interval registrations the listener made.  The
+    timer patches are entered on ``stack`` and stay active for the
+    caller's lifetime — the listener also schedules point-in-time
+    wakes INSIDE its tick callbacks (the fix under test), so the patch
+    must remain active while the test drives those ticks, not only
+    during setup.
+    """
+    reg = _PointInTimeRegistry()
+    stack.enter_context(
+        patch(
+            f"{_LISTENERS}.async_track_point_in_time",
+            side_effect=reg.track_point_in_time,
+        )
+    )
+    stack.enter_context(
+        patch(
+            f"{_LISTENERS}.async_track_time_interval",
+            side_effect=reg.track_interval,
+        )
+    )
+    setup_smart_charge_listeners(hass, _DOMAIN, adapter)
+    assert reg.interval, "setup_smart_charge_listeners did not register periodic CB"
+    return reg.interval[0], reg
 
 
 class _RecordingAdapter(FakeAdapter):
@@ -578,4 +645,269 @@ class TestFoxESSAdapterWiresWebSocketStartup:
         assert "_maybe_start_realtime_ws" in getattr(coro, "__qualname__", ""), (
             "Injected callback must schedule _maybe_start_realtime_ws. "
             f"Got coroutine: {coro!r}"
+        )
+
+
+class TestTransitionFiresPromptlyAtDeferredDeadline:
+    """C-020 / D-008: the deferred→active transition (and therefore the
+    ``on_session_started`` WS-startup hook) must fire PROMPTLY at the
+    committed deferred-start deadline — not be gated to the next
+    ``SMART_CHARGE_ADJUST_SECONDS`` (300 s) periodic interval tick.
+
+    Live regression 2026-06-02 (v1.0.17): the status sensor flipped
+    ``scheduled → charging`` at 01:00:10 (it recomputes ``now >=
+    deferred_start_committed`` on every ~5 s coordinator refresh —
+    ``is_effectively_charging``), but the LISTENER only re-evaluates
+    the transition on its 300 s interval.  The prior interval tick was
+    at 00:58:46, so ``charging_started`` did not actually flip — and
+    ``on_session_started`` did not fire — until the next interval tick
+    at ~01:03:46, bringing the WebSocket up at 01:04:04.  ~3 m 54 s of
+    ``data_freshness=api`` while the dashboard claimed "charging": a
+    C-020 defect, the SAME symptom and magnitude as the beta.2 bug.
+
+    The beta.2 fix made WS startup event-driven *on the listener's
+    transition* (the ``on_session_started`` hook).  But the listener's
+    transition is ITSELF NOT event-driven: it only happens when a
+    300 s interval tick observes ``now >= deferred_start_committed``.
+    There is no point-in-time wake scheduled AT the deferred-start
+    deadline.  So the hook fires promptly relative to the listener's
+    transition, but the transition lags the real deadline by up to one
+    interval — reproducing the ~4-minute gap.
+
+    These tests exercise the path the existing tests miss: the
+    *scheduling* of the transition, not just its hook side effect once
+    invoked.  The existing tests call ``cb(now)`` exactly at the
+    transition instant, so they never observe that the listener fails
+    to arrange to BE called at the deadline.
+    """
+
+    @pytest.mark.asyncio
+    async def test_prompt_wake_scheduled_at_committed_deferred_deadline(
+        self,
+    ) -> None:
+        """A deferred tick that commits a FUTURE deferred-start must
+        schedule a point-in-time wake at (or before) that deadline.
+
+        Setup: a long window whose ``calculate_deferred_start``
+        resolves to a time strictly in the future but well WITHIN one
+        300 s adjust interval (here ~90 s out is not guaranteed, so we
+        assert against the committed value the listener actually
+        computed).  After the first tick:
+
+        * ``charging_started`` is still False (we are deferred), and
+        * ``deferred_start_committed`` is a future datetime.
+
+        Observable contract: the listener must have registered a
+        point-in-time trigger that fires no later than the committed
+        deferred-start deadline, so the transition (and WS startup)
+        happens within seconds of the deadline — NOT up to 300 s later
+        on the next interval tick.
+
+        On current ``develop`` the listener registers only the 300 s
+        ``async_track_time_interval``; no point-in-time wake is
+        scheduled at the deferred deadline, so this assertion fails —
+        reproducing the live ~4-minute WS-startup lag.
+        """
+        now = datetime.datetime(2026, 6, 2, 0, 58, 46)
+        end = now + datetime.timedelta(hours=8)
+
+        hass = _build_hass(
+            coordinator_data={"SoC": 78.0, "loadsPower": 0.1, "pvPower": 0.0},
+            battery_capacity_kwh=10.0,
+        )
+        state = _make_deferred_state(
+            now=now,
+            end=end,
+            target_soc=80,
+            battery_capacity_kwh=10.0,
+            max_power_w=5000,
+            current_soc=78.0,
+        )
+        hass.data[_DOMAIN].smart_charge_state = state
+
+        adapter = _RecordingAdapter(max_power_w=5000)
+
+        with ExitStack() as stack:
+            cb, reg = await _setup_with_registry(hass, adapter, stack)
+
+            # Drive one deferred tick: commits deferred_start_committed.
+            stack.enter_context(patch(f"{_LISTENERS}.dt_util.now", return_value=now))
+            await cb(now)
+
+        cur_state = hass.data[_DOMAIN].smart_charge_state
+        assert cur_state is not None
+        # Test pre-condition: we are in the deferred phase with a
+        # future committed deadline.
+        assert cur_state["charging_started"] is False, (
+            "Test pre-condition: tick must stay deferred. "
+            "calculate_deferred_start resolved <= now unexpectedly."
+        )
+        committed = cur_state.get("deferred_start_committed")
+        assert committed is not None and committed > now, (
+            "Test pre-condition: a future deferred-start must be "
+            f"committed. Got {committed!r} (now={now!r})."
+        )
+
+        # The next periodic interval tick would land at now + 300 s.
+        next_interval = now + datetime.timedelta(seconds=300)
+
+        # Observable contract: a point-in-time wake must be scheduled
+        # at or before the committed deadline so the transition is
+        # prompt.  A wake that exists but lands AFTER the deadline (or
+        # only the 300 s interval) is the bug.
+        prompt_wakes = [
+            when for (when, _c) in reg.point_in_time if reg._naive(when) <= committed
+        ]
+        assert prompt_wakes, (
+            "C-020 regression: the listener committed a deferred-start "
+            f"at {committed}, but scheduled NO point-in-time wake at or "
+            "before that deadline. The only trigger is the 300 s "
+            f"interval (next at {next_interval}), so charging_started "
+            "and the on_session_started WS-startup hook lag the real "
+            "deferred-start deadline by up to SMART_CHARGE_ADJUST_"
+            "SECONDS (live 2026-06-02: ~3 m 54 s of data_freshness=api "
+            "while the status sensor already read 'charging'). "
+            f"point-in-time registrations: "
+            f"{[w for (w, _c) in reg.point_in_time]!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_firing_prompt_wake_performs_transition_and_hook(
+        self,
+    ) -> None:
+        """Firing the scheduled deferred-deadline wake must perform the
+        transition and fire ``on_session_started``.
+
+        End-to-end of the prompt path: after committing a future
+        deferred-start, the listener schedules a wake; invoking that
+        wake's callback at the committed deadline must flip
+        ``charging_started`` True and notify the adapter — i.e. the
+        WebSocket starts at the deadline, not one interval later.
+        """
+        now = datetime.datetime(2026, 6, 2, 0, 58, 46)
+        end = now + datetime.timedelta(hours=8)
+
+        hass = _build_hass(
+            coordinator_data={"SoC": 78.0, "loadsPower": 0.1, "pvPower": 0.0},
+            battery_capacity_kwh=10.0,
+        )
+        state = _make_deferred_state(
+            now=now,
+            end=end,
+            target_soc=80,
+            battery_capacity_kwh=10.0,
+            max_power_w=5000,
+            current_soc=78.0,
+        )
+        hass.data[_DOMAIN].smart_charge_state = state
+
+        adapter = _RecordingAdapter(max_power_w=5000)
+
+        with ExitStack() as stack:
+            cb, reg = await _setup_with_registry(hass, adapter, stack)
+
+            now_patch = stack.enter_context(
+                patch(f"{_LISTENERS}.dt_util.now", return_value=now)
+            )
+            await cb(now)
+
+            cur_state = hass.data[_DOMAIN].smart_charge_state
+            assert cur_state is not None
+            committed = cur_state.get("deferred_start_committed")
+            assert committed is not None and committed > now
+
+            # Find the prompt wake scheduled at/just before the deadline.
+            prompt = [
+                (when, c)
+                for (when, c) in reg.point_in_time
+                if reg._naive(when) <= committed
+            ]
+            assert prompt, (
+                "C-020 regression: no prompt point-in-time wake scheduled "
+                f"at/before the committed deadline {committed}; only the "
+                "300 s interval would eventually transition the session."
+            )
+            wake_when, wake_cb = prompt[-1]
+
+            # No transition / hook yet — we are still deferred.
+            assert cur_state["charging_started"] is False
+            assert not adapter.session_started_calls
+
+            # Fire the wake at the committed deadline.
+            now_patch.return_value = committed
+            await wake_cb(committed)
+
+        cur_state = hass.data[_DOMAIN].smart_charge_state
+        assert cur_state is not None
+        assert cur_state["charging_started"] is True, (
+            "Firing the deferred-deadline wake must transition the "
+            "session to active (charging_started=True)."
+        )
+        assert adapter.session_started_calls, (
+            "Firing the deferred-deadline wake must fire "
+            "on_session_started so the brand layer starts the WebSocket "
+            "promptly at the deadline (C-020), not one 300 s interval "
+            "later."
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_prompt_wake_when_already_active(self) -> None:
+        """Neighbourhood: an already-active tick must not schedule a
+        spurious deferred-deadline wake.
+
+        Once ``charging_started`` is True, ``deferred_start_committed``
+        is cleared (None) and the session is in the active-adjust path.
+        A tick here must not register a new point-in-time wake for a
+        (non-existent) future deferred-start.
+        """
+        now = datetime.datetime(2026, 6, 2, 1, 0, 0)
+        end = now + datetime.timedelta(minutes=30)
+
+        hass = _build_hass(
+            coordinator_data={"SoC": 50.0, "loadsPower": 0.3, "pvPower": 0.0},
+            battery_capacity_kwh=10.0,
+        )
+        state = _make_deferred_state(
+            now=now,
+            end=end,
+            target_soc=80,
+            battery_capacity_kwh=10.0,
+            max_power_w=5000,
+            current_soc=50.0,
+        )
+        hass.data[_DOMAIN].smart_charge_state = state
+
+        adapter = _RecordingAdapter(max_power_w=5000)
+
+        with ExitStack() as stack:
+            cb, reg = await _setup_with_registry(hass, adapter, stack)
+
+            now_patch = stack.enter_context(
+                patch(f"{_LISTENERS}.dt_util.now", return_value=now)
+            )
+            # Tick 1: deferred→active transition (tight window).
+            await cb(now)
+
+            cur_state = hass.data[_DOMAIN].smart_charge_state
+            assert cur_state is not None
+            assert cur_state["charging_started"] is True, (
+                "Test pre-condition: tight window must transition to active."
+            )
+
+            wakes_after_transition = len(reg.point_in_time)
+
+            # Tick 2 while active: must not add a deferred-deadline wake.
+            later = now + datetime.timedelta(minutes=5)
+            hass.data[_DOMAIN].entries["entry1"].coordinator.data = {
+                "SoC": 52.0,
+                "loadsPower": 0.3,
+                "pvPower": 0.0,
+            }
+            now_patch.return_value = later
+            await cb(later)
+
+        assert len(reg.point_in_time) == wakes_after_transition, (
+            "Active-phase ticks must not schedule new deferred-deadline "
+            "wakes. point-in-time grew from "
+            f"{wakes_after_transition} to {len(reg.point_in_time)}."
         )
