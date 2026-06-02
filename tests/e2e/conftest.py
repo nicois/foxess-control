@@ -342,6 +342,66 @@ def _capture_failure(page: Any, description: str) -> str:
     return " | ".join(parts)
 
 
+class E2EConditionTimeout(AssertionError):
+    """A wait_for_condition pass_check did not become true in time."""
+
+
+class E2EConditionFailed(AssertionError):
+    """A wait_for_condition fail_check tripped before the pass_check."""
+
+
+def wait_for_condition(
+    page: Any,
+    pass_check: str,
+    *,
+    timeout_ms: int,
+    fail_check: str | None = None,
+    description: str = "",
+    poll_ms: int = 250,
+) -> Any:
+    """Poll pass_check until truthy; abort early if fail_check trips.
+
+    Returns pass_check's truthy value. On fail_check tripping
+    (E2EConditionFailed) or timeout (E2EConditionTimeout), captures DOM
+    via _capture_failure and embeds the summary in the raised exception.
+    Predicate evaluations hitting a context-destroyed navigation error are
+    retried after a <=3000ms domcontentloaded settle within remaining budget.
+    """
+    from playwright._impl._errors import Error as _PwError  # noqa: PLC0415
+
+    deadline = time.monotonic() + timeout_ms / 1000
+    desc = description or "wait_for_condition"
+
+    def _poll(expr: str) -> Any:
+        while True:
+            try:
+                return page.evaluate(expr)
+            except _PwError as exc:
+                if not any(s in str(exc) for s in _CONTEXT_DESTROYED_SIGNALS):
+                    raise
+                settle = int((deadline - time.monotonic()) * 1000)
+                if settle <= 0:
+                    return None
+                with contextlib.suppress(_PwError):
+                    page.wait_for_load_state(
+                        "domcontentloaded", timeout=min(settle, 3000)
+                    )
+
+    while True:
+        if fail_check is not None and _poll(fail_check):
+            summary = _capture_failure(page, desc)
+            raise E2EConditionFailed(f"{desc}: fail_check tripped. {summary}")
+        val = _poll(pass_check)
+        if val:
+            return val
+        if time.monotonic() >= deadline:
+            summary = _capture_failure(page, desc)
+            raise E2EConditionTimeout(
+                f"{desc}: pass_check not satisfied within {timeout_ms}ms. {summary}"
+            )
+        time.sleep(poll_ms / 1000)
+
+
 def _container_name() -> str:
     """Deterministic container name for this worker."""
     return f"ha-e2e-{_worker_id()}"

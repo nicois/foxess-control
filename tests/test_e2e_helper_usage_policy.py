@@ -67,6 +67,14 @@ _HELPER_FUNCTIONS: dict[str, frozenset[str]] = {
         {
             "_wait_for_lovelace_panel",
             "_wait_for_stage",
+            # New poll primitive: its inner ``_poll`` wraps page.evaluate
+            # in the same context-destroyed retry loop as the other
+            # helpers.
+            "wait_for_condition",
+            # Best-effort DOM-capture routine: page.evaluate is wrapped in
+            # ``contextlib.suppress`` so a destroyed context can never
+            # propagate — the retry layer does not apply.
+            "_capture_failure",
         }
     ),
 }

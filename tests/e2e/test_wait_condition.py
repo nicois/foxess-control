@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import time as _time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+import pytest
 
 from tests.e2e import conftest as cf
-
-if TYPE_CHECKING:
-    import pytest
 
 
 class _StubPage:
@@ -51,4 +51,71 @@ def test_capture_failure_never_raises(
     page = _StubPage(screenshot_raises=True)
     summary = cf._capture_failure(page, "stage-3 timeout")
     assert isinstance(summary, str)
+    assert list(tmp_path.glob("*.html"))
+
+
+class _PollStubPage(_StubPage):
+    def __init__(
+        self,
+        pass_results: list[Any],
+        fail_results: list[Any] | None = None,
+        **kw: Any,
+    ) -> None:
+        super().__init__(**kw)
+        self._pass = list(pass_results)
+        self._fail = list(fail_results or [])
+
+    def evaluate(self, expr: str, *args: Any) -> Any:
+        if "filter(t => present" in expr:  # the DOM summary JS
+            return {"tags": ["home-assistant"], "error_text": None}
+        if "FAILCHECK" in expr:
+            return self._fail.pop(0) if self._fail else False
+        return self._pass.pop(0) if self._pass else False
+
+    def wait_for_load_state(self, *a: Any, **k: Any) -> None:
+        return None
+
+
+def test_pass_check_returns_immediately(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cf, "_failure_capture_dir", lambda: tmp_path)
+    out = cf.wait_for_condition(
+        _PollStubPage(pass_results=[True]),
+        "PASS true",
+        timeout_ms=5000,
+        description="t",
+    )
+    assert out is True
+    assert not list(tmp_path.glob("*"))
+
+
+def test_fail_check_aborts_before_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cf, "_failure_capture_dir", lambda: tmp_path)
+    page = _PollStubPage(pass_results=[False, False, False], fail_results=[True])
+    start = _time.monotonic()
+    with pytest.raises(cf.E2EConditionFailed) as ei:
+        cf.wait_for_condition(
+            page,
+            "PASS x",
+            fail_check="FAILCHECK y",
+            timeout_ms=10000,
+            description="panel",
+            poll_ms=10,
+        )
+    assert _time.monotonic() - start < 5
+    assert "capture" in str(ei.value)
+    assert list(tmp_path.glob("*.html"))
+
+
+def test_timeout_captures_dom(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cf, "_failure_capture_dir", lambda: tmp_path)
+    page = _PollStubPage(pass_results=[False] * 50)
+    with pytest.raises(cf.E2EConditionTimeout) as ei:
+        cf.wait_for_condition(
+            page, "PASS x", timeout_ms=300, description="stage3", poll_ms=10
+        )
+    assert "capture" in str(ei.value)
     assert list(tmp_path.glob("*.html"))
