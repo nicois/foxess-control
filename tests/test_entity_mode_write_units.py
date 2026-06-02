@@ -326,3 +326,99 @@ class TestNonPowerWritesUntouched:
         assert _power_set_value_calls(hass, min_soc_eid) == [15], (
             "min_soc (% unit) must not be re-scaled by the power unit helper"
         )
+
+
+# --------------------------------------------------------------------------
+# Persistent min-SoC-on-grid floor vs session discharge target (P-001/P-002).
+# --------------------------------------------------------------------------
+
+
+class TestPersistentMinSocFloorRestored:
+    """Smart discharge must not leave the inverter's *persistent* on-grid
+    min-SoC floor raised to the session discharge *target*.
+
+    Live symptom (06-01 evening session, target min_soc=50%, real reserve
+    11%): the entity backend wrote ``fd_soc`` (the session target, 50%) into
+    the foxess_modbus *Min SoC* register — which is the inverter's PERSISTENT
+    self-use on-grid floor, not a per-session knob. When the session ended
+    and the inverter reverted to self-use, the floor was still 50%, so the
+    inverter refused to discharge the battery below 50% and served house load
+    from the grid (~1.4 kW import) instead. That violates P-001 (no import
+    after forced discharge) and P-002 (the *session* min_soc must not become
+    the persistent reserve).
+
+    The observable contract: after a discharge session ends (revert to
+    self-use), the persistent Min SoC entity must be restored to the user's
+    configured reserve (e.g. 11%), NOT left at the session target (50%).
+    C-025 (session-boundary cleanliness): per-session state must not leak.
+    """
+
+    @pytest.mark.asyncio
+    async def test_teardown_restores_persistent_min_soc_to_reserve(self) -> None:
+        min_soc_eid = "number.foxess_min_soc"
+        opts = {
+            CONF_WORK_MODE_ENTITY: "select.foxess_work_mode",
+            CONF_DISCHARGE_POWER_ENTITY: "number.foxess_force_discharge_power",
+            CONF_MIN_SOC_ENTITY: min_soc_eid,
+        }
+        hass = _make_hass(
+            opts,
+            {
+                "number.foxess_force_discharge_power": _state(unit="kW", max_val=15),
+                min_soc_eid: _state(unit="%", min_val=10, max_val=100, step=1),
+            },
+        )
+        # User's genuine outage reserve is 11%, far below the session target.
+        adapter = FoxESSEntityAdapter(
+            entry_options=opts, max_power_w=15000, min_soc_on_grid=11
+        )
+
+        # Active discharge: stop target (fd_soc) is 50%.
+        await adapter.apply_mode(
+            hass, WorkMode.FORCE_DISCHARGE, power_w=3500, fd_soc=50
+        )
+        # Session ends → revert to self-use (the teardown path).
+        await adapter.remove_override(hass, WorkMode.FORCE_DISCHARGE)
+
+        writes = _power_set_value_calls(hass, min_soc_eid)
+        # During discharge the target (50) is written; the LAST write — on
+        # teardown — must restore the persistent reserve (11), not leave 50.
+        assert writes, "expected at least one Min SoC write"
+        assert writes[-1] == 11, (
+            "After the session ends, the persistent Min SoC floor must be "
+            f"restored to the configured reserve (11%), got writes={writes}. "
+            "Leaving it at the session target (50%) makes self-use import "
+            "from the grid instead of discharging the battery (P-001/P-002)."
+        )
+
+    @pytest.mark.asyncio
+    async def test_active_discharge_still_targets_session_min_soc(self) -> None:
+        # C-002 regression guard: while discharging, the stop target written
+        # to the inverter must remain the session min_soc (50), so force
+        # discharge still stops at the session target.
+        min_soc_eid = "number.foxess_min_soc"
+        opts = {
+            CONF_WORK_MODE_ENTITY: "select.foxess_work_mode",
+            CONF_DISCHARGE_POWER_ENTITY: "number.foxess_force_discharge_power",
+            CONF_MIN_SOC_ENTITY: min_soc_eid,
+        }
+        hass = _make_hass(
+            opts,
+            {
+                "number.foxess_force_discharge_power": _state(unit="kW", max_val=15),
+                min_soc_eid: _state(unit="%", min_val=10, max_val=100, step=1),
+            },
+        )
+        adapter = FoxESSEntityAdapter(
+            entry_options=opts, max_power_w=15000, min_soc_on_grid=11
+        )
+
+        await adapter.apply_mode(
+            hass, WorkMode.FORCE_DISCHARGE, power_w=3500, fd_soc=50
+        )
+
+        writes = _power_set_value_calls(hass, min_soc_eid)
+        assert writes == [50], (
+            "Active force-discharge must write the session target (50) as the "
+            f"force-discharge stop SoC, got {writes}"
+        )

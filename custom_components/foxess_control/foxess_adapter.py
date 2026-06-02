@@ -661,9 +661,15 @@ class FoxESSEntityAdapter:
         self,
         entry_options: dict[str, Any],
         max_power_w: int,
+        min_soc_on_grid: int = DEFAULT_API_MIN_SOC,
     ) -> None:
         self._opts = entry_options
         self._max_power_w = max_power_w
+        # The user's configured persistent on-grid min-SoC reserve. Used to
+        # restore the inverter's persistent Min SoC floor on session teardown
+        # so a discharge session does not leave it raised to the session
+        # target (P-001/P-002, C-025).
+        self._min_soc_on_grid = min_soc_on_grid
         self._first_write: dict[str, bool] = {}
         self._warned_missing_export_limit = False
 
