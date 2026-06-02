@@ -8,10 +8,12 @@ with zero changes to call sites.
 
 from __future__ import annotations
 
+import datetime
 import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections import deque
     from collections.abc import Callable
 
 _CHARGE_FIELDS = (
@@ -94,3 +96,59 @@ def remove_session_filter(
 ) -> None:
     """Remove a previously installed `SessionContextFilter`."""
     logger.removeFilter(f)
+
+
+_SEVERITY_LEVELS = {
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+}
+
+
+def record_operational_error(
+    logger: logging.Logger,
+    buffer: deque[dict[str, Any]] | None,
+    *,
+    category: str,
+    attempted: str,
+    exc: BaseException,
+    hint: str | None = None,
+    context: dict[str, Any] | None = None,
+    severity: str = "warning",
+) -> None:
+    """Log a self-sufficient operational-error line and record it to a ring buffer.
+
+    Brand-agnostic (C-039): takes the ring buffer as a parameter rather than
+    importing brand domain data.  Pass ``None`` for *buffer* to log only.  The
+    log line names the category, what was attempted, the exception type and
+    string, and an optional likely-cause *hint*, so a single pasted line is
+    self-sufficient.  The buffer record is the structured form exported by the
+    diagnostics platform.
+
+    This is distinct from the listener's ``_record_error`` (which records a
+    session abort to ``smart_error_state`` and raises a Repair issue).  This
+    helper is for operational/diagnostic errors surfaced via the diagnostics
+    download, not session aborts.
+
+    *context* should contain only non-secret facts; the diagnostics exporter
+    redacts known-sensitive keys, but do not put raw tokens or passwords here.
+    """
+    exc_type = type(exc).__name__
+    message = f"[{category}] {attempted}: {exc_type}: {exc}"
+    if hint:
+        message += f" — {hint}"
+    logger.log(_SEVERITY_LEVELS.get(severity, logging.WARNING), "%s", message)
+    if buffer is not None:
+        buffer.append(
+            {
+                "t": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
+                "category": category,
+                "attempted": attempted,
+                "exc_type": exc_type,
+                "exc_str": str(exc),
+                "hint": hint,
+                "context": dict(context) if context else {},
+                "severity": severity,
+            }
+        )
