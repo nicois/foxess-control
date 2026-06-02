@@ -199,6 +199,7 @@ def _get_entity_adapter(hass: HomeAssistant) -> FoxESSEntityAdapter:
     return FoxESSEntityAdapter(
         entry_options=dict(_get_first_entry(hass).options),
         max_power_w=_cfg(hass).max_power_w,
+        min_soc_on_grid=_cfg(hass).min_soc_on_grid,
     )
 
 

@@ -259,6 +259,7 @@ def _build_foxess_adapter(
         return FoxESSEntityAdapter(
             entry_options=dict(_get_first_entry(hass).options),
             max_power_w=_cfg(hass).max_power_w,
+            min_soc_on_grid=state.get("min_soc_on_grid", _cfg(hass).min_soc_on_grid),
         )
     inv = inverter or _get_inverter(hass)
     entry_id = _first_entry_id(hass)

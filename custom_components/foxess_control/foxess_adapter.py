@@ -755,17 +755,27 @@ class FoxESSEntityAdapter:
                     self._log_first_write(power_entity, "set_value", value, err)
                     raise
 
+        # The foxess_modbus 'Min SoC' register is the inverter's PERSISTENT
+        # on-grid floor. During force discharge it doubles as the stop SoC,
+        # so we write the session target (fd_soc). On any non-discharge mode
+        # (self-use teardown) we MUST restore it to the user's configured
+        # reserve — otherwise the session target is left as the persistent
+        # floor and self-use imports from the grid instead of discharging the
+        # battery down to the real reserve (P-001/P-002, C-025).
         min_soc_entity = self._opts.get(CONF_MIN_SOC_ENTITY)
-        if min_soc_entity and mode == WorkMode.FORCE_DISCHARGE:
+        if min_soc_entity:
+            min_soc_value = (
+                fd_soc if mode == WorkMode.FORCE_DISCHARGE else self._min_soc_on_grid
+            )
             try:
                 await hass.services.async_call(
                     _entity_service_domain(min_soc_entity, "number"),
                     "set_value",
-                    {"entity_id": min_soc_entity, "value": fd_soc},
+                    {"entity_id": min_soc_entity, "value": min_soc_value},
                 )
-                self._log_first_write(min_soc_entity, "set_value", fd_soc)
+                self._log_first_write(min_soc_entity, "set_value", min_soc_value)
             except Exception as err:
-                self._log_first_write(min_soc_entity, "set_value", fd_soc, err)
+                self._log_first_write(min_soc_entity, "set_value", min_soc_value, err)
                 raise
 
     async def remove_override(
