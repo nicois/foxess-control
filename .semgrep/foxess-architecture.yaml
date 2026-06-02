@@ -134,6 +134,17 @@ rules:
       - pattern-not-inside: |
           def _wait_for_stage(...):
             ...
+      # New poll primitive + DOM-capture routine in conftest.py.
+      # ``wait_for_condition`` wraps page.evaluate in its own
+      # context-destroyed retry (``_eval``); ``_capture_failure`` is
+      # best-effort and suppresses all exceptions, so the retry layer
+      # does not apply.
+      - pattern-not-inside: |
+          def wait_for_condition(...):
+            ...
+      - pattern-not-inside: |
+          def _capture_failure(...):
+            ...
       # Class-scoped retry helpers — same context-destroyed retry
       # contract as the module-level helpers, with form- and
       # screenshot-specific recovery semantics.

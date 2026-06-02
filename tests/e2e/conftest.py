@@ -17,6 +17,7 @@ state from prior tests.
 from __future__ import annotations
 
 import contextlib
+import itertools
 import logging
 import os
 import shutil
@@ -289,6 +290,56 @@ def _build_container_once() -> None:
 def _worker_id() -> str:
     """Return the xdist worker ID, or 'main' for serial runs."""
     return os.environ.get("PYTEST_XDIST_WORKER", "main")
+
+
+_CAPTURE_COUNTER = itertools.count(1)
+
+_DOM_SUMMARY_JS = """() => {
+    function present(root, tag) {
+        if (root.querySelector(tag)) return true;
+        for (const el of root.querySelectorAll('*')) {
+            if (el.shadowRoot && present(el.shadowRoot, tag)) return true;
+        }
+        return false;
+    }
+    const tags = ['home-assistant','home-assistant-main','ha-panel-lovelace',
+        'hui-root','ha-panel-error','hui-error-card'].filter(t => present(document, t));
+    let error_text = null;
+    const err = document.querySelector('ha-panel-error, hui-error-card');
+    if (err) error_text = (err.textContent || '').trim().slice(0, 300);
+    return {tags, error_text};
+}"""
+
+
+def _failure_capture_dir() -> Path:
+    d = Path(__file__).parent / "screenshots" / _worker_id() / "failures"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _slug(text: str) -> str:
+    return "".join(c if c.isalnum() else "-" for c in text)[:60].strip("-") or "wait"
+
+
+def _capture_failure(page: Any, description: str) -> str:
+    """Best-effort DOM capture on a wait failure. Never raises."""
+    n = next(_CAPTURE_COUNTER)
+    base = _failure_capture_dir() / f"{_slug(description)}-{n}"
+    parts = [f"capture #{n} ({description})"]
+    with contextlib.suppress(Exception):
+        info = page.evaluate(_DOM_SUMMARY_JS)
+        if isinstance(info, dict):
+            if info.get("tags") is not None:
+                parts.append(f"elements present: {info['tags']}")
+            if info.get("error_text"):
+                parts.append(f"error panel text: {info['error_text']!r}")
+    with contextlib.suppress(Exception):
+        base.with_suffix(".html").write_text(page.content())
+        parts.append(f"html: {base.with_suffix('.html').name}")
+    with contextlib.suppress(Exception):
+        page.screenshot(path=str(base.with_suffix(".png")), full_page=True)
+        parts.append(f"png: {base.with_suffix('.png').name}")
+    return " | ".join(parts)
 
 
 def _container_name() -> str:
