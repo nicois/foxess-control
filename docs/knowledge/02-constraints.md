@@ -436,9 +436,12 @@ invisible to the dashboard user.
 normally when it is actually failing.
 **Traces**: D-029 (session-level error state surfaced via the
 Smart Battery Status sensor), D-048 (sensor-listener write
-failures surface as HA Repair issues);
+failures surface as HA Repair issues), D-059 (operational errors
+recorded to an always-on ring buffer + self-sufficient log line,
+exported via the diagnostics download);
 `tests/test_services.py::TestErrorSurfacing`,
-`tests/test_sensor_listener_safety.py::TestSensorListenerFailureSurfacesRepair` (6)
+`tests/test_sensor_listener_safety.py::TestSensorListenerFailureSurfacesRepair` (6),
+`tests/test_error_recording.py`, `tests/test_diagnostics.py`
 
 ### C-038: Sensor-listener parameter parity
 **Priority enforced**: P-005 (operational transparency) — when the

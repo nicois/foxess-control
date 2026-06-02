@@ -110,6 +110,25 @@ charge/discharge scenarios through containerised HA + simulator
 | `TestPersistentMinSocFloorRestored::test_teardown_restores_persistent_min_soc_to_reserve` | Entity adapter restores the persistent Min SoC entity to the configured reserve on self-use teardown (not left at the session target) | C-001, C-025 |
 | `TestPersistentMinSocFloorRestored::*` (inverse) | Active force discharge still writes the session target as the stop SoC | C-002 |
 
+## Operational-error capture & diagnostics (D-059)
+
+**Constraints**: C-026, C-039
+**Source**: `tests/test_error_recording.py`, `tests/test_diagnostics.py`
+
+| Test | Verifies | Constraint |
+|---|---|---|
+| `test_domain_data_has_bounded_recent_errors_buffer` | Always-on `recent_errors` deque, maxlen 30, no shared mutable default | C-026 |
+| `test_records_self_sufficient_log_line` | Log line names category + attempt + exc type + exc str + hint | C-026 |
+| `test_appends_structured_record` | Buffer record has all 8 keys with correct values | C-026 |
+| `test_respects_buffer_maxlen` | Oldest evicted at maxlen; newest retained | C-026 |
+| `test_buffer_none_logs_without_crashing` | `buffer=None` logs only (brand-agnostic, no domain data needed) | C-039 |
+| `test_severity_maps_to_log_level` | severity string → correct log level | C-026 |
+| `test_battery_id_discovery_records_ws_handshake_error` | Issue-#8 site: `WSServerHandshakeError` recorded with region hint + host/plant_id context | C-026 |
+| (BMS-temp / entity-write / REST-poll site tests) | Migrated sites record typed errors; contract (re-raise / fallback) unchanged | C-026 |
+| `test_diagnostics_includes_recent_errors` | Diagnostics exports the ring buffer | C-026 |
+| `test_diagnostics_environment_reports_host_and_ws_mode` | `environment` section reports resolved host, ws_mode, WS state, compound-id status | C-026 |
+| `test_diagnostics_redacts_secrets_everywhere` | No token/serial/compound-id/api_key leaks anywhere in the download (mutation-verified load-bearing) | C-026 |
+
 ## Smart Charge Pacing
 
 **Constraints**: C-014

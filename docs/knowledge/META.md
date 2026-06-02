@@ -917,6 +917,23 @@ current. No priority inversions, no unconstrained priorities.
 
 ---
 
+### 2026-06-02 — Update (D-059 structured error capture)
+
+**Type**: Update workflow, propagating the error-handling/diagnostics
+feature (spec + plan under `docs/superpowers/`) into the tree.
+
+- **New D-059** (`04-design/observability.md`, a new design file):
+  `record_operational_error` helper + always-on `recent_errors` ring
+  buffer + diagnostics `recent_errors`/`environment` export. Classified
+  `other`, serves P-005, traces C-026 + C-039.
+- **C-026** `Traces` extended with D-059 + the two new test files.
+- **06-tests.md**: new "Operational-error capture & diagnostics (D-059)"
+  section. **05-coverage.md**: D-059 in the P-005 + C-026 rows; D-NNN
+  counts 59→60 active / 56→57 unique.
+- Audit clean: no priority/classification gaps, no new collisions.
+  Motivated by GH issue #8 (battery-ID discovery failure with no
+  actionable diagnostics).
+
 ### 2026-06-02 — Update (1.0.17 + 1.0.18 discharge/WS fixes)
 
 **Type**: Update workflow (code → tree propagation), triggered by
