@@ -1534,6 +1534,12 @@ class TestControlCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
         _robust_reload(page, settle_ms=3000)
         assert _find_card(page, "foxess-control-card")
+        # The card element exists, but ``render_with`` mutates ``card._hass``
+        # and calls ``_render()`` directly — so HA must have wired the initial
+        # ``_hass`` in first.  Without this gate the eval can run against a
+        # not-yet-hass-ready card and return ``{no_card: true}``, which then
+        # KeyErrors on ``result["has_clamp_active"]`` (flaky on slow/loaded CI).
+        _wait_for_card_hass(page, "foxess-control-card")
 
         def render_with(clamp_active: bool) -> dict[str, bool]:
             result = _safe_evaluate(
