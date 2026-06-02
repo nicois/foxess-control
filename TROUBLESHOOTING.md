@@ -50,3 +50,14 @@ Common issues and how to diagnose them. For each problem, work through the check
 3. **API quota:** The FoxESS Cloud allows approximately 1440 requests per day (1 per minute). If you're running multiple integrations against the same account or have reduced the polling interval aggressively, you may be hitting rate limits. Check HA logs for "rate limit" or errno 40400 messages.
 4. **Inverter offline:** If the inverter itself is offline (e.g. powered down overnight for hybrid systems without EPS), the API returns stale data. This is normal — values will refresh when the inverter comes back online.
 5. **HA restart:** After an HA restart, the first data update may take up to one polling interval. Check that the integration loaded successfully in Settings > Devices & Services.
+
+## Reporting a problem
+
+If the checks above don't resolve the issue, **download a diagnostics file before filing a report** — it usually contains everything a maintainer needs, avoiding back-and-forth:
+
+1. Go to **Settings > Devices & Services > FoxESS Control** and click **"Download Diagnostics"**.
+2. Attach the downloaded file to your GitHub issue.
+
+The file includes a **`recent_errors`** buffer (the last 30 structured operational errors, captured automatically — you do *not* need to enable debug logging first) and an **`environment`** section: integration version, resolved cloud host, WebSocket mode and connection state, battery-discovery status, and inverter model. These are the facts most reports otherwise have to be asked for. All secrets (API keys, passwords, serials, the battery compound id) are redacted from the file, so it is safe to attach to a public issue.
+
+For live/transient problems that the snapshot might miss, you can additionally enable the rolling debug-log sensor (`input_boolean.foxess_control_debug_log`) and share recent entries from `sensor.foxess_debug_log`.

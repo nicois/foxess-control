@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.19-beta.1
+
+### Added
+- **Structured operational-error capture for self-sufficient diagnostics** (C-026 / P-005, D-059). When the integration hits an operational error, the information a maintainer would otherwise have to ask for is now captured automatically — reducing back-and-forth on bug reports. Motivated by GH issue #8 (a battery-ID-discovery `WSServerHandshakeError: 200` where the resolved cloud host, `ws_mode`, exception type, and whether it worked during a session all had to be requested manually). Two surfaces:
+  - **Better log lines.** A new `record_operational_error` helper logs a self-sufficient line — `[{category}] {what-was-attempted}: {ExceptionType}: {message} — {likely-cause hint}` — so a single pasted log line names the exception type, what failed, and the probable cause. High-value error sites are migrated to it: battery-ID discovery (the issue-#8 site, now with a regional-endpoint/token hint), BMS-temperature fetch, entity-mode power/schedule/export-limit writes, and the REST poll. Each site narrows its exception handling to the meaningful types while keeping a catch-all arm so genuine bugs still surface; existing control flow (re-raise / fallback) is unchanged.
+  - **Richer HA Diagnostics download.** The "Download diagnostics" file now includes a `recent_errors` ring buffer (the last 30 structured errors, always-on — no need to enable debug logging first) and an `environment` section: integration version, resolved cloud base URL, `ws_mode`, WS-connected state, battery-compound-id discovery status, plant-id presence, inverter model/max power, and data source. All output is redacted (tokens, passwords, serials, and the battery compound id never appear) — a mutation-tested, load-bearing safety check, since the file is attached to public issue reports.
+  - This does not change any control behaviour; it is observability only. It also does not *fix* issue #8 (whose root cause is cloud/region-side) — it makes the next such report arrive self-diagnosing.
+
 ## 1.0.18
 
 ### Fixed

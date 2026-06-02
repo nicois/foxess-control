@@ -858,7 +858,7 @@ See [FAQ.md](FAQ.md) for answers to common questions: back-to-back sessions, wor
 
 See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for decision-tree guides to common issues: sessions not starting, grid import during discharge, WebSocket problems, early session aborts, and stale data.
 
-**Diagnostics:** Click "Download Diagnostics" on the integration page (Settings > Devices & Services > FoxESS Control) to export coordinator data, session state, WebSocket status, taper profile, and config — with API keys and credentials redacted.
+**Diagnostics:** Click "Download Diagnostics" on the integration page (Settings > Devices & Services > FoxESS Control) to export coordinator data, session state, WebSocket status, taper profile, and config — with API keys and credentials redacted. The download also includes a **`recent_errors`** buffer (the last 30 structured operational errors, captured automatically — you do *not* need to enable debug logging first) and an **`environment`** section (integration version, resolved cloud host, WebSocket mode and connection state, battery-discovery status, inverter model). When filing a bug report, attach this file — it usually contains everything needed to diagnose the issue without follow-up questions. Secrets (tokens, passwords, serials, the battery compound id) are redacted from the entire file.
 
 **Repair issues:** Actionable errors (unmanaged work mode, session aborts, sensor state-write failures) surface in HA's Repairs panel instead of just logs. Issues auto-clear when the problem is resolved or a new session starts. If a sensor fails to write its state, the Repair names the specific sensor and the error — other sensors continue updating rather than silently freezing.
 
