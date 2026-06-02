@@ -238,3 +238,242 @@ async def test_bms_temp_fetch_records_typed_error_on_client_error() -> None:
     assert rec["context"]["host"] == "https://eu.foxesscloud.com"
     # The raw compound id embeds a serial — must NOT be recorded verbatim.
     assert "SERIAL123" not in str(rec["context"])
+
+
+# ---------------------------------------------------------------------------
+# Entity-mode write failures (foxess_adapter) record typed errors
+# ---------------------------------------------------------------------------
+
+
+def _entity_hass(
+    entry_options: dict[str, Any],
+    *,
+    raise_exc: BaseException,
+    entity_states: dict[str, Any] | None = None,
+) -> Any:
+    """Mock hass whose services.async_call raises *raise_exc*, with
+    FoxESSControlData domain data (so recent_errors is reachable)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from custom_components.foxess_control.const import DOMAIN
+    from custom_components.foxess_control.domain_data import (
+        FoxESSControlData,
+        FoxESSEntryData,
+        build_config,
+    )
+
+    hass = MagicMock()
+    hass.services.async_call = AsyncMock(side_effect=raise_exc)
+    states_map = entity_states or {}
+    hass.states.get = MagicMock(side_effect=lambda eid: states_map.get(eid))
+    dd = FoxESSControlData()
+    dd.entries["entry1"] = FoxESSEntryData()
+    dd.config = build_config(entry_options)
+    hass.data = {DOMAIN: dd}
+    return hass, dd
+
+
+def _number_state(unit: str = "W", max_val: float = 15000) -> Any:
+    from unittest.mock import MagicMock
+
+    st = MagicMock()
+    st.state = "0"
+    st.attributes = {"unit_of_measurement": unit, "min": 0, "max": max_val}
+    return st
+
+
+@pytest.mark.asyncio
+async def test_entity_workmode_write_failure_records_and_reraises() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    from custom_components.foxess_control.const import (
+        CONF_WORK_MODE_ENTITY,
+    )
+    from custom_components.foxess_control.foxess.inverter import WorkMode
+    from custom_components.foxess_control.foxess_adapter import FoxESSEntityAdapter
+
+    wm = "select.foxess_work_mode"
+    opts = {CONF_WORK_MODE_ENTITY: wm}
+    hass, dd = _entity_hass(opts, raise_exc=HomeAssistantError("service failed"))
+    adapter = FoxESSEntityAdapter(entry_options=opts, max_power_w=15000)
+
+    with pytest.raises(HomeAssistantError):
+        await adapter.apply_mode(hass, WorkMode.SELF_USE)
+
+    assert len(dd.recent_errors) == 1
+    rec = dd.recent_errors[0]
+    assert rec["category"] == "mode_write"
+    assert rec["exc_type"] == "HomeAssistantError"
+    assert rec["context"]["entity_id"] == wm
+
+
+@pytest.mark.asyncio
+async def test_entity_power_write_failure_records_and_reraises() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    from custom_components.foxess_control.const import (
+        CONF_DISCHARGE_POWER_ENTITY,
+        CONF_WORK_MODE_ENTITY,
+    )
+    from custom_components.foxess_control.foxess.inverter import WorkMode
+    from custom_components.foxess_control.foxess_adapter import FoxESSEntityAdapter
+
+    wm = "select.foxess_work_mode"
+    power = "number.foxess_discharge_power"
+    opts = {CONF_WORK_MODE_ENTITY: wm, CONF_DISCHARGE_POWER_ENTITY: power}
+    # First call (work-mode select) succeeds; the power set_value raises.
+    from unittest.mock import AsyncMock, MagicMock
+
+    from custom_components.foxess_control.const import DOMAIN
+    from custom_components.foxess_control.domain_data import (
+        FoxESSControlData,
+        FoxESSEntryData,
+        build_config,
+    )
+
+    calls = {"n": 0}
+
+    async def _async_call(domain: str, service: str, payload: Any, **kw: Any) -> None:
+        calls["n"] += 1
+        if service == "set_value":
+            raise HomeAssistantError("power write failed")
+
+    hass = MagicMock()
+    hass.services.async_call = AsyncMock(side_effect=_async_call)
+    hass.states.get = MagicMock(
+        side_effect=lambda eid: _number_state() if eid == power else None
+    )
+    dd = FoxESSControlData()
+    dd.entries["entry1"] = FoxESSEntryData()
+    dd.config = build_config(opts)
+    hass.data = {DOMAIN: dd}
+    adapter = FoxESSEntityAdapter(entry_options=opts, max_power_w=15000)
+
+    with pytest.raises(HomeAssistantError):
+        await adapter.apply_mode(hass, WorkMode.FORCE_DISCHARGE, power_w=3000)
+
+    assert len(dd.recent_errors) == 1
+    rec = dd.recent_errors[0]
+    assert rec["category"] == "power_write"
+    assert rec["exc_type"] == "HomeAssistantError"
+    assert rec["context"]["entity_id"] == power
+    assert "value" in rec["context"]
+
+
+@pytest.mark.asyncio
+async def test_entity_min_soc_write_failure_records_and_reraises() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    from custom_components.foxess_control.const import (
+        CONF_MIN_SOC_ENTITY,
+        CONF_WORK_MODE_ENTITY,
+    )
+    from custom_components.foxess_control.foxess.inverter import WorkMode
+    from custom_components.foxess_control.foxess_adapter import FoxESSEntityAdapter
+
+    wm = "select.foxess_work_mode"
+    min_soc = "number.foxess_min_soc"
+    opts = {CONF_WORK_MODE_ENTITY: wm, CONF_MIN_SOC_ENTITY: min_soc}
+    # Work-mode select succeeds; min-soc set_value raises.
+    from unittest.mock import AsyncMock, MagicMock
+
+    from custom_components.foxess_control.const import DOMAIN
+    from custom_components.foxess_control.domain_data import (
+        FoxESSControlData,
+        FoxESSEntryData,
+        build_config,
+    )
+
+    async def _async_call(domain: str, service: str, payload: Any, **kw: Any) -> None:
+        if service == "set_value":
+            raise HomeAssistantError("min soc write failed")
+
+    hass = MagicMock()
+    hass.services.async_call = AsyncMock(side_effect=_async_call)
+    hass.states.get = MagicMock(side_effect=lambda eid: None)
+    dd = FoxESSControlData()
+    dd.entries["entry1"] = FoxESSEntryData()
+    dd.config = build_config(opts)
+    hass.data = {DOMAIN: dd}
+    adapter = FoxESSEntityAdapter(entry_options=opts, max_power_w=15000)
+
+    with pytest.raises(HomeAssistantError):
+        await adapter.apply_mode(hass, WorkMode.SELF_USE)
+
+    assert len(dd.recent_errors) == 1
+    rec = dd.recent_errors[0]
+    assert rec["category"] == "min_soc_write"
+    assert rec["context"]["entity_id"] == min_soc
+
+
+@pytest.mark.asyncio
+async def test_entity_export_limit_write_failure_records_and_reraises() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    from custom_components.foxess_control.const import CONF_EXPORT_LIMIT_ENTITY
+    from custom_components.foxess_control.foxess_adapter import FoxESSEntityAdapter
+
+    eid = "number.foxess_export_limit"
+    opts = {CONF_EXPORT_LIMIT_ENTITY: eid}
+    hass, dd = _entity_hass(
+        opts,
+        raise_exc=HomeAssistantError("export write failed"),
+        entity_states={eid: _number_state()},
+    )
+    adapter = FoxESSEntityAdapter(entry_options=opts, max_power_w=15000)
+
+    with pytest.raises(HomeAssistantError):
+        await adapter.set_export_limit_w(hass, 5000)
+
+    assert len(dd.recent_errors) == 1
+    rec = dd.recent_errors[0]
+    assert rec["category"] == "export_limit_write"
+    assert rec["context"]["entity_id"] == eid
+    assert "value" in rec["context"]
+
+
+@pytest.mark.asyncio
+async def test_cloud_adapter_export_limit_write_failure_records_and_reraises() -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    from homeassistant.exceptions import HomeAssistantError
+
+    from custom_components.foxess_control.const import DOMAIN
+    from custom_components.foxess_control.domain_data import (
+        FoxESSControlData,
+        FoxESSEntryData,
+    )
+    from custom_components.foxess_control.foxess_adapter import FoxESSCloudAdapter
+
+    eid = "number.foxess_export_limit"
+    hass = MagicMock()
+    hass.services.async_call = AsyncMock(
+        side_effect=HomeAssistantError("export write failed")
+    )
+    dd = FoxESSControlData()
+    dd.entries["entry1"] = FoxESSEntryData()
+    hass.data = {DOMAIN: dd}
+
+    inverter = MagicMock()
+    inverter.max_power_w = 15000
+    import datetime as _dt
+
+    now = _dt.datetime(2026, 6, 2, 10, 0, tzinfo=_dt.UTC)
+    adapter = FoxESSCloudAdapter(
+        hass=hass,
+        inverter=inverter,
+        min_soc_on_grid=11,
+        api_min_soc=10,
+        start=now,
+        end=now + _dt.timedelta(hours=1),
+        export_limit_entity=eid,
+    )
+
+    with pytest.raises(HomeAssistantError):
+        await adapter.set_export_limit_w(hass, 5000)
+
+    assert len(dd.recent_errors) == 1
+    rec = dd.recent_errors[0]
+    assert rec["category"] == "export_limit_write"
+    assert rec["context"]["entity_id"] == eid
+    assert rec["context"]["value"] == 5000

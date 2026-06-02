@@ -15,7 +15,7 @@ import datetime  # noqa: TC003 — used at runtime by adapters
 import logging
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.issue_registry import (
     IssueSeverity,
     async_create_issue,
@@ -38,6 +38,7 @@ from .smart_battery.algorithms import (
     DISCHARGE_SAFETY_FACTOR,
     compute_safe_schedule_end,
 )
+from .smart_battery.logging import record_operational_error
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -75,6 +76,30 @@ _SCHEDULE_GROUP_KEYS = {
 }
 
 _PLACEHOLDER_MODES = {"Invalid", ""}
+
+
+def _recent_errors(hass: HomeAssistant) -> Any:
+    """Return the domain ring buffer for operational errors, or None.
+
+    Defensive: a write may be attempted during teardown when domain data
+    is gone — recording is best-effort and must never mask the original
+    write failure (which is re-raised by the caller).
+    """
+    try:
+        from ._helpers import _dd
+
+        return _dd(hass).recent_errors
+    except Exception:  # noqa: BLE001 — buffer lookup is best-effort
+        return None
+
+
+# Entity/HA-service write failures we can confidently enumerate: HA service
+# layer errors plus the value-conversion errors the write bodies can raise.
+_WRITE_ERRORS: tuple[type[Exception], ...] = (
+    HomeAssistantError,
+    ValueError,
+    TypeError,
+)
 
 
 def _to_minutes(hour: int, minute: int) -> int:
@@ -515,11 +540,39 @@ class FoxESSCloudAdapter:
                     value_w,
                 )
                 self._first_export_write_logged = True
-        except Exception:
+        except _WRITE_ERRORS as err:
             _LOGGER.warning(
                 "Export-limit write FAILED: %s ← %d W",
                 entity_id,
                 value_w,
+            )
+            record_operational_error(
+                _LOGGER,
+                _recent_errors(hass),
+                category="export_limit_write",
+                attempted="cloud-mode export-limit set_value (cross-integration)",
+                exc=err,
+                hint=(
+                    "HA service call to the export-limit entity failed — check "
+                    "the entity exists and is available"
+                ),
+                context={"entity_id": entity_id, "value": value_w},
+            )
+            raise
+        except Exception as err:
+            _LOGGER.warning(
+                "Export-limit write FAILED: %s ← %d W",
+                entity_id,
+                value_w,
+            )
+            record_operational_error(
+                _LOGGER,
+                _recent_errors(hass),
+                category="unexpected",
+                attempted="cloud-mode export-limit set_value (cross-integration)",
+                exc=err,
+                context={"entity_id": entity_id, "value": value_w},
+                severity="error",
             )
             raise
 
@@ -701,6 +754,37 @@ class FoxESSEntityAdapter:
                 error,
             )
 
+    def _record_write_error(
+        self,
+        hass: HomeAssistant,
+        *,
+        category: str,
+        attempted: str,
+        exc: BaseException,
+        entity_id: str,
+        value: Any,
+        severity: str = "warning",
+    ) -> None:
+        """Record an entity-mode write failure to the diagnostics ring buffer.
+
+        The write itself is still re-raised by the caller — this only adds a
+        self-sufficient diagnostic so a silent (to the user) inverter-no-op
+        becomes visible via the diagnostics download (C-020/C-026).
+        """
+        record_operational_error(
+            _LOGGER,
+            _recent_errors(hass),
+            category=category,
+            attempted=attempted,
+            exc=exc,
+            hint=(
+                "HA service call to the foxess_modbus target entity failed — "
+                "check the entity exists and is available"
+            ),
+            context={"entity_id": entity_id, "value": value},
+            severity=severity,
+        )
+
     async def apply_mode(
         self,
         hass: HomeAssistant,
@@ -726,8 +810,27 @@ class FoxESSEntityAdapter:
                     {"entity_id": wm_entity, "option": mode_option},
                 )
                 self._log_first_write(wm_entity, "select_option", mode_option)
-            except Exception as err:
+            except _WRITE_ERRORS as err:
                 self._log_first_write(wm_entity, "select_option", mode_option, err)
+                self._record_write_error(
+                    hass,
+                    category="mode_write",
+                    attempted="entity-mode work-mode select_option",
+                    exc=err,
+                    entity_id=wm_entity,
+                    value=mode_option,
+                )
+                raise
+            except Exception as err:
+                self._record_write_error(
+                    hass,
+                    category="unexpected",
+                    attempted="entity-mode work-mode select_option",
+                    exc=err,
+                    entity_id=wm_entity,
+                    value=mode_option,
+                    severity="error",
+                )
                 raise
 
         if power_w is not None and mode in (
@@ -751,8 +854,27 @@ class FoxESSEntityAdapter:
                         {"entity_id": power_entity, "value": value},
                     )
                     self._log_first_write(power_entity, "set_value", value)
-                except Exception as err:
+                except _WRITE_ERRORS as err:
                     self._log_first_write(power_entity, "set_value", value, err)
+                    self._record_write_error(
+                        hass,
+                        category="power_write",
+                        attempted="entity-mode force power set_value",
+                        exc=err,
+                        entity_id=power_entity,
+                        value=value,
+                    )
+                    raise
+                except Exception as err:
+                    self._record_write_error(
+                        hass,
+                        category="unexpected",
+                        attempted="entity-mode force power set_value",
+                        exc=err,
+                        entity_id=power_entity,
+                        value=value,
+                        severity="error",
+                    )
                     raise
 
         # The foxess_modbus 'Min SoC' register is the inverter's PERSISTENT
@@ -774,8 +896,27 @@ class FoxESSEntityAdapter:
                     {"entity_id": min_soc_entity, "value": min_soc_value},
                 )
                 self._log_first_write(min_soc_entity, "set_value", min_soc_value)
-            except Exception as err:
+            except _WRITE_ERRORS as err:
                 self._log_first_write(min_soc_entity, "set_value", min_soc_value, err)
+                self._record_write_error(
+                    hass,
+                    category="min_soc_write",
+                    attempted="entity-mode min-SoC set_value",
+                    exc=err,
+                    entity_id=min_soc_entity,
+                    value=min_soc_value,
+                )
+                raise
+            except Exception as err:
+                self._record_write_error(
+                    hass,
+                    category="unexpected",
+                    attempted="entity-mode min-SoC set_value",
+                    exc=err,
+                    entity_id=min_soc_entity,
+                    value=min_soc_value,
+                    severity="error",
+                )
                 raise
 
     async def remove_override(
@@ -813,8 +954,27 @@ class FoxESSEntityAdapter:
                 blocking=True,
             )
             self._log_first_write(entity_id, "set_value", value)
-        except Exception as err:
+        except _WRITE_ERRORS as err:
             self._log_first_write(entity_id, "set_value", value, err)
+            self._record_write_error(
+                hass,
+                category="export_limit_write",
+                attempted="entity-mode export-limit set_value",
+                exc=err,
+                entity_id=entity_id,
+                value=value,
+            )
+            raise
+        except Exception as err:
+            self._record_write_error(
+                hass,
+                category="unexpected",
+                attempted="entity-mode export-limit set_value",
+                exc=err,
+                entity_id=entity_id,
+                value=value,
+                severity="error",
+            )
             raise
 
     async def get_export_limit_w(
