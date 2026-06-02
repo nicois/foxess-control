@@ -629,6 +629,47 @@ def setup_smart_charge_listeners(
             domain,
         )
 
+    def _cancel_deferred_wake(cur_state: dict[str, Any]) -> None:
+        """Cancel any pending deferred-start point-in-time wake."""
+        unsub = cur_state.pop("_deferred_wake_unsub", None)
+        cur_state.pop("_deferred_wake_at", None)
+        if unsub is not None:
+            try:
+                unsub()
+            except Exception:
+                _LOGGER.debug(
+                    "Smart charge: deferred-wake cancel raised: %s",
+                    _exc_summary(),
+                )
+
+    def _schedule_deferred_wake(
+        cur_state: dict[str, Any], deferred: datetime.datetime
+    ) -> None:
+        """Schedule a one-shot wake at the committed deferred-start time.
+
+        Without this, the deferred→active transition only happens when
+        the periodic ``SMART_CHARGE_ADJUST_SECONDS`` (5 min) interval
+        tick next observes ``now >= deferred_start_committed`` — so the
+        transition (and the ``on_session_started`` WS-startup hook) can
+        lag the real deferred-start deadline by up to one full interval
+        (live 2026-06-02: status sensor read "charging" at 01:00:10 but
+        the WebSocket did not come up until 01:04:04 — ~3 m 54 s of
+        ``data_freshness=api``).  This makes the transition event-driven
+        on the deadline itself.  C-020.
+
+        Idempotent: a no-op when a wake is already scheduled for the same
+        deadline; reschedules when the recomputed deadline moves (the
+        deferred-start algorithm re-runs each tick on live inputs).
+        """
+        existing_at: datetime.datetime | None = cur_state.get("_deferred_wake_at")
+        if existing_at is not None and existing_at == deferred:
+            return
+        _cancel_deferred_wake(cur_state)
+        cur_state["_deferred_wake_unsub"] = async_track_point_in_time(
+            hass, _adjust_charge_power, dt_util.as_utc(deferred)
+        )
+        cur_state["_deferred_wake_at"] = deferred
+
     async def _adjust_charge_power_inner(
         cur_state: dict[str, Any],
     ) -> None:
@@ -790,8 +831,15 @@ def setup_smart_charge_listeners(
                     effective_max,
                     headroom * 100,
                 )
+                # Event-driven transition: wake exactly at the committed
+                # deferred-start deadline rather than waiting for the next
+                # periodic interval tick (C-020 — see _schedule_deferred_wake).
+                _schedule_deferred_wake(cur_state, deferred)
                 _maybe_clear_unreachable_on_early_return()
                 return
+            # Deadline reached — transitioning to active now; drop any
+            # pending wake so it can't re-fire after the transition.
+            _cancel_deferred_wake(cur_state)
 
             # Time to start charging
             new_power = call_algo(
@@ -917,6 +965,9 @@ def setup_smart_charge_listeners(
             # above.  Without this, the sensor recomputes deferred from live
             # inputs and flips back to "charging" within seconds.
             _cs["deferred_start_committed"] = deferred
+            # Re-arm the event-driven wake for the new (re-deferred)
+            # deadline so the resumed transition is prompt (C-020).
+            _schedule_deferred_wake(_cs, deferred)
             await save_session(
                 _get_store(hass, domain),
                 "smart_charge",
