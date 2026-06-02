@@ -7,6 +7,7 @@ field access is statically checkable.  Brand integrations subclass
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -55,6 +56,14 @@ class SmartBatteryDomainData:
 
     # Pending override cleanup for retry on next poll
     pending_override_cleanup: dict[str, Any] | None = None
+
+    # Always-on bounded ring buffer of recent structured operational
+    # errors, exported by the brand diagnostics platform.  Independent of
+    # the opt-in debug-log sensor.  See
+    # smart_battery/logging.py::record_operational_error.
+    recent_errors: deque[dict[str, Any]] = field(
+        default_factory=lambda: deque(maxlen=30)
+    )
 
 
 _LEGACY_KEY_MAP: dict[str, str] = {
