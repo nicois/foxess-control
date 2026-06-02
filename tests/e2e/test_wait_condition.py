@@ -141,3 +141,54 @@ def test_timeout_captures_dom(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
         )
     assert "capture" in str(ei.value)
     assert list(tmp_path.glob("*.html"))
+
+
+def test_form_input_wait_for_form_captures_on_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Class-scoped _wait_for_form genuine timeout leaves a DOM capture."""
+    from playwright.sync_api import TimeoutError as PwTimeoutError
+
+    from tests.e2e import test_ui
+
+    monkeypatch.setattr(cf, "_failure_capture_dir", lambda: tmp_path)
+    inst = test_ui.TestFormInputPersistence()
+
+    class _TimeoutPage(_StubPage):
+        def wait_for_function(self, *a: Any, **k: Any) -> Any:
+            raise PwTimeoutError("Page.wait_for_function: Timeout 10000ms exceeded.")
+
+        def wait_for_load_state(self, *a: Any, **k: Any) -> None:
+            return None
+
+    with pytest.raises(PwTimeoutError):
+        inst._wait_for_form(_TimeoutPage())
+    assert list(tmp_path.glob("*.html"))
+
+
+def test_form_input_safe_evaluate_captures_on_final_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Class-scoped _safe_evaluate final-failure path leaves a DOM capture."""
+    from tests.e2e import test_ui
+
+    monkeypatch.setattr(cf, "_failure_capture_dir", lambda: tmp_path)
+    inst = test_ui.TestFormInputPersistence()
+
+    class _AlwaysDestroyed(_StubPage):
+        def evaluate(self, expr: str, *a: Any) -> Any:
+            raise PlaywrightError("Execution context was destroyed")
+
+        def wait_for_load_state(self, *a: Any, **k: Any) -> None:
+            return None
+
+    # Stub the recovery helpers so only _safe_evaluate's own retry loop
+    # runs (avoids _find_card's real ~30s wait_for_function budget). Each
+    # destroyed-context retry calls _recover_form + _wait_for_form; both
+    # become no-ops here, so the loop exhausts retries=2 fast and hits the
+    # final raise — the capture-before-raise under test.
+    monkeypatch.setattr(inst, "_recover_form", lambda *a, **k: None)
+    monkeypatch.setattr(inst, "_wait_for_form", lambda *a, **k: None)
+    with pytest.raises(PlaywrightError):
+        inst._safe_evaluate(_AlwaysDestroyed(), "() => 1")
+    assert list(tmp_path.glob("*.html"))

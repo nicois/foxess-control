@@ -2215,13 +2215,17 @@ class TestFormInputPersistence:
         context.  When that happens, wait for the page to settle, re-open
         the form if one was expected, and retry.
         """
+        from .conftest import _capture_failure
+
         for attempt in range(retries + 1):
             try:
                 return page.evaluate(expression)
             except PlaywrightError as exc:
                 if "Execution context was destroyed" not in str(exc):
+                    _capture_failure(page, "form-input: safe_evaluate")
                     raise
                 if attempt == retries:
+                    _capture_failure(page, "form-input: safe_evaluate")
                     raise
                 # Page navigated — wait for it to settle, then
                 # re-open the form (navigation resets card state).
@@ -2343,6 +2347,8 @@ class TestFormInputPersistence:
         )
 
     def _wait_for_form(self, page: Page) -> None:
+        from .conftest import _capture_failure
+
         for attempt in range(3):
             try:
                 page.wait_for_function(
@@ -2356,9 +2362,16 @@ class TestFormInputPersistence:
                 )
                 return
             except PlaywrightError as exc:
+                # PlaywrightError covers both the genuine TimeoutError (the
+                # real flake — form overlay never renders 'form-start' in 10s)
+                # and context-destroyed navigations. Capture DOM before any
+                # raise that exits the method so the next occurrence is
+                # diagnosable; control flow / retry count is unchanged.
                 if "Execution context was destroyed" not in str(exc):
+                    _capture_failure(page, "form-input: wait_for_form")
                     raise
                 if attempt == 2:
+                    _capture_failure(page, "form-input: wait_for_form")
                     raise
                 # Page navigated — recover card + form
                 self._recover_form(page)
