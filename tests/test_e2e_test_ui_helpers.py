@@ -26,16 +26,19 @@ The helpers covered:
 
 1. ``_safe_evaluate``  — wraps ``page.evaluate`` (retries=3).
 2. ``_safe_screenshot`` — wraps ``locator.screenshot`` (retries=3).
-3. ``_wait_for_card_hass`` — wraps ``page.wait_for_function`` for
-   ``_hass``-readiness (within a 30s budget).
-4. ``_find_card`` — wraps ``page.wait_for_function`` for shadow-DOM
-   element existence (within a 30s budget).
+3. ``_wait_for_card_hass`` — delegates to ``conftest.wait_for_condition``
+   (which polls ``page.evaluate``) for ``_hass``-readiness (30s budget).
+4. ``_find_card`` — delegates to ``conftest.wait_for_condition``
+   (which polls ``page.evaluate``) for shadow-DOM element existence
+   (30s budget).
 
 Each test forces the helper down its retry path by raising
-context-destroyed errors on the underlying Playwright call, captures
-every ``wait_for_load_state`` invocation, and asserts that EVERY
-observed timeout is ≤ 5000ms.  A helper still using the unbounded
-15000ms cap will fail with ``15000 > 5000``.
+context-destroyed errors on the underlying Playwright call (``page.evaluate``
+for helpers 3 & 4 since their 2026-06-03 migration to
+``wait_for_condition``; the original call for 1 & 2), captures every
+``wait_for_load_state`` invocation, and asserts that EVERY observed
+timeout is ≤ 5000ms.  A helper still using the unbounded 15000ms cap
+will fail with ``15000 > 5000``; ``wait_for_condition``'s cap is 3000ms.
 
 Style follows
 ``tests/test_e2e_page_fixture.py::TestWaitForLovelacePanelSustainedRetryBudget``
@@ -173,17 +176,22 @@ class TestSafeScreenshotBoundedSettle:
 
 class TestWaitForCardHassBoundedSettle:
     """``_wait_for_card_hass`` must not consume its 30s budget on
-    ``networkidle`` settles that never fire (C-031).
+    settles that never fire (C-031).
 
-    Unlike the other helpers, this one polls
-    ``page.wait_for_function`` inside a deadline-based loop.  The
-    settle cap there is ``min(remaining, 15000)`` — a fresh deadline
-    means the cap evaluates to 15000ms on the first retry, which is
-    the same exposure as the others.
+    **Surface migration (2026-06-03)**: ``_wait_for_card_hass`` now
+    delegates to ``conftest.wait_for_condition``, which polls
+    ``page.evaluate`` (not ``page.wait_for_function``) and, on a
+    context-destroyed navigation error, settles the new context with
+    ``page.wait_for_load_state("domcontentloaded", timeout=min(settle,
+    3000))``.  The CONTRACT is unchanged — every per-retry settle must
+    be capped at ≤ 5000ms so that a sustained churn storm cannot eat
+    the budget — only the mocked surface moves from ``wait_for_function``
+    to ``page.evaluate``.  The primitive's hard cap is 3000ms (< 5000ms);
+    a regression to an unbounded 15000ms cap would still fail here.
     """
 
     def test_per_retry_settle_capped_at_modest_budget(self) -> None:
-        """Force the first ``wait_for_function`` call to raise context-
+        """Force the first ``page.evaluate`` calls to raise context-
         destroyed.  The retry-loop's ``wait_for_load_state`` must use a
         modest cap, regardless of how much budget is remaining.
         """
@@ -193,13 +201,13 @@ class TestWaitForCardHassBoundedSettle:
         settle_timeouts: list[int] = []
         fired = {"count": 0}
 
-        def _wait_function(_pred: str, timeout: int = 30000) -> None:  # noqa: ARG001
+        def _evaluate(_expr: str) -> object:
             # Raise context-destroyed twice; on the third call return
             # success so the helper exits cleanly.
             if fired["count"] < 2:
                 fired["count"] += 1
-                raise _ctx_destroyed("Page.wait_for_function")
-            return None
+                raise _ctx_destroyed("Page.evaluate")
+            return True
 
         def _wait_load_state(
             _state: str,  # noqa: ARG001
@@ -208,7 +216,7 @@ class TestWaitForCardHassBoundedSettle:
         ) -> None:
             settle_timeouts.append(timeout)
 
-        page.wait_for_function.side_effect = _wait_function
+        page.evaluate.side_effect = _evaluate
         page.wait_for_load_state.side_effect = _wait_load_state
 
         _wait_for_card_hass(page, "foxess-control-card", timeout_ms=30000)
@@ -221,21 +229,30 @@ class TestWaitForCardHassBoundedSettle:
             assert t <= _MAX_SETTLE_MS, (
                 f"_wait_for_card_hass called wait_for_load_state with "
                 f"timeout={t}ms.  The per-retry settle MUST be capped at "
-                f"≤ {_MAX_SETTLE_MS}ms — the existing min(remaining, "
-                f"15000) cap evaluates to 15000ms when there's plenty "
-                f"of budget left, exposing the same dead-time problem "
-                f"as conftest._wait_for_stage prior to 74d7f75.  "
+                f"≤ {_MAX_SETTLE_MS}ms — under sustained CI churn a "
+                f"never-firing settle that consumes a 15000ms cap on "
+                f"every retry exhausts the 30s budget before the "
+                f"predicate can converge.  wait_for_condition caps the "
+                f"settle at min(remaining, 3000)ms.  Same root cause as "
+                f"conftest._wait_for_stage prior to 74d7f75.  "
                 f"Observed settle timeouts: {settle_timeouts}"
             )
 
 
 class TestFindCardBoundedSettle:
-    """``_find_card`` must not consume its 30s budget on ``networkidle``
-    settles that never fire (C-031).
+    """``_find_card`` must not consume its 30s budget on settles that
+    never fire (C-031).
+
+    **Surface migration (2026-06-03)**: ``_find_card`` now delegates to
+    ``conftest.wait_for_condition``, polling ``page.evaluate`` instead of
+    ``page.wait_for_function``.  The settle-cap CONTRACT (≤ 5000ms per
+    retry) is unchanged — only the mocked surface moves to
+    ``page.evaluate``.  ``_find_card`` still returns ``True`` when the
+    predicate eventually becomes truthy.
     """
 
     def test_per_retry_settle_capped_at_modest_budget(self) -> None:
-        """Force the first ``wait_for_function`` call to raise context-
+        """Force the first ``page.evaluate`` calls to raise context-
         destroyed.  The retry-loop's ``wait_for_load_state`` must use a
         modest cap, regardless of how much budget is remaining.
         """
@@ -245,11 +262,11 @@ class TestFindCardBoundedSettle:
         settle_timeouts: list[int] = []
         fired = {"count": 0}
 
-        def _wait_function(_pred: str, timeout: int = 30000) -> None:  # noqa: ARG001
+        def _evaluate(_expr: str) -> object:
             if fired["count"] < 2:
                 fired["count"] += 1
-                raise _ctx_destroyed("Page.wait_for_function")
-            return None
+                raise _ctx_destroyed("Page.evaluate")
+            return True
 
         def _wait_load_state(
             _state: str,  # noqa: ARG001
@@ -258,7 +275,7 @@ class TestFindCardBoundedSettle:
         ) -> None:
             settle_timeouts.append(timeout)
 
-        page.wait_for_function.side_effect = _wait_function
+        page.evaluate.side_effect = _evaluate
         page.wait_for_load_state.side_effect = _wait_load_state
 
         result = _find_card(page, "foxess-control-card", timeout=30000)
@@ -273,9 +290,9 @@ class TestFindCardBoundedSettle:
             assert t <= _MAX_SETTLE_MS, (
                 f"_find_card called wait_for_load_state with "
                 f"timeout={t}ms.  The per-retry settle MUST be capped at "
-                f"≤ {_MAX_SETTLE_MS}ms — the existing min(remaining_ms, "
-                f"15000) cap evaluates to 15000ms early in the budget, "
-                f"exposing the same dead-time problem as "
-                f"conftest._wait_for_stage prior to 74d7f75.  Observed "
-                f"settle timeouts: {settle_timeouts}"
+                f"≤ {_MAX_SETTLE_MS}ms — a never-firing settle on a "
+                f"15000ms cap eats the budget early; wait_for_condition "
+                f"caps it at min(remaining_ms, 3000)ms.  Same dead-time "
+                f"problem as conftest._wait_for_stage prior to 74d7f75.  "
+                f"Observed settle timeouts: {settle_timeouts}"
             )

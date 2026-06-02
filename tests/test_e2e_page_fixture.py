@@ -26,11 +26,24 @@ which stage was stuck.
 These tests avoid a full Playwright browser: they mock the page object
 to simulate the CI races deterministically.
 
+**Surface migration (2026-06-03)**: ``_wait_for_lovelace_panel`` →
+``_wait_for_stage`` now delegate to ``conftest.wait_for_condition``,
+which polls ``page.evaluate(predicate)`` in a loop rather than calling
+``page.wait_for_function`` / ``page.wait_for_selector``.  These tests
+drive the new surface: behavioural tests configure ``page.evaluate``;
+budget/staging tests spy on ``conftest.wait_for_condition`` to observe
+the per-stage ``timeout_ms`` the helper computes (no longer a Playwright
+call argument).  Every original contract is preserved; only the mocked
+surface and (where the helper now raises a typed error) the expected
+exception type change.
+
 Symptoms reproduced:
 - ``PlaywrightError: Execution context was destroyed`` raised by
-  ``wait_for_function`` during navigation churn.
-- ``TimeoutError: Page.wait_for_function: Timeout 30000ms exceeded``
-  when panel boot exceeds the monolithic 30s cap on slow shards.
+  ``page.evaluate`` during navigation churn.
+- ``E2EConditionTimeout`` (the typed error wait_for_condition raises)
+  when a stage predicate never becomes truthy within its bounded budget
+  — the staged equivalent of the old monolithic 30s ``wait_for_function``
+  timeout on slow shards.
 """
 
 from __future__ import annotations
@@ -40,7 +53,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from playwright._impl._errors import Error as PlaywrightError
-from playwright._impl._errors import TimeoutError as PwTimeoutError
+
+from tests.e2e.conftest import E2EConditionTimeout
 
 
 def _get_helper() -> Any:
@@ -63,6 +77,22 @@ def _get_helper() -> Any:
         raise ImportError(msg) from exc
 
 
+def _is_fail_check(expr: str) -> bool:
+    """True if ``expr`` is the lovelace HA-error ``fail_check`` predicate.
+
+    ``wait_for_condition`` polls the ``fail_check`` (the shared
+    ``_LOVELACE_FAIL_CHECK``, which scans for ``ha-panel-error`` /
+    ``hui-error-card``) BEFORE the stage ``pass_check`` on every
+    iteration.  A MagicMock ``page.evaluate`` that returns truthy for
+    *everything* would trip the fail_check and raise ``E2EConditionFailed``
+    spuriously.  Tests that drive ``page.evaluate`` must therefore return
+    falsy for the fail_check (no error panel rendered) and the intended
+    value for the stage pass_check.  The fail_check is the only predicate
+    that references the HA error elements.
+    """
+    return "ha-panel-error" in expr or "hui-error-card" in expr
+
+
 class TestWaitForLovelacePanelRetries:
     """The helper must retry when the JS execution context is destroyed.
 
@@ -78,43 +108,46 @@ class TestWaitForLovelacePanelRetries:
     def test_retries_on_execution_context_destroyed(self) -> None:
         """Helper retries when the first poll loses its execution context.
 
-        Monolithic helper: first ``wait_for_function`` call raises,
-        second succeeds — helper recovers.
+        The helper polls ``page.evaluate(predicate)`` through
+        ``wait_for_condition``: the first ``evaluate`` call raises a
+        context-destroyed PlaywrightError, the next returns truthy — the
+        helper recovers and the stage completes.
 
-        Staged helper: first call (stage 1) raises, retries, subsequent
-        stage calls succeed — helper still recovers.
-
-        Common contract: at least one retry happens AND
+        Common contract (unchanged): at least one retry happens AND
         ``wait_for_load_state`` is used to settle between attempts.
         """
         helper = _get_helper()
         page = MagicMock()
-        fired = {"count": 0}
+        fired = {"destroyed": 0, "success": 0}
 
-        def _maybe_destroy(*_args: Any, **_kwargs: Any) -> None:
-            if fired["count"] == 0:
-                fired["count"] += 1
+        def _maybe_destroy(expr: str) -> object:
+            # The fail_check (HA-error scan) must stay falsy — an error
+            # panel is NOT present — else wait_for_condition aborts early.
+            if _is_fail_check(expr):
+                return False
+            # First stage pass_check loses its execution context, then
+            # recovers on the retry.
+            if fired["destroyed"] == 0:
+                fired["destroyed"] += 1
                 raise PlaywrightError(
-                    "Page.wait_for_function: Execution context was destroyed, "
+                    "Page.evaluate: Execution context was destroyed, "
                     "most likely because of a navigation"
                 )
-            fired["count"] += 1
-            return None
+            fired["success"] += 1
+            return True
 
-        page.wait_for_function.side_effect = _maybe_destroy
-        # Some staged implementations may use wait_for_selector;
-        # apply the same pattern so context destruction is injected
-        # regardless of which API the helper uses for its stages.
-        page.wait_for_selector.side_effect = _maybe_destroy
+        # The helper now drives stages via page.evaluate(predicate)
+        # through wait_for_condition; inject context destruction there.
+        page.evaluate.side_effect = _maybe_destroy
         page.wait_for_load_state.return_value = None
 
         helper(page, timeout_ms=5000)
 
         # Context-destruction was injected at least once and the helper
-        # continued past it (no unhandled exception bubbled up).
-        assert fired["count"] >= 2, (
-            f"Expected >=1 context-destroyed + >=1 success; total calls="
-            f"{fired['count']}"
+        # continued past it (recovered with >=1 successful pass_check).
+        assert fired["destroyed"] >= 1 and fired["success"] >= 1, (
+            f"Expected >=1 context-destroyed + >=1 success; "
+            f"destroyed={fired['destroyed']}, success={fired['success']}"
         )
         # wait_for_load_state was used to settle after the context loss.
         assert page.wait_for_load_state.called
@@ -123,58 +156,82 @@ class TestWaitForLovelacePanelRetries:
         """Helper retries when Playwright reports it is mid-navigation."""
         helper = _get_helper()
         page = MagicMock()
-        fired = {"count": 0}
+        fired = {"destroyed": 0, "success": 0}
 
-        def _maybe_navigating(*_args: Any, **_kwargs: Any) -> None:
-            if fired["count"] == 0:
-                fired["count"] += 1
+        def _maybe_navigating(expr: str) -> object:
+            if _is_fail_check(expr):
+                return False
+            if fired["destroyed"] == 0:
+                fired["destroyed"] += 1
                 raise PlaywrightError(
-                    "Page.wait_for_function: frame was detached while navigating"
+                    "Page.evaluate: frame was detached while navigating"
                 )
-            fired["count"] += 1
-            return None
+            fired["success"] += 1
+            return True
 
-        page.wait_for_function.side_effect = _maybe_navigating
-        page.wait_for_selector.side_effect = _maybe_navigating
+        page.evaluate.side_effect = _maybe_navigating
         page.wait_for_load_state.return_value = None
 
         helper(page, timeout_ms=5000)
 
-        assert fired["count"] >= 2, (
-            f"Expected >=1 navigating + >=1 success; total calls={fired['count']}"
+        assert fired["destroyed"] >= 1 and fired["success"] >= 1, (
+            f"Expected >=1 navigating + >=1 success; "
+            f"destroyed={fired['destroyed']}, success={fired['success']}"
         )
 
-    def test_genuine_timeout_propagates(self) -> None:
-        """True TimeoutError (panel never rendered) must still raise.
+    def test_genuine_timeout_propagates(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """A predicate that never becomes truthy must still raise.
 
-        With a staged helper, we simulate the *first* stage timing out
-        — the helper must propagate (not swallow) the TimeoutError.
+        We simulate the *first* stage never satisfying its predicate:
+        ``page.evaluate`` always returns falsy, so ``wait_for_condition``
+        exhausts the (short) per-stage budget and raises
+        ``E2EConditionTimeout``.  The helper must propagate (not swallow)
+        it.
+
+        **Expected-exception update (contract, not weakening)**: the old
+        monolithic helper bubbled Playwright's ``TimeoutError``; the
+        staged helper now raises the typed ``E2EConditionTimeout``
+        (an ``AssertionError`` subclass that ``wait_for_condition``
+        raises after capturing the DOM).  Asserting the new type still
+        asserts "a genuine timeout propagates and is not swallowed."
+        """
+        # Redirect failure-capture artifacts to tmp_path; the timeout
+        # path calls _capture_failure (page.evaluate / content /
+        # screenshot on the mock, all suppressed).
+        from tests.e2e import conftest  # noqa: PLC0415
+
+        monkeypatch.setattr(conftest, "_failure_capture_dir", lambda: tmp_path)
+        helper = _get_helper()
+        page = MagicMock()
+        # Predicate never satisfied; fail_check also falsy so the stage
+        # runs to its deadline and raises E2EConditionTimeout.
+        page.evaluate.return_value = False
+        page.wait_for_load_state.return_value = None
+        page.content.return_value = "<html></html>"
+        page.screenshot.return_value = None
+
+        with pytest.raises(E2EConditionTimeout):
+            helper(page, timeout_ms=200)
+
+    def test_unrelated_playwright_error_propagates(self) -> None:
+        """Non-context-destroyed PlaywrightErrors must not be swallowed.
+
+        ``page.evaluate`` raises a PlaywrightError whose message does NOT
+        match the context-destroyed signals; ``wait_for_condition`` must
+        re-raise it unchanged — never retried, never converted into an
+        ``E2EConditionTimeout``.
         """
         helper = _get_helper()
         page = MagicMock()
-        page.wait_for_function.side_effect = PwTimeoutError(
-            "Page.wait_for_function: Timeout 30000ms exceeded."
-        )
-        page.wait_for_selector.side_effect = PwTimeoutError(
-            "Page.wait_for_selector: Timeout 30000ms exceeded."
-        )
+        page.evaluate.side_effect = PlaywrightError("Some other playwright failure")
 
-        with pytest.raises(PwTimeoutError):
+        with pytest.raises(PlaywrightError) as exc_info:
             helper(page, timeout_ms=5000)
-
-    def test_unrelated_playwright_error_propagates(self) -> None:
-        """Non-context-destroyed PlaywrightErrors must not be swallowed."""
-        helper = _get_helper()
-        page = MagicMock()
-        page.wait_for_function.side_effect = PlaywrightError(
-            "Some other playwright failure"
-        )
-        page.wait_for_selector.side_effect = PlaywrightError(
-            "Some other playwright failure"
-        )
-
-        with pytest.raises(PlaywrightError):
-            helper(page, timeout_ms=5000)
+        # Must propagate unchanged — not swallowed into a timeout.
+        assert not isinstance(exc_info.value, E2EConditionTimeout)
+        assert "Some other playwright failure" in str(exc_info.value)
 
 
 class TestWaitForLovelacePanelStagedBudget:
@@ -198,52 +255,46 @@ class TestWaitForLovelacePanelStagedBudget:
     - The total timeout budget across calls exceeds 30000ms.
     """
 
-    def test_staged_wait_succeeds_when_panel_boot_exceeds_30s(self) -> None:
+    def test_staged_wait_succeeds_when_panel_boot_exceeds_30s(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Helper succeeds when panel boot takes ~45s across multiple stages.
 
-        Simulates a slow shard where each DOM milestone takes 10-15s:
-        - ``home-assistant`` attaches at t=5s
-        - ``home-assistant-main`` inside shadowRoot at t=20s
-        - ``ha-panel-lovelace`` at t=45s
+        A monolithic 30s wait would time out.  A staged helper issues
+        one ``wait_for_condition`` call per DOM milestone, each with its
+        own bounded budget; each succeeds, so the overall helper succeeds.
 
-        A monolithic 30s ``wait_for_function`` would time out.  A staged
-        helper issues three calls with their own budgets; each succeeds
-        within its budget, so the overall helper succeeds.
+        **Surface migration**: the per-stage budget is no longer a
+        Playwright-call argument — it is the ``timeout_ms`` the helper
+        passes to ``wait_for_condition`` (the internal poll deadline).
+        We spy on ``conftest.wait_for_condition`` and sum the
+        ``timeout_ms`` it receives.  Contract unchanged: >=2 staged
+        milestones, total budget > 30000ms.
         """
+        from tests.e2e import conftest  # noqa: PLC0415
+
+        stage_timeouts: list[int] = []
+
+        def _spy(_page: Any, _pass: str, *, timeout_ms: int, **_kw: Any) -> object:
+            stage_timeouts.append(timeout_ms)
+            return True
+
+        monkeypatch.setattr(conftest, "wait_for_condition", _spy)
         helper = _get_helper()
         page = MagicMock()
-        # Track every call's timeout argument so we can sum them.
-        wait_function_timeouts: list[int] = []
-        wait_selector_timeouts: list[int] = []
-
-        def _wait_function(_pred: str, timeout: int) -> None:
-            wait_function_timeouts.append(timeout)
-            return None
-
-        def _wait_selector(_selector: str, timeout: int = 30000, **_kw: Any) -> Any:
-            wait_selector_timeouts.append(timeout)
-            return MagicMock()
-
-        page.wait_for_function.side_effect = _wait_function
-        page.wait_for_selector.side_effect = _wait_selector
-        page.wait_for_load_state.return_value = None
 
         # 90s budget reflects slow-shard worst case (one shard ran 90.9s).
         helper(page, timeout_ms=90000)
 
-        total_calls = (
-            page.wait_for_function.call_count + page.wait_for_selector.call_count
-        )
         # The helper must stage the wait — at least 2 distinct DOM
         # milestones checked (ideally 3, but 2 is the minimum that is
         # materially better than the monolithic single call).
-        assert total_calls >= 2, (
-            f"Expected staged wait with >=2 milestones; got {total_calls} total calls. "
-            f"wait_for_function={page.wait_for_function.call_count}, "
-            f"wait_for_selector={page.wait_for_selector.call_count}"
+        assert len(stage_timeouts) >= 2, (
+            f"Expected staged wait with >=2 milestones; got "
+            f"{len(stage_timeouts)} wait_for_condition calls."
         )
 
-        total_budget_ms = sum(wait_function_timeouts) + sum(wait_selector_timeouts)
+        total_budget_ms = sum(stage_timeouts)
         # Total budget across stages must exceed the old 30s cap —
         # otherwise we have not materially improved the worst case.
         assert total_budget_ms > 30000, (
@@ -251,78 +302,78 @@ class TestWaitForLovelacePanelStagedBudget:
             f"the old monolithic 30000ms cap — slow shards will still fail."
         )
 
-    def test_staged_wait_checks_progressive_dom_milestones(self) -> None:
+    def test_staged_wait_checks_progressive_dom_milestones(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Helper checks distinct DOM milestones, not one monolithic predicate.
 
-        A monolithic predicate (single ``wait_for_function`` with the
-        ``home-assistant >>> home-assistant-main >>> ha-panel-lovelace``
-        traversal) cannot distinguish between:
+        A monolithic predicate (a single traversal of
+        ``home-assistant >>> home-assistant-main >>> ha-panel-lovelace``)
+        cannot distinguish between:
         (a) the root element hasn't attached yet (HA still booting),
         (b) the main layout hasn't rendered yet, or
         (c) the Lovelace panel hasn't mounted yet.
 
         Staging the wait produces diagnostic evidence of which layer is
-        stuck.  Assert that multiple *distinct* wait arguments are used —
-        either as selector strings or JS predicate substrings.
+        stuck.  **Surface migration**: each stage now flows through a
+        separate ``wait_for_condition`` call carrying that stage's
+        ``pass_check`` predicate.  We spy on ``conftest.wait_for_condition``
+        and assert >=2 *distinct* predicates are polled.
         """
+        from tests.e2e import conftest  # noqa: PLC0415
+
+        seen_predicates: list[str] = []
+
+        def _spy(_page: Any, pass_check: str, **_kw: Any) -> object:
+            seen_predicates.append(pass_check)
+            return True
+
+        monkeypatch.setattr(conftest, "wait_for_condition", _spy)
         helper = _get_helper()
         page = MagicMock()
-        seen_function_predicates: list[str] = []
-        seen_selector_strings: list[str] = []
-
-        def _wait_function(predicate: str, timeout: int = 30000) -> None:  # noqa: ARG001
-            seen_function_predicates.append(predicate)
-            return None
-
-        def _wait_selector(selector: str, timeout: int = 30000, **_kw: Any) -> Any:  # noqa: ARG001
-            seen_selector_strings.append(selector)
-            return MagicMock()
-
-        page.wait_for_function.side_effect = _wait_function
-        page.wait_for_selector.side_effect = _wait_selector
-        page.wait_for_load_state.return_value = None
 
         helper(page, timeout_ms=60000)
 
-        # Combine all "what we waited for" evidence.
-        all_waited_for = [*seen_function_predicates, *seen_selector_strings]
-        # Normalise — we expect at least 2 *distinct* milestone checks.
+        # We expect at least 2 *distinct* milestone predicates.
         # A monolithic single-predicate helper would only have 1 entry.
-        assert len(all_waited_for) >= 2, (
-            f"Expected >=2 distinct DOM-milestone waits, got {len(all_waited_for)}: "
-            f"function_preds={seen_function_predicates}, "
-            f"selectors={seen_selector_strings}"
+        assert len(seen_predicates) >= 2, (
+            f"Expected >=2 distinct DOM-milestone waits, got "
+            f"{len(seen_predicates)}: {seen_predicates}"
         )
         # The individual waits must probe *different* targets — a helper
-        # that calls the same predicate twice is not staging, it's
+        # that polls the same predicate twice is not staging, it's
         # retrying a monolithic check.
-        distinct = {str(x).replace(" ", "").replace("\n", "") for x in all_waited_for}
+        distinct = {"".join(p.split()) for p in seen_predicates}
         assert len(distinct) >= 2, (
-            f"All wait calls used the same target — no staging: {all_waited_for}"
+            f"All wait calls used the same predicate — no staging: {seen_predicates}"
         )
 
-    def test_first_stage_timeout_is_bounded(self) -> None:
+    def test_first_stage_timeout_is_bounded(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Each stage's timeout must be bounded to prevent runaway waits.
 
-        No single stage should exceed the caller's total timeout budget,
-        and at least one stage must use a meaningful fraction (≥10s) so
-        the container has time to boot even on slow shards.
+        No single stage should exceed the caller's total timeout budget.
+
+        **Surface migration**: the per-stage budget is the ``timeout_ms``
+        passed to ``wait_for_condition`` (no longer a Playwright-call
+        argument), so we spy on it.
         """
-        helper = _get_helper()
-        page = MagicMock()
+        from tests.e2e import conftest  # noqa: PLC0415
+
         observed_timeouts: list[int] = []
 
-        def _record(_x: str, timeout: int = 30000, **_kw: Any) -> Any:
-            observed_timeouts.append(timeout)
-            return MagicMock()
+        def _spy(_page: Any, _pass: str, *, timeout_ms: int, **_kw: Any) -> object:
+            observed_timeouts.append(timeout_ms)
+            return True
 
-        page.wait_for_function.side_effect = _record
-        page.wait_for_selector.side_effect = _record
-        page.wait_for_load_state.return_value = None
+        monkeypatch.setattr(conftest, "wait_for_condition", _spy)
+        helper = _get_helper()
+        page = MagicMock()
 
         helper(page, timeout_ms=60000)
 
-        assert observed_timeouts, "Helper made no wait calls at all"
+        assert observed_timeouts, "Helper made no staged wait calls at all"
         # No stage may exceed the total budget (bounded).
         for t in observed_timeouts:
             assert 0 < t <= 60000, f"Stage timeout {t}ms outside (0, 60000]ms budget"
@@ -376,71 +427,56 @@ class TestWaitForLovelacePanelNavigationDuringPanelRender:
     predicate responses simulate the exact mid-stage navigation.
     """
 
-    def test_retry_after_midstage_nav_uses_remaining_overall_budget(self) -> None:
+    def test_retry_after_midstage_nav_uses_remaining_overall_budget(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Retry after mid-stage context destruction must use any remaining
         overall budget, not be re-capped to ``max_stage_ms``.
 
         Scenario: caller supplies ``timeout_ms=75000``.  Earlier stages
-        consume ~2s total.  The final stage enters ``wait_for_function``,
-        runs for 20s, then HA navigates → ``Execution context was
-        destroyed``.  On retry the overall budget still has ~53s left and
-        the helper must use that full amount so the post-navigation panel
-        mount has time to complete under slow-shard contention.
+        consume a small amount.  The final stage polls its predicate; if
+        HA navigates mid-stage, the post-navigation retry must keep using
+        the full remaining overall budget so the panel mount has time to
+        complete under slow-shard contention.
 
-        **What the current code does wrong**: ``_wait_for_stage`` uses
-        ``min(remaining_ms, max_stage_ms=30000)`` on every loop iteration.
-        After the mid-stage navigation the remaining overall budget is
-        ~53s but the retry is re-capped to 30s.  If post-nav rebuild
-        legitimately takes 31–53s (well under overall budget, but over
-        the per-stage cap) we time out spuriously.
+        **Contract location**: ``_wait_for_stage`` sets
+        ``max_stage_ms=None`` for the final stage, so its
+        ``timeout_ms = remaining_ms`` (the full remaining overall budget),
+        NOT ``min(remaining_ms, 30000)``.  Were the final stage re-capped
+        to 30s, a post-nav rebuild taking 31–53s (well under the overall
+        budget but over the per-stage cap) would time out spuriously.
+
+        **Surface migration**: the per-stage budget is the ``timeout_ms``
+        the helper hands ``wait_for_condition`` (no longer a Playwright-
+        call argument), so we spy on it directly.
         """
+        from tests.e2e import conftest  # noqa: PLC0415
+
+        observed_timeouts: list[int] = []
+
+        # Spy on wait_for_condition: record the per-stage budget the
+        # helper computes.  The final stage's max_stage_ms is None, so
+        # _wait_for_stage gives it the full remaining overall budget —
+        # NOT a 30s re-cap.  Earlier stages return instantly here, so
+        # the final stage sees nearly the entire 75000ms left.
+        def _spy(_page: Any, _pass: str, *, timeout_ms: int, **_kw: Any) -> object:
+            observed_timeouts.append(timeout_ms)
+            return True
+
+        monkeypatch.setattr(conftest, "wait_for_condition", _spy)
         helper = _get_helper()
         page = MagicMock()
-        observed_timeouts: list[int] = []
-        call_history: list[str] = []
-        fired = {"destroyed_once": False}
-
-        def _wait_function(_pred: str, timeout: int = 30000) -> None:
-            observed_timeouts.append(timeout)
-            call_history.append("fn")
-            # The first call that reaches the FINAL stage returns
-            # successfully quickly (stages 1+2 pass fast).  The one we
-            # want to exercise is the call that sees the panel predicate
-            # with a *large* remaining budget — it should be given the
-            # full budget, not 30s.
-            if not fired["destroyed_once"] and timeout > 30000:
-                # This is the final-stage call with full remaining budget.
-                # Simulate a mid-stage navigation.
-                fired["destroyed_once"] = True
-                raise PlaywrightError(
-                    "Page.wait_for_function: Execution context was destroyed, "
-                    "most likely because of a navigation"
-                )
-            return None
-
-        def _wait_selector(_selector: str, timeout: int = 30000, **_kw: Any) -> Any:
-            observed_timeouts.append(timeout)
-            call_history.append("sel")
-            if not fired["destroyed_once"] and timeout > 30000:
-                fired["destroyed_once"] = True
-                raise PlaywrightError(
-                    "Page.wait_for_selector: Execution context was destroyed, "
-                    "most likely because of a navigation"
-                )
-            return MagicMock()
-
-        page.wait_for_function.side_effect = _wait_function
-        page.wait_for_selector.side_effect = _wait_selector
-        page.wait_for_load_state.return_value = None
 
         helper(page, timeout_ms=75000)
 
-        # Assert: at least one call received a timeout > 30000ms.  A
-        # helper that caps every individual call at 30s cannot honour
-        # the full remaining budget on the post-navigation retry, which
-        # is precisely what drives the observed 40s stage-3 timeouts.
+        # Assert: at least one stage received a budget > 30000ms.  A
+        # helper that caps every stage at 30s cannot honour the full
+        # remaining budget on the post-navigation retry, which is
+        # precisely what drives the observed 40s stage-3 timeouts.  The
+        # contract lives in _wait_for_stage's max_stage_ms=None for the
+        # final stage (stage_ms = remaining_ms, no 30s re-cap).
         assert any(t > 30000 for t in observed_timeouts), (
-            f"Every individual wait call was capped at <=30000ms "
+            f"Every staged wait budget was capped at <=30000ms "
             f"(observed: {observed_timeouts}).  The final stage must be "
             f"allowed to consume the remaining overall budget (up to "
             f"the full 75000ms) on the post-navigation retry, otherwise "
@@ -1108,13 +1144,23 @@ class TestWaitForLovelacePanelSustainedRetryBudget:
     **Fix contract** (what these tests assert):
     1. The per-retry ``wait_for_load_state`` cap must be modest
        (≤ 5000ms), not 15000ms.  All we need from settle is a brief
-       moment for the new context to attach — networkidle never firing
-       under sustained traffic must not eat the budget.
+       moment for the new context to attach — a settle signal never
+       firing under sustained traffic must not eat the budget.
     2. The total time the helper can spend in settle calls across all
        retries must be bounded so a sustained retry storm cannot
        dominate the overall budget — at least half of the overall
-       budget must remain available for the actual ``wait_for_function``
-       polls that observe the predicate becoming truthy.
+       budget must remain available for the actual predicate polls
+       that observe the predicate becoming truthy.
+
+    **Surface migration (2026-06-03)**: the retry/settle loop now lives
+    in ``conftest.wait_for_condition``, which polls ``page.evaluate`` and
+    settles a context-destroyed navigation with
+    ``page.wait_for_load_state("domcontentloaded", timeout=min(remaining,
+    3000))``.  These tests drive ``page.evaluate`` (not
+    ``page.wait_for_function``) to raise the context-destroyed error; the
+    settle-cap and total-settle contracts are unchanged.  The implemented
+    cap is 3000ms (well within the ≤ 5000ms contract); a regression to an
+    unbounded 15000ms cap would fail test 1 here.
     """
 
     def test_per_retry_settle_is_bounded_to_modest_cap(self) -> None:
@@ -1128,7 +1174,7 @@ class TestWaitForLovelacePanelSustainedRetryBudget:
         without dominating the budget.
 
         This test injects three successive context-destruction errors
-        in the final stage and inspects the timeouts the helper
+        on ``page.evaluate`` and inspects the timeouts the helper
         requested for ``wait_for_load_state``.  Every observed call
         must be ≤ 5000ms.  A helper using the unbounded 15000ms cap
         will fail this assertion.
@@ -1139,33 +1185,27 @@ class TestWaitForLovelacePanelSustainedRetryBudget:
         fired = {"count": 0}
         target_destructions = 3
 
-        def _wait_function(_pred: str, timeout: int = 30000) -> None:  # noqa: ARG001
-            # Simulate sustained context destruction in the final stage:
-            # raise on the first ``target_destructions`` calls that get a
-            # large remaining-budget timeout (final-stage signature).
-            if fired["count"] < target_destructions and timeout > 30000:
+        def _evaluate(expr: str) -> object:
+            # The fail_check must stay falsy (no HA error panel) so the
+            # stage does not abort early.
+            if _is_fail_check(expr):
+                return False
+            # Simulate sustained context destruction: raise on the first
+            # ``target_destructions`` pass_check evaluations (each drives
+            # one settle), then let the predicate succeed.
+            if fired["count"] < target_destructions:
                 fired["count"] += 1
                 raise PlaywrightError(
-                    "Page.wait_for_function: Execution context was destroyed, "
+                    "Page.evaluate: Execution context was destroyed, "
                     "most likely because of a navigation"
                 )
-            return None
-
-        def _wait_selector(_selector: str, timeout: int = 30000, **_kw: Any) -> Any:
-            if fired["count"] < target_destructions and timeout > 30000:
-                fired["count"] += 1
-                raise PlaywrightError(
-                    "Page.wait_for_selector: Execution context was destroyed, "
-                    "most likely because of a navigation"
-                )
-            return MagicMock()
+            return True
 
         def _wait_load_state(state: str, timeout: int = 30000, **_kw: Any) -> None:  # noqa: ARG001
             settle_timeouts.append(timeout)
             return None
 
-        page.wait_for_function.side_effect = _wait_function
-        page.wait_for_selector.side_effect = _wait_selector
+        page.evaluate.side_effect = _evaluate
         page.wait_for_load_state.side_effect = _wait_load_state
 
         helper(page, timeout_ms=75000)
@@ -1211,30 +1251,22 @@ class TestWaitForLovelacePanelSustainedRetryBudget:
         fired = {"count": 0}
         target_destructions = 5
 
-        def _wait_function(_pred: str, timeout: int = 30000) -> None:  # noqa: ARG001
-            if fired["count"] < target_destructions and timeout > 30000:
+        def _evaluate(expr: str) -> object:
+            if _is_fail_check(expr):
+                return False
+            if fired["count"] < target_destructions:
                 fired["count"] += 1
                 raise PlaywrightError(
-                    "Page.wait_for_function: Execution context was destroyed, "
+                    "Page.evaluate: Execution context was destroyed, "
                     "most likely because of a navigation"
                 )
-            return None
-
-        def _wait_selector(_selector: str, timeout: int = 30000, **_kw: Any) -> Any:
-            if fired["count"] < target_destructions and timeout > 30000:
-                fired["count"] += 1
-                raise PlaywrightError(
-                    "Page.wait_for_selector: Execution context was destroyed, "
-                    "most likely because of a navigation"
-                )
-            return MagicMock()
+            return True
 
         def _wait_load_state(state: str, timeout: int = 30000, **_kw: Any) -> None:  # noqa: ARG001
             settle_timeouts.append(timeout)
             return None
 
-        page.wait_for_function.side_effect = _wait_function
-        page.wait_for_selector.side_effect = _wait_selector
+        page.evaluate.side_effect = _evaluate
         page.wait_for_load_state.side_effect = _wait_load_state
 
         overall_budget_ms = 75000
