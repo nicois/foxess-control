@@ -998,7 +998,20 @@ class TestOverviewCard:
         )
         _robust_reload(page, settle_ms=3000)
 
-        # Extract solar node text from deep shadow DOM
+        # Extract solar node text from deep shadow DOM.
+        #
+        # Gate the wait on the OBSERVABLE we assert on — a *parseable*
+        # numeric solar value and PV detail — not merely on the solar
+        # node existing.  After ``_robust_reload`` the card renders its
+        # structure immediately, but the browser's ``hass.states`` may
+        # not yet carry the fresh ``sensor.foxess_solar_power`` value, so
+        # ``_formatKw(null)`` paints the ``—`` placeholder for a beat.
+        # The backend-sensor wait above (``wait_for_numeric_state``) gates
+        # on the wrong thing: it confirms the *sensor* crossed 2.5, not
+        # that the *card frontend* re-rendered with it.  Returning ``null``
+        # here keeps ``wait_for_function`` polling until the rendered text
+        # parses with the same ``W|kW`` pattern ``_parse_power_kw`` uses —
+        # eliminating the ``Cannot parse power from '—'`` race (C-031).
         solar_texts = _safe_wait_for_function(
             page,
             """() => {
@@ -1022,14 +1035,19 @@ class TestOverviewCard:
                 if (!solar) return null;
                 const value = solar.querySelector('.node-value');
                 const sub = solar.querySelector('.node-sub');
-                return {
-                    total: value ? value.textContent : null,
-                    detail: sub ? sub.textContent : null,
-                };
+                const total = value ? value.textContent : null;
+                const detail = sub ? sub.textContent : null;
+                // Mirror _parse_power_kw's pattern: keep polling until the
+                // card shows a real power value (not the '—' placeholder)
+                // and the PV detail is populated.
+                const powerRe = /[\\d.]+\\s*(kW|W)/;
+                if (!total || !powerRe.test(total)) return null;
+                if (!detail || !powerRe.test(detail)) return null;
+                return { total, detail };
             }""",
-            timeout=10000,
+            timeout=30000,
         ).json_value()
-        assert solar_texts, "Solar node not found in overview card"
+        assert solar_texts, "Solar node never rendered a parseable value"
         assert solar_texts["total"], "Solar total not displayed"
 
         assert solar_texts["detail"], "PV detail not displayed"
