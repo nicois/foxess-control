@@ -796,6 +796,22 @@ _LOVELACE_PANEL_STAGES: tuple[tuple[str, str], ...] = (
 )
 
 
+# Shared fail-fast predicate for lovelace staged waits: trips when HA has
+# rendered an error panel (``ha-panel-error``) or an error card
+# (``hui-error-card``) anywhere in the shadow DOM, so a wait aborts with a
+# captured DOM instead of burning the full overall budget on a dead panel.
+_LOVELACE_FAIL_CHECK = """() => {
+    function present(root, sel) {
+        if (root.querySelector(sel)) return true;
+        for (const el of root.querySelectorAll('*')) {
+            if (el.shadowRoot && present(el.shadowRoot, sel)) return true;
+        }
+        return false;
+    }
+    return present(document, 'ha-panel-error, hui-error-card');
+}"""
+
+
 # Per-stage timeout cap in milliseconds.  ``None`` means "use the full
 # remaining overall budget" — used for the final ``ha-panel-lovelace``
 # stage, where post-navigation retries must be allowed to consume any
@@ -818,80 +834,37 @@ def _wait_for_stage(
     deadline: float,
     max_stage_ms: int | None = 30000,
 ) -> None:
-    """Wait for one DOM milestone with retry-on-context-destroyed.
+    """Wait for one lovelace DOM milestone, failing fast on HA error states.
 
-    The per-call timeout is ``min(remaining_budget, max_stage_ms)``
-    when ``max_stage_ms`` is set, or the full remaining budget when
-    ``max_stage_ms is None``.
+    Per-call budget is ``min(remaining_overall, max_stage_ms)``, or the
+    full remaining overall budget when ``max_stage_ms is None`` (the final
+    stage must not be re-capped — its post-navigation retries must be
+    allowed to consume any leftover overall budget).  See
+    ``test_retry_after_midstage_nav_uses_remaining_overall_budget`` for the
+    concrete reproduction.
 
-    The ``max_stage_ms is None`` mode is specifically required for
-    stages that race with navigation-driven context destruction: the
-    post-navigation retry must be allowed to consume any remaining
-    overall budget, not be artificially re-capped.  See
-    ``test_retry_after_midstage_nav_uses_remaining_overall_budget`` for
-    the concrete reproduction.
-
-    Retries when Playwright reports context destruction (HA navigation
-    churn).  Genuine ``TimeoutError`` and unrelated ``PlaywrightError``
-    propagate to the caller.
+    Delegates to ``wait_for_condition``, which polls the stage predicate,
+    aborts early if the shared HA-error ``fail_check`` trips, retries on
+    Playwright context-destroyed navigation churn, and captures the DOM
+    (HTML + screenshot + summary) before raising ``E2EConditionTimeout`` /
+    ``E2EConditionFailed`` on failure.  The stage name is embedded in the
+    description, so both the capture filename and the CI log identify the
+    stuck stage.
     """
-    from playwright._impl._errors import Error as PlaywrightError  # noqa: PLC0415
-    from playwright._impl._errors import (  # noqa: PLC0415
-        TimeoutError as PwTimeoutError,
+    remaining_ms = int((deadline - time.monotonic()) * 1000)
+    if remaining_ms <= 0:
+        raise E2EConditionTimeout(
+            f"lovelace stage {stage_name!r}: overall deadline exceeded "
+            f"before stage could start"
+        )
+    stage_ms = remaining_ms if max_stage_ms is None else min(remaining_ms, max_stage_ms)
+    wait_for_condition(
+        page,
+        predicate,
+        timeout_ms=stage_ms,
+        fail_check=_LOVELACE_FAIL_CHECK,
+        description=f"lovelace-stage:{stage_name}",
     )
-
-    while True:
-        remaining_ms = int((deadline - time.monotonic()) * 1000)
-        if remaining_ms <= 0:
-            msg = (
-                f"_wait_for_lovelace_panel: overall deadline exceeded before "
-                f"stage '{stage_name}' could start"
-            )
-            raise PwTimeoutError(msg)
-        if max_stage_ms is None:
-            stage_ms = remaining_ms
-        else:
-            stage_ms = min(remaining_ms, max_stage_ms)
-        try:
-            page.wait_for_function(predicate, timeout=stage_ms)
-            return
-        except PwTimeoutError:
-            # Per-stage timeout — propagate.  The stage name is in the
-            # helper log line, so CI output identifies the stuck stage.
-            raise
-        except PlaywrightError as exc:
-            if not any(s in str(exc) for s in _CONTEXT_DESTROYED_SIGNALS):
-                # Unrelated playwright failure — propagate.
-                raise
-            # Navigation destroyed the context.  Briefly let the new
-            # context attach, then retry within the remaining budget.
-            #
-            # The per-retry settle MUST be modest (≤ 3000ms).  Earlier
-            # versions used ``networkidle`` with a 15000ms cap, but
-            # under sustained CI churn (entity-mode WS state-burst
-            # from input-helper registrations + EntityCoordinator first
-            # refresh) networkidle may never fire and the full 15000ms
-            # is consumed every retry — five back-to-back retries then
-            # exhaust the entire 75000ms overall budget on settle waits
-            # alone, leaving wait_for_function no time to observe
-            # hui-root after the churn subsides.  Diagnosed from the
-            # v1.0.17-beta.2 flake on ``test_card_renders[entity]``:
-            # 74969ms timeout, container ready 67s before the timeout
-            # fired (run 26070914568, e2e-shard-6, gw1).
-            #
-            # 3000ms is comfortably enough for the new context's
-            # ``domcontentloaded`` event under any realistic CI load,
-            # and a 5-retry storm consumes only 15000ms — leaving 60s+
-            # for the actual predicate poll to converge.
-            settle_budget = int((deadline - time.monotonic()) * 1000)
-            if settle_budget <= 0:
-                raise
-            with contextlib.suppress(PlaywrightError):
-                page.wait_for_load_state(
-                    "domcontentloaded",
-                    timeout=min(settle_budget, 3000),
-                )
-            # Loop back and retry wait_for_function with refreshed budget.
 
 
 def _wait_for_lovelace_panel(page: Any, timeout_ms: int = 75000) -> None:
