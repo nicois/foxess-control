@@ -8,6 +8,9 @@
   - **Richer HA Diagnostics download.** The "Download diagnostics" file now includes a `recent_errors` ring buffer (the last 30 structured errors, always-on — no need to enable debug logging first) and an `environment` section: integration version, resolved cloud base URL, `ws_mode`, WS-connected state, battery-compound-id discovery status, plant-id presence, inverter model/max power, and data source. All output is redacted (tokens, passwords, serials, and the battery compound id never appear) — a mutation-tested, load-bearing safety check, since the file is attached to public issue reports.
   - This does not change any control behaviour; it is observability only. It also does not *fix* issue #8 (whose root cause is cloud/region-side) — it makes the next such report arrive self-diagnosing.
 
+### Internal (no user-facing change)
+- **E2E test reliability: `wait_for_condition` step helper + DOM capture on failure.** The E2E suite's panel/card waits previously detected failures by timeout alone and captured no page state, making intermittent render flakes hard to root-cause. A new `wait_for_condition` primitive fails fast on known-bad DOM states (e.g. an HA error panel) instead of waiting out the full budget, and captures the DOM (HTML + screenshot + summary) on any wait/evaluate failure into the CI artifacts. No effect on the shipped integration; improves maintainer diagnosis of flaky E2E runs.
+
 ## 1.0.18
 
 ### Fixed
