@@ -12,6 +12,18 @@
 
 **Spec:** `docs/superpowers/specs/2026-06-02-error-handling-diagnostics-design.md`
 
+> **Correction (post-audit, 2026-06-02):** Task 1 found (a) **50** unique
+> production broad-except sites, not ~33; and (b) an EXISTING
+> `_record_error(hass, domain, message, *, session_type)` in
+> `smart_battery/listeners.py` that records a *session-abort* to
+> `smart_error_state` AND raises a Repair issue — a different concern from
+> this plan's diagnostic helper. To avoid a name collision, the new helper
+> introduced in Task 3 is named **`record_operational_error`** (not
+> `record_error`). Everywhere this plan says `record_error`, read
+> `record_operational_error`. The existing `_record_error` is left
+> untouched (it serves session-abort surfacing / C-026 via Repair issues;
+> the new helper serves operational-error diagnostics via the ring buffer).
+
 ---
 
 ## File Structure
