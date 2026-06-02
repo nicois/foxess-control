@@ -14,7 +14,28 @@ if TYPE_CHECKING:
 
 from .const import DOMAIN
 
-REDACT_KEYS = {"api_key", "web_password", "web_username", "device_serial"}
+REDACT_KEYS = {
+    "api_key",
+    "web_password",
+    "web_username",
+    "device_serial",
+    "token",
+    "batSn",
+    "battery_compound_id",
+}
+
+
+def _integration_version() -> str | None:
+    """Read the integration version from manifest.json."""
+    import json
+    from pathlib import Path
+
+    try:
+        manifest = Path(__file__).parent / "manifest.json"
+        version = json.loads(manifest.read_text()).get("version")
+        return str(version) if version is not None else None
+    except Exception:  # diagnostics must never raise
+        return None
 
 
 async def async_get_config_entry_diagnostics(
@@ -48,6 +69,26 @@ async def async_get_config_entry_diagnostics(
 
     taper = domain_data.taper_profile
 
+    web_session = getattr(domain_data, "web_session", None)
+    cloud_base_url = getattr(web_session, "BASE_URL", None)
+    ws_connected = bool(ws is not None and getattr(ws, "is_connected", False))
+    compound = getattr(domain_data, "battery_compound_id", None)
+    compound_status = "discovered" if compound else "missing"
+    environment = {
+        "integration_version": _integration_version(),
+        "cloud_base_url": cloud_base_url,
+        "ws_mode": getattr(domain_data, "ws_mode", None),
+        "ws_connected": ws_connected,
+        "battery_compound_id_status": compound_status,
+        "plant_id_present": bool(getattr(domain_data, "plant_id", None)),
+        "inverter_model": getattr(inverter, "model", None) if inverter else None,
+        "max_power_w": inverter.max_power_w if inverter else None,
+        "data_source": (
+            coordinator_data.get("data_source") if coordinator_data else None
+        ),
+    }
+    recent_errors = list(getattr(domain_data, "recent_errors", []))
+
     return async_redact_data(
         {
             "entry": {
@@ -63,6 +104,8 @@ async def async_get_config_entry_diagnostics(
             "error_state": error_state,
             "websocket": ws_info,
             "taper_profile": taper.to_dict() if taper else None,
+            "environment": environment,
+            "recent_errors": recent_errors,
         },
         REDACT_KEYS,
     )
