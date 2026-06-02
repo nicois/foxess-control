@@ -332,6 +332,7 @@ from .conftest import (
 
 - [ ] **Step 2: Rewrite `_find_card`** (returns bool, never raises):
 
+{% raw %}
 ```python
 def _find_card(page: Page, tag: str, timeout: int = 30000) -> bool:
     """Return True if a custom card element exists anywhere in the page DOM.
@@ -355,9 +356,11 @@ def _find_card(page: Page, tag: str, timeout: int = 30000) -> bool:
     except E2EConditionTimeout:
         return False
 ```
+{% endraw %}
 
 - [ ] **Step 3: Rewrite `_wait_for_card_hass`** (void, raises). FIRST read the current body (~line 219) and match its predicate semantics exactly (the `_hass` truthy + render-cycle check). Use the current predicate if it differs from below; do not weaken it:
 
+{% raw %}
 ```python
 def _wait_for_card_hass(page: Page, tag: str, timeout_ms: int = 30000) -> None:
     """Wait until <tag>._hass is truthy and the card has rendered.
@@ -377,6 +380,7 @@ def _wait_for_card_hass(page: Page, tag: str, timeout_ms: int = 30000) -> None:
     }}"""
     wait_for_condition(page, js, timeout_ms=timeout_ms, description=f"card-hass:{tag}")
 ```
+{% endraw %}
 
 - [ ] **Step 4: Rewrite `_safe_wait_for_function`** — keep `page.wait_for_function` (returns JSHandle) but capture DOM on both failure exits. `wait_for_condition` is NOT used here because it returns a value not a handle, and 13 callers do `.json_value()`:
 
