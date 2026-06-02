@@ -16,6 +16,7 @@ from homeassistant.util import dt as dt_util
 from .const import DOMAIN, POLLED_VARIABLES
 from .smart_battery.coordinator import EntityCoordinator as _EntityCoordinator
 from .smart_battery.coordinator import get_coordinator_soc as _get_coordinator_soc
+from .smart_battery.logging import record_operational_error
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -289,6 +290,26 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.info("BMS temperature fetch failed", exc_info=True)
             self._preserve_bms_temperature(data)
 
+    def _record_rest_poll_error(self, err: BaseException, *, severity: str) -> None:
+        """Record a REST-poll failure that was absorbed by serving last-known data.
+
+        Replaces the prior bare ``_LOGGER.warning`` so the failure is also
+        self-sufficiently captured in the diagnostics ring buffer; the
+        control flow (keep last-known, no re-raise) is unchanged.
+        """
+        domain_data = self.hass.data.get(DOMAIN)
+        buffer = getattr(domain_data, "recent_errors", None)
+        record_operational_error(
+            _LOGGER,
+            buffer,
+            category="rest_poll",
+            attempted="FoxESS REST poll (get_real_time)",
+            exc=err,
+            hint="kept last-known data; will retry on the next poll",
+            context={"last_known_data_retained": True},
+            severity=severity,
+        )
+
     async def _async_update_data(self) -> dict[str, Any]:
         from .foxess.client import FoxESSApiError
 
@@ -317,12 +338,18 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "FoxESS API key is invalid or expired"
                 ) from err
             if self.data is not None:
-                _LOGGER.warning("REST poll failed, keeping last-known data: %s", err)
+                # Transient cloud-API blip: keep last-known data so the UI
+                # does not flap.  Record at info so the diagnostics download
+                # shows the gap without alarming on a routine blip (C-026).
+                self._record_rest_poll_error(err, severity="info")
                 return dict(self.data)
             raise UpdateFailed(f"Error fetching FoxESS data: {err}") from err
         except Exception as err:
             if self.data is not None:
-                _LOGGER.warning("REST poll failed, keeping last-known data: %s", err)
+                # Unexpected (non-API) failure but we have last-known data:
+                # keep serving it.  Record at warning — this path is not the
+                # routine API blip and may indicate a real defect (C-026).
+                self._record_rest_poll_error(err, severity="warning")
                 return dict(self.data)
             raise UpdateFailed(f"Error fetching FoxESS data: {err}") from err
 

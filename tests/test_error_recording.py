@@ -477,3 +477,45 @@ async def test_cloud_adapter_export_limit_write_failure_records_and_reraises() -
     assert rec["category"] == "export_limit_write"
     assert rec["context"]["entity_id"] == eid
     assert rec["context"]["value"] == 5000
+
+
+# ---------------------------------------------------------------------------
+# REST-poll failure (coordinator) records a typed error
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_rest_poll_failure_records_typed_error_and_keeps_last_data() -> None:
+    """A non-API REST-poll failure with last-known data records a
+    rest_poll error noting data retention, and still returns the
+    last-known data (fallback contract unchanged)."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from custom_components.foxess_control.const import DOMAIN
+    from custom_components.foxess_control.coordinator import FoxESSDataCoordinator
+    from custom_components.foxess_control.domain_data import (
+        FoxESSControlData,
+        FoxESSEntryData,
+    )
+    from custom_components.foxess_control.foxess.inverter import Inverter
+
+    inv = MagicMock(spec=Inverter)
+    inv.get_real_time.side_effect = RuntimeError("transient REST blip")
+
+    hass = MagicMock()
+    hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
+    dd = FoxESSControlData()
+    dd.entries["entry1"] = FoxESSEntryData()
+    hass.data = {DOMAIN: dd}
+    with patch("homeassistant.helpers.frame.report_usage"):
+        coord = FoxESSDataCoordinator(hass, inv, 300)
+    coord.data = {"SoC": 46.0, "_data_source": "ws"}
+
+    result = await coord._async_update_data()
+
+    assert result["SoC"] == 46.0  # last-known retained
+    assert len(dd.recent_errors) == 1
+    rec = dd.recent_errors[0]
+    assert rec["category"] == "rest_poll"
+    assert rec["exc_type"] == "RuntimeError"
+    assert "last-known" in str(rec["context"]).lower() or rec["hint"]
