@@ -259,10 +259,12 @@ class TestCloudFdSocFloorNoImportCapacityUnset:
         spy.set_export_limit_w.assert_not_called()
 
         # Step SoC down minute-by-minute under un-paced (full-power) drain.
-        # The override MUST be removed at or before the first tick where SoC
-        # reaches min_soc — otherwise the inverter sits at fdSoc importing.
+        # The override MUST be removed on the SAME tick SoC first reaches
+        # min_soc — never held for a subsequent tick, which would leave the
+        # inverter sitting at the fdSoc floor importing house load.
         removed_at_soc: float | None = None
         import_window_at_soc: float | None = None
+        ticks_below_min_while_active = 0
         soc = 50.6
         for minute in range(1, 30):
             now = start + datetime.timedelta(minutes=minute)
@@ -275,15 +277,19 @@ class TestCloudFdSocFloorNoImportCapacityUnset:
                 await tick(now)
             await asyncio.sleep(0)
 
-            if _removed_force_discharge(spy):
+            removed_this_tick = _removed_force_discharge(spy)
+            if removed_this_tick and removed_at_soc is None:
                 removed_at_soc = soc
-                break
 
-            # Still in ForceDischarge this tick.  If SoC is at/below the fdSoc
-            # floor here WITHOUT the override having been removed, the inverter
-            # is sitting at fdSoc with house load → grid import (P-001).
-            if soc <= min_soc:
-                import_window_at_soc = soc
+            # Import window: SoC is at/below the fdSoc floor and the override
+            # was NOT removed on this tick — the inverter sits at fdSoc with
+            # house load → grid import (P-001 violation).
+            if soc <= min_soc and not removed_this_tick:
+                ticks_below_min_while_active += 1
+                if import_window_at_soc is None:
+                    import_window_at_soc = soc
+
+            if removed_this_tick:
                 break
 
             # Pacing disabled → fdPwr pinned at max; model full-power drain.
@@ -292,18 +298,23 @@ class TestCloudFdSocFloorNoImportCapacityUnset:
             soc -= drain_kwh / cap * 100
 
         assert import_window_at_soc is None, (
-            f"load={load_kw}kW: tick observed SoC={import_window_at_soc}% "
-            f"<= min_soc ({min_soc}%) while ForceDischarge override still "
-            "ACTIVE — the inverter sits at the fdSoc floor and imports house "
-            "load from the grid (P-001 import window)."
+            f"load={load_kw}kW: {ticks_below_min_while_active} tick(s) observed "
+            f"SoC<=min_soc ({min_soc}%, first at {import_window_at_soc}%) while "
+            "ForceDischarge override still ACTIVE — the inverter sits at the "
+            "fdSoc floor and imports house load from the grid (P-001 window)."
         )
         assert removed_at_soc is not None, (
             f"load={load_kw}kW: session never removed the ForceDischarge "
             "override across the approach to min_soc."
         )
-        assert removed_at_soc >= min_soc, (
-            f"load={load_kw}kW: override removed at SoC={removed_at_soc}%, "
-            f"below min_soc {min_soc}%."
+        # Removal must be PROMPT: it happens on the first tick at/below the
+        # floor, i.e. within one full-power drain step of min_soc — not after
+        # a multi-tick post-floor confirmation delay.
+        one_step_pct = (inv.max_power_w / 1000 * (60 / 3600)) / cap * 100
+        assert removed_at_soc >= min_soc - one_step_pct - 0.01, (
+            f"load={load_kw}kW: override removed at SoC={removed_at_soc}%, more "
+            f"than one drain step below min_soc {min_soc}% — held at the fdSoc "
+            "floor for an extended (multi-tick) window."
         )
 
     @pytest.mark.asyncio

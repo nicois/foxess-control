@@ -1730,11 +1730,51 @@ def setup_smart_discharge_listeners(
         cur_state: dict[str, Any],
         soc_value: float,
     ) -> None:
-        """End session when SoC confirmed at/below min_soc."""
+        """End session when SoC confirmed at/below min_soc.
+
+        Two distinct actions happen here, with different timing rules:
+
+        * **Override removal (G1 / C-002 / P-001).**  The moment SoC reaches
+          ``min_soc`` the ForceDischarge override must come off so the
+          inverter reverts to self-use.  On the cloud path the active
+          ForceDischarge group carries ``fdSoc = min_soc``; in ForceDischarge
+          mode the inverter stops following load at ``fdSoc`` and supplies
+          house load from the GRID until the override is removed.  Leaving the
+          override in place even for one extra tick opens a P-001 import
+          window.  This removal is **capacity-independent** — it needs only
+          ``soc <= min_soc`` — so it protects the capacity-UNKNOWN /
+          pacing-disabled path, where ``_handle_suspend_resume`` (G1/G2) is
+          skipped and this is the *only* protection.  (On the
+          capacity-known path G1/G2 already removed the override above
+          ``min_soc``; a second removal here is idempotent.)
+        * **Session teardown.**  Cancelling listeners and ending the session
+          keeps the 2-consecutive-tick anti-flap confirmation (G1 contract
+          §G1): a transient single-sample dip must not terminate a multi-hour
+          session.  Reverting to self-use early is harmless on a transient dip
+          (self-use serves load from the battery and the next tick resumes if
+          SoC recovers), so the anti-flap rule applies to teardown only — not
+          to the safety-critical override removal.
+        """
         if soc_value <= cur_state["min_soc"]:
             cur_state["soc_below_min_count"] = (
                 cur_state.get("soc_below_min_count", 0) + 1
             )
+            # Capacity-independent P-001 protection: revert to self-use the
+            # instant SoC reaches min_soc, before the 2-tick teardown
+            # confirmation.  Otherwise the inverter sits at the fdSoc floor
+            # importing house load for ~1 tick.  Idempotent if G1/G2 already
+            # removed the override above min_soc.
+            if not cur_state.get("override_removed_at_floor"):
+                cur_state["override_removed_at_floor"] = True
+                if _is_my_session():
+                    _LOGGER.info(
+                        "Smart discharge: SoC %.1f%% reached threshold %d%%, "
+                        "reverting to self-use (no fdSoc-floor import); "
+                        "ending session after confirmation",
+                        soc_value,
+                        cur_state["min_soc"],
+                    )
+                    await _remove_discharge_override()
             if cur_state["soc_below_min_count"] < 2:
                 _LOGGER.debug(
                     "Smart discharge: SoC %.1f%% <= threshold %d%% "
@@ -1754,7 +1794,11 @@ def setup_smart_discharge_listeners(
                 if ws_stop is not None:
                     await ws_stop
         else:
+            # SoC recovered above min_soc — clear the anti-flap counter and
+            # re-arm the at-floor override-removal latch so a subsequent dip
+            # triggers prompt self-use revert again.
             cur_state["soc_below_min_count"] = 0
+            cur_state["override_removed_at_floor"] = False
 
     async def _check_discharge_soc_inner(
         cur_state: dict[str, Any],

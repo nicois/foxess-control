@@ -1430,7 +1430,14 @@ class TestHandleSmartDischarge:
 
     @pytest.mark.asyncio
     async def test_soc_threshold_triggers_self_use(self) -> None:
-        """SoC at threshold schedules self_use and cancels listeners."""
+        """SoC at threshold reverts to self_use promptly, cancels on confirm.
+
+        P-001: the ForceDischarge override must come off the moment SoC
+        reaches min_soc (first at-threshold tick) so the inverter does not
+        sit at the fdSoc floor importing house load.  Session teardown
+        (listener cancellation) still keeps the 2-consecutive-tick anti-flap
+        confirmation.
+        """
         inv = MagicMock(spec=Inverter)
         inv.max_power_w = 10500
         inv.get_schedule.return_value = {"enable": 0, "groups": []}
@@ -1477,16 +1484,19 @@ class TestHandleSmartDischarge:
         # Simulate SoC dropping to threshold via coordinator
         hass.data[DOMAIN].entries["entry1"].coordinator.data = {"SoC": 30.0}
 
-        # First reading: registers count=1, doesn't cancel yet
+        # First reading: reverts to self-use PROMPTLY (P-001 — close the
+        # fdSoc-floor import window) but registers count=1 and does NOT
+        # cancel the session yet (anti-flap).
         await captured_interval(datetime.datetime(2026, 4, 7, 18, 0, 0))
         assert hass.data[DOMAIN].smart_discharge_state is not None
+        inv.self_use.assert_called_once()
+        # Listeners not cancelled on a single below-threshold sample.
+        assert hass.data[DOMAIN].smart_discharge_unsubs != []
 
-        # Second consecutive reading: confirms and cancels
+        # Second consecutive reading: confirms and ends the session.
         await captured_interval(datetime.datetime(2026, 4, 7, 18, 1, 0))
 
-        # The callback removes the override via _remove_mode_from_schedule
-        inv.self_use.assert_called_once()
-        # Listeners should be cancelled
+        # Listeners should now be cancelled.
         assert hass.data[DOMAIN].smart_discharge_unsubs == []
 
     @pytest.mark.asyncio
