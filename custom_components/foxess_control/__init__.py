@@ -1381,7 +1381,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     except Exception:
                         _LOGGER.debug("Could not discover plantId for battery ID")
                 if _plant_id:
-                    compound_id = await web_session.async_discover_battery_id(_plant_id)
+                    compound_id = await web_session.async_discover_battery_id(
+                        _plant_id, recent_errors=dd_inner.recent_errors
+                    )
                     if compound_id:
                         dd_inner.battery_compound_id = compound_id
 

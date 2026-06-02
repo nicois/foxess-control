@@ -1178,7 +1178,9 @@ class TestBmsCompoundIdRediscovery:
         data: dict[str, Any] = {"SoC": 50.0}
         await coord._fetch_bms_temperature(data)
 
-        web_session.async_discover_battery_id.assert_awaited_once_with("my-plant-456")
+        web_session.async_discover_battery_id.assert_awaited_once_with(
+            "my-plant-456", recent_errors=dd.recent_errors
+        )
 
     @pytest.mark.asyncio
     async def test_rediscovery_discovers_plant_id_if_missing(self) -> None:

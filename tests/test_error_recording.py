@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+import pytest
 
 from smart_battery.domain_data import SmartBatteryDomainData
 from smart_battery.logging import record_operational_error
-
-if TYPE_CHECKING:
-    import pytest
 
 
 def test_domain_data_has_bounded_recent_errors_buffer() -> None:
@@ -108,3 +107,62 @@ def test_severity_maps_to_log_level(caplog: pytest.LogCaptureFixture) -> None:
             severity="error",
         )
     assert caplog.records[-1].levelno == logging.ERROR
+
+
+class _FakeWSConnectSession:
+    """Minimal aiohttp.ClientSession stand-in whose ws_connect raises."""
+
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+        self.closed = False
+
+    def ws_connect(self, *args: Any, **kwargs: Any) -> Any:
+        raise self._exc
+
+
+@pytest.mark.asyncio
+async def test_battery_id_discovery_records_ws_handshake_error() -> None:
+    """A WSServerHandshakeError during discovery records a typed,
+    region-hinted error and still returns None (issue #8)."""
+    import aiohttp
+    from multidict import CIMultiDict, CIMultiDictProxy
+    from yarl import URL
+
+    from custom_components.foxess_control.foxess.web_session import (
+        FoxESSWebSession,
+    )
+
+    request_info = aiohttp.RequestInfo(
+        URL("wss://eu.foxesscloud.com/dew/v0/wsmaitian"),
+        "GET",
+        CIMultiDictProxy(CIMultiDict()),
+    )
+    exc = aiohttp.WSServerHandshakeError(
+        request_info=request_info,
+        history=(),
+        status=200,
+        message="Invalid response status",
+    )
+
+    buf: deque[dict[str, Any]] = deque(maxlen=30)
+    session = _FakeWSConnectSession(exc)
+    ws = FoxESSWebSession(
+        "testuser",
+        "d41d8cd98f00b204e9800998ecf8427e",
+        base_url="https://eu.foxesscloud.com",
+        session=session,  # type: ignore[arg-type]
+    )
+    # Avoid a real login; discovery only needs a token string.
+    ws._token = "tok"  # noqa: SLF001
+    ws._last_login = float("inf")  # noqa: SLF001
+
+    result = await ws.async_discover_battery_id("PLANT123", recent_errors=buf)
+
+    assert result is None
+    assert len(buf) == 1
+    rec = buf[0]
+    assert rec["category"] == "ws_discovery"
+    assert rec["exc_type"] == "WSServerHandshakeError"
+    assert "regional" in (rec["hint"] or "")
+    assert rec["context"]["host"] == "https://eu.foxesscloud.com"
+    assert rec["context"]["plant_id"] == "PLANT123"

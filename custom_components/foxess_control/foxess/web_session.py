@@ -12,11 +12,15 @@ import logging
 import re
 import time
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
 
+from ..smart_battery.logging import record_operational_error
 from .signature import generate_signature
+
+if TYPE_CHECKING:
+    from collections import deque
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -160,7 +164,11 @@ class FoxESSWebSession:
             return self._token
         return await self.async_login()
 
-    async def async_discover_battery_id(self, plant_id: str) -> str | None:
+    async def async_discover_battery_id(
+        self,
+        plant_id: str,
+        recent_errors: deque[dict[str, Any]] | None = None,
+    ) -> str | None:
         """Discover the battery compound ID via a single WebSocket message.
 
         Connects to the real-time WebSocket, reads the first non-stale
@@ -198,8 +206,40 @@ class FoxESSWebSession:
                             compound = f"{bid}@{first_sn}"
                             _LOGGER.info("Discovered battery compound ID: %s", compound)
                             return compound
+        except aiohttp.WSServerHandshakeError as exc:
+            record_operational_error(
+                _LOGGER,
+                recent_errors,
+                category="ws_discovery",
+                attempted="battery ID discovery via wsmaitian WS",
+                exc=exc,
+                hint=(
+                    f"server returned HTTP {exc.status} not 101 — possible "
+                    f"regional endpoint mismatch (configured host: {self.BASE_URL}) "
+                    f"or rejected web-session token"
+                ),
+                context={"host": self.BASE_URL, "plant_id": plant_id},
+            )
+        except (TimeoutError, aiohttp.ClientError) as exc:
+            record_operational_error(
+                _LOGGER,
+                recent_errors,
+                category="ws_discovery",
+                attempted="battery ID discovery via wsmaitian WS",
+                exc=exc,
+                hint="transient connection error during battery-ID discovery",
+                context={"host": self.BASE_URL, "plant_id": plant_id},
+                severity="info",
+            )
         except Exception as exc:
-            _LOGGER.warning("Battery ID discovery via WebSocket failed: %s", exc)
+            record_operational_error(
+                _LOGGER,
+                recent_errors,
+                category="unexpected",
+                attempted="battery ID discovery via wsmaitian WS",
+                exc=exc,
+                severity="error",
+            )
         return None
 
     async def async_get_battery_temperature(

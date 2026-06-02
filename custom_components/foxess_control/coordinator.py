@@ -233,7 +233,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         try:
             compound_id: str | None = await web_session.async_discover_battery_id(
-                plant_id
+                plant_id, recent_errors=domain_data.recent_errors
             )
             if compound_id:
                 domain_data.battery_compound_id = compound_id
