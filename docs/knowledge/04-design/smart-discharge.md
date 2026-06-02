@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: Smart Discharge
-last_verified: 2026-05-07
+last_verified: 2026-06-02
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -79,8 +79,14 @@ power floor constraint.
 **Alternatives considered**:
 - Continue forced discharge to the end: rejected because the last
   10 minutes of grid import offset the feed-in revenue
+**Note**: This guard is the *paced* (capacity-dependent) protection and
+runs only when `pacing_enabled`. On the capacity-unknown /
+pacing-disabled path it is skipped; D-057 provides the
+capacity-independent backstop that removes the override at the min-SoC
+floor so P-001 still holds.
 **Traces**: C-001, C-017 (end-of-discharge guard is the specific
-10-min enforcement of C-001 near window end);
+10-min enforcement of C-001 near window end), D-057 (capacity-independent
+floor backstop);
 `tests/test_smart_battery_algorithms.py::TestShouldSuspendDischarge`
 
 ### D-004: Peak consumption tracking with exponential decay
@@ -274,8 +280,19 @@ D-002 (deferred start), D-005 (feedin budget);
 `tests/test_smart_battery_algorithms.py::TestFeedinHeadroomAccountsForExportClamp` (6 tests)
 
 ### D-047: Hardware export-limit actuator for discharge pacing
-**Decision**: When the integration is configured with an export-limit
-entity (e.g. the FoxESS Modbus `number.*_export_limit` control),
+**Decision**: This scheme activates **only when an export-limit
+actuator *entity* is configured** — gated on
+`_has_export_limit_entity()`, NOT on whether a grid-export-limit
+*value* is set (`grid_export_limit_w > 0`, which defaults to 5000).
+The distinction is load-bearing: a limit value with no actuator entity
+must fall back to software pacing (`calculate_discharge_power`), the
+same as no limit at all. Gating on the value instead pinned `fdPwr` at
+max with no actuator to modulate, so software pacing was bypassed and
+the battery drained uncapped to min SoC early, importing at the floor
+(P-001 regression fixed 2026-06-01, release 1.0.17; all three gates —
+`_start_deferred_discharge` and `_apply_discharge_power` in
+`listeners.py`, and `_do_smart_discharge` in `services.py` — now test
+`_has_export_limit_entity`). When the actuator entity *is* present,
 smart discharge uses a two-channel control scheme:
 1. **Cloud schedule (`fdPwr`)** is pinned at the inverter's maximum
    power for the entire session — the schedule provides the
@@ -342,7 +359,61 @@ path, lines ~1373–1414),
 `tests/test_export_limit.py::TestSmartDischargeExportLimitSensor` (2),
 `tests/test_export_limit.py::TestAdapterExportLimitInterface`,
 `tests/test_export_limit.py::TestSmartOperationsOverviewAttribute`,
-`tests/test_export_limit.py::TestExportLimitThreshold` (24 total)
+`tests/test_export_limit.py::TestExportLimitThreshold` (24 total),
+`tests/test_export_limit.py::TestExportLimitConfiguredButNoActuatorPaces`
+(actuator-presence gate: paces when limit set but no actuator)
+
+### D-057: Capacity-independent override removal at the min-SoC floor
+**Decision**: When a discharge tick observes `current_soc <= min_soc`,
+remove the forced-discharge override (revert to self-use) on the
+**first** such tick — independent of `battery_capacity_kwh` and of
+whether pacing is enabled. Session *teardown* (cancelling listeners,
+ending the session) still requires the 2-consecutive-tick anti-flap
+confirmation (see contract §G1). A one-shot latch
+(`override_removed_at_floor`) makes the removal idempotent and re-arms
+when SoC recovers above `min_soc`.
+**Context**: `battery_capacity_kwh` defaults to 0 and has no required
+config-flow field, so a large fraction of users run smart discharge
+with `pacing_enabled` false. With pacing off, the entire suspend block
+— including the C-017/G2 end-of-discharge guard (D-003) — was skipped;
+the only stop was the 2-tick `_check_soc_threshold`, which removed the
+override ~1 tick (~60 s) *after* SoC reached `min_soc`. On FoxESS
+ForceDischarge the active group's `fdSoc = min_soc`, and the inverter
+holds that floor by importing house load until the override is
+removed — so that ~1-tick delay was a real P-001 import window (live
+2026-06-01, ~1.4 kW for ~2 min after SoC hit 50%).
+**Rationale**: P-001 must hold regardless of capacity configuration.
+G2 (D-003) is the *paced* protection and is structurally
+capacity-dependent (its energy math needs `battery_capacity_kwh`);
+`should_suspend_discharge` returns False when capacity is 0, so it
+cannot help. The override removal, by contrast, needs only the SoC
+comparison, so it protects every config. Removing the override early
+on a transient dip is harmless (self-use serves load from the
+battery; the session resumes if SoC recovers), so it does not need
+the anti-flap delay that *terminating* the session does.
+**Priority served**: P-001 (No grid import during forced discharge)
+**Trades against**: none — prompt self-use revert strictly dominates a
+delayed one for P-001; the anti-flap guarantee is preserved on the
+teardown path.
+**Classification**: safety — closes a P-001 import window on the
+capacity-unknown / pacing-disabled path.
+**Alternatives considered**:
+- Refuse to start smart discharge when `battery_capacity_kwh <= 0`:
+  rejected — the integration has hundreds of users, many with
+  capacity unset, and a hard refusal would break their discharge
+  automations on upgrade. The fix must keep the feature working and
+  simply close the import window.
+- Run the full C-017/G2 guard when pacing is disabled: rejected — G2's
+  energy math is uncomputable without capacity (`energy_above_min_kwh`
+  is identically 0), so it cannot provide the protection; the SoC-only
+  override removal can.
+**Traces**: C-001, C-002 (suspend at min SoC), C-025 (teardown
+ordering preserved); `smart_battery/listeners.py::_check_soc_threshold`
+(`override_removed_at_floor` latch);
+`tests/test_discharge_fdsoc_floor_import_no_capacity.py`
+(capacity-unset: no import window),
+`tests/test_discharge_fdsoc_floor_import.py`
+(capacity-known: G1/G2 still remove override above min_soc)
 
 ## Key Behaviours
 

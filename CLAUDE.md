@@ -31,7 +31,7 @@ serves and any lower-priority goal it trades against.
 - **C-024**: Safe state on failure: 3 consecutive adapter errors open circuit breaker (hold position). 5 more ticks without recovery → abort session → self-use
 - **C-025**: Session boundary cleanliness: all overrides removed before new session starts
 - **C-027**: Schedule end time set to safe horizon (SoC/rate/safety_factor), not full window
-- **C-037**: Grid export limit awareness: deferral caps effective export rate at the configured hardware limit; active discharge requests max power and lets the hardware actuator enforce (D-047)
+- **C-037**: Grid export limit awareness: deferral caps effective export rate at the configured limit *value*; active-discharge pacing gates on actuator-*entity* presence (`_has_export_limit_entity`), not the value — with a limit but no actuator, fall back to software pacing (D-047)
 
 ### Data Integrity
 - **C-003**: Session identity tokens prevent stale callback races

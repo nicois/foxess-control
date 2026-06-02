@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 2
-last_verified: 2026-04-27
+last_verified: 2026-06-02
 traces_up: [01-vision.md]
 traces_down: [03-architecture.md, 04-design/]
 ---
@@ -760,31 +760,50 @@ maximisation) — without this awareness, feed-in targets go unmet
 on export-limited sites; the constraint also protects P-001 by
 preventing late starts that would force low paced power near window
 end
-**Statement**: When a hardware grid export limit is configured
-(`grid_export_limit_w > 0`), the discharge deferral calculation must
-cap the effective export rate at `grid_export_limit_w / 1000` kW in
-both the SoC deadline and feed-in energy deadline calculations.
-During active discharge, the system must request `max_power_w`
-directly instead of computing paced discharge power, allowing the
-inverter's built-in export limiter to enforce the constraint without
-double-limiting.
+**Statement**: When a hardware grid export limit *value* is
+configured (`grid_export_limit_w > 0`), the discharge deferral
+calculation must cap the effective export rate at
+`grid_export_limit_w / 1000` kW in both the SoC deadline and feed-in
+energy deadline calculations. Active-discharge pacing, however, is
+gated on the presence of an export-limit **actuator entity**, NOT on
+the limit value: only when an actuator entity is configured
+(`_has_export_limit_entity()` true) does the system pin `fdPwr` at
+`max_power_w` and let the hardware actuator enforce the paced rate
+(see D-047). When a limit value is configured but no actuator entity
+exists, active discharge falls back to **software pacing**
+(`calculate_discharge_power`) exactly as it does with no limit at
+all — pinning `fdPwr` at max in that case would drain the battery
+uncapped and import at the floor.
 **Rationale**: When a hardware export limit exists (DNO enforcement
 or inverter firmware config), actual grid export becomes
 `min(discharge_power, hardware_limit)`. Software pacing assumes
-`discharge ≈ export`, which is violated by the hardware limit.
-Uncapped deferral starts too late (insufficient time to export at the
-limited rate). Paced active discharge double-limits — the inverter
-delivers less export AND less house-load contribution than possible.
+`discharge ≈ export`, which is violated by the hardware limit, so the
+*deferral* must cap the rate. But the "pin `fdPwr` at max and let
+hardware enforce" scheme only works when an actuator the integration
+can modulate actually exists — the limit *value* alone does not imply
+an actuator. Conflating the two (gating active pacing on the value)
+pinned `fdPwr` at max on installs with a configured limit but no
+actuator, bypassing software pacing entirely: the battery drained at
+full power to min SoC early and the house then imported (P-001
+regression, fixed 2026-06-01, release 1.0.17). Active pacing
+therefore gates on actuator-entity presence; the deferral rate-cap
+still uses the value.
 **Violation consequence**: Deferral deadline too late — discharge
-session incomplete or SoC target missed. Paced active discharge
-under-utilises battery contribution to house load and export.
-**Traces**: C-001 (deferral timing affects no-import), D-002
-(deferred start), D-005 (feedin deadline), D-044;
+session incomplete or SoC target missed. If active pacing is gated on
+the limit value instead of actuator presence, installs with a limit
+but no actuator run forced discharge at full power into the min-SoC
+floor and import (P-001 violation).
+**Traces**: C-001 (deferral timing affects no-import; actuator-gate
+prevents full-power drain), D-002 (deferred start), D-005 (feedin
+deadline), D-044, D-047 (actuator scheme);
 `smart_battery/algorithms.py::calculate_discharge_deferred_start`
-(lines 538–539 SoC cap, 566–567 feedin cap);
-`smart_battery/listeners.py::_discharge_listener` (max power path);
+(SoC cap, feedin cap);
+`smart_battery/listeners.py` (`_start_deferred_discharge`,
+`_apply_discharge_power` — both gate on `_has_export_limit_entity`),
+`smart_battery/services.py::_do_smart_discharge`;
 `tests/test_smart_battery_algorithms.py::TestGridExportLimitDeferral`,
-`tests/test_sensor.py::test_deferred_countdown_with_grid_export_limit_and_consumption`
+`tests/test_sensor.py::test_deferred_countdown_with_grid_export_limit_and_consumption`,
+`tests/test_export_limit.py::TestExportLimitConfiguredButNoActuatorPaces`
 
 ## Invariants — Hardware Behaviour
 

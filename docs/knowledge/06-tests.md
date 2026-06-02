@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 6
-last_verified: 2026-05-08
+last_verified: 2026-06-02
 traces_up: [02-constraints.md, 04-design/]
 # This file describes the Jekyll/Liquid safety test and quotes the
 # Jinja tag names literally as examples.  The section that quotes
@@ -74,6 +74,41 @@ charge/discharge scenarios through containerised HA + simulator
 | `TestAdapterExportLimitInterface::test_get_unavailable_returns_none` | Adapters without entity return None | D-047 |
 | `TestSmartOperationsOverviewAttribute::*` | Overview attribute reflects last written | C-020 |
 | `TestExportLimitThreshold::test_default_threshold_is_50w` | Default `export_limit_min_change_w` | D-047 |
+| `TestExportLimitConfiguredButNoActuatorPaces::*` | Export-limit value set but NO actuator entity → software pacing (not pinned at max); actuator-present still pins+modulates; tight window still paces toward max | C-037, C-001, D-047 |
+
+## Discharge min-SoC floor / no-import (D-057)
+
+**Constraints**: C-001, C-002, C-025
+**Source**: `tests/test_discharge_fdsoc_floor_import.py`,
+`tests/test_discharge_fdsoc_floor_import_no_capacity.py`
+
+| Test | Verifies | Constraint |
+|---|---|---|
+| `TestCloudFdSocFloorNoImport::*` | Capacity-known cloud path: G1/G2 remove the ForceDischarge override while SoC is strictly above min_soc (no fdSoc-floor import) | C-001, C-017 |
+| `TestCloudRemoveOverrideRevertsToSelfUse::*` | `remove_override` reverts the FD schedule group to self-use | C-025 |
+| `TestCloudFdSocFloorNoImportCapacityUnset::test_override_removed_no_import_window[*]` | Capacity-unset / pacing-disabled: override removed on first at-threshold tick — no tick left in ForceDischarge at/below min_soc | C-001, C-002 |
+| `TestCloudFdSocFloorNoImportCapacityUnset::test_no_premature_removal_well_above_min_soc` | No override removal while SoC well above min_soc (no early session kill) | C-002 |
+
+## WS startup on charge transition (D-058)
+
+**Constraints**: C-020
+**Source**: `tests/test_ws_startup_charge_transition.py`
+
+| Test | Verifies | Constraint |
+|---|---|---|
+| `TestTransitionFiresPromptlyAtDeferredDeadline::test_prompt_wake_scheduled_at_committed_deferred_deadline` | A point-in-time wake is scheduled at the committed deferred-start deadline (not just the 300 s interval) | C-020 |
+| `TestTransitionFiresPromptlyAtDeferredDeadline::test_firing_prompt_wake_performs_transition_and_hook` | Firing the wake performs the deferred→active transition and fires `on_session_started` | C-020 |
+| `TestTransitionFiresPromptlyAtDeferredDeadline::test_no_prompt_wake_when_already_active` | No spurious wake scheduled when already actively charging | C-020 |
+
+## Entity-mode persistent Min SoC (D-047 backend)
+
+**Constraints**: P-001, P-002, C-025
+**Source**: `tests/test_entity_mode_write_units.py`
+
+| Test | Verifies | Constraint |
+|---|---|---|
+| `TestPersistentMinSocFloorRestored::test_teardown_restores_persistent_min_soc_to_reserve` | Entity adapter restores the persistent Min SoC entity to the configured reserve on self-use teardown (not left at the session target) | C-001, C-025 |
+| `TestPersistentMinSocFloorRestored::*` (inverse) | Active force discharge still writes the session target as the stop SoC | C-002 |
 
 ## Smart Charge Pacing
 

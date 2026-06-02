@@ -1,12 +1,12 @@
 ---
 project: FoxESS Control
 created: 2026-04-14
-last_updated: 2026-05-08
+last_updated: 2026-06-02
 last_reflection: 2026-05-08T12:00:00+10:00
 workflow_state:
-  last_check: 2026-05-08T12:00:00+10:00
-  last_update: 2026-05-08T12:00:00+10:00
-  last_coverage: 2026-05-08T12:00:00+10:00
+  last_check: 2026-06-02T12:00:00+10:00
+  last_update: 2026-06-02T12:00:00+10:00
+  last_coverage: 2026-06-02T12:00:00+10:00
   last_review: null
   last_auto: 2026-05-04T11:45:00+10:00
 ---
@@ -914,6 +914,50 @@ script). Covers ~42 hours of project work across multiple sessions.
 
 **Actions recommended (not taken this pass)**: none. Tree is
 current. No priority inversions, no unconstrained priorities.
+
+---
+
+### 2026-06-02 — Update (1.0.17 + 1.0.18 discharge/WS fixes)
+
+**Type**: Update workflow (code → tree propagation), triggered by
+four behavioural fixes shipped since the tree was last verified
+(2026-05-08).
+
+**Changes propagated**:
+- **C-037 restated**: was "active discharge requests `max_power_w`
+  when `grid_export_limit_w > 0`" — factually wrong after the 1.0.17
+  fix. Now: active pacing gates on actuator-entity *presence*
+  (`_has_export_limit_entity`), not the limit *value*; deferral
+  rate-cap still uses the value. The old wording described the bug.
+- **Contract §G1 restated**: override removal now happens on the
+  *first* at-threshold tick (capacity-independent, P-001-critical),
+  while session *teardown* keeps the 2-consecutive-tick anti-flap
+  rule. Previously conflated.
+- **D-047 clarified**: actuator scheme gates on entity presence, with
+  the P-001 regression that motivated it recorded.
+- **D-003 annotated**: it is the *paced* (capacity-dependent)
+  protection; D-057 is the capacity-independent backstop.
+- **New D-057**: capacity-independent override removal at the min-SoC
+  floor (closes the import window on the pacing-disabled path; the
+  "refuse to start" alternative was rejected because of the large
+  user base).
+- **New D-058**: point-in-time wake at the committed deferred-start
+  deadline (closes the ~4-min WS-startup lag; deeper cause than the
+  beta.2 `on_session_started` hook — the listener transition itself
+  wasn't event-driven).
+- **06-tests.md**: added four test sections (no-actuator pacing,
+  fdSoc-floor no-import known+unknown capacity, WS-startup transition,
+  entity-mode persistent Min SoC).
+
+**Audit**: `knowledge_audit.py` clean for the new entries — no
+missing priority/classification/trades-against, no inversions, no new
+ID collisions. (Pre-existing: 3 D-NNN collisions in unrelated files,
+D-024 sequence gap, P-004 + 10 C-NNN upward gaps — all predate this
+pass, untouched.)
+
+**Not done**: `last_review` is still null — a `review` pass has never
+run on this tree. Worth one given the tree's growth, but out of scope
+for this code-propagation update.
 
 ---
 

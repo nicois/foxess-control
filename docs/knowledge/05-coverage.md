@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 5
-last_verified: 2026-05-08
+last_verified: 2026-06-02
 traces_up: [02-constraints.md, 04-design/]
 traces_down: [06-tests.md]
 ---
@@ -20,11 +20,11 @@ serving it.
 
 | Priority | Enforced by (C-NNN) | Served by (D-NNN) | Status |
 |---|---|---|---|
-| P-001 No grid import during forced discharge | C-001, C-003, C-013, C-016, C-017, C-024, C-025, C-027 | D-001, D-002, D-003, D-004, D-017, D-018, D-023, D-025, D-026, D-047 | ENFORCED |
+| P-001 No grid import during forced discharge | C-001, C-003, C-013, C-016, C-017, C-024, C-025, C-027 | D-001, D-002, D-003, D-004, D-017, D-018, D-023, D-025, D-026, D-047, D-057 | ENFORCED |
 | P-002 Respect minimum state of charge | C-002, C-003, C-012, C-013, C-016, C-018, C-019, C-024, C-025, C-027 | D-001, D-016 | ENFORCED |
 | P-003 Meet the user's energy target | C-007, C-008, C-009, C-010, C-011, C-014, C-022, C-023, C-037 | D-005, D-006, D-007, D-011, D-012, D-013, D-014, D-015 (taper), D-019, D-032, D-033, D-037, D-042, D-043, D-044, D-046 | ENFORCED |
 | P-004 Maximise feed-in revenue | (aspirational — no C-NNN) | (no D-NNN currently declares P-004 as primary; D-044 serves P-003 but advances P-004 as a secondary effect) | ASPIRATIONAL |
-| P-005 Operational transparency | C-004, C-005, C-006, C-020, C-022, C-026, C-038 | D-008, D-009, D-010, D-020, D-021, D-027, D-028, D-029, D-030, D-035, D-036, D-038, D-039, D-040, D-041 (ws), D-048, D-050, D-051, D-053, D-054, D-055, D-056 | ENFORCED |
+| P-005 Operational transparency | C-004, C-005, C-006, C-020, C-022, C-026, C-038 | D-008, D-009, D-010, D-020, D-021, D-027, D-028, D-029, D-030, D-035, D-036, D-038, D-039, D-040, D-041 (ws), D-048, D-050, D-051, D-053, D-054, D-055, D-056, D-058 | ENFORCED |
 | P-006 Brand portability | C-015, C-021, C-039, C-040 | D-022 | ENFORCED |
 | P-007 Engineering process integrity | C-015, C-028, C-029, C-030, C-031, C-032, C-033, C-034, C-035, C-036 | D-019, D-031, D-034, D-041 (lovelace), D-045, D-049 | ENFORCED |
 
@@ -63,12 +63,14 @@ declaration.
 
 ## Classification Summary
 
-Across 57 active decision entries (IDs D-001..D-056 with D-024
+Across 59 active decision entries (IDs D-001..D-058 with D-024
 silently retired without marker and D-052 carrying a `[RETIRED]`
 marker since 2026-05-08; D-014, D-015, and D-041 each reuse the
 same ID for two distinct decisions in different design files —
-collisions tracked in META.md; 54 unique active IDs + 3 collisions
-= 57 active entries).
+collisions tracked in META.md; 56 unique active IDs + 3 collisions
+= 59 active entries). D-057 (capacity-independent override removal
+at the min-SoC floor) and D-058 (point-in-time wake at the
+committed deferred-start deadline) added 2026-06-02.
 
 | Classification | Count | Meaning |
 |---|---|---|
@@ -87,8 +89,8 @@ against a scenario that the system couldn't actually reach.
 
 | Constraint | Design | Tests | Status |
 |---|---|---|---|
-| C-001 No grid import during discharge | D-001, D-002, D-003, D-004, D-005, D-007, D-037, D-044, D-047 | `TestCalculateDischargePower` (6), `TestDischargePowerFeedinConstraint` (2), `TestShouldSuspendDischarge::test_high_consumption_suspends`, `TestCalculateDischargeDeferredStart` (14, incl. `test_tight_window_feedin_does_not_over_defer`), `TestClampExportLimitW` (6), `TestFeedinHeadroomAccountsForExportClamp` (6), E2E: `test_discharge_starts`, `test_ws_connects_after_deferred_start`, `test_feedin_power_adjusts_over_time` | COVERED |
-| C-002 Never discharge below min SoC | D-001 | `TestCalculateDischargePower::test_soc_at_min`, `test_soc_below_min`, `TestShouldSuspendDischarge::test_soc_at_min_suspends`, `test_soc_below_min_suspends`, `TestSocStabilityCounters` (4), E2E: `test_discharge_drains_battery` | COVERED |
+| C-001 No grid import during discharge | D-001, D-002, D-003, D-004, D-005, D-007, D-037, D-044, D-047, D-057 | `TestCalculateDischargePower` (6), `TestDischargePowerFeedinConstraint` (2), `TestShouldSuspendDischarge::test_high_consumption_suspends`, `TestCalculateDischargeDeferredStart` (14, incl. `test_tight_window_feedin_does_not_over_defer`), `TestClampExportLimitW` (6), `TestFeedinHeadroomAccountsForExportClamp` (6), `TestExportLimitConfiguredButNoActuatorPaces`, `TestCloudFdSocFloorNoImport`, `TestCloudFdSocFloorNoImportCapacityUnset`, E2E: `test_discharge_starts`, `test_ws_connects_after_deferred_start`, `test_feedin_power_adjusts_over_time` | COVERED |
+| C-002 Never discharge below min SoC | D-001, D-057 | `TestCalculateDischargePower::test_soc_at_min`, `test_soc_below_min`, `TestShouldSuspendDischarge::test_soc_at_min_suspends`, `test_soc_below_min_suspends`, `TestSocStabilityCounters` (4), `TestCloudFdSocFloorNoImportCapacityUnset` (override removed at floor; no premature removal), E2E: `test_discharge_drains_battery` | COVERED |
 | C-003 Session identity prevents races | D-017, D-018 | `TestSessionPersistence` (3), `TestRecoverSessions` (13), E2E: `test_ws_connects_on_second_session` | COVERED |
 | C-004 WS watts / coordinator kW | D-010, D-041 | `TestMapWsToCoordinator::test_real_world_sample`, `test_basic_mapping_export`, `TestIsPlausible` (11), `TestWsPlausibilityFilter` (3), E2E: `test_ws_unit_mismatch_handled` | COVERED |
 | C-005 WS stale message filter | D-008, D-041 | `TestStaleness::test_stale_messages_skipped`, `TestIsPlausible` (11), `TestWsPlausibilityFilter` (3) | COVERED |
@@ -103,14 +105,14 @@ against a scenario that the system couldn't actually reach.
 | C-014 Taper profile plausibility | D-006, D-011, D-012, D-013, D-014 (taper), D-015 (taper) | `TestIsPlausible` (1+), `TestRecordCharge` (4), `TestRecordChargeTemp`, `TestTempFactor`, `TestEstimateChargeHours`, `TestSerialization::test_from_dict_clamps_ratios`, `TestCalculateChargePower::test_trajectory_behind_triggers_max_power`, `test_trajectory_ahead_resumes_normal`, `TestCalculateDeferredStart::test_taper_*` (2) | COVERED |
 | C-015 Vendored smart_battery matches canonical | -- | `test_vendored_copy_matches_canonical` | ACCEPTED |
 | C-016 Cancel listeners before awaits | D-018 | `test_cancel_smart_session_is_synchronous` | COVERED |
-| C-017 End-of-discharge guard | D-003 | `TestShouldSuspendDischarge::test_high_consumption_suspends` | COVERED |
+| C-017 End-of-discharge guard | D-003, D-057 | `TestShouldSuspendDischarge::test_high_consumption_suspends`, `TestCloudFdSocFloorNoImport` (paced path removes override above min_soc) | COVERED |
 | C-018 Unmanaged work mode protection | D-016 | `TestCheckScheduleSafe` (7), `test_rejects_schedule_with_backup_mode` | COVERED |
 | C-019 Discharge SoC unavailability abort | D-019 | `TestDischargeSocUnavailability` (2) | COVERED |
-| C-020 Operational transparency | D-008, D-009, D-021, D-027, D-028, D-029, D-030, D-033, D-035, D-036, D-038, D-039, D-040, D-051, D-053, D-054, D-055, D-056 | `TestSessionContextFilter` (7), `TestInstallRemove` (2), `TestDebugLogHandlerWithSession` (3), `TestBMSBatteryTemperature` (3 mapped), `TestBatteryDetailEndpoint` (2 mapped), `TestCompoundIdFromWebSocket` (1 mapped), `TestSmartDischargeExportLimitSensor` (2), `TestSmartOperationsOverviewAttribute`, `test_all_locales_cover_english_keys` (2, parametrized), `test_parser_finds_expected_locales`, `test_new_keys_present_in_every_locale`, `TestSaveRunViolationPersistence` (2, soak-recorder observability), E2E: `test_data_source_badge_matches_mode` (3), `test_stale_badge_shown_for_old_api_data` (3), `test_api_source_when_idle`, `test_ws_always_connects_without_session`, `test_ws_mode_persists_via_options_flow`, `test_ws_linger_captures_post_discharge_data`, `test_house_load_never_greyed`, `test_pv_values_consistent_with_solar_total` (3), `test_node_click_opens_more_info`, `test_default_config_renders_all_four_boxes`, `test_custom_boxes_*` (3), `test_progress_hidden_when_idle`, `test_progress_visible_during_discharge` (3), `test_clamp_split_power_row_renders_when_export_limit_configured`, `test_clamp_active_class_toggles_with_attribute`, `test_safety_floor_row_appears_when_tracked`, `test_safety_floor_row_is_expandable_and_shows_peak`, `test_discharge_deferred_reason_renders_when_attribute_present`, `test_charge_deferred_reason_renders_when_attribute_present`, `TestTaperCard` (3), `TestFormInputPersistence` (5), `TestApplyModePowerConversion` (5), `TestSetExportLimitConversion` (3), `TestNonPowerWritesUntouched` (1) | COVERED |
+| C-020 Operational transparency | D-008, D-009, D-021, D-027, D-028, D-029, D-030, D-033, D-035, D-036, D-038, D-039, D-040, D-051, D-053, D-054, D-055, D-056, D-058 | `TestTransitionFiresPromptlyAtDeferredDeadline` (3, WS startup at deferred deadline), `TestSessionContextFilter` (7), `TestInstallRemove` (2), `TestDebugLogHandlerWithSession` (3), `TestBMSBatteryTemperature` (3 mapped), `TestBatteryDetailEndpoint` (2 mapped), `TestCompoundIdFromWebSocket` (1 mapped), `TestSmartDischargeExportLimitSensor` (2), `TestSmartOperationsOverviewAttribute`, `test_all_locales_cover_english_keys` (2, parametrized), `test_parser_finds_expected_locales`, `test_new_keys_present_in_every_locale`, `TestSaveRunViolationPersistence` (2, soak-recorder observability), E2E: `test_data_source_badge_matches_mode` (3), `test_stale_badge_shown_for_old_api_data` (3), `test_api_source_when_idle`, `test_ws_always_connects_without_session`, `test_ws_mode_persists_via_options_flow`, `test_ws_linger_captures_post_discharge_data`, `test_house_load_never_greyed`, `test_pv_values_consistent_with_solar_total` (3), `test_node_click_opens_more_info`, `test_default_config_renders_all_four_boxes`, `test_custom_boxes_*` (3), `test_progress_hidden_when_idle`, `test_progress_visible_during_discharge` (3), `test_clamp_split_power_row_renders_when_export_limit_configured`, `test_clamp_active_class_toggles_with_attribute`, `test_safety_floor_row_appears_when_tracked`, `test_safety_floor_row_is_expandable_and_shows_peak`, `test_discharge_deferred_reason_renders_when_attribute_present`, `test_charge_deferred_reason_renders_when_attribute_present`, `TestTaperCard` (3), `TestFormInputPersistence` (5), `TestApplyModePowerConversion` (5), `TestSetExportLimitConversion` (3), `TestNonPowerWritesUntouched` (1) | COVERED |
 | C-021 Brand-agnostic code in common package | D-022 | `test_smart_battery_has_no_brand_imports`, `test_vendored_copy_matches_canonical` | COVERED |
 | C-022 Unreachable charge target surfaced | D-028 | `TestIsChargeTargetReachable` (7) | COVERED |
 | C-024 Safe state on failure | D-023, D-025, D-026, D-031, D-032, D-034, D-042, D-045 | `TestTransientApiErrorResilience` (3), `TestStaleWorkModeAfterCleanupFailure` (2), `TestRecoverSessions` (13), E2E: `test_ws_recovers_after_stream_stolen`, `test_ws_reconnects_after_reload_at_max_power`, `TestReloadRecovery` (7), `test_deferred_to_discharging_triggers_ws` | COVERED |
-| C-025 Session boundary cleanliness | D-026, D-032, D-045 | `TestStaleWorkModeAfterCleanupFailure` (2), `TestRecoverSessions` (13), E2E: `test_self_use_on_clear`, `test_discharge_resumes_after_reload`, `test_charge_resumes_after_reload`, `test_idle_after_reload_with_no_session`, `test_session_clears_after_window_expires_during_reload` | COVERED |
+| C-025 Session boundary cleanliness | D-026, D-032, D-045, D-057 | `TestStaleWorkModeAfterCleanupFailure` (2), `TestRecoverSessions` (13), `TestPersistentMinSocFloorRestored` (entity-mode reserve restored on teardown), `TestCloudRemoveOverrideRevertsToSelfUse`, E2E: `test_self_use_on_clear`, `test_discharge_resumes_after_reload`, `test_charge_resumes_after_reload`, `test_idle_after_reload_with_no_session`, `test_session_clears_after_window_expires_during_reload` | COVERED |
 | C-026 Proactive error surfacing | D-029, D-038, D-048 | `TestErrorSurfacing` (2), `TestSensorListenerFailureSurfacesRepair` (6), `TestSafeWriteHelperHappyPath` (1) | COVERED |
 | C-027 Progressive schedule extension | D-023 | `TestRecoverSessions` (13, schedule horizon verification), E2E: `test_schedule_horizon_during_discharge` | COVERED |
 | C-028 Simulator over mocks | -- | `test_client.py` (9), `test_inverter.py` (10) use simulator | ACCEPTED |
@@ -127,7 +129,7 @@ against a scenario that the system couldn't actually reach.
 | C-040 Brand-agnostic code has brand-agnostic tests | D-022 (adapter as injection seam) | `tests/test_smart_battery_agnostic.py` (15 tests — FakeAdapter Protocol conformance + canonical recording patterns + inline import-purity self-check) | COVERED |
 
 | C-038 Sensor-listener parameter parity | D-002, D-005, D-043, D-054, D-055 | `test_charge_deferred_sensor.py` (7), `test_discharge_deferred_sensor.py` (4), `tests/test_is_effectively_charging_stability.py::TestIsEffectivelyChargingStability` (4), `tests/test_sensor.py::TestFoxESSPolledSensor` rolling-median cases | COVERED |
-| C-037 Grid export limit awareness | D-002, D-005, D-044, D-047 | `TestGridExportLimitDeferral` (4), `TestFeedinHeadroomAccountsForExportClamp` (6 — clamp-slack-aware headroom, 2026-04-24), `TestListenerWriteSuppression` (2), `TestListenerStartsAtHardwareMax`, `TestListenerOverwriteExternalChanges`, `TestAdapterExportLimitInterface`, `TestExportLimitThreshold`, `test_deferred_countdown_with_grid_export_limit_and_consumption` | COVERED |
+| C-037 Grid export limit awareness | D-002, D-005, D-044, D-047 | `TestGridExportLimitDeferral` (4), `TestFeedinHeadroomAccountsForExportClamp` (6 — clamp-slack-aware headroom, 2026-04-24), `TestListenerWriteSuppression` (2), `TestListenerStartsAtHardwareMax`, `TestListenerOverwriteExternalChanges`, `TestAdapterExportLimitInterface`, `TestExportLimitThreshold`, `TestExportLimitConfiguredButNoActuatorPaces` (actuator-presence gate), `test_deferred_countdown_with_grid_export_limit_and_consumption` | COVERED |
 | C-023 Solar-first during ForceCharge | D-043 | `tests/soak/test_scenarios.py::test_charge_with_solar`, `test_charge_solar_exceeds_target`, `test_charge_solar_then_spike` | ACCEPTED |
 
 ## Gaps
@@ -231,10 +233,15 @@ C-014.
 
 - **Priorities**: 7 (P-001..P-007, introduced 2026-04-24)
 - **Total constraints**: 40 (all active; C-023 reclassified as hardware-satisfied; C-039 and C-040 added 2026-04-25)
-- **Design decisions**: 54 unique active (D-001..D-056, D-024
+- **Design decisions**: 56 unique active (D-001..D-058, D-024
   retired, D-052 retired 2026-05-08; D-014, D-015, and D-041 each
   refer to two different entries in different design files — ID
-  collisions tracked in META.md). 2026-05-03 additions still in
+  collisions tracked in META.md). 2026-06-02 additions: D-057
+  (capacity-independent override removal at the min-SoC floor —
+  closes a P-001 import window on the pacing-disabled path),
+  D-058 (point-in-time wake at the committed deferred-start
+  deadline — closes the ~4-min WS-startup lag on the charge
+  deferred→active transition). 2026-05-03 additions still in
   effect: D-053 (locale-safe `_resolve(key)` for control + taper
   cards), D-054 (rolling-median filter on WS-fed display power
   channels), D-055 (listener commits deferred_start for sensor-side
@@ -259,7 +266,7 @@ C-014.
 - **Priority inversions**: 0
 - **Unconstrained priorities**: 1 (P-004 — aspirational by design)
 - **Unprioritised constraints**: 0 (all 40 C-NNN name P-NNN)
-- **Unprioritised decisions**: 0 (all 57 active D-NNN entries name P-NNN + classification; 54 unique active IDs + 3 collisions; D-024 silently retired; D-052 retired 2026-05-08 with `[RETIRED]` marker; D-014 / D-015 / D-041 each carry two distinct entries in different design files — ID reuse collisions noted below under Classification Summary)
+- **Unprioritised decisions**: 0 (all 59 active D-NNN entries name P-NNN + classification; 56 unique active IDs + 3 collisions; D-024 silently retired; D-052 retired 2026-05-08 with `[RETIRED]` marker; D-014 / D-015 / D-041 each carry two distinct entries in different design files — ID reuse collisions noted below under Classification Summary)
 - **Active regression**: none
 - **Orphan tests**: ~160 unit (display, plumbing, lifecycle tests)
 - **Test counts**: run `python scripts/test_summary.py` for

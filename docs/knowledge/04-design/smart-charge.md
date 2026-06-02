@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: Smart Charge
-last_verified: 2026-05-03
+last_verified: 2026-06-02
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -232,6 +232,67 @@ reads the listener's committed result rather than re-running it);
 (four cases: no flip under ±0.1% SoC + ±0.4 kW consumption noise,
 plus neighbourhood cases confirming real qualitative changes
 still flip phase promptly).
+
+### D-058: Point-in-time wake at the committed deferred-start deadline
+
+**Decision**: When the charge listener commits a future
+`deferred_start` (D-055), it also schedules a one-shot
+`async_track_point_in_time` wake at that deadline
+(`_schedule_deferred_wake`), which re-runs `_adjust_charge_power`
+through the session-id guard and circuit breaker. The wake is
+idempotent (no-op when the deadline is unchanged), reschedules when
+D-043 re-deferral moves the deadline, and is cancelled once the
+transition to active charging occurs.
+
+**Context**: Observed 2026-06-02 (live, on v1.0.17): smart charge
+flipped `scheduled → charging` at 01:00:10Z but the WebSocket did
+not connect until 01:04:04Z (~3m54s later), leaving the dashboard on
+stale REST data. This is the same ~4-minute symptom 1.0.17-beta.2
+(D-008's `on_session_started` hook) targeted — but a deeper cause.
+The beta.2 fix made the WS-startup *hook* event-driven and correctly
+wired; it fires when `charging_started` flips True. But the
+listener's deferred→active transition itself was NOT event-driven:
+`_adjust_charge_power` only re-evaluated on its periodic
+`async_track_time_interval` (`SMART_CHARGE_ADJUST_SECONDS` = 300 s).
+So the *sensor* flipped to "charging" the instant `now >=
+deferred_start_committed` (recomputed every ~5 s coordinator refresh,
+D-055), while the *listener* didn't set `charging_started=True` /
+fire the hook until its next 300 s tick — up to a full interval
+late. Sensor and WS startup were driven by different clocks.
+
+**Rationale**: The transition must be driven by an event at the
+deadline, not polled at a coarse cadence. A point-in-time timer at
+the committed deadline makes the listener re-evaluate within seconds
+of the deadline, so `charging_started` flips and the
+`on_session_started` hook fires promptly — closing the
+sensor-vs-listener clock gap. Reusing the already-committed
+`deferred_start` (D-055) as the wake time keeps a single source of
+truth.
+
+**Priority served**: P-005 (Operational transparency — the
+data-freshness badge and WS-fed live data reflect the actual session
+state within seconds of the transition).
+**Trades against**: none.
+**Classification**: other (transparency/latency; the underlying
+WS startup is a P-005 concern, not a safety invariant).
+**Alternatives considered**:
+- Shrink `SMART_CHARGE_ADJUST_SECONDS`: rejected — masks the
+  structural lag with a faster poll, costing API calls and still
+  leaving up-to-one-interval latency.
+- Drive WS startup from the sensor's transition: rejected — the
+  sensor is a read-only view (D-055); side effects belong in the
+  listener.
+**Note**: the **discharge** deferred-start path has the analogous
+structural gap but additional WS-startup triggers (per-tick WS-aware
+wrapper, WS-message arrival, auto-mode targeting) make it
+lower-severity — flagged as a follow-up, not yet fixed.
+**Traces**: C-020 (user determines state from UI alone), D-055
+(committed deferred_start), D-008 (`on_session_started` hook this
+wake triggers promptly);
+`smart_battery/listeners.py::_schedule_deferred_wake`;
+`tests/test_ws_startup_charge_transition.py::TestTransitionFiresPromptlyAtDeferredDeadline`
+(wake scheduled at deadline; firing it performs the transition; no
+spurious wake when already active).
 
 ## Key Behaviours
 

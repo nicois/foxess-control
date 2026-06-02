@@ -2,7 +2,7 @@
 project: FoxESS Control
 audience: contributors implementing the smart-discharge algorithm in any language
 sources: smart_battery/algorithms.py, smart_battery/listeners.py, docs/knowledge/04-design/smart-discharge.md
-last_verified: 2026-05-10
+last_verified: 2026-06-02
 ---
 
 # Smart Discharge Contract
@@ -192,13 +192,36 @@ override; the inverter reverts to self-use. The session enters
 suspended state but is NOT terminated — if SoC recovers (e.g.
 incoming solar), G1 will not re-fire and pacing resumes.
 
-**Confirmation rule.** The listener layer requires **2 consecutive**
-ticks with `current_soc <= min_soc` before ending the session. A
-single below-threshold sample increments `soc_below_min_count` and
-returns; the second consecutive sample ends the session. This is the
-listener's anti-flap protection — a transient SoC dip (one stale
-reading, one inter-poll fluctuation) must not terminate a multi-hour
-session.
+**Confirmation rule.** Two distinct actions happen at this guard,
+with different timing:
+
+- **Override removal (P-001-critical, capacity-independent).** The
+  moment `current_soc <= min_soc`, the forced-discharge override MUST
+  be removed so the inverter reverts to self-use — on the **first**
+  at-threshold tick, not after confirmation. This matters because on
+  FoxESS ForceDischarge the active group carries `fdSoc = min_soc`,
+  and the inverter stops following house load at `fdSoc`: it holds
+  that level by importing house load until the override is removed.
+  Leaving the override in place even one extra tick opens a P-001
+  import window. This removal needs only `soc <= min_soc` (no battery
+  capacity), so it is the sole protection on the capacity-unknown /
+  pacing-disabled path where the suspend/G2 block is skipped. (On the
+  paced path G1/G2 already removed the override while SoC was strictly
+  above `min_soc`; the at-floor removal is then idempotent.)
+- **Session teardown.** Cancelling listeners and ending the session
+  keeps the **2-consecutive-tick** anti-flap confirmation: a single
+  below-threshold sample increments `soc_below_min_count` and returns;
+  the second consecutive sample ends the session. A transient SoC dip
+  (one stale reading, one inter-poll fluctuation) must not terminate a
+  multi-hour session. Reverting to self-use early is harmless on a
+  transient dip — self-use serves load from the battery and the next
+  tick resumes if SoC recovers (the at-floor latch re-arms) — so the
+  anti-flap rule applies to *teardown*, not to the override removal.
+
+This split was introduced 2026-06-02 (release 1.0.18): previously the
+override removal was bound to the 2-tick confirmation, which on the
+pacing-disabled path left forced discharge at the `fdSoc` floor
+importing for ~1 tick (~60 s) after SoC reached `min_soc`.
 
 **Why it is first.** P-002 sits above P-003 and P-004 in the priority
 chain. No feed-in target or revenue calculation is allowed to drive
