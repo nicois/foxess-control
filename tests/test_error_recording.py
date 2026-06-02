@@ -166,3 +166,75 @@ async def test_battery_id_discovery_records_ws_handshake_error() -> None:
     assert "regional" in (rec["hint"] or "")
     assert rec["context"]["host"] == "https://eu.foxesscloud.com"
     assert rec["context"]["plant_id"] == "PLANT123"
+
+
+class _FakeGetCtx:
+    """Async-context-manager returned by a fake session's .get()."""
+
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    async def __aenter__(self) -> Any:
+        raise self._exc
+
+    async def __aexit__(self, *args: Any) -> None:
+        return None
+
+
+class _FakeGetSession:
+    """Minimal aiohttp.ClientSession stand-in whose GET raises."""
+
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+        self.closed = False
+
+    def get(self, *args: Any, **kwargs: Any) -> Any:
+        return _FakeGetCtx(self._exc)
+
+
+def _request_info(url: str) -> Any:
+    import aiohttp
+    from multidict import CIMultiDict, CIMultiDictProxy
+    from yarl import URL
+
+    return aiohttp.RequestInfo(URL(url), "GET", CIMultiDictProxy(CIMultiDict()))
+
+
+@pytest.mark.asyncio
+async def test_bms_temp_fetch_records_typed_error_on_client_error() -> None:
+    """An aiohttp client error during BMS-temp fetch records a typed,
+    bms_temp_fetch error with host context and a hint, and still
+    returns None (preserving the existing fallback contract)."""
+    import aiohttp
+
+    from custom_components.foxess_control.foxess.web_session import (
+        FoxESSWebSession,
+    )
+
+    exc = aiohttp.ClientConnectionError("cannot connect to host")
+
+    buf: deque[dict[str, Any]] = deque(maxlen=30)
+    session = _FakeGetSession(exc)
+    ws = FoxESSWebSession(
+        "testuser",
+        "d41d8cd98f00b204e9800998ecf8427e",
+        base_url="https://eu.foxesscloud.com",
+        session=session,  # type: ignore[arg-type]
+    )
+    ws._token = "tok"  # noqa: SLF001
+    ws._last_login = float("inf")  # noqa: SLF001
+
+    result = await ws.async_get_battery_temperature(
+        battery_compound_id="BID@SERIAL123",
+        recent_errors=buf,
+    )
+
+    assert result is None
+    assert len(buf) == 1
+    rec = buf[0]
+    assert rec["category"] == "bms_temp_fetch"
+    assert rec["exc_type"] == "ClientConnectionError"
+    assert rec["hint"]
+    assert rec["context"]["host"] == "https://eu.foxesscloud.com"
+    # The raw compound id embeds a serial — must NOT be recorded verbatim.
+    assert "SERIAL123" not in str(rec["context"])

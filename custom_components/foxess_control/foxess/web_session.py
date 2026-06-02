@@ -245,6 +245,7 @@ class FoxESSWebSession:
     async def async_get_battery_temperature(
         self,
         battery_compound_id: str,
+        recent_errors: deque[dict[str, Any]] | None = None,
     ) -> float | None:
         """Fetch BMS battery temperature from the web portal.
 
@@ -261,10 +262,54 @@ class FoxESSWebSession:
             )
             return self._extract_battery_temperature(result)
         except (FoxESSWebAuthError, ValueError, TypeError, KeyError) as exc:
-            _LOGGER.debug("BMS temperature fetch failed: %s", exc)
+            # Auth/shape errors: web credentials/region or an unexpected
+            # response body.  Self-sufficient diagnostic, fall back to None
+            # (caller preserves the last-known temperature).  The compound id
+            # embeds a battery serial — record only its presence, never the
+            # raw value.
+            record_operational_error(
+                _LOGGER,
+                recent_errors,
+                category="bms_temp_fetch",
+                attempted="BMS battery temperature via /dew/v0/device/detail",
+                exc=exc,
+                hint=(
+                    "check web credentials/region — the device-detail endpoint "
+                    "rejected the request or returned no temperature"
+                ),
+                context={
+                    "host": self.BASE_URL,
+                    "compound_id_present": bool(battery_compound_id),
+                },
+                severity="info",
+            )
+            return None
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            record_operational_error(
+                _LOGGER,
+                recent_errors,
+                category="bms_temp_fetch",
+                attempted="BMS battery temperature via /dew/v0/device/detail",
+                exc=exc,
+                hint=(
+                    "transient connection/timeout to the web portal — check "
+                    "host/region reachability"
+                ),
+                context={
+                    "host": self.BASE_URL,
+                    "compound_id_present": bool(battery_compound_id),
+                },
+            )
             return None
         except Exception as exc:
-            _LOGGER.warning("BMS temperature fetch failed: %s", exc)
+            record_operational_error(
+                _LOGGER,
+                recent_errors,
+                category="unexpected",
+                attempted="BMS battery temperature via /dew/v0/device/detail",
+                exc=exc,
+                severity="error",
+            )
             return None
 
     @staticmethod

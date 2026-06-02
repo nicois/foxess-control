@@ -752,6 +752,7 @@ class TestBmsTemperatureFetch:
         assert data.get("bmsBatteryTemperature") == 23.5
         web_session.async_get_battery_temperature.assert_awaited_once_with(
             battery_compound_id="abc@SN123",
+            recent_errors=dd.recent_errors,
         )
 
     @pytest.mark.asyncio
