@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.2-beta.6
+
+- Fixed: add-on failed to start on HAOS (`[FATAL tini (7)] exec /init failed: Permission denied`) — the custom AppArmor profile omitted the s6-overlay boot path (`/init`). Reverted to Supervisor's default AppArmor profile, restoring the pre-0.12.1-beta.1 behaviour. Affected every install since 0.12.1-beta.1.
+
 ## 0.14.3
 
 - **Discharge suspension:** smart discharge automatically reverts to SelfUse when house consumption alone would drain the battery to min SoC within the remaining window, resuming forced discharge when conditions improve
