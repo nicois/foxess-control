@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 
 from ..smart_battery.logging import record_operational_error
-from .signature import generate_signature
 
 if TYPE_CHECKING:
     from collections import deque
@@ -95,6 +94,11 @@ class FoxESSWebSession:
         Contains a CPU-bound WASM call — use :meth:`_async_make_headers`
         from async code to avoid blocking the event loop.
         """
+        # Deferred import: signing pulls in the WASM engine (and wasmtime),
+        # which we only want loaded when actually making a web request — not
+        # at integration import time. See foxess/signature.py.
+        from .signature import generate_signature
+
         ts_ms = str(int(time.time() * 1000))
         token = self._token or ""
         sig = generate_signature(path, token, self.LANG, ts_ms)

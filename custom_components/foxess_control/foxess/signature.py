@@ -12,21 +12,29 @@ from __future__ import annotations
 import ctypes
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import wasmtime
+if TYPE_CHECKING:
+    import wasmtime
 
 _LOGGER = logging.getLogger(__name__)
 
+# Path only — no I/O at import time. The bytes are read lazily when the
+# signature engine is first built (see ``_SignatureEngine.__init__``) so that
+# importing this module — and therefore the whole integration / config flow —
+# does not require ``wasmtime`` (which has no wheel on e.g. 32-bit ARM).
 _WASM_PATH = Path(__file__).with_name("signature.wasm")
-_WASM_BYTES = _WASM_PATH.read_bytes()
 
 
 class _SignatureEngine:
     """Thin wrapper around the FoxESS signature WASM module."""
 
     def __init__(self) -> None:
+        # Deferred import: keep wasmtime out of the integration's import path.
+        import wasmtime
+
         self._store = wasmtime.Store()
-        module = wasmtime.Module(self._store.engine, _WASM_BYTES)
+        module = wasmtime.Module(self._store.engine, _WASM_PATH.read_bytes())
 
         linker = wasmtime.Linker(self._store.engine)
         self._memory: wasmtime.Memory | None = None

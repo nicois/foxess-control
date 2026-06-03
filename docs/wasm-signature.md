@@ -55,7 +55,13 @@ HTTP request with { "signature": "02ed6973...5245784" }
 
 The Python wrapper (`foxess/signature.py`) does three things:
 
-1. **Loads the WASM once** as a process-level singleton via `wasmtime`
+1. **Loads the WASM lazily, once** as a process-level singleton via `wasmtime`.
+   Both the `import wasmtime` and the `signature.wasm` byte read are deferred
+   until the first `generate_signature()` call — they do **not** run at module
+   import time. This keeps `wasmtime` (which has no wheel on some platforms,
+   e.g. 32-bit ARM) out of the integration's import path, so the integration
+   still loads and appears in HA's "Add Integration" list even where wasmtime
+   is unavailable.
 2. **Bridges Python strings into WASM memory** — writes UTF-8 bytes into the WASM linear memory, calls the exported `begin_signature` function, and reads the result back
 3. **Manages the WASM stack** — saves and restores the stack pointer around each call to prevent memory leaks
 
@@ -72,4 +78,4 @@ Only when **web credentials** are configured (see [README: Web credentials](../R
 1. Log in to the web portal and obtain a session token
 2. Authenticate the WebSocket upgrade request for real-time data
 
-If web credentials are not configured, the WASM module is never loaded and `wasmtime` is never imported. The integration falls back to the Open API with standard polling.
+If web credentials are not configured, no web request is ever signed, so the WASM module is never loaded and `wasmtime` is never imported (the import is deferred to the first `generate_signature()` call inside `_make_headers`). The integration falls back to the Open API with standard polling.
