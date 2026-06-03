@@ -67,6 +67,59 @@ jobs:
             ${{ env.REGISTRY }}/nicois/foxess-control-${{ matrix.arch }}:${{ steps.tag.outputs.version }}
             ${{ env.REGISTRY }}/nicois/foxess-control-${{ matrix.arch }}:latest
 
+      # Smoke test: actually RUN the built image and assert it boots.
+      #
+      # The AppArmor regression that broke the add-on on HAOS for 5 betas
+      # (commit 7cf864d: the custom profile omitted /init, so s6-overlay's
+      # first exec was denied with "[FATAL tini (7)] exec /init failed:
+      # Permission denied") shipped because CI built and signed the image
+      # but never ran it.
+      #
+      # This step builds the image LOCALLY (load instead of push) for the
+      # native amd64 runner, then `docker run`s it against a throwaway
+      # /config mount and asserts:
+      #   * the container boots past /init (s6-overlay starts) and runs
+      #     run.sh — a boot/exec/Dockerfile regression would fail here;
+      #   * run.sh copies the integration into
+      #     /config/custom_components/foxess_control (manifest.json present);
+      #   * the container exits 0 (add-on is startup: once).
+      #
+      # WHAT THIS DOES NOT COVER: plain `docker run` does NOT apply the
+      # Supervisor/HAOS AppArmor profile, so this cannot catch the specific
+      # AppArmor regression that motivated it — that would require a HAOS
+      # environment we don't have in CI. It DOES catch the broad class of
+      # "image cannot boot / run.sh broken / integration not copied"
+      # regressions, which is still valuable. AppArmor-specific safety is
+      # now enforced by NOT shipping a custom profile (Supervisor default).
+      #
+      # matrix.arch / matrix.base are workflow-defined matrix values, not
+      # untrusted external input, so direct interpolation is safe here.
+      - name: Smoke test (boots past /init, copies integration, exits 0)
+        if: matrix.arch == 'amd64'
+        env:
+          BUILD_FROM: ${{ matrix.base }}
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --load \
+            --platform linux/amd64 \
+            --build-arg "BUILD_FROM=${BUILD_FROM}" \
+            -f foxess-control/Dockerfile \
+            -t foxess-control-smoke:ci \
+            .
+          CONFIG_DIR="$(mktemp -d)"
+          # startup: once — run.sh copies files then the container exits.
+          docker run --rm -v "${CONFIG_DIR}:/config" foxess-control-smoke:ci
+          # Assert run.sh actually installed the integration.
+          INSTALLED="${CONFIG_DIR}/custom_components/foxess_control/manifest.json"
+          if [ ! -f "${INSTALLED}" ]; then
+            echo "SMOKE TEST FAILED: ${INSTALLED} was not created — run.sh did not copy the integration (or the container never booted past /init)."
+            ls -laR "${CONFIG_DIR}" || true
+            exit 1
+          fi
+          echo "Smoke test passed: container booted, ran run.sh, copied integration, exited 0."
+          rm -rf "${CONFIG_DIR}"
+
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
