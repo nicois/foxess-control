@@ -99,6 +99,7 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         super().__init__()
         self._api_data: dict[str, Any] = {}
+        self._entity_data: dict[str, Any] = {}
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -152,6 +153,54 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
+        )
+
+    async def async_step_entity(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Entity mode: map foxess_modbus entities (no API key)."""
+        if user_input is not None:
+            self._entity_data = dict(user_input)
+            return await self.async_step_entity_battery()
+
+        detected = _detect_foxess_modbus_entities(self.hass)
+        return self.async_show_form(
+            step_id="entity",
+            data_schema=entity_mapping_schema(None, detected),
+        )
+
+    async def async_step_entity_battery(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Entity mode: battery options, then create the entry.
+
+        The runtime reads entity mode and all entity/battery config from
+        ``entry.options`` (``domain_data.py`` builds ``entity_mode`` from
+        ``CONF_WORK_MODE_ENTITY`` in options; ``IntegrationConfig`` is built
+        from ``dict(entry.options)``). The mappings AND the battery settings
+        therefore both go into ``options``; ``data`` is empty (no API key).
+        """
+        if user_input is not None:
+            # Stable unique_id for the API-key-less entity entry: derive from
+            # the first foxess_modbus config entry id (falls back to a fixed
+            # sentinel) so duplicate entity setups abort cleanly.
+            modbus_entries = self.hass.config_entries.async_entries("foxess_modbus")
+            uid = (
+                f"entity-{modbus_entries[0].entry_id}"
+                if modbus_entries
+                else "entity-foxess-control"
+            )
+            await self.async_set_unique_id(uid)
+            self._abort_if_unique_id_configured()
+            return self.async_create_entry(
+                title="FoxESS Control (entity mode)",
+                data={},
+                options={**self._entity_data, **user_input},
+            )
+
+        return self.async_show_form(
+            step_id="entity_battery",
+            data_schema=battery_options_schema(None),
         )
 
     async def _validate_web_credentials(

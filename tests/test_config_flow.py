@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -473,6 +474,58 @@ class TestConfigFlowRouting:
         assert result["type"] == "form"
         _, kwargs = flow.async_show_form.call_args
         assert kwargs["step_id"] == "cloud"
+
+
+class TestConfigFlowEntityBranch:
+    @pytest.mark.asyncio
+    async def test_entity_step_shows_mapping_form(self) -> None:
+        flow = FoxessControlConfigFlow()
+        flow.hass = _make_hass_modbus(True)
+        flow.async_show_form = MagicMock(
+            return_value={"type": "form", "step_id": "entity"}
+        )
+        with patch(
+            "custom_components.foxess_control.config_flow._detect_foxess_modbus_entities",
+            return_value={CONF_WORK_MODE_ENTITY: "select.wm"},
+        ):
+            result = await flow.async_step_entity(None)
+        assert result["type"] == "form"
+        _, kwargs = flow.async_show_form.call_args
+        assert kwargs["step_id"] == "entity"
+
+    @pytest.mark.asyncio
+    async def test_entity_then_battery_creates_entry_without_api_key(self) -> None:
+        flow = FoxessControlConfigFlow()
+        flow.hass = _make_hass_modbus(True)
+        flow.async_set_unique_id = AsyncMock()
+        flow._abort_if_unique_id_configured = MagicMock()
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
+        created: dict[str, Any] = {}
+
+        def _create(**kw: Any) -> dict[str, str]:
+            created.update(kw)
+            return {"type": "create_entry"}
+
+        flow.async_create_entry = MagicMock(side_effect=_create)
+        await flow.async_step_entity(
+            {CONF_WORK_MODE_ENTITY: "select.wm", CONF_SOC_ENTITY: "sensor.soc"}
+        )
+        await flow.async_step_entity_battery(
+            {
+                CONF_BATTERY_CAPACITY_KWH: 10.0,
+                CONF_MIN_SOC_ON_GRID: 11,
+                CONF_MIN_POWER_CHANGE: 200,
+            }
+        )
+        assert created
+        # api_key absent from BOTH data and options
+        assert CONF_API_KEY not in created.get("data", {})
+        assert CONF_API_KEY not in created.get("options", {})
+        # entity mode active: work-mode entity is in OPTIONS (where
+        # IntegrationConfig reads it)
+        assert created["options"][CONF_WORK_MODE_ENTITY] == "select.wm"
+        # battery option carried in options too
+        assert created["options"][CONF_BATTERY_CAPACITY_KWH] == 10.0
 
 
 class TestSchemaBuildersNoEntry:
