@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.19-beta.2
+
+### Added
+- **Entity mode (foxess_modbus) is now configurable during initial setup** (P-005, D-060). Previously, entity mode could only be set up *after* installation via the integration's **Configure** (options) screen — and the initial setup *required* a FoxESS Cloud API key, validated against the cloud before an entry could be created. A foxess_modbus user with no cloud API key was therefore blocked from completing setup at all, and the entity-mode step was hidden behind a screen they could never reach. Now, when `foxess_modbus` is detected, the **first setup step offers an explicit choice**: *FoxESS Cloud (API key)* or *Use my foxess_modbus inverter (no API key needed)*. The entity branch maps the inverter entities (auto-detected from the foxess_modbus registry, overridable) and collects battery settings, then creates a working entity-mode entry with **no cloud API key required**. Cloud-only users (no foxess_modbus installed) see no change — setup goes straight to the API-key step as before. The options flow remains available to change mappings later. Localised across all ten translations.
+
 ## 1.0.19-beta.1
 
 ### Added
