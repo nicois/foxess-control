@@ -280,10 +280,47 @@
     "step": {
       "user": {
         "title": "FoxESS Control",
-        "description": "FoxESS Cloud API の認証情報を入力してください。",
+        "description": "インバーターはどのように接続されていますか？",
+        "menu_options": {
+          "cloud": "FoxESS Cloud（API キー）",
+          "entity": "foxess_modbus インバーターを使用する（API キー不要）"
+        }
+      },
+      "cloud": {
+        "title": "FoxESS Control",
+        "description": "FoxESS Cloud API の認証情報を入力してください。代わりに foxess_modbus 統合を使用する場合は、クラウド API キーなしで動作できます — ドキュメントを参照してください。",
         "data": {
           "api_key": "API キー",
           "device_serial": "デバイスシリアル番号"
+        }
+      },
+      "entity": {
+        "title": "FoxESS Control — エンティティモード",
+        "description": "foxess_modbus インバーターのコントロールをマッピングします。検出されたフィールドは自動入力されます。必要に応じて調整してください。動作モードエンティティを設定するとエンティティモードが有効になります。",
+        "data": {
+          "work_mode_entity": "動作モードエンティティ (select)",
+          "charge_power_entity": "充電電力上限エンティティ (number)",
+          "discharge_power_entity": "放電電力上限エンティティ (number)",
+          "min_soc_entity": "最低 SoC エンティティ (number)",
+          "soc_entity": "バッテリー SoC エンティティ (sensor)",
+          "loads_power_entity": "家庭負荷電力エンティティ (sensor)",
+          "pv_power_entity": "太陽光発電電力エンティティ (sensor)",
+          "feedin_energy_entity": "累積売電エネルギーエンティティ (sensor)",
+          "bat_charge_power_entity": "バッテリー充電電力エンティティ (sensor)",
+          "bat_discharge_power_entity": "バッテリー放電電力エンティティ (sensor)",
+          "grid_consumption_power_entity": "系統消費電力エンティティ (sensor)",
+          "feedin_power_entity": "系統売電電力エンティティ (sensor)",
+          "export_limit_entity": "最大系統売電上限エンティティ (number、任意 — ハードウェアアクチュエータによるテーパリングを有効化)",
+          "inverter_power": "インバーター定格電力 (W)"
+        }
+      },
+      "entity_battery": {
+        "title": "FoxESS Control — バッテリー",
+        "description": "バッテリー設定。放電ペーシングにはバッテリー容量が必要です。",
+        "data": {
+          "min_soc_on_grid": "系統接続時の最低残量 (%)",
+          "battery_capacity_kwh": "バッテリー容量 (kWh)",
+          "min_power_change": "スマート充電の最小電力変化 (W)"
         }
       },
       "web_credentials": {

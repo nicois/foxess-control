@@ -280,10 +280,47 @@
     "step": {
       "user": {
         "title": "FoxESS Control",
-        "description": "Voer uw FoxESS Cloud API-inloggegevens in.",
+        "description": "Hoe is uw omvormer aangesloten?",
+        "menu_options": {
+          "cloud": "FoxESS Cloud (API-sleutel)",
+          "entity": "Mijn foxess_modbus-omvormer gebruiken (geen API-sleutel nodig)"
+        }
+      },
+      "cloud": {
+        "title": "FoxESS Control",
+        "description": "Voer uw FoxESS Cloud API-inloggegevens in. Als u in plaats daarvan de foxess_modbus-integratie gebruikt, kunt u zonder cloud-API-sleutel werken — zie de documentatie.",
         "data": {
           "api_key": "API-sleutel",
           "device_serial": "Serienummer apparaat"
+        }
+      },
+      "entity": {
+        "title": "FoxESS Control — entiteitsmodus",
+        "description": "Wijs de besturingen van uw foxess_modbus-omvormer toe. Velden worden automatisch ingevuld waar gedetecteerd; pas aan indien nodig. Het instellen van de werkmodus-entiteit schakelt de entiteitsmodus in.",
+        "data": {
+          "work_mode_entity": "Werkmodus-entiteit (select)",
+          "charge_power_entity": "Laadvermogenslimiet-entiteit (number)",
+          "discharge_power_entity": "Ontlaadvermogenslimiet-entiteit (number)",
+          "min_soc_entity": "Min-SoC-entiteit (number)",
+          "soc_entity": "Batterij-SoC-entiteit (sensor)",
+          "loads_power_entity": "Huisverbruik-vermogensentiteit (sensor)",
+          "pv_power_entity": "Zonne-opwekvermogensentiteit (sensor)",
+          "feedin_energy_entity": "Cumulatieve teruglevering-energie-entiteit (sensor)",
+          "bat_charge_power_entity": "Batterijlaadvermogen-entiteit (sensor)",
+          "bat_discharge_power_entity": "Batterijontlaadvermogen-entiteit (sensor)",
+          "grid_consumption_power_entity": "Netafname-vermogensentiteit (sensor)",
+          "feedin_power_entity": "Netteruglevering-vermogensentiteit (sensor)",
+          "export_limit_entity": "Max. netteruglevering-limietentiteit (number, optioneel — schakelt hardware-actuator-tapering in)",
+          "inverter_power": "Nominaal vermogen omvormer (W)"
+        }
+      },
+      "entity_battery": {
+        "title": "FoxESS Control — batterij",
+        "description": "Batterij-instellingen. De batterijcapaciteit is vereist voor ontlaadtempo.",
+        "data": {
+          "min_soc_on_grid": "Minimum SoC op net (%)",
+          "battery_capacity_kwh": "Batterijcapaciteit (kWh)",
+          "min_power_change": "Minimale vermogenswijziging voor slim laden (W)"
         }
       },
       "web_credentials": {

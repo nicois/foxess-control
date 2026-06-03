@@ -289,10 +289,47 @@
     "step": {
       "user": {
         "title": "FoxESS Control",
-        "description": "Enter your FoxESS Cloud API credentials.",
+        "description": "How is your inverter connected?",
+        "menu_options": {
+          "cloud": "FoxESS Cloud (API key)",
+          "entity": "Use my foxess_modbus inverter (no API key needed)"
+        }
+      },
+      "cloud": {
+        "title": "FoxESS Control",
+        "description": "Enter your FoxESS Cloud API credentials. If you use the foxess_modbus integration instead, you can run without a cloud API key — see the docs.",
         "data": {
           "api_key": "API Key",
           "device_serial": "Device Serial Number"
+        }
+      },
+      "entity": {
+        "title": "FoxESS Control — entity mode",
+        "description": "Map the controls from your foxess_modbus inverter. Fields are auto-filled where detected; adjust as needed. Setting the Work Mode entity enables entity mode.",
+        "data": {
+          "work_mode_entity": "Work mode entity (select)",
+          "charge_power_entity": "Charge power limit entity (number)",
+          "discharge_power_entity": "Discharge power limit entity (number)",
+          "min_soc_entity": "Min SoC entity (number)",
+          "soc_entity": "Battery SoC entity (sensor)",
+          "loads_power_entity": "House load power entity (sensor)",
+          "pv_power_entity": "Solar generation power entity (sensor)",
+          "feedin_energy_entity": "Cumulative feed-in energy entity (sensor)",
+          "bat_charge_power_entity": "Battery charge power entity (sensor)",
+          "bat_discharge_power_entity": "Battery discharge power entity (sensor)",
+          "grid_consumption_power_entity": "Grid consumption power entity (sensor)",
+          "feedin_power_entity": "Grid feed-in power entity (sensor)",
+          "export_limit_entity": "Max grid export limit entity (number, optional — enables hardware-actuator tapering)",
+          "inverter_power": "Inverter rated power (W)"
+        }
+      },
+      "entity_battery": {
+        "title": "FoxESS Control — battery",
+        "description": "Battery settings. Battery capacity is required for discharge pacing.",
+        "data": {
+          "min_soc_on_grid": "Minimum SoC on Grid (%)",
+          "battery_capacity_kwh": "Battery Capacity (kWh)",
+          "min_power_change": "Minimum Power Change for Smart Charge (W)"
         }
       },
       "web_credentials": {

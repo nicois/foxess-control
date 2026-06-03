@@ -276,10 +276,47 @@
     "step": {
       "user": {
         "title": "FoxESS Control",
-        "description": "Geben Sie Ihre FoxESS Cloud API-Anmeldedaten ein.",
+        "description": "Wie ist Ihr Wechselrichter angeschlossen?",
+        "menu_options": {
+          "cloud": "FoxESS Cloud (API-Schlüssel)",
+          "entity": "Meinen foxess_modbus-Wechselrichter verwenden (kein API-Schlüssel erforderlich)"
+        }
+      },
+      "cloud": {
+        "title": "FoxESS Control",
+        "description": "Geben Sie Ihre FoxESS Cloud API-Anmeldedaten ein. Wenn Sie stattdessen die foxess_modbus-Integration verwenden, können Sie ohne Cloud-API-Schlüssel arbeiten — siehe Dokumentation.",
         "data": {
           "api_key": "API-Schlüssel",
           "device_serial": "Geräte-Seriennummer"
+        }
+      },
+      "entity": {
+        "title": "FoxESS Control — Entitätsmodus",
+        "description": "Ordnen Sie die Steuerungen Ihres foxess_modbus-Wechselrichters zu. Felder werden bei Erkennung automatisch ausgefüllt; passen Sie sie bei Bedarf an. Das Festlegen der Betriebsmodus-Entität aktiviert den Entitätsmodus.",
+        "data": {
+          "work_mode_entity": "Betriebsmodus-Entität (select)",
+          "charge_power_entity": "Ladeleistungsgrenze-Entität (number)",
+          "discharge_power_entity": "Entladeleistungsgrenze-Entität (number)",
+          "min_soc_entity": "Min-SoC-Entität (number)",
+          "soc_entity": "Batterie-SoC-Entität (sensor)",
+          "loads_power_entity": "Hauslast-Leistungsentität (sensor)",
+          "pv_power_entity": "Solarerzeugungs-Leistungsentität (sensor)",
+          "feedin_energy_entity": "Kumulierte Einspeiseenergie-Entität (sensor)",
+          "bat_charge_power_entity": "Batterieladeleistung-Entität (sensor)",
+          "bat_discharge_power_entity": "Batterieentladeleistung-Entität (sensor)",
+          "grid_consumption_power_entity": "Netzbezugsleistung-Entität (sensor)",
+          "feedin_power_entity": "Netzeinspeiseleistung-Entität (sensor)",
+          "export_limit_entity": "Max. Netzeinspeisegrenze-Entität (number, optional — aktiviert Hardware-Aktor-Tapering)",
+          "inverter_power": "Nennleistung des Wechselrichters (W)"
+        }
+      },
+      "entity_battery": {
+        "title": "FoxESS Control — Batterie",
+        "description": "Batterieeinstellungen. Die Batteriekapazität ist für das Entlade-Pacing erforderlich.",
+        "data": {
+          "min_soc_on_grid": "Minimaler SoC am Netz (%)",
+          "battery_capacity_kwh": "Batteriekapazität (kWh)",
+          "min_power_change": "Minimale Leistungsänderung für intelligentes Laden (W)"
         }
       },
       "web_credentials": {

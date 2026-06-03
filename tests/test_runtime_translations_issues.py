@@ -473,6 +473,61 @@ class TestNonEnglishLocalesMirrorIssueKeys:
             )
 
     @pytest.mark.parametrize("locale", _NON_EN_LOCALES)
+    def test_locale_has_config_step_parity_with_en(self, locale: str) -> None:
+        """C-020: every shipped locale must carry the same ``config.step``
+        catalogue as ``en.json`` — same step keys, same per-step ``data``
+        field keys, and same ``menu_options`` keys for menu steps.
+
+        Added with the config-flow connection-mode menu (``user`` →
+        ``cloud`` / ``entity`` / ``entity_battery``).  Without a locale's
+        translations for these steps, HA falls back to the English
+        ``en.json`` copy and a non-English user sees English form labels
+        — and a missing key renders the bare translation key in the UI.
+
+        This guards future drift: adding a new config step or field to
+        ``en.json`` without mirroring it into every locale fails here.
+        """
+        en = _runtime_translations()
+        en_steps = en.get("config", {}).get("step", {})
+        data = _load_locale(locale)
+        loc_steps = data.get("config", {}).get("step", {})
+
+        # Step-key parity.
+        missing_steps = sorted(set(en_steps) - set(loc_steps))
+        assert not missing_steps, (
+            f"C-020 violation: locale {locale!r} is missing config.step "
+            f"entries present in en.json: {missing_steps}.  HA will "
+            f"render the English fallback (or the bare key) for these "
+            f"steps."
+        )
+
+        # Per-step sub-key parity: a step uses either ``data`` (a form)
+        # or ``menu_options`` (a menu).  Whichever en.json uses, the
+        # locale must mirror the same key set.
+        for step_key, en_step in en_steps.items():
+            loc_step = loc_steps.get(step_key, {})
+            for sub in ("data", "menu_options"):
+                en_sub = en_step.get(sub)
+                if en_sub is None:
+                    continue
+                loc_sub = loc_step.get(sub, {})
+                missing = sorted(set(en_sub) - set(loc_sub))
+                assert not missing, (
+                    f"C-020 violation: locale {locale!r} "
+                    f"config.step.{step_key}.{sub} is missing key(s) "
+                    f"{missing} present in en.json.  HA renders the "
+                    f"bare key for missing form labels / menu options."
+                )
+                # Non-empty values for every present key.
+                for k in en_sub:
+                    val = loc_sub.get(k, "")
+                    assert isinstance(val, str) and val.strip(), (
+                        f"locale {locale!r}: "
+                        f"config.step.{step_key}.{sub}.{k} must be a "
+                        f"non-empty string — got {val!r}"
+                    )
+
+    @pytest.mark.parametrize("locale", _NON_EN_LOCALES)
     def test_locale_issue_descriptions_are_not_english(self, locale: str) -> None:
         """Best-effort sentinel check: a faithfully translated
         description should not contain any of the strong English

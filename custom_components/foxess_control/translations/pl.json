@@ -276,10 +276,47 @@
     "step": {
       "user": {
         "title": "FoxESS Control",
-        "description": "Wprowadź dane uwierzytelniające API FoxESS Cloud.",
+        "description": "W jaki sposób podłączony jest Twój falownik?",
+        "menu_options": {
+          "cloud": "FoxESS Cloud (klucz API)",
+          "entity": "Użyj mojego falownika foxess_modbus (klucz API nie jest wymagany)"
+        }
+      },
+      "cloud": {
+        "title": "FoxESS Control",
+        "description": "Wprowadź dane uwierzytelniające API FoxESS Cloud. Jeśli zamiast tego używasz integracji foxess_modbus, możesz działać bez klucza API w chmurze — zobacz dokumentację.",
         "data": {
           "api_key": "Klucz API",
           "device_serial": "Numer seryjny urządzenia"
+        }
+      },
+      "entity": {
+        "title": "FoxESS Control — tryb encji",
+        "description": "Zmapuj elementy sterujące falownika foxess_modbus. Pola są automatycznie wypełniane po wykryciu; dostosuj w razie potrzeby. Ustawienie encji trybu pracy włącza tryb encji.",
+        "data": {
+          "work_mode_entity": "Encja trybu pracy (select)",
+          "charge_power_entity": "Encja limitu mocy ładowania (number)",
+          "discharge_power_entity": "Encja limitu mocy rozładowania (number)",
+          "min_soc_entity": "Encja minimalnego SoC (number)",
+          "soc_entity": "Encja SoC baterii (sensor)",
+          "loads_power_entity": "Encja mocy poboru domowego (sensor)",
+          "pv_power_entity": "Encja mocy generacji słonecznej (sensor)",
+          "feedin_energy_entity": "Encja skumulowanej energii oddanej do sieci (sensor)",
+          "bat_charge_power_entity": "Encja mocy ładowania baterii (sensor)",
+          "bat_discharge_power_entity": "Encja mocy rozładowania baterii (sensor)",
+          "grid_consumption_power_entity": "Encja mocy poboru z sieci (sensor)",
+          "feedin_power_entity": "Encja mocy oddawania do sieci (sensor)",
+          "export_limit_entity": "Encja maksymalnego limitu oddawania do sieci (number, opcjonalnie — włącza wygaszanie przez sprzętowy element wykonawczy)",
+          "inverter_power": "Moc znamionowa falownika (W)"
+        }
+      },
+      "entity_battery": {
+        "title": "FoxESS Control — bateria",
+        "description": "Ustawienia baterii. Pojemność baterii jest wymagana do regulacji tempa rozładowania.",
+        "data": {
+          "min_soc_on_grid": "Minimalny SoC w sieci (%)",
+          "battery_capacity_kwh": "Pojemność baterii (kWh)",
+          "min_power_change": "Minimalna zmiana mocy dla inteligentnego ładowania (W)"
         }
       },
       "web_credentials": {

@@ -276,10 +276,47 @@
     "step": {
       "user": {
         "title": "FoxESS Control",
-        "description": "Introduza as credenciais da API FoxESS Cloud.",
+        "description": "Como está ligado o seu inversor?",
+        "menu_options": {
+          "cloud": "FoxESS Cloud (chave API)",
+          "entity": "Usar o meu inversor foxess_modbus (não é necessária chave API)"
+        }
+      },
+      "cloud": {
+        "title": "FoxESS Control",
+        "description": "Introduza as credenciais da API FoxESS Cloud. Se utilizar a integração foxess_modbus em vez disso, pode funcionar sem uma chave API na nuvem — consulte a documentação.",
         "data": {
           "api_key": "Chave API",
           "device_serial": "Número de série do dispositivo"
+        }
+      },
+      "entity": {
+        "title": "FoxESS Control — modo entidade",
+        "description": "Mapeie os controlos do seu inversor foxess_modbus. Os campos são preenchidos automaticamente quando detetados; ajuste conforme necessário. Definir a entidade de Modo de funcionamento ativa o modo entidade.",
+        "data": {
+          "work_mode_entity": "Entidade de modo de funcionamento (select)",
+          "charge_power_entity": "Entidade de limite de potência de carga (number)",
+          "discharge_power_entity": "Entidade de limite de potência de descarga (number)",
+          "min_soc_entity": "Entidade de SoC mínimo (number)",
+          "soc_entity": "Entidade de SoC da bateria (sensor)",
+          "loads_power_entity": "Entidade de potência de consumo da casa (sensor)",
+          "pv_power_entity": "Entidade de potência de geração solar (sensor)",
+          "feedin_energy_entity": "Entidade de energia de injeção acumulada (sensor)",
+          "bat_charge_power_entity": "Entidade de potência de carga da bateria (sensor)",
+          "bat_discharge_power_entity": "Entidade de potência de descarga da bateria (sensor)",
+          "grid_consumption_power_entity": "Entidade de potência de consumo da rede (sensor)",
+          "feedin_power_entity": "Entidade de potência de injeção na rede (sensor)",
+          "export_limit_entity": "Entidade de limite máximo de injeção na rede (number, opcional — ativa a atenuação por atuador de hardware)",
+          "inverter_power": "Potência nominal do inversor (W)"
+        }
+      },
+      "entity_battery": {
+        "title": "FoxESS Control — bateria",
+        "description": "Definições da bateria. A capacidade da bateria é necessária para o ritmo de descarga.",
+        "data": {
+          "min_soc_on_grid": "SoC mínimo na rede (%)",
+          "battery_capacity_kwh": "Capacidade da bateria (kWh)",
+          "min_power_change": "Alteração mínima de potência para carga inteligente (W)"
         }
       },
       "web_credentials": {

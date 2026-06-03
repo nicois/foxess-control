@@ -280,10 +280,47 @@
     "step": {
       "user": {
         "title": "FoxESS Control",
-        "description": "输入您的 FoxESS Cloud API 凭据。",
+        "description": "您的逆变器是如何连接的？",
+        "menu_options": {
+          "cloud": "FoxESS Cloud（API 密钥）",
+          "entity": "使用我的 foxess_modbus 逆变器（无需 API 密钥）"
+        }
+      },
+      "cloud": {
+        "title": "FoxESS Control",
+        "description": "输入您的 FoxESS Cloud API 凭据。如果您改用 foxess_modbus 集成，则可以在没有云 API 密钥的情况下运行 — 请参阅文档。",
         "data": {
           "api_key": "API 密钥",
           "device_serial": "设备序列号"
+        }
+      },
+      "entity": {
+        "title": "FoxESS Control — 实体模式",
+        "description": "映射来自 foxess_modbus 逆变器的控制项。检测到的字段会自动填充；请按需调整。设置工作模式实体即可启用实体模式。",
+        "data": {
+          "work_mode_entity": "工作模式实体 (select)",
+          "charge_power_entity": "充电功率上限实体 (number)",
+          "discharge_power_entity": "放电功率上限实体 (number)",
+          "min_soc_entity": "最低 SoC 实体 (number)",
+          "soc_entity": "电池 SoC 实体 (sensor)",
+          "loads_power_entity": "家庭负载功率实体 (sensor)",
+          "pv_power_entity": "太阳能发电功率实体 (sensor)",
+          "feedin_energy_entity": "累计上网电量实体 (sensor)",
+          "bat_charge_power_entity": "电池充电功率实体 (sensor)",
+          "bat_discharge_power_entity": "电池放电功率实体 (sensor)",
+          "grid_consumption_power_entity": "电网消耗功率实体 (sensor)",
+          "feedin_power_entity": "电网馈电功率实体 (sensor)",
+          "export_limit_entity": "最大电网馈电限制实体 (number，可选 — 启用硬件执行器渐降)",
+          "inverter_power": "逆变器额定功率 (W)"
+        }
+      },
+      "entity_battery": {
+        "title": "FoxESS Control — 电池",
+        "description": "电池设置。放电节奏控制需要电池容量。",
+        "data": {
+          "min_soc_on_grid": "并网最低电量 (%)",
+          "battery_capacity_kwh": "电池容量 (kWh)",
+          "min_power_change": "智能充电最小功率变化 (W)"
         }
       },
       "web_credentials": {

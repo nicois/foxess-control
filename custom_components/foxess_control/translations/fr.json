@@ -276,10 +276,47 @@
     "step": {
       "user": {
         "title": "FoxESS Control",
-        "description": "Entrez vos identifiants de l'API FoxESS Cloud.",
+        "description": "Comment votre onduleur est-il connecté ?",
+        "menu_options": {
+          "cloud": "FoxESS Cloud (clé API)",
+          "entity": "Utiliser mon onduleur foxess_modbus (aucune clé API requise)"
+        }
+      },
+      "cloud": {
+        "title": "FoxESS Control",
+        "description": "Entrez vos identifiants de l'API FoxESS Cloud. Si vous utilisez plutôt l'intégration foxess_modbus, vous pouvez fonctionner sans clé API cloud — voir la documentation.",
         "data": {
           "api_key": "Clé API",
           "device_serial": "Numéro de série de l'appareil"
+        }
+      },
+      "entity": {
+        "title": "FoxESS Control — mode entité",
+        "description": "Associez les commandes de votre onduleur foxess_modbus. Les champs sont préremplis lorsqu'ils sont détectés ; ajustez-les si nécessaire. Définir l'entité de mode de fonctionnement active le mode entité.",
+        "data": {
+          "work_mode_entity": "Entité de mode de fonctionnement (select)",
+          "charge_power_entity": "Entité de limite de puissance de charge (number)",
+          "discharge_power_entity": "Entité de limite de puissance de décharge (number)",
+          "min_soc_entity": "Entité de SoC minimum (number)",
+          "soc_entity": "Entité de SoC de la batterie (sensor)",
+          "loads_power_entity": "Entité de puissance de consommation de la maison (sensor)",
+          "pv_power_entity": "Entité de puissance de production solaire (sensor)",
+          "feedin_energy_entity": "Entité d'énergie d'injection cumulée (sensor)",
+          "bat_charge_power_entity": "Entité de puissance de charge de la batterie (sensor)",
+          "bat_discharge_power_entity": "Entité de puissance de décharge de la batterie (sensor)",
+          "grid_consumption_power_entity": "Entité de puissance de consommation réseau (sensor)",
+          "feedin_power_entity": "Entité de puissance d'injection réseau (sensor)",
+          "export_limit_entity": "Entité de limite maximale d'injection réseau (number, facultatif — active l'atténuation par actionneur matériel)",
+          "inverter_power": "Puissance nominale de l'onduleur (W)"
+        }
+      },
+      "entity_battery": {
+        "title": "FoxESS Control — batterie",
+        "description": "Paramètres de la batterie. La capacité de la batterie est requise pour le rythme de décharge.",
+        "data": {
+          "min_soc_on_grid": "SoC minimum sur le réseau (%)",
+          "battery_capacity_kwh": "Capacité de la batterie (kWh)",
+          "min_power_change": "Changement de puissance minimum pour la charge intelligente (W)"
         }
       },
       "web_credentials": {
