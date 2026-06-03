@@ -41,6 +41,8 @@ FoxESS Control polls real-time inverter data (battery SoC, charge/discharge powe
 6. Search for "FoxESS Control" in the HACS integrations list and click **Download**.
 7. Restart Home Assistant.
 
+> **Important — it won't appear by itself.** HACS only *downloads* the files. After the restart, FoxESS Control will **not** show up on its own under Settings → Devices & Services. You must add it: go to **Settings → Devices & Services → ＋ Add Integration**, search for **FoxESS Control**, and follow the [Configuration](#configuration) steps below. (This is normal for HACS integrations — downloading and adding are two separate steps.)
+
 ### Home Assistant Add-on
 
 1. Go to **Settings > Add-ons > Add-on Store**.
@@ -48,10 +50,14 @@ FoxESS Control polls real-time inverter data (battery SoC, charge/discharge powe
 3. Install **FoxESS Control** from the store and start it.
 4. Restart Home Assistant.
 
+> After restarting, add the integration: **Settings → Devices & Services → ＋ Add Integration → FoxESS Control** (see [Configuration](#configuration)). The add-on only copies the integration's files into your config; it does not add the integration for you.
+
 ### Manual
 
 1. Copy the `custom_components/foxess_control` directory into your Home Assistant `config/custom_components/` directory.
 2. Restart Home Assistant.
+
+> Then add it via **Settings → Devices & Services → ＋ Add Integration → FoxESS Control** (see [Configuration](#configuration)).
 
 ## Configuration
 
@@ -65,6 +71,8 @@ FoxESS Control polls real-time inverter data (battery SoC, charge/discharge powe
 After entering your API key and serial, an optional second step allows you to provide your **FoxESS Cloud web portal** username and password (the same credentials you use to log in at [foxesscloud.com](https://www.foxesscloud.com/)). These enable the real-time WebSocket data feature (see below). You can skip this step and add credentials later via **Configure > Reconfigure**.
 
 The web portal API uses an obfuscated signature algorithm (shipped as a WebAssembly module) for request authentication. See [docs/wasm-signature.md](docs/wasm-signature.md) for a full explanation of why this is necessary and how it works.
+
+> **Architecture note:** The WebAssembly signing uses `wasmtime`, which ships prebuilt wheels only for 64-bit x86_64 and arm64 (aarch64). On **32-bit ARM** (armv7/armhf) `wasmtime` cannot be installed, so the optional web-credentials / real-time WebSocket feature is unavailable there — but the integration itself loads and works normally on cloud-API polling. (`wasmtime` is only imported when web credentials are actually configured, so a missing wheel never blocks the integration from loading.)
 
 You can enter either your raw password or its MD5 hash. If you prefer not to type your password into the HA UI, generate the hash beforehand:
 
