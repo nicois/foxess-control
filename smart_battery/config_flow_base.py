@@ -101,10 +101,14 @@ ENTITY_KEYS = (
 
 
 def battery_options_schema(
-    config_entry: ConfigEntry,
+    config_entry: ConfigEntry | None,
 ) -> vol.Schema:
-    """Build the vol.Schema for the shared battery options step."""
-    opts = config_entry.options
+    """Build the vol.Schema for the shared battery options step.
+
+    *config_entry* may be ``None`` at first-time setup (no entry exists yet),
+    in which case options are treated as empty and defaults are used.
+    """
+    opts = config_entry.options if config_entry is not None else {}
     return vol.Schema(
         {
             vol.Optional(
@@ -202,7 +206,7 @@ def battery_options_schema(
 
 
 def entity_mapping_schema(
-    config_entry: ConfigEntry,
+    config_entry: ConfigEntry | None,
     detected: dict[str, str],
     *,
     default_inverter_power: int = DEFAULT_INVERTER_POWER,
@@ -210,8 +214,12 @@ def entity_mapping_schema(
     """Build the vol.Schema for the entity mapping step.
 
     *detected* maps ``CONF_*_ENTITY`` keys to auto-detected entity IDs.
+
+    *config_entry* may be ``None`` at first-time setup (no entry exists yet),
+    in which case options are treated as empty and defaults come from
+    *detected* / built-in defaults.
     """
-    opts = config_entry.options
+    opts = config_entry.options if config_entry is not None else {}
 
     def _default(conf_key: str) -> str:
         return opts.get(conf_key) or detected.get(conf_key, "")

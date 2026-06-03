@@ -431,3 +431,36 @@ class TestDetectFoxessModbusEntities:
         assert result == {
             CONF_EXPORT_LIMIT_ENTITY: ("number.foxess_inv1_max_grid_export_limit"),
         }
+
+
+class TestSchemaBuildersNoEntry:
+    """entity_mapping_schema / battery_options_schema must work at setup time
+    (no config entry exists yet)."""
+
+    def test_entity_mapping_schema_accepts_none_entry(self) -> None:
+        from custom_components.foxess_control.smart_battery.config_flow_base import (
+            entity_mapping_schema,
+        )
+
+        schema = entity_mapping_schema(None, {CONF_WORK_MODE_ENTITY: "select.wm"})
+        # Read declared defaults directly from the schema markers. We cannot call
+        # schema({}) here because the other entity fields default to "" and the
+        # EntitySelector validator rejects empty strings (this is true for any
+        # empty-options entry, not specific to config_entry=None). The intent is
+        # to verify the detected work-mode value flows through as the default.
+        defaults = {
+            str(key): key.default()
+            for key in schema.schema
+            if getattr(key, "default", None) is not None
+        }
+        assert defaults[CONF_WORK_MODE_ENTITY] == "select.wm"
+
+    def test_battery_options_schema_accepts_none_entry(self) -> None:
+        from custom_components.foxess_control.smart_battery.config_flow_base import (
+            battery_options_schema,
+        )
+
+        schema = battery_options_schema(None)
+        defaults = schema({})
+        assert CONF_MIN_SOC_ON_GRID in defaults
+        assert CONF_BATTERY_CAPACITY_KWH in defaults
