@@ -917,6 +917,21 @@ current. No priority inversions, no unconstrained priorities.
 
 ---
 
+### 2026-06-03 — Update (D-060 entity mode at first-time setup)
+
+**Type**: Update workflow, propagating the modbus-aware config-flow
+feature (spec + plan under docs/superpowers/) into the tree.
+
+- **New D-060** (`04-design/session-management.md`, next to D-022):
+  config flow detects foxess_modbus and offers a cloud/entity menu;
+  entity branch creates an API-key-less entry with mappings + battery
+  in `options`. Serves P-005; resolves the issue investigation's
+  hypothesis (d) (cloud-validation blocked modbus-only users).
+- **README** setup section updated (entity mode now offered at setup,
+  not options-only). **06-tests.md** + **05-coverage.md** updated;
+  D-NNN counts 60→61 active / 57→58 unique.
+- Audit clean: no priority/classification gaps, no new collisions.
+
 ### 2026-06-02 — Update (D-059 structured error capture)
 
 **Type**: Update workflow, propagating the error-handling/diagnostics

@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 6
-last_verified: 2026-06-02
+last_verified: 2026-06-03
 traces_up: [02-constraints.md, 04-design/]
 # This file describes the Jekyll/Liquid safety test and quotes the
 # Jinja tag names literally as examples.  The section that quotes
@@ -128,6 +128,20 @@ charge/discharge scenarios through containerised HA + simulator
 | `test_diagnostics_includes_recent_errors` | Diagnostics exports the ring buffer | C-026 |
 | `test_diagnostics_environment_reports_host_and_ws_mode` | `environment` section reports resolved host, ws_mode, WS state, compound-id status | C-026 |
 | `test_diagnostics_redacts_secrets_everywhere` | No token/serial/compound-id/api_key leaks anywhere in the download (mutation-verified load-bearing) | C-026 |
+
+## Config flow: entity mode at setup (D-060)
+
+**Constraints**: P-005 (transparency); D-060
+**Source**: `tests/test_config_flow.py`
+
+| Test | Verifies | Constraint |
+|---|---|---|
+| `TestConfigFlowRouting::test_user_step_shows_menu_when_modbus_present` | foxess_modbus detected → cloud/entity menu offered | D-060 |
+| `TestConfigFlowRouting::test_user_step_goes_straight_to_cloud_when_no_modbus` | no modbus → straight to cloud API-key step (no new step for cloud-only users) | D-060 |
+| `TestConfigFlowEntityBranch::test_entity_step_shows_mapping_form` | entity branch shows the auto-detected mapping form | D-060 |
+| `TestConfigFlowEntityBranch::test_entity_then_battery_creates_entry_without_api_key` | entity branch creates an entry with NO api_key; work-mode entity + battery options land in `options` (entity mode active) | D-060 |
+| `TestSchemaBuildersNoEntry::*` | `entity_mapping_schema`/`battery_options_schema` accept `config_entry=None` (first-time setup) | D-060 |
+| `test_locale_has_config_step_parity_with_en` (9 locales) | all 10 locales mirror en.json `config.step` keys + menu_options | C-020 |
 
 ## Smart Charge Pacing
 

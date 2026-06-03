@@ -109,9 +109,9 @@ After setup, click **Configure** on the integration entry to adjust:
 
 If you use [foxess_modbus](https://github.com/nathanmarlor/foxess_modbus) for local Modbus control, foxess_control can optionally read inverter state from and write mode changes to foxess_modbus's HA entities instead of the FoxESS Cloud API. This gives you fast local control combined with foxess_control's smart charge/discharge algorithms — no cloud API connection required.
 
-**Setup:** When foxess_modbus is installed, the options flow automatically shows a second step with entity mappings. Entities are **auto-detected** from the foxess_modbus entity registry and pre-populated — in most cases no manual configuration is needed. You can override any mapping if the auto-detection picks the wrong entity.
+**Setup:** When foxess_modbus is installed, the **initial setup** offers a choice between *FoxESS Cloud (API key)* and *Use my foxess_modbus inverter (no API key needed)*. Choosing the modbus option configures entity mode directly — mapping the inverter entities and battery settings — with no cloud API key required. Entities are **auto-detected** from the foxess_modbus entity registry and pre-populated; you can override any mapping if the auto-detection picks the wrong entity. You can also change the mappings later via the integration's **Configure** (options) screen.
 
-If foxess_modbus is not installed, the entity mapping step is hidden entirely.
+If foxess_modbus is not installed, setup goes straight to the cloud API-key step (no mode choice), and the entity mapping step is hidden entirely.
 
 | Option | Domain | Required | Description |
 |---|---|---|---|

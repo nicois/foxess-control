@@ -2,7 +2,7 @@
 project: FoxESS Control
 level: 4
 feature: Session Management
-last_verified: 2026-04-24
+last_verified: 2026-06-03
 traces_up: [../02-constraints.md, ../03-architecture.md]
 traces_down: [../05-coverage.md, ../06-tests.md]
 ---
@@ -112,6 +112,56 @@ Modbus is already faster than the cloud WS.
   integration with adapter-pattern branching
 **Traces**: C-021;
 `tests/test_entity_mode.py`
+
+### D-060: Entity mode reachable at first-time setup (modbus-aware config flow)
+**Decision**: The config flow's entry step (`async_step_user`) detects
+whether a `foxess_modbus` config entry is present. If it is, it shows a
+menu (`async_show_menu`) offering **cloud** (API key) vs **entity** (no
+API key needed); if not, it goes straight to the cloud API-key step
+(`async_step_cloud`). The entity branch (`async_step_entity` →
+`async_step_entity_battery`) maps the foxess_modbus entities
+(auto-detected, overridable) and collects battery options, then creates
+an entry with **no API key** and the entity mappings + battery options in
+the entry's `options` (where `IntegrationConfig` reads them — setting the
+work-mode entity in `options` is what activates entity mode at runtime).
+**Context**: Entity mode was previously only configurable in the OPTIONS
+flow (`Configure`), and the initial setup REQUIRED a cloud-API-validated
+key. A modbus-only user with no valid API key could not complete setup at
+all → no entry → no `Configure` button → entity mode unreachable. A user
+reported being unable to find entity-mode setup and being put off by the
+mandatory-looking API key (investigation 2026-06-02). This contradicted
+the documented "API key optional for modbus users" promise.
+**Rationale**: Surfacing the choice at setup, gated on actual
+foxess_modbus presence, makes entity mode discoverable from the UI alone
+(P-005) and removes the cloud-API-key blocker for modbus-only users —
+the entity branch creates a working entry without ever calling the cloud
+API. Cloud-only users (no foxess_modbus) see no new step — the router
+delegates straight to the cloud step, behaviourally identical to before.
+The entity branch requires a battery step (capacity etc.) rather than
+defaulting capacity to 0, because capacity 0 disables discharge pacing
+and the min-SoC suspend guard (see the 2026-06-02 P-001 discharge work) —
+shipping an unconfigured-capacity entity entry would reproduce that bug.
+**Priority served**: P-005 (operational transparency — the user can
+reach the right mode from the UI without hidden knowledge)
+**Trades against**: none
+**Classification**: other (setup UX)
+**Alternatives considered**:
+- Help text only (make the API-key fields optional + explain they're
+  skippable): rejected as insufficient — a user who skips still lands in
+  cloud mode and must then discover `Configure`; the entity step remains
+  a hidden second journey.
+- Always show the menu (even with no foxess_modbus): rejected — adds a
+  click and an unusable option for the cloud-only majority.
+**Note**: The brittle name-based modbus entity detection (matching
+`entity.original_name` exactly) is unchanged and remains a separate
+hardening follow-up; it degrades gracefully (unmatched field shown blank,
+user picks manually).
+**Traces**: P-005, D-022 (the entity-mode control path this exposes at
+setup); `custom_components/foxess_control/config_flow.py`
+(`async_step_user`/`async_step_cloud`/`async_step_entity`/`async_step_entity_battery`);
+`tests/test_config_flow.py::TestConfigFlowRouting`,
+`tests/test_config_flow.py::TestConfigFlowEntityBranch`,
+`tests/test_config_flow.py::TestSchemaBuildersNoEntry`
 
 ### D-045: Force→smart unification via full_power flag
 **Decision**: `force_charge` and `force_discharge` service handlers

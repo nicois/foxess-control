@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 5
-last_verified: 2026-06-02
+last_verified: 2026-06-03
 traces_up: [02-constraints.md, 04-design/]
 traces_down: [06-tests.md]
 ---
@@ -24,7 +24,7 @@ serving it.
 | P-002 Respect minimum state of charge | C-002, C-003, C-012, C-013, C-016, C-018, C-019, C-024, C-025, C-027 | D-001, D-016 | ENFORCED |
 | P-003 Meet the user's energy target | C-007, C-008, C-009, C-010, C-011, C-014, C-022, C-023, C-037 | D-005, D-006, D-007, D-011, D-012, D-013, D-014, D-015 (taper), D-019, D-032, D-033, D-037, D-042, D-043, D-044, D-046 | ENFORCED |
 | P-004 Maximise feed-in revenue | (aspirational — no C-NNN) | (no D-NNN currently declares P-004 as primary; D-044 serves P-003 but advances P-004 as a secondary effect) | ASPIRATIONAL |
-| P-005 Operational transparency | C-004, C-005, C-006, C-020, C-022, C-026, C-038 | D-008, D-009, D-010, D-020, D-021, D-027, D-028, D-029, D-030, D-035, D-036, D-038, D-039, D-040, D-041 (ws), D-048, D-050, D-051, D-053, D-054, D-055, D-056, D-058, D-059 | ENFORCED |
+| P-005 Operational transparency | C-004, C-005, C-006, C-020, C-022, C-026, C-038 | D-008, D-009, D-010, D-020, D-021, D-027, D-028, D-029, D-030, D-035, D-036, D-038, D-039, D-040, D-041 (ws), D-048, D-050, D-051, D-053, D-054, D-055, D-056, D-058, D-059, D-060 | ENFORCED |
 | P-006 Brand portability | C-015, C-021, C-039, C-040 | D-022 | ENFORCED |
 | P-007 Engineering process integrity | C-015, C-028, C-029, C-030, C-031, C-032, C-033, C-034, C-035, C-036 | D-019, D-031, D-034, D-041 (lovelace), D-045, D-049 | ENFORCED |
 
@@ -63,12 +63,12 @@ declaration.
 
 ## Classification Summary
 
-Across 60 active decision entries (IDs D-001..D-059 with D-024
+Across 61 active decision entries (IDs D-001..D-060 with D-024
 silently retired without marker and D-052 carrying a `[RETIRED]`
 marker since 2026-05-08; D-014, D-015, and D-041 each reuse the
 same ID for two distinct decisions in different design files —
-collisions tracked in META.md; 57 unique active IDs + 3 collisions
-= 60 active entries). D-057 (capacity-independent override removal
+collisions tracked in META.md; 58 unique active IDs + 3 collisions
+= 61 active entries). D-057 (capacity-independent override removal
 at the min-SoC floor), D-058 (point-in-time wake at the committed
 deferred-start deadline), and D-059 (structured operational-error
 capture feeding logs + diagnostics) added 2026-06-02.
@@ -234,7 +234,7 @@ C-014.
 
 - **Priorities**: 7 (P-001..P-007, introduced 2026-04-24)
 - **Total constraints**: 40 (all active; C-023 reclassified as hardware-satisfied; C-039 and C-040 added 2026-04-25)
-- **Design decisions**: 57 unique active (D-001..D-059, D-024
+- **Design decisions**: 58 unique active (D-001..D-060, D-024
   retired, D-052 retired 2026-05-08; D-014, D-015, and D-041 each
   refer to two different entries in different design files — ID
   collisions tracked in META.md). 2026-06-02 additions: D-057
@@ -267,7 +267,7 @@ C-014.
 - **Priority inversions**: 0
 - **Unconstrained priorities**: 1 (P-004 — aspirational by design)
 - **Unprioritised constraints**: 0 (all 40 C-NNN name P-NNN)
-- **Unprioritised decisions**: 0 (all 60 active D-NNN entries name P-NNN + classification; 57 unique active IDs + 3 collisions; D-024 silently retired; D-052 retired 2026-05-08 with `[RETIRED]` marker; D-014 / D-015 / D-041 each carry two distinct entries in different design files — ID reuse collisions noted below under Classification Summary)
+- **Unprioritised decisions**: 0 (all 61 active D-NNN entries name P-NNN + classification; 58 unique active IDs + 3 collisions; D-024 silently retired; D-052 retired 2026-05-08 with `[RETIRED]` marker; D-014 / D-015 / D-041 each carry two distinct entries in different design files — ID reuse collisions noted below under Classification Summary)
 - **Active regression**: none
 - **Orphan tests**: ~160 unit (display, plumbing, lifecycle tests)
 - **Test counts**: run `python scripts/test_summary.py` for
