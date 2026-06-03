@@ -55,8 +55,10 @@ class TestConfigFlow:
         with patch(
             "custom_components.foxess_control.config_flow._validate_credentials"
         ):
-            # Step 1: API credentials — redirects to web_credentials step
-            await flow.async_step_user(user_input)
+            # Step 1: API credentials — redirects to web_credentials step.
+            # async_step_user is now a router; the api-key form lives in
+            # async_step_cloud (step_id "cloud"), so call it directly.
+            await flow.async_step_cloud(user_input)
 
         # Step 1 shows the web_credentials form
         flow.async_show_form.assert_called_once()
@@ -86,9 +88,10 @@ class TestConfigFlow:
             "custom_components.foxess_control.config_flow._validate_credentials",
             side_effect=FoxESSApiError(41809, "Token invalid"),
         ):
-            await flow.async_step_user(user_input)
+            await flow.async_step_cloud(user_input)
 
         flow.async_show_form.assert_called_once()
+        assert flow.async_show_form.call_args.kwargs["step_id"] == "cloud"
         errors: dict[str, str] = flow.async_show_form.call_args.kwargs["errors"]
         assert errors["base"] == "invalid_auth"
 
@@ -106,9 +109,10 @@ class TestConfigFlow:
             "custom_components.foxess_control.config_flow._validate_credentials",
             side_effect=requests.ConnectionError("DNS failure"),
         ):
-            await flow.async_step_user(user_input)
+            await flow.async_step_cloud(user_input)
 
         flow.async_show_form.assert_called_once()
+        assert flow.async_show_form.call_args.kwargs["step_id"] == "cloud"
         errors: dict[str, str] = flow.async_show_form.call_args.kwargs["errors"]
         assert errors["base"] == "cannot_connect"
 
@@ -127,7 +131,7 @@ class TestConfigFlow:
             ),
             pytest.raises(TypeError, match="bug"),
         ):
-            await flow.async_step_user(user_input)
+            await flow.async_step_cloud(user_input)
 
     @pytest.mark.asyncio
     async def test_show_form_when_no_input(self) -> None:
@@ -137,9 +141,10 @@ class TestConfigFlow:
             return_value={"type": "form"},
         )
 
-        await flow.async_step_user(None)
+        await flow.async_step_cloud(None)
 
         flow.async_show_form.assert_called_once()
+        assert flow.async_show_form.call_args.kwargs["step_id"] == "cloud"
         assert flow.async_show_form.call_args.kwargs["errors"] == {}
 
 
@@ -431,6 +436,43 @@ class TestDetectFoxessModbusEntities:
         assert result == {
             CONF_EXPORT_LIMIT_ENTITY: ("number.foxess_inv1_max_grid_export_limit"),
         }
+
+
+def _make_hass_modbus(has_modbus: bool) -> MagicMock:
+    hass = MagicMock()
+    hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
+    hass.config_entries.async_entries = MagicMock(
+        side_effect=lambda domain: (
+            [MagicMock()] if domain == "foxess_modbus" and has_modbus else []
+        )
+    )
+    return hass
+
+
+class TestConfigFlowRouting:
+    @pytest.mark.asyncio
+    async def test_user_step_shows_menu_when_modbus_present(self) -> None:
+        flow = FoxessControlConfigFlow()
+        flow.hass = _make_hass_modbus(True)
+        flow.async_show_menu = MagicMock(return_value={"type": "menu"})
+        result = await flow.async_step_user(None)
+        assert result["type"] == "menu"
+        # cloud + entity options offered
+        _, kwargs = flow.async_show_menu.call_args
+        assert set(kwargs["menu_options"]) == {"cloud", "entity"}
+
+    @pytest.mark.asyncio
+    async def test_user_step_goes_straight_to_cloud_when_no_modbus(self) -> None:
+        flow = FoxessControlConfigFlow()
+        flow.hass = _make_hass_modbus(False)
+        flow.async_show_form = MagicMock(
+            return_value={"type": "form", "step_id": "cloud"}
+        )
+        result = await flow.async_step_user(None)
+        # No menu; the cloud (api-key) form is shown directly.
+        assert result["type"] == "form"
+        _, kwargs = flow.async_show_form.call_args
+        assert kwargs["step_id"] == "cloud"
 
 
 class TestSchemaBuildersNoEntry:

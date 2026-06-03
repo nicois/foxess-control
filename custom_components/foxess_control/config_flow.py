@@ -103,7 +103,25 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle the initial step."""
+        """Entry point: route on foxess_modbus presence.
+
+        When a ``foxess_modbus`` config entry exists, offer a cloud/entity
+        menu; otherwise go straight to the cloud API-key step (today's
+        behaviour). HA routes a menu selection of ``"cloud"`` to
+        ``async_step_cloud`` and ``"entity"`` to ``async_step_entity`` by the
+        step-name convention (data_entry_flow handles ``next_step_id``).
+        """
+        if self.hass.config_entries.async_entries("foxess_modbus"):
+            return self.async_show_menu(
+                step_id="user",
+                menu_options=["cloud", "entity"],
+            )
+        return await self.async_step_cloud()
+
+    async def async_step_cloud(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Cloud setup: API key + serial (validated against the cloud API)."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -126,7 +144,7 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_web_credentials()
 
         return self.async_show_form(
-            step_id="user",
+            step_id="cloud",
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_API_KEY): str,
