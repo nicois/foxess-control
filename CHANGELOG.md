@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.19-beta.3
+
+### Fixed
+- **The integration now loads on 32-bit ARM and other systems without a `wasmtime` wheel** (GH #9). `wasmtime` (used only for the optional web-portal/WebSocket request signing) was imported eagerly at integration load, so on platforms with no prebuilt wheel (32-bit ARM — armv7/armhf) the import failed and the integration silently failed to set up and never appeared under *Add Integration*. The import is now deferred to the first signing call, so the integration loads and runs (cloud-API polling) regardless of architecture; the WebSocket feature remains available only where `wasmtime` can be installed (64-bit x86_64 / arm64). This also makes the documented behaviour (`wasmtime` loaded only when web credentials are configured) actually true.
+
+### Documentation
+- **Clarified that installing via HACS (or the add-on / manual copy) does not add the integration by itself** (GH #9). After downloading + restarting, you must go to **Settings → Devices & Services → ＋ Add Integration → FoxESS Control** — this step is now called out explicitly in every install section. Also documented the `wasmtime` 64-bit-only limitation for the WebSocket feature.
+
+### Add-on (separate `foxess-control` add-on, → 0.13.2-beta.6)
+- **Fixed the add-on failing to start on Home Assistant OS** with `[FATAL tini (7)] exec /init failed: Permission denied` (GH #9). The add-on's custom AppArmor profile (added in add-on 0.12.1-beta.1) omitted the s6-overlay boot path (`/init`), so the container could not boot — broken on every install since. Reverted to Supervisor's default AppArmor profile (the pre-0.12.1-beta.1 behaviour). A CI smoke-test now runs the built image to catch boot regressions. *(Note: the add-on only copies the integration's files into your config; HACS is the recommended install path.)*
+
 ## 1.0.19-beta.2
 
 ### Added
