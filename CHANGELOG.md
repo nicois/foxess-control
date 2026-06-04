@@ -1,28 +1,27 @@
 # Changelog
 
-## 1.0.19-beta.3
+## 1.0.19
+
+Consolidates the 1.0.19-beta.1 … beta.3 pre-releases. Headline: the add-on
+boots on Home Assistant OS again (GH #9 / #10), the integration loads on
+32-bit ARM, entity-mode setup works without a cloud API key, and operational
+errors are captured for self-sufficient diagnostics.
 
 ### Fixed
 - **The integration now loads on 32-bit ARM and other systems without a `wasmtime` wheel** (GH #9). `wasmtime` (used only for the optional web-portal/WebSocket request signing) was imported eagerly at integration load, so on platforms with no prebuilt wheel (32-bit ARM — armv7/armhf) the import failed and the integration silently failed to set up and never appeared under *Add Integration*. The import is now deferred to the first signing call, so the integration loads and runs (cloud-API polling) regardless of architecture; the WebSocket feature remains available only where `wasmtime` can be installed (64-bit x86_64 / arm64). This also makes the documented behaviour (`wasmtime` loaded only when web credentials are configured) actually true.
 
-### Documentation
-- **Clarified that installing via HACS (or the add-on / manual copy) does not add the integration by itself** (GH #9). After downloading + restarting, you must go to **Settings → Devices & Services → ＋ Add Integration → FoxESS Control** — this step is now called out explicitly in every install section. Also documented the `wasmtime` 64-bit-only limitation for the WebSocket feature.
-
-### Add-on (separate `foxess-control` add-on, → 0.13.2-beta.6)
-- **Fixed the add-on failing to start on Home Assistant OS** with `[FATAL tini (7)] exec /init failed: Permission denied` (GH #9). The add-on's custom AppArmor profile (added in add-on 0.12.1-beta.1) omitted the s6-overlay boot path (`/init`), so the container could not boot — broken on every install since. Reverted to Supervisor's default AppArmor profile (the pre-0.12.1-beta.1 behaviour). A CI smoke-test now runs the built image to catch boot regressions. *(Note: the add-on only copies the integration's files into your config; HACS is the recommended install path.)*
-
-## 1.0.19-beta.2
-
 ### Added
 - **Entity mode (foxess_modbus) is now configurable during initial setup** (P-005, D-060). Previously, entity mode could only be set up *after* installation via the integration's **Configure** (options) screen — and the initial setup *required* a FoxESS Cloud API key, validated against the cloud before an entry could be created. A foxess_modbus user with no cloud API key was therefore blocked from completing setup at all, and the entity-mode step was hidden behind a screen they could never reach. Now, when `foxess_modbus` is detected, the **first setup step offers an explicit choice**: *FoxESS Cloud (API key)* or *Use my foxess_modbus inverter (no API key needed)*. The entity branch maps the inverter entities (auto-detected from the foxess_modbus registry, overridable) and collects battery settings, then creates a working entity-mode entry with **no cloud API key required**. Cloud-only users (no foxess_modbus installed) see no change — setup goes straight to the API-key step as before. The options flow remains available to change mappings later. Localised across all ten translations.
-
-## 1.0.19-beta.1
-
-### Added
 - **Structured operational-error capture for self-sufficient diagnostics** (C-026 / P-005, D-059). When the integration hits an operational error, the information a maintainer would otherwise have to ask for is now captured automatically — reducing back-and-forth on bug reports. Motivated by GH issue #8 (a battery-ID-discovery `WSServerHandshakeError: 200` where the resolved cloud host, `ws_mode`, exception type, and whether it worked during a session all had to be requested manually). Two surfaces:
   - **Better log lines.** A new `record_operational_error` helper logs a self-sufficient line — `[{category}] {what-was-attempted}: {ExceptionType}: {message} — {likely-cause hint}` — so a single pasted log line names the exception type, what failed, and the probable cause. High-value error sites are migrated to it: battery-ID discovery (the issue-#8 site, now with a regional-endpoint/token hint), BMS-temperature fetch, entity-mode power/schedule/export-limit writes, and the REST poll. Each site narrows its exception handling to the meaningful types while keeping a catch-all arm so genuine bugs still surface; existing control flow (re-raise / fallback) is unchanged.
   - **Richer HA Diagnostics download.** The "Download diagnostics" file now includes a `recent_errors` ring buffer (the last 30 structured errors, always-on — no need to enable debug logging first) and an `environment` section: integration version, resolved cloud base URL, `ws_mode`, WS-connected state, battery-compound-id discovery status, plant-id presence, inverter model/max power, and data source. All output is redacted (tokens, passwords, serials, and the battery compound id never appear) — a mutation-tested, load-bearing safety check, since the file is attached to public issue reports.
   - This does not change any control behaviour; it is observability only. It also does not *fix* issue #8 (whose root cause is cloud/region-side) — it makes the next such report arrive self-diagnosing.
+
+### Documentation
+- **Clarified that installing via HACS (or the add-on / manual copy) does not add the integration by itself** (GH #9). After downloading + restarting, you must go to **Settings → Devices & Services → ＋ Add Integration → FoxESS Control** — this step is now called out explicitly in every install section. Also documented the `wasmtime` 64-bit-only limitation for the WebSocket feature.
+
+### Add-on (separate `foxess-control` add-on, → 0.13.2)
+- **Fixed the add-on failing to start on Home Assistant OS** with `[FATAL tini (7)] exec /init failed: Permission denied` (GH #9, GH #10). The add-on's custom AppArmor profile (added in add-on 0.12.1-beta.1) omitted the s6-overlay boot path (`/init`), so the container could not boot — broken on every install since, **including the 1.0.18 stable add-on** (which shipped 0.13.2-beta.5 with the broken profile). Reverted to Supervisor's default AppArmor profile (the pre-0.12.1-beta.1 behaviour). A CI smoke-test now runs the built image to catch boot regressions. *(Note: the add-on only copies the integration's files into your config; HACS is the recommended install path.)*
 
 ### Internal (no user-facing change)
 - **E2E test reliability: `wait_for_condition` step helper + DOM capture on failure.** The E2E suite's panel/card waits previously detected failures by timeout alone and captured no page state, making intermittent render flakes hard to root-cause. A new `wait_for_condition` primitive fails fast on known-bad DOM states (e.g. an HA error panel) instead of waiting out the full budget, and captures the DOM (HTML + screenshot + summary) on any wait/evaluate failure into the CI artifacts. No effect on the shipped integration; improves maintainer diagnosis of flaky E2E runs.
