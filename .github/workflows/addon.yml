@@ -53,44 +53,32 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: foxess-control/Dockerfile
-          platforms: ${{ matrix.platform }}
-          push: true
-          build-args: |
-            BUILD_FROM=${{ matrix.base }}
-          tags: |
-            ${{ env.REGISTRY }}/nicois/foxess-control-${{ matrix.arch }}:${{ steps.tag.outputs.version }}
-            ${{ env.REGISTRY }}/nicois/foxess-control-${{ matrix.arch }}:latest
-
-      # Smoke test: actually RUN the built image and assert it boots.
+      # Smoke test BEFORE push: build the image LOCALLY (--load) and RUN it,
+      # so a broken image is never published. The smoke test gates the push.
       #
       # The AppArmor regression that broke the add-on on HAOS for 5 betas
       # (commit 7cf864d: the custom profile omitted /init, so s6-overlay's
       # first exec was denied with "[FATAL tini (7)] exec /init failed:
       # Permission denied") shipped because CI built and signed the image
-      # but never ran it.
+      # but never ran it. A prior fix added this smoke test but ran it AFTER
+      # `push: true` — so it could only leave a bad image unsigned, never
+      # prevent publication, and its root-owned /config cleanup failed the
+      # job (skipping signing) even when the boot test itself passed. This
+      # version builds-load -> smoke-test -> push -> sign, so the test
+      # actually gates publication and cleanup can't fail a good build.
       #
-      # This step builds the image LOCALLY (load instead of push) for the
-      # native amd64 runner, then `docker run`s it against a throwaway
-      # /config mount and asserts:
+      # Only runs on amd64 (the runner's native arch — other arches are
+      # cross-built and can't `docker run` natively here). Asserts:
       #   * the container boots past /init (s6-overlay starts) and runs
-      #     run.sh — a boot/exec/Dockerfile regression would fail here;
+      #     run.sh — a boot/exec/Dockerfile regression fails here;
       #   * run.sh copies the integration into
       #     /config/custom_components/foxess_control (manifest.json present);
       #   * the container exits 0 (add-on is startup: once).
       #
       # WHAT THIS DOES NOT COVER: plain `docker run` does NOT apply the
       # Supervisor/HAOS AppArmor profile, so this cannot catch the specific
-      # AppArmor regression that motivated it — that would require a HAOS
-      # environment we don't have in CI. It DOES catch the broad class of
-      # "image cannot boot / run.sh broken / integration not copied"
-      # regressions, which is still valuable. AppArmor-specific safety is
-      # now enforced by NOT shipping a custom profile (Supervisor default).
+      # AppArmor regression that motivated it. AppArmor-specific safety is
+      # enforced by NOT shipping a custom profile (Supervisor default).
       #
       # matrix.arch / matrix.base are workflow-defined matrix values, not
       # untrusted external input, so direct interpolation is safe here.
@@ -115,10 +103,31 @@ jobs:
           if [ ! -f "${INSTALLED}" ]; then
             echo "SMOKE TEST FAILED: ${INSTALLED} was not created — run.sh did not copy the integration (or the container never booted past /init)."
             ls -laR "${CONFIG_DIR}" || true
+            # Best-effort cleanup of root-owned files even on the failure path.
+            docker run --rm -v "${CONFIG_DIR}:/config" "${BUILD_FROM}" sh -c 'rm -rf /config/* /config/.[!.]* 2>/dev/null || true' || true
+            sudo rm -rf "${CONFIG_DIR}" 2>/dev/null || true
             exit 1
           fi
           echo "Smoke test passed: container booted, ran run.sh, copied integration, exited 0."
-          rm -rf "${CONFIG_DIR}"
+          # run.sh wrote files into /config as root, so the unprivileged
+          # runner user cannot remove them directly. Delete them from inside
+          # a throwaway container (root); fall back to sudo if needed.
+          docker run --rm -v "${CONFIG_DIR}:/config" "${BUILD_FROM}" sh -c 'rm -rf /config/* /config/.[!.]* 2>/dev/null || true'
+          rmdir "${CONFIG_DIR}" 2>/dev/null || sudo rm -rf "${CONFIG_DIR}" 2>/dev/null || true
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: foxess-control/Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: true
+          build-args: |
+            BUILD_FROM=${{ matrix.base }}
+          tags: |
+            ${{ env.REGISTRY }}/nicois/foxess-control-${{ matrix.arch }}:${{ steps.tag.outputs.version }}
+            ${{ env.REGISTRY }}/nicois/foxess-control-${{ matrix.arch }}:latest
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3

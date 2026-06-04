@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.20
+
+### Add-on (separate `foxess-control` add-on)
+- **Add-on version scheme unified with the integration, so the AppArmor `/init` fix finally reaches users** (GH #9, GH #10). Root cause of why 1.0.19 did *not* fix the add-on for anyone: the add-on `config.yaml` `version:` had been frozen at `0.13.2-beta.5` since an April renumber, while the build workflow tags images with the **git tag** (`1.0.x`). Home Assistant Supervisor pulls `{image}:{config.yaml version}` — i.e. `:0.13.2-beta.5`, an image built 2026-04-10 — and reads the add-on's AppArmor profile from the **default branch (`main`)**, which still shipped the broken custom `apparmor.txt`. So every stable add-on install pulled a stale April image *and* applied the boot-breaking profile, regardless of integration releases. Fixes: (1) `config.yaml` `version:` now tracks the integration version (`1.0.20`), so Supervisor pulls the image the workflow actually builds and signs; (2) the AppArmor fix (no custom profile — Supervisor default) is merged to `main`; (3) the add-on CI smoke-test now runs **before** push (build-load → smoke-test → push → sign) so a broken image can never be published, and its root-owned `/config` cleanup runs in a throwaway container so it can't fail a good build (the 1.0.19 amd64 build pushed but was left unsigned by exactly that cleanup bug).
+
 ## 1.0.19
 
 Consolidates the 1.0.19-beta.1 … beta.3 pre-releases. Headline: the add-on
