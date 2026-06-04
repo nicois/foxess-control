@@ -19,6 +19,7 @@ from custom_components.foxess_control import (
     _groups_overlap,
     _is_expired,
     _is_placeholder,
+    _maybe_start_realtime_ws,
     _merge_with_existing,
     _remove_mode_from_schedule,
     _resolve_start_end,
@@ -2058,3 +2059,171 @@ class TestWsGateSelfUseLull:
 
         with patch("custom_components.foxess_control.dt_util.now", return_value=now):
             assert _should_start_realtime_ws(hass) is False
+
+
+class _FakeRunningWS:
+    """Minimal stand-in for a *running* FoxESSRealtimeWS.
+
+    ``is_active`` is True (a live listen task) and ``is_connected`` is
+    False so ``_stop_realtime_ws`` skips the 30s linger branch (which
+    needs live coordinator data) and goes straight to
+    ``async_disconnect``.  Records whether teardown was requested so the
+    test can assert the running connection was actually stopped.
+    """
+
+    def __init__(self) -> None:
+        self.disconnected = False
+        self.stop_requested = False
+
+    @property
+    def is_active(self) -> bool:
+        return not self.disconnected
+
+    @property
+    def is_connected(self) -> bool:
+        return False
+
+    def request_stop(self) -> None:
+        self.stop_requested = True
+
+    async def async_disconnect(self) -> None:
+        self.disconnected = True
+
+
+class TestWsTornDownWhenGateFlipsFalse:
+    """Regression: a *running* WS must be torn down once the start-gate
+    flips to False — the reconcile path, not just session-end cancel.
+
+    Live evidence (2026-06-02, ``ws_mode=smart_sessions``, cloud mode):
+    the realtime WebSocket kept delivering ~5s frames for hours of
+    confirmed idle (``betriebsmodus=SelfUse``, both laden/entladen
+    binary sensors off, ``data_freshness=ws age_seconds=0``), and the
+    data-source badge sawtoothed ``ws → api → ws`` on the ~5.5-min
+    REST-poll cadence.
+
+    Root cause (this fix, distinct from the sibling gate fix 1837f10):
+    ``_should_start_realtime_ws`` correctly returns False during a
+    discharge self-use lull / after a session has ended, but
+    ``_maybe_start_realtime_ws`` is *start-only* — when the gate says
+    False AND a WS is already running it returns early WITHOUT tearing
+    the connection down.  Nothing reconciles a running WS down on a
+    gate→False transition.  A WS started during genuine paced discharge
+    therefore keeps streaming through every subsequent self-use lull
+    (``last_power_w`` drops to 0 while the session window stays open
+    until the end timer fires) — a C-020 leak: the UI shows a live WS
+    badge while the system is effectively idle.
+
+    The WS-aware listener wrappers (``_ws_aware_discharge_cb`` /
+    ``_ws_aware_charge_cb``) and the ``always``-mode watchdog all call
+    ``_maybe_start_realtime_ws`` on every tick, so making that function
+    *reconcile* (start when the gate is True, stop when it is False)
+    closes the leak at the single shared chokepoint.
+
+    These tests drive the observable contract: with a running WS and a
+    gate that returns False, ``_maybe_start_realtime_ws`` must leave the
+    WS torn down.  On current ``develop`` the WS stays connected and the
+    tests FAIL.
+    """
+
+    def _seed_self_use_lull(self, dd: "FoxESSControlData") -> datetime.datetime:
+        """Open discharge session parked in self-use (last_power_w == 0).
+
+        Window 14:28–15:35, ``now`` = 14:40 (inside the window).  The
+        gate returns False for this state (sibling fix 1837f10), so a
+        running WS must be reconciled down.
+        """
+        dd.smart_discharge_state = dict(
+            discharging_started=True,
+            start=datetime.datetime(2026, 4, 22, 14, 28, 0),
+            end=datetime.datetime(2026, 4, 22, 15, 35, 0),
+            min_soc=30,
+            last_power_w=0,
+            max_power_w=10500,
+        )
+        return datetime.datetime(2026, 4, 22, 14, 40, 0)
+
+    @pytest.mark.asyncio
+    async def test_running_ws_torn_down_during_self_use_lull(self) -> None:
+        """smart_sessions: running WS is stopped when gate flips False."""
+        hass = _make_ws_hass(ws_mode=WS_MODE_SMART_SESSIONS)
+        dd: FoxESSControlData = hass.data[DOMAIN]
+        now = self._seed_self_use_lull(dd)
+
+        fake_ws = _FakeRunningWS()
+        dd.realtime_ws = fake_ws  # type: ignore[assignment]
+
+        # Sanity: the gate must agree the WS should be DOWN for this state.
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is False
+            await _maybe_start_realtime_ws(hass)
+
+        assert fake_ws.disconnected, (
+            "Running WS was not torn down when the start-gate returned False "
+            "(self-use lull) — WS keeps streaming during effective idle "
+            "(C-020 leak)."
+        )
+        assert dd.realtime_ws is None, (
+            "dd.realtime_ws should be cleared after teardown so a stale "
+            "reference does not linger."
+        )
+
+    @pytest.mark.asyncio
+    async def test_running_ws_torn_down_after_session_ended(self) -> None:
+        """No session at all (fully ended) + running WS → teardown.
+
+        Mirrors the live observation: the last smart session had ended
+        ~2h46m earlier (no smart_discharge_state, no smart_charge_state),
+        yet a WS was still connected and streaming.
+        """
+        hass = _make_ws_hass(ws_mode=WS_MODE_SMART_SESSIONS)
+        dd: FoxESSControlData = hass.data[DOMAIN]
+        dd.smart_discharge_state = None
+        dd.smart_charge_state = None
+
+        fake_ws = _FakeRunningWS()
+        dd.realtime_ws = fake_ws  # type: ignore[assignment]
+
+        now = datetime.datetime(2026, 4, 22, 22, 47, 0)
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is False
+            await _maybe_start_realtime_ws(hass)
+
+        assert fake_ws.disconnected, (
+            "Running WS was not torn down after the session fully ended — "
+            "WS stayed connected during idle (the live 2h46m leak)."
+        )
+        assert dd.realtime_ws is None
+
+    @pytest.mark.asyncio
+    async def test_active_paced_session_keeps_ws_up(self) -> None:
+        """Inverse (must NOT regress): genuine paced discharge keeps WS up.
+
+        With ``0 < last_power_w < max_power_w`` the gate returns True, so
+        a running WS must be left alone — the reconcile must not be
+        over-eager and tear down a connection that is still earning its
+        keep.
+        """
+        hass = _make_ws_hass(ws_mode=WS_MODE_SMART_SESSIONS)
+        dd: FoxESSControlData = hass.data[DOMAIN]
+        dd.smart_discharge_state = dict(
+            discharging_started=True,
+            start=datetime.datetime(2026, 4, 22, 14, 28, 0),
+            end=datetime.datetime(2026, 4, 22, 15, 35, 0),
+            min_soc=30,
+            last_power_w=4000,
+            max_power_w=10500,
+        )
+        now = datetime.datetime(2026, 4, 22, 14, 40, 0)
+
+        fake_ws = _FakeRunningWS()
+        dd.realtime_ws = fake_ws  # type: ignore[assignment]
+
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is True
+            await _maybe_start_realtime_ws(hass)
+
+        assert not fake_ws.disconnected, (
+            "Reconcile tore down a WS that the gate still authorises "
+            "(active paced discharge) — over-eager teardown."
+        )
+        assert dd.realtime_ws is not None
