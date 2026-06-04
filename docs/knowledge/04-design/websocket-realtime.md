@@ -51,6 +51,25 @@ The FoxESS-specific `__init__.py` wraps the brand-agnostic discharge
 callback to call `_maybe_start_realtime_ws` after every check, ensuring
 WS activates on deferred→active transitions.
 
+`_maybe_start_realtime_ws` *reconciles* the connection to the gate — it
+is not start-only. When the gate returns False it tears down any
+still-running WS (delegating to `_stop_realtime_ws`) rather than
+returning early. This is required because the gate is consulted only to
+*start*; nothing else stops a running WS on a gate→False transition. A
+connection opened during genuine paced discharge would otherwise keep
+streaming through every subsequent self-use lull (`last_power_w == 0`
+while the window stays open) and after the session window-end timer
+fires, leaving the WS data-source badge lit during effective idle (a
+C-020 leak, live 2026-06-02: ~5 s frames for 2h46m after the last
+session ended; `data_freshness` sawtoothing ws→api→ws on the REST-poll
+cadence). The sibling fix corrected the gate's *return value* during the
+self-use lull; this reconcile makes the start chokepoint *act* on that
+value for an already-running connection. `_stop_realtime_ws` (the
+session-cancel/end hook) remains the other teardown path — the reconcile
+covers the gate→False-while-running case it does not reach. Inverse: an
+active paced session (gate True) must leave a running WS untouched —
+the reconcile must not be over-eager.
+
 Existing configurations with the old `ws_all_sessions=True` boolean
 are migrated to `ws_mode=smart_sessions` automatically.
 **Context**: WebSocket uses a separate web session (username + MD5

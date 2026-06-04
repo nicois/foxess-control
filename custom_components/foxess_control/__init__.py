@@ -1052,6 +1052,22 @@ async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
         _stack,
     )
     if not _should_start_realtime_ws(hass):
+        # Reconcile DOWN: the gate is start-only, but it is the single
+        # chokepoint every WS-aware listener tick and the always-mode
+        # watchdog call.  If a WS is still running while the gate now
+        # refuses (e.g. a discharge session has dropped into a self-use
+        # lull with last_power_w==0 while its window stays open, or the
+        # session has ended entirely), tear it down here.  Without this
+        # the connection started during genuine paced discharge keeps
+        # streaming through every subsequent self-use lull and after the
+        # session ends — leaving the WS data-source badge lit during
+        # effective idle (C-020 leak, live 2026-06-02) and oscillating
+        # data_freshness ws->api->ws on the REST-poll cadence.  Nothing
+        # else reconciles a running WS down on a gate->False transition:
+        # _stop_realtime_ws is only wired to the session-cancel/end hook.
+        if DOMAIN in hass.data and _dd(hass).realtime_ws is not None:
+            _LOGGER.debug("WS: gate now False with WS running — tearing down")
+            await _stop_realtime_ws(hass)
         return
     dd = _dd(hass)
     ws_ref = dd.realtime_ws
