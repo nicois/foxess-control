@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **WebSocket stayed alive (and the `data_freshness` badge oscillated `ws → api → ws`) during discharge self-use lulls** (C-020, D-008). With `ws_mode=smart_sessions` in cloud mode, the realtime WebSocket kept streaming ~5 s frames while the inverter sat in self-use (live 2026-06-02: `betriebsmodus=SelfUse`, `data_freshness=ws age_seconds=0`, 60 frames over 182 s during confirmed idle; 278 badge transitions in ~12 h). Root cause: `_should_start_realtime_ws`'s "paced forced discharge" test was `last_power_w < max_power_w`, which is also satisfied at `last_power_w == 0`. The discharge listener parks the inverter in self-use during a session via two paths — the suspend path (`_handle_suspend_resume`) and the feed-in self-use path — both set `last_power_w = 0` while leaving `discharging_started=True` and the session window open until the end-of-window timer fires. With `last_power_w == 0` there is no ForceDischarge override and thus no P-001 import window to monitor, so the WS has nothing to pace — yet the gate kept it up, and each REST poll's badge downgrade was immediately re-overridden by the next WS frame. Fix: the gate now requires `0 < last_power_w < max_power_w` in the auto "paced" branch and `last_power_w > 0` in the `smart_sessions` discharge fall-through, so a session parked in self-use no longer holds the WS open. Charge is unaffected (no mid-session self-use floor). Regression class `tests/test_init.py::TestWsGateSelfUseLull` asserts the gate is False at `last_power_w == 0` (auto + smart_sessions), True for genuine paced discharge, and False at full power.
+
 ## 1.0.20
 
 ### Add-on (separate `foxess-control` add-on)

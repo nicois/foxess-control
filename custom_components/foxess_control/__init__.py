@@ -979,7 +979,22 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
         min_soc = ds.get("min_soc", 0)
         last_pw = ds.get("last_power_w", 0)
         max_pw = ds.get("max_power_w", 0)
-        paced = not min_soc >= 100 and last_pw < max_pw
+        # "Paced forced discharge" (D-008) means the inverter is actively
+        # force-discharging at a *modulated* rate below the hardware max —
+        # the only state where house load could exceed discharge power and
+        # cause grid import (P-001), so WS pacing earns its keep.
+        #
+        # ``last_pw == 0`` is NOT paced discharge: it is the self-use floor
+        # the discharge listener parks the inverter at during a session
+        # (the suspend path and the feed-in self-use path both set
+        # ``last_power_w = 0`` while leaving ``discharging_started=True`` and
+        # the window open until the end timer fires).  In self-use there is
+        # no ForceDischarge override, hence no P-001 import window to
+        # monitor and nothing to pace — so the WS must stay down.  Treating
+        # ``last_pw == 0`` as paced kept the WS streaming during self-use
+        # lulls (C-020 leak: ws→api→ws badge oscillation on the poll
+        # cadence during idle).  Require ``last_pw > 0``.
+        paced = not min_soc >= 100 and 0 < last_pw < max_pw
         _LOGGER.debug(
             "WS check: discharge active, min_soc=%s, "
             "last_power=%dW, max_power=%dW, paced=%s",
@@ -1007,9 +1022,21 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
             )
             return False
 
-    return (ds is not None and ds.get("discharging_started", False)) or (
-        cs is not None and cs.get("charging_started", False)
+    # smart_sessions: keep WS up for any *active* session.  A discharge
+    # session that has parked the inverter in self-use (suspend / feed-in
+    # self-use → ``last_power_w == 0``) is functionally idle even though
+    # the session state lingers until the window-end timer fires, so it
+    # must NOT hold the WS open — otherwise the badge oscillates ws↔api on
+    # the poll cadence during a self-use lull and misleads the user about
+    # system state (C-020).  Charge has no analogous mid-session self-use
+    # floor, so ``charging_started`` alone gates it.
+    discharge_active = (
+        ds is not None
+        and ds.get("discharging_started", False)
+        and ds.get("last_power_w", 0) > 0
     )
+    charge_active = cs is not None and cs.get("charging_started", False)
+    return discharge_active or charge_active
 
 
 async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:

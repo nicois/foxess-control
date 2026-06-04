@@ -22,10 +22,25 @@ where stale data risks grid import from undetected load spikes.
 option (replacing the former boolean `ws_all_sessions`):
 
 - **auto** (default): WS connects only during paced forced discharge
-  (`discharging_started=True` and `last_power_w < max_power_w`).
+  (`discharging_started=True` and `0 < last_power_w < max_power_w`).
   Requires web credentials and cloud mode (not entity mode).
 - **smart_sessions**: WS connects during any started smart session
-  (charge or discharge, including deferred phases) or force operation.
+  (charge, or *actively discharging* with `last_power_w > 0`, including
+  deferred phases that have transitioned to active) or force operation.
+
+  `last_power_w == 0` is **not** an active session for WS purposes: it is
+  the self-use floor the discharge listener parks the inverter at during a
+  session (the suspend path and the feed-in self-use path both set
+  `last_power_w = 0` while leaving `discharging_started=True` and the
+  window open until the end-of-window timer fires). In self-use there is
+  no ForceDischarge override, so no P-001 import window to monitor and
+  nothing to pace — the WS must stay down. Treating `last_power_w == 0`
+  as paced (the pre-1.0.21 `last_pw < max_pw` test) kept the WS streaming
+  through self-use lulls, producing a `ws → api → ws` `data_freshness`
+  badge oscillation on the REST-poll cadence during effective idle — a
+  C-020 leak (live 2026-06-02). The gate now requires `last_power_w > 0`
+  in both the auto "paced" branch and the smart_sessions discharge
+  fall-through.
 - **always**: WS connects at integration startup and stays connected
   regardless of session state. A watchdog timer (at the polling
   interval) re-establishes the connection after transient failures.
