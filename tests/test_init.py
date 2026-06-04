@@ -1950,3 +1950,111 @@ class TestShouldStartRealtimeWs:
         now = datetime.datetime(2026, 4, 22, 2, 0, 0)
         with patch("custom_components.foxess_control.dt_util.now", return_value=now):
             assert _should_start_realtime_ws(hass) is True
+
+
+class TestWsGateSelfUseLull:
+    """Regression: WS must NOT stay alive while a discharge session is in a
+    self-use lull (``last_power_w == 0``).
+
+    Live evidence (2026-06-02, ``ws_mode=smart_sessions``, cloud mode):
+    the system was in self-use (``betriebsmodus=SelfUse``) with no active
+    forced discharge, yet the WebSocket kept delivering ~5s frames during
+    confirmed idle (``data_freshness=ws age_seconds=0``, 60 frames over
+    182s). The data-source badge oscillated ``ws → api → ws`` on the
+    REST-poll cadence all day (278 transitions in ~12h) — consistent with
+    the WS being torn down at each poll and immediately RE-STARTED because
+    ``_should_start_realtime_ws`` returned True during idle.
+
+    Root cause: the gate's "paced forced discharge" branch computes
+    ``paced = not min_soc >= 100 and last_power_w < max_power_w``. When the
+    listener parks the inverter in self-use during a session (the
+    suspend path — ``_handle_suspend_resume`` — or the feed-in self-use
+    path — both set ``last_power_w = 0`` while leaving
+    ``discharging_started=True`` and the session window open until the
+    end timer fires), ``last_power_w == 0`` still satisfies ``0 <
+    max_power_w`` so ``paced`` is True and the gate keeps the WebSocket
+    up.
+
+    But ``last_power_w == 0`` means the inverter is NOT force-discharging
+    at all — it is in self-use. There is no modulated discharge rate to
+    monitor and no P-001 grid-import risk to track at sub-second
+    resolution (P-001 only applies while a ForceDischarge override is
+    active). D-008 scopes ``auto`` WS to *paced forced discharge*
+    (``discharging_started=True`` AND ``last_power_w < max_power_w``); the
+    intent is an actively-modulated discharge, not the
+    ``last_power_w == 0`` self-use floor. Keeping a WS badge lit during
+    self-use misleads the user about system state — a direct C-020
+    violation.
+
+    Fix: ``paced`` must require ``last_power_w > 0`` (genuine modulated
+    forced discharge), not merely ``last_power_w < max_power_w``.
+
+    These tests assert the observable gate contract; on current
+    ``develop`` the ``last_power_w == 0`` cases return True and FAIL.
+    """
+
+    def _make_active_discharge(
+        self,
+        dd: "FoxESSControlData",
+        *,
+        last_power_w: int,
+        min_soc: int = 30,
+        max_power_w: int = 10500,
+    ) -> datetime.datetime:
+        """Seed an ACTIVE (window-open) discharge session and return ``now``.
+
+        Window 14:28–15:35, ``now`` = 14:40 (inside the window), so the
+        scheduled-phase guard does not apply — the only thing under test
+        is whether ``last_power_w`` gates the WS correctly.
+        """
+        dd.smart_discharge_state = dict(
+            discharging_started=True,
+            start=datetime.datetime(2026, 4, 22, 14, 28, 0),
+            end=datetime.datetime(2026, 4, 22, 15, 35, 0),
+            min_soc=min_soc,
+            last_power_w=last_power_w,
+            max_power_w=max_power_w,
+        )
+        return datetime.datetime(2026, 4, 22, 14, 40, 0)
+
+    def test_self_use_lull_blocks_ws_auto(self) -> None:
+        """auto: WS must NOT be active when last_power_w == 0 (self-use)."""
+        hass = _make_ws_hass(ws_mode=WS_MODE_AUTO)
+        dd: FoxESSControlData = hass.data[DOMAIN]
+        now = self._make_active_discharge(dd, last_power_w=0)
+
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is False
+
+    def test_self_use_lull_blocks_ws_smart_sessions(self) -> None:
+        """smart_sessions: WS must NOT be active when last_power_w == 0.
+
+        The active-discharge ("paced") branch runs for ALL ws_modes
+        before the smart_sessions fall-through; a self-use lull must not
+        re-arm WS via that branch on the poll cadence.
+        """
+        hass = _make_ws_hass(ws_mode=WS_MODE_SMART_SESSIONS)
+        dd: FoxESSControlData = hass.data[DOMAIN]
+        now = self._make_active_discharge(dd, last_power_w=0)
+
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is False
+
+    def test_paced_discharge_still_allows_ws_auto(self) -> None:
+        """Inverse: genuine paced discharge (0 < last < max) keeps WS on."""
+        hass = _make_ws_hass(ws_mode=WS_MODE_AUTO)
+        dd: FoxESSControlData = hass.data[DOMAIN]
+        now = self._make_active_discharge(dd, last_power_w=4000)
+
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is True
+
+    def test_full_power_discharge_blocks_ws_auto(self) -> None:
+        """Boundary (unchanged): full-power discharge has import headroom,
+        so auto mode does NOT need WS (last_power_w == max_power_w)."""
+        hass = _make_ws_hass(ws_mode=WS_MODE_AUTO)
+        dd: FoxESSControlData = hass.data[DOMAIN]
+        now = self._make_active_discharge(dd, last_power_w=10500)
+
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is False
