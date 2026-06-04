@@ -362,11 +362,43 @@ Two things to know that diverge from the public docs:
 - Each `datas` entry has `name` (human-readable) and `unit` fields
   not mentioned in the docs. Treat extra fields as advisory.
 
-Common variables: `SoC`, `batChargePower`, `batDischargePower`,
-`batTemperature`, `batVolt`, `batCurrent`, `loadPower`, `gridPower`,
-`feedinPower`, `pvPower`. Power values from this endpoint are in
-**kilowatts** (floats). Note this differs from the WebSocket and from
-schedule writes — see §8.
+**Instantaneous power variables** (kW floats): `SoC` (%),
+`batChargePower`, `batDischargePower`, `loadsPower`, `pvPower`,
+`pv1Power`, `pv2Power`, `gridConsumptionPower`, `feedinPower`,
+`generationPower`, `meterPower`, `epsPower`, `batVolt` (V),
+`batCurrent` (A), `batTemperature` / `ambientTemperation` /
+`invTemperation` (°C), `RVolt` / `RCurrent` / `RFreq`.
+
+**Cumulative energy counters** (kWh, lifetime, monotonic
+`total_increasing` — take the delta between two readings for an
+interval, or use the underlying meter's own statistics):
+
+| Variable | Meaning |
+|---|---|
+| `generation` | Lifetime solar generation energy |
+| `chargeEnergyToTal` | Lifetime **battery charge** energy *(note the `ToTal` capitalisation — a FoxESS API quirk, not a typo to "fix")* |
+| `dischargeEnergyToTal` | Lifetime **battery discharge** energy (everything the battery put out, into house load **and** export combined) |
+| `feedin` | Lifetime **grid feed-in (export)** energy — energy exported to the grid, i.e. discharge/solar **beyond** household self-consumption |
+| `gridConsumption` | Lifetime grid **import** energy |
+| `loads` | Lifetime house-load energy |
+| `energyThroughput` | Lifetime total throughput |
+
+**`dischargeEnergyToTal` vs `feedin` — do not confuse them.**
+Battery *discharge* energy (`dischargeEnergyToTal`) is everything the
+battery delivered, most of which typically serves house load.
+Grid *feed-in* energy (`feedin`) is only the portion exported to the
+grid. The smart-discharge "feed-in energy limit" / `feedin_target_kwh`
+control input (see `docs/control/smart-discharge-contract.md`) is
+measured from **`feedin`**, NOT from `dischargeEnergyToTal` — a
+discharge-energy cap would strand usable battery energy and cannot
+measure export. Both variables exist and are pollable; pick the one
+that matches the quantity you actually want to bound.
+
+Power values from this endpoint are in **kilowatts** (floats). Note
+this differs from the WebSocket and from schedule writes — see §8.
+This list reflects the integration's `POLLED_VARIABLES`
+(`custom_components/foxess_control/const.py`); FoxESS may expose
+further variables not polled here.
 
 ### `POST /op/v0/device/scheduler/enable`
 
