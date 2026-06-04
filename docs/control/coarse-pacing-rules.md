@@ -2,7 +2,7 @@
 project: FoxESS Control
 audience: contributors implementing smart-charge / smart-discharge in systems without WebSocket access (SaaS, third-party clients)
 sources: smart_battery/algorithms.py, docs/knowledge/04-design/smart-discharge.md
-last_verified: 2026-05-10
+last_verified: 2026-06-04
 ---
 
 # Coarse-Pacing Rules
@@ -65,7 +65,7 @@ account for.
 | Charge tick                             | 5 min                     | 5 min                              |
 | First-frame latency on session start    | < 5 s (WS push)           | up to 5 min (next REST poll)       |
 | Adverse-event reaction time             | 60 s + 5 s ≈ 65 s worst case | up to 5 min                     |
-| Inter-tick blind window during discharge | ~5 s (WS) / 60 s (no WS) | 5 min                              |
+| Inter-tick blind window during discharge | ~5 s (WS) / up to 5 min for load+PV, 60 s for SoC (no WS — SoC interpolated, load/PV frozen at last REST poll) | 5 min |
 | Effective sampling rate (Hz)            | ~0.2 (WS) / 0.017 (1-min) | 0.0033                             |
 
 The relevant ratio is the last row: a SaaS at 5-minute cadence sees
@@ -141,7 +141,16 @@ at 4 kW.
   and suspends. **Worst-case grid import: ~65 s × 2 kW shortfall =
   ~36 Wh.** (Negligible.)
 - **HA integration without WebSocket** (REST only, but still the
-  60-second discharge tick): same as above with ~5 s extra latency.
+  60-second discharge tick): the 60 s tick keeps re-evaluating, but it
+  reads `loadsPower`/`pvPower` that are themselves only refreshed at
+  the REST `update_interval` (default 5 min). Only **SoC** is
+  interpolated/extrapolated between polls (`coordinator.py`
+  `_soc_interpolated` / `_schedule_soc_extrapolation`); load and PV are
+  frozen at the last poll. So for *load-spike detection* — the case
+  this section worries about — no-WS HA is also up to ~5 min blind, not
+  60 s. The 60 s tick simply re-paces against stale load until the next
+  REST poll. (The pre-pay argument below is unchanged; the "5× less
+  data" framing is optimistic for the spike case.)
 - **SaaS at 5-min cadence**: the spike is invisible until the next
   poll. **Worst-case grid import: 5 min × 2 kW shortfall = ~167 Wh
   per spike.** Across a session, repeated spikes compound. A single
@@ -221,7 +230,7 @@ unchanged from HA.
 ### 4.2 End-of-discharge guard (C-017 / D-003)
 
 **HA formula** (`smart_battery/algorithms.py::should_suspend_discharge`,
-end-of-discharge guard, lines around 404–408):
+end-of-discharge guard, lines around 452–456):
 
 ```
 floor_kw_HA   = consumption × DISCHARGE_SAFETY_FACTOR
@@ -270,8 +279,12 @@ The HA integration applies a **conditional headroom** to the feed-in
 deadline. When a hardware export clamp is configured AND the clamp
 slack (`max_power_kw − grid_export_limit_kw`) is wide enough that
 typical load spikes cannot erode net export below the clamp, the
-single 10% headroom is used. Otherwise the doubled 40% headroom is
-used. See D-044 for the exact predicate.
+**single** headroom (`headroom`) is used. Otherwise the **doubled**
+headroom (`min(headroom × 2, MAX_FEEDIN_HEADROOM)`) is used. With the
+default `headroom = 0.10` this is **0.10 vs 0.20** — the `0.40`
+(`MAX_FEEDIN_HEADROOM`) is only the *cap* on the doubled value, reached
+only if the user configures `headroom ≥ 0.20`. See D-044 for the exact
+predicate.
 
 The conditional logic is HA-specific: it depends on observing
 `net_consumption_kw` and `consumption_peak_kw` against the clamp slack
@@ -283,24 +296,31 @@ predicate "typical load spikes cannot erode net export" requires
 real-time evidence the SaaS does not have. Therefore:
 
 **SaaS rule**: the doubled headroom is **always** applied,
-unconditionally.
+unconditionally — and the SaaS pins it to the `MAX_FEEDIN_HEADROOM`
+cap of 0.40 rather than the configured `2 × headroom`, since it cannot
+verify the clamp-slack predicate:
 
 ```
-headroom_SaaS = 0.40   (always)
+headroom_SaaS = 0.40   (always = MAX_FEEDIN_HEADROOM)
 ```
 
-vs HA:
+vs HA (where `headroom` defaults to 0.10):
 
 ```
-headroom_HA = 0.10 if (clamp_active AND peak ≤ clamp_slack) else 0.40
+headroom_HA = headroom                          if (clamp_active AND projected_load ≤ clamp_slack)
+            = min(headroom × 2, 0.40)            otherwise
+            # default config → 0.10 (single) vs 0.20 (doubled); 0.40 only as the cap
 ```
 
-The mathematical effect on the deferred start: the SaaS computes
-the deferred-start time using a 40% margin on top of the feed-in
-drain estimate, never the 10% margin. This shifts the deferred
-start earlier (less self-use time, more discharge time at higher
-power), but more importantly it shifts the start time *predictably*,
-without depending on inter-poll observations the SaaS cannot make.
+The mathematical effect on the deferred start: the SaaS computes the
+deferred-start time using a 40% margin on top of the feed-in drain
+estimate, never the smaller single/doubled margin. Note this is
+*stricter* than HA's default-config doubled value (0.20), not merely
+equal to it — the SaaS deliberately pins to the cap. This shifts the
+deferred start earlier (less self-use time, more discharge time at
+higher power), but more importantly it shifts the start time
+*predictably*, without depending on inter-poll observations the SaaS
+cannot make.
 
 **Cite**: P-001, P-004, D-005, D-044. The unconditional 40%
 headroom is a SaaS-specific simplification of HA's conditional
@@ -308,25 +328,35 @@ logic; HA's conditional remains unchanged.
 
 ### 4.4 Peak consumption EMA (D-004)
 
-**HA formula** (`smart_battery/algorithms.py`, `PEAK_DECAY_PER_TICK`
-referenced by listener):
+**HA formula** (`PEAK_DECAY_PER_TICK` defined in
+`smart_battery/algorithms.py:314`, **applied only** in the discharge
+tick body `listeners.py:1810-1811`):
 
 ```
 peak ← max(peak × PEAK_DECAY_PER_TICK, current_consumption)
 PEAK_DECAY_PER_TICK = 0.85
 ```
 
-At HA's 1-minute discharge tick, the half-life is
-`log(0.5) / log(0.85) ≈ 4.27` ticks ≈ **4.3 minutes**. At HA's
-5-minute charge tick, the same factor gives a half-life of
-`4.27 × 5 ≈ 21.3` minutes — which is why the docstring on
-`PEAK_DECAY_PER_TICK` cites "~21 minutes" (it documents the charge
-context, where the same constant runs at a 5-minute tick).
+In the reference, this decay is applied **once per discharge tick**,
+and the discharge tick runs at `SMART_DISCHARGE_CHECK_SECONDS = 60 s`.
+The half-life is therefore `log(0.5) / log(0.85) ≈ 4.27` ticks ≈
+**4.3 minutes**.
 
-**SaaS adjustment**: at 5-minute discharge ticks, applying the
-HA factor of 0.85 verbatim gives the 21-minute half-life shown in
-the docstring — too long for a discharge floor that needs to track
-recent spikes.
+> **Correction (do not be misled by the docstring).** The
+> `PEAK_DECAY_PER_TICK` docstring says "~21 minutes at 5-min polling".
+> That figure is **stale/aspirational**: the constant is *not* applied
+> on the charge path at all (the charge listener never tracks a
+> consumption peak — grep confirms `consumption_peak_kw` is written
+> only inside the discharge tick). On the actual discharge path the
+> half-life is ~4.3 min at the 60 s tick, not 21 min. A re-implementer
+> should not look for (or replicate) a charge-side peak tracker.
+
+**SaaS adjustment**: at 5-minute *discharge* ticks, applying the HA
+factor of 0.85 verbatim gives a half-life of `4.27 × 5 ≈ 21.3` minutes
+— too long for a discharge floor that needs to track recent spikes.
+(The HA reference achieves a ~4.3-min half-life by running the same
+0.85 at a 60 s tick; the SaaS, ticking 5× slower, must re-derive the
+constant to keep a comparable half-life.)
 
 **SaaS formula** (general half-life conversion):
 
@@ -353,8 +383,10 @@ A 15-minute half-life is justified as follows:
 - 15 minutes is short enough that residential loads have changed
   character (kettle done, oven cycled, EV charger ramped up) — so
   the peak adapts to the current load regime.
-- 15 minutes is comparable to the HA charge half-life (21 minutes)
-  but shorter, reflecting the higher stakes on discharge.
+- 15 minutes sits between HA's actual ~4.3-min discharge half-life
+  (60 s tick) and the ~21-min half-life that 0.85 would give verbatim
+  at 5-min ticks — a deliberate compromise that keeps the floor
+  responsive without trusting a single coarse poll.
 
 **Cite**: D-004. The `α = 1 − 0.5^(tick_seconds / half_life_seconds)`
 identity is the textbook EMA half-life formula; the choice of
@@ -377,6 +409,33 @@ for sub-5-minute charge ticks, so the SaaS inherits the same risk
 profile.
 
 **Cite**: D-043. Unchanged.
+
+### 4.6 Existing HA fail-safes a SaaS port inherits
+
+Two HA discharge behaviours are relevant to the coarse-cadence safety
+story and should be carried over (they are not SaaS-specific
+*adjustments*, but a port that drops them loses safety the §4 margins
+assume is present):
+
+- **SoC-unavailable abort.** The HA discharge tick aborts the session
+  after `MAX_SOC_UNAVAILABLE_COUNT = 3` consecutive missing SoC reads
+  (`listeners.py::_handle_soc_unavailable`). At 5-min SaaS ticks this
+  is a 15-minute blind-SoC tolerance — arguably too long; a SaaS may
+  want a stricter count. Either way the abort path must exist: a missed
+  SoC sample is a missed P-002 safety check, the same class of fault as
+  the §5 cadence miss.
+- **Software-pacing self-use hand-off.** On the no-actuator software
+  path, when a feed-in target is set and the paced power falls below
+  `min_power_change`, the HA listener switches the inverter to SELF_USE
+  at 0 W rather than dribbling a sub-threshold forced discharge
+  (`listeners.py::_apply_discharge_power`, the `feedin_self_use`
+  branch). This is itself a P-001 fail-safe — exactly the
+  "suspend rather than push a tiny burst" direction §3 mandates — and a
+  SaaS that drives the inverter via work-mode (not an export-limit
+  actuator) should reproduce it rather than clamping to
+  `MIN_DISCHARGE_POWER_W`.
+
+**Cite**: C-019 (SoC unavailable), P-001 (self-use hand-off).
 
 ## 5. Refusal rule (the most important defensive line)
 
@@ -441,6 +500,17 @@ This refusal is not a degradation; it is the safety contract. A SaaS
 that runs sessions without verifying its own cadence is an
 unsupervised forced-discharge actuator on the inverter — exactly
 the failure mode C-024 was written to prevent.
+
+> **No HA counterpart for the cadence checks.** The HA reference has
+> **no** cadence pre-flight or per-tick cadence-monitoring code — there
+> is nothing in `listeners.py`/`algorithms.py` that aborts on poll-delta.
+> HA does not need it: the HA runtime owns the timer and the WebSocket,
+> so a 60 s tick is guaranteed by the platform. The only HA anchor for
+> §5 is the `_with_circuit_breaker` *abort mechanism* (C-024) that the
+> cadence-fault path reuses. Everything else in §5 (cadence pre-flight,
+> recent-trigger check, per-tick poll-delta monitoring) is entirely
+> SaaS-new and must be built from scratch; do not expect to find it in
+> the reference.
 
 **Cite**: P-001, P-002, C-024, C-026.
 
@@ -565,7 +635,7 @@ source. The tabular form below is the implementer's index:
 | §4.3 Headroom (40% always) | `smart_battery/algorithms.py::calculate_discharge_deferred_start`                | C-001, C-037 | D-005, D-044 |
 | §4.4 EMA decay (15-min HL) | `smart_battery/algorithms.py::PEAK_DECAY_PER_TICK`                               | C-001        | D-004        |
 | §4.5 Charge re-deferral    | `smart_battery/algorithms.py` (charge listener path)                             | (none new)   | D-043        |
-| §5 Refusal rule            | `smart_battery/listeners.py` (circuit breaker, C-024 path)                       | C-024, C-026 | (no D)       |
+| §5 Refusal rule (abort mechanics only) | `smart_battery/listeners.py::_with_circuit_breaker` (C-024 abort path) | C-024, C-026 | (no D) |
 | §7 Charge unchanged        | `smart_battery/algorithms.py` (charge pacing)                                    | (unchanged)  | D-006, D-007 |
 
 Source-of-truth files:

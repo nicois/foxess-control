@@ -2,7 +2,7 @@
 project: FoxESS Control
 audience: contributors implementing the smart-charge algorithm in any language
 sources: smart_battery/algorithms.py, smart_battery/listeners.py, docs/knowledge/04-design/smart-charge.md, taper-model.md
-last_verified: 2026-05-10
+last_verified: 2026-06-04
 ---
 
 # Smart Charge Contract
@@ -84,7 +84,7 @@ numbers.
 | Input | Type / unit | Source | Notes |
 |---|---|---|---|
 | `current_soc` | percent (float) | inverter / coordinator | Per-tick. Source of truth for "where are we". |
-| `target_soc` | integer percent | session config | Stable for the session. Typically clamped to ≤ 98 % by the schedule layer. |
+| `target_soc` | integer percent | session config | Stable for the session. Accepted range 5–100; **not** clamped below 100 in the reference (see §7.3). |
 | `start`, `end` | timestamps | session config | Window boundary. |
 | `now` | timestamp | system clock | Per-tick. |
 | `current_load_kw` | kW (float) | inverter / coordinator | Household consumption. Per-tick. |
@@ -148,7 +148,8 @@ if current_soc >= target_soc:
     if not target_reached:
         if charging_started:
             adapter.remove_override(FORCE_CHARGE)
-            charging_started = False
+            groups = []
+        # NOTE: charging_started is intentionally left True (see below).
         target_reached = True
         log: "SoC %.1f%% >= target %d%%, charge stopped, monitoring"
     return  # no further action this tick
@@ -156,6 +157,18 @@ if target_reached and current_soc < target_soc:
     target_reached = False
     log: "SoC dropped below target, resuming"
 ```
+
+**Why `charging_started` is *not* cleared here.** When the target is
+reached the listener removes the active override and clears its
+`groups`, but it deliberately leaves `charging_started == True`. This
+is load-bearing for the resume path: when SoC later drifts back below
+target and `target_reached` flips to False, the next tick sees
+`charging_started == True` and therefore re-enters via the **G4
+re-deferral / G5–G6 adjust path** — it does *not* re-run the G3
+deferred-start gate. A re-implementer who clears `charging_started`
+here would instead re-enter the deferred-start computation on resume
+(recomputing a deferred start, possibly idling in self-use) — a
+materially different behaviour. Keep `charging_started` True.
 
 The session **continues** to its scheduled window end so the listener
 can re-arm if SoC drifts back below target (e.g. battery self-discharge
@@ -224,6 +237,17 @@ Apply the time-buffer headroom and compare to remaining time:
 buffered_hours    = charge_hours / (1 − headroom)
 is_target_reachable = (buffered_hours ≤ remaining_hours)
 ```
+
+**Shared numeric core (C-038 parity).** In the reference, the
+buffered-hours computation above lives in a single helper
+(`_buffered_charge_hours` in `algorithms.py`) consumed by **both** the
+listener's `is_charge_target_reachable` *and* the sensor's
+`charge_reachability_slack_minutes` attribute. This is the C-038
+mechanism: the UI slack figure and the listener's feasibility verdict
+are guaranteed to agree because they call the same function with the
+same parameters. A re-implementer should factor this computation once
+and share it between the control path and the display path rather than
+duplicating the math.
 
 **Why median-min?** This is a *feasibility* check, not a *pacing*
 prediction. A single anomalous taper observation (one tick where the
@@ -474,8 +498,8 @@ listener `_adjust_charge_power_inner`.
 
 **Apply.** Send `paced_power_w` to the inverter via the adapter
 (`apply_mode(FORCE_CHARGE, power_w, fd_soc=100)`). After the await,
-re-check session identity (a stale callback may have raced — C-003 /
-C-016) before persisting.
+re-check session identity (a stale callback may have raced — C-003)
+before persisting.
 
 ### G7. Cold-temperature curtailment (D-037)
 
@@ -615,9 +639,10 @@ Before recording, drop garbage:
 The 50 W floor specifically guards against the unit-mismatch class
 of bug (W vs kW) that produced ~0.001 ratios on Beta 14.
 
-The profile is persisted to HA Store every `_TAPER_SAVE_EVERY_N`
-observations (5 for charge in some configurations, 3 in current
-listener defaults — check the constant). Cite: D-012.
+The profile is persisted to HA Store every N observations: the charge
+listener passes `save_every = 3`, the discharge listener `save_every
+= 5`. These are inline literals in the listener (no named constant).
+Cite: D-012.
 
 ### 5.5 The 10-minute stability gate — D-015
 
@@ -667,7 +692,7 @@ for bins in [charge, discharge, charge_temp, discharge_temp]:
     if trusted is empty:
         continue
     median = sorted(trusted)[len(trusted) // 2]
-    if median <= 0.10:
+    if median <= MIN_RATIO * 2:     # MIN_RATIO = 0.05 → threshold 0.10
         return PROFILE_CORRUPT
 return OK
 ```
@@ -781,13 +806,21 @@ today, behave more conservatively".
 
 ### 7.3 Charge target above max safe SoC
 
-The schedule layer clamps `target_soc` to ≤ 98 % before the algorithm
-sees it. A target of 100 % would push the BMS into saturation phase,
-where acceptance can drop below 5 % and the trajectory check would
-fire max power for the entire tail of the charge — wasteful and
-hard on cell longevity. The 98 % cap is enforced by the service
-validator, not by the pacing algorithm. A re-implementer should
-preserve this clamp at the same boundary.
+A target of 100 % pushes the BMS into saturation phase, where
+acceptance can drop below 5 % and the trajectory check would fire max
+power for the entire tail of the charge — wasteful and hard on cell
+longevity.
+
+> **Implementation note (no clamp currently enforced).** The current
+> reference implementation does **not** clamp `target_soc`. The
+> `smart_charge` service declares `target_soc` with `min: 5, max:
+> 100` (`services.yaml`) and the `force_charge` service hard-codes
+> `target_soc = 100` (`_services.py`). No layer caps the value below
+> 100. The saturation concern above is real but presently
+> unmitigated. A re-implementer *may* choose to add a cap (e.g. ≤
+> 98 %) at the service-validation boundary — but should be aware that
+> the FoxESS reference does not, and a 100 % target is accepted and
+> charged to.
 
 ### 7.4 Taper profile cold start (no observations)
 
@@ -827,23 +860,30 @@ arithmetically discover the window is over.
 If `target_reached == True` and a subsequent tick reads
 `current_soc < target_soc` (e.g. battery self-discharge, large house
 load that pulled energy out of a battery that's connected to load),
-flip `target_reached = False` and resume the normal flow. The next
-tick's G3 / G5 / G6 will produce a fresh paced power. This is not
-an error path; it's the design for sessions whose window is much
-longer than the time required to charge.
+flip `target_reached = False` and resume the normal flow. Because
+`charging_started` was left True at target-reached (see G1), the
+resume re-enters via the **G4 re-deferral / G5–G6 adjust path** — not
+the G3 deferred-start gate — and produces a fresh paced power
+directly. This is not an error path; it's the design for sessions
+whose window is much longer than the time required to charge.
 
 ### 7.7 SoC entity already at or above target at session start
 
-Before a session is even created, the service validator rejects:
+Before a session is even created, the service validator rejects (on
+the **paced** smart-charge path only):
 
 ```
-if current_soc >= target_soc:
-    raise ServiceValidationError("Current SoC at or above target")
+if not full_power:                       # paced smart-charge only
+    if current_soc >= target_soc:
+        raise ServiceValidationError("Current SoC at or above target")
 ```
 
-— so the listener never sees this case freshly. If during the session
-the user changes `target_soc` to a value below current, G1 catches
-it on the next tick and stops charging.
+— so the paced listener never sees this case freshly. The
+`force_charge` / full-power path **bypasses** this check (along with
+the SoC-availability and capacity checks), since it intentionally
+drives the inverter at max power regardless of headroom. If during
+a paced session the user changes `target_soc` to a value below
+current, G1 catches it on the next tick and stops charging.
 
 ---
 
@@ -967,31 +1007,34 @@ minor edits.
 | Section | Source file | Lines | Function / area |
 |---|---|---|---|
 | §3 outputs | `smart_battery/algorithms.py` | 32–158 | `calculate_charge_power` |
-| G1 target reached | `smart_battery/listeners.py` | 645–664 | `_adjust_charge_power_inner` (target check) |
-| G1 target reached (algo) | `smart_battery/algorithms.py` | 66–73 | `calculate_charge_power` early-return at `energy_needed_kwh ≤ 0` |
-| G2 feasibility | `smart_battery/algorithms.py` | 161–263 | `is_charge_target_reachable` + `_median_trusted_charge_ratio` |
-| G2 surfacing (Repair issue) | `smart_battery/listeners.py` | 260–287, 908–933 | `_create_unreachable_issue`, `_clear_unreachable_issue`, post-adjust check |
-| G3 deferred-start computation | `smart_battery/algorithms.py` | 502–556 | `calculate_deferred_start` |
-| G3 commit (D-055) | `smart_battery/listeners.py` | 717–723, 837 | `cur_state["deferred_start_committed"] = deferred` |
-| G3 transition (deferred → active) | `smart_battery/listeners.py` | 700–799 | `_adjust_charge_power_inner` (deferred-start branch) |
-| G4 re-deferral | `smart_battery/listeners.py` | 801–843 | `_adjust_charge_power_inner` (re-defer branch) |
-| G5 trajectory (taper-aware) | `smart_battery/algorithms.py` | 79–145 | `calculate_charge_power` (trajectory block) |
+| G1 target reached | `smart_battery/listeners.py` | 705–724 | `_adjust_charge_power_inner` (target check; `charging_started` left True) |
+| G1 target reached (algo) | `smart_battery/algorithms.py` | 67–73 | `calculate_charge_power` early-return at `energy_needed_kwh ≤ 0` |
+| G2 feasibility | `smart_battery/algorithms.py` | 229–311 | `is_charge_target_reachable` + `_median_trusted_charge_ratio` |
+| G2 shared buffered-hours helper (C-038) | `smart_battery/algorithms.py` | 161–226 | `_buffered_charge_hours` (also consumed by sensor `charge_reachability_slack_minutes`) |
+| G2 surfacing (Repair issue) | `smart_battery/listeners.py` | 260–311, 1043–1075 | `_create_unreachable_issue`, `_clear_unreachable_issue`, post-adjust check |
+| G3 deferred-start computation | `smart_battery/algorithms.py` | 550–604 | `calculate_deferred_start` |
+| G3 commit (D-055) | `smart_battery/listeners.py` | 820, 837 | `cur_state["deferred_start_committed"] = deferred` |
+| G3 deferred-start wake (point-in-time) | `smart_battery/listeners.py` | 645–671, 837 | `_schedule_deferred_wake` (fixes deferred→active lag) |
+| G3 transition (deferred → active) | `smart_battery/listeners.py` | 838–921 | `_adjust_charge_power_inner` (deferred-start branch) |
+| G4 re-deferral | `smart_battery/listeners.py` | 925–976 | `_adjust_charge_power_inner` (re-defer branch) |
+| G5 trajectory (taper-aware) | `smart_battery/algorithms.py` | 84–126 | `calculate_charge_power` (taper trajectory block) |
 | G5 trajectory (linear fallback) | `smart_battery/algorithms.py` | 127–145 | `calculate_charge_power` (else branch of trajectory block) |
 | G6 paced power | `smart_battery/algorithms.py` | 147–158 | `calculate_charge_power` (final block) |
-| G6 hysteresis | `smart_battery/listeners.py` | 879–906 | `_adjust_charge_power_inner` (min_power_change skip) |
+| G6 hysteresis | `smart_battery/listeners.py` | 1012–1022 | `_adjust_charge_power_inner` (min_power_change skip) |
 | G7 cold-temp curtailment (legacy) | (removed; see D-037 and META) | — | superseded by D-014 multiplicative temp factor |
 | §5 taper recording | `smart_battery/taper.py` | 72–106 | `record_charge`, `_record` |
-| §5.5 stability gate | `smart_battery/listeners.py` | 411–484 | `_record_taper_observation`, constants `TEMP_STABILITY_SECONDS`, `TEMP_DEFICIT_THRESHOLD` |
+| §5.4 save cadence | `smart_battery/listeners.py` | 757, 1843 | `save_every=3` (charge), `save_every=5` (discharge) — inline literals |
+| §5.5 stability gate | `smart_battery/listeners.py` | 434–503 | `_record_taper_observation`, constants `TEMP_STABILITY_SECONDS` (430), `TEMP_DEFICIT_THRESHOLD` (431) |
 | §5.5 temp recording | `smart_battery/taper.py` | 110–168 | `record_charge_temp`, `_record_temp` |
 | §5.6 plausibility | `smart_battery/taper.py` | 339–364 | `is_plausible` |
-| §5.7 interpolation | `smart_battery/taper.py` | 192–218 | `_ratio` |
+| §5.7 interpolation | `smart_battery/taper.py` | 192–217 | `_ratio` |
 | §5.8 hours estimate | `smart_battery/taper.py` | 259–335 | `estimate_charge_hours`, `_estimate_hours` |
-| §8.1 circuit breaker | `smart_battery/listeners.py` | 297–387 | `_with_circuit_breaker` |
-| §8.2 SoC unavailable | `smart_battery/listeners.py` | 617–642 | `_adjust_charge_power_inner` (SoC unavailability branch) |
-| §8.3 cleanup retry marker | `smart_battery/listeners.py` | 555–568 | `_remove_charge_override` |
-| §8.4 timer / tick race | `smart_battery/listeners.py` | 574–598, 954–963 | `_on_charge_timer_expire`, listener registration |
-| §8.5 persistence | `smart_battery/listeners.py` | 794–798, 948–952 | `save_session(...)` calls |
-| Constants — cadence, thresholds | `smart_battery/const.py` | 69–89 | `SMART_CHARGE_ADJUST_SECONDS`, `MAX_SOC_UNAVAILABLE_COUNT`, `MAX_CONSECUTIVE_ADAPTER_ERRORS`, `CIRCUIT_BREAKER_TICKS_BEFORE_ABORT`, `MIN_CHARGE_POWER_W` |
+| §8.1 circuit breaker | `smart_battery/listeners.py` | 316–405 | `_with_circuit_breaker` |
+| §8.2 SoC unavailable | `smart_battery/listeners.py` | 678–702 | `_adjust_charge_power_inner` (SoC unavailability branch) |
+| §8.3 cleanup retry marker | `smart_battery/listeners.py` | 574–591 | `_remove_charge_override` (`pending_override_cleanup`) |
+| §8.4 timer / tick race | `smart_battery/listeners.py` | 593–604, 1096–1100 | `_on_charge_timer_expire`, listener registration |
+| §8.5 persistence | `smart_battery/listeners.py` | 1085–1092 | `save_session(...)` calls |
+| Constants — cadence, thresholds | `smart_battery/const.py` | 69–88 | `SMART_CHARGE_ADJUST_SECONDS` (69), `MAX_SOC_UNAVAILABLE_COUNT` (74), `MAX_CONSECUTIVE_ADAPTER_ERRORS` (79), `CIRCUIT_BREAKER_TICKS_BEFORE_ABORT` (84), `MIN_CHARGE_POWER_W` (87) |
 | Taper constants | `smart_battery/taper.py` | 26–50 | `EMA_ALPHA`, `MIN_TRUST_COUNT`, `MIN_RATIO`, `MAX_RATIO`, `MIN_REQUESTED_W`, `MIN_ACTUAL_W`, `MIN_TEMP_TRUST_COUNT`, `TEMP_NEIGHBOR_RANGE` |
 
 ### Design / constraint anchors

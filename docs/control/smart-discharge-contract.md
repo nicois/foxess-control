@@ -2,7 +2,7 @@
 project: FoxESS Control
 audience: contributors implementing the smart-discharge algorithm in any language
 sources: smart_battery/algorithms.py, smart_battery/listeners.py, docs/knowledge/04-design/smart-discharge.md
-last_verified: 2026-06-02
+last_verified: 2026-06-04
 ---
 
 # Smart Discharge Contract
@@ -117,7 +117,7 @@ across ticks):
 | State                            | Type             | Initial value                    |
 |----------------------------------|------------------|----------------------------------|
 | `discharging_started`            | bool             | false                            |
-| `consumption_peak_kw`            | kW               | 0.0 (or `current_load_kw` on first tick — see §7) |
+| `consumption_peak_kw`            | kW               | 0.0 (collapses to the current *net* consumption on the first tick — see §7.1) |
 | `feedin_start_kwh`               | kWh / null       | null until first tick after force-discharge starts |
 | `feedin_prev_kwh`                | kWh / null       | null                             |
 | `last_power_w`                   | W                | 0                                |
@@ -134,7 +134,7 @@ across ticks):
 |-------------------------------------|-------|----------------------------------------------------|
 | `DISCHARGE_SAFETY_FACTOR`           | 1.5   | C-001 floor multiplier on peak consumption          |
 | `PEAK_DECAY_PER_TICK`               | 0.85  | Half-life ≈ 4.27 min at 1-min ticks                |
-| `_END_GUARD_MINUTES`                | 10    | C-017: switch to self-use when energy < 10 min of floor |
+| `_END_GUARD_MINUTES`                | 10.0  | C-017: switch to self-use when energy < 10 min of floor |
 | `MIN_DISCHARGE_POWER_W`             | 100   | Floor for the integer power output                 |
 | `MAX_FEEDIN_HEADROOM`               | 0.40  | Cap on the doubled feed-in headroom                |
 | `FEEDIN_FALLBACK_RATIO`             | 0.10  | Used when effective export rate would be ≤ 0       |
@@ -161,23 +161,60 @@ computable from the inputs.
 | `safe_schedule_end`   | datetime       | The schedule end time the inverter should be programmed with — see D-023 / C-027. Capped at `window_end`. Re-extended on every power change. |
 | `effective_export_rate_kw` | kW (debug)| The export rate used in the feed-in deadline calculation. Useful for surfacing the deferral reasoning to the user (P-005). |
 
+> **Actuator-path nuance.** On the export-limit *actuator* path the
+> reference tracks **two** distinct values: `last_power_w` stays pinned
+> at `max_power_w` (the inverter's `fdPwr` request) while a separate
+> `target_power_w` holds the modulated export target written to the
+> export-limit register. `paced_power_w` in this table is the
+> *conceptual* paced value; a port that surfaces the displayed pacing
+> figure must read the modulated target, not the pinned `fdPwr`. On the
+> software-pacing path (no actuator) the two coincide.
+
 ---
 
 ## 4. The decision tree (in priority order)
 
-This section is the body of the contract. The guards run in the
-listed order. The first guard that fires determines the tick's
-verdict; later guards are not consulted on that tick. This ordering is
-mandatory: it is the implementation of the priority chain in §1.2 —
-G1..G3 enforce P-001 / P-002 (the absolute invariants), G4..G6
-implement P-003 / P-004 (the targets and the revenue maximisation).
+This section is the body of the contract. The guards `G1..G6` are
+presented in **priority order** — the order in which their underlying
+priorities (P-001 > P-002 > P-003 > P-004) dominate. This is the order
+in which a reviewer should reason about correctness: G1/G2/G2b enforce
+P-001 / P-002 (the absolute invariants), G4/G6 implement P-003 / P-004
+(the targets and revenue maximisation), and G3/G5 are clamps that
+bound the power request and the schedule horizon.
 
-A reviewer porting this algorithm must preserve the order. Reordering
-the guards inverts the priority chain and produces a different
-algorithm — for example, computing the feed-in budget before the
-end-of-discharge guard would let a feed-in-paced burst run during the
-last 10 minutes of available energy, which is exactly the import
-condition C-017 prevents.
+**Priority order is not the runtime call order.** The reference
+listener (`_check_discharge_soc_inner`) does not evaluate the guards
+top-to-bottom and stop at the first that fires. Instead each guard is
+applied where it is relevant in the tick, and most are orthogonal (the
+deferred-start guard only runs before discharge has started; the
+at-floor teardown only runs once SoC reaches the floor). The actual
+per-tick runtime sequence is:
+
+1. **Peak update** (§5) — update `consumption_peak_kw`.
+2. **G6 deferred-start** — only while `discharging_started == false`;
+   decides whether to begin forced discharge this tick.
+3. **Feed-in session-end check** (G4 early-stop / target-hit).
+4. **SoC-unavailable guard** (§7.3) — abort after 3 misses.
+5. **Taper observation** recording.
+6. **Suspend / resume** — `should_suspend_discharge` (G1 floor check +
+   G2 end-guard + G2b consumption-drain), then **power application**
+   (G4 feed-in pacing → G3 safety-floor clamp → G5 safe-horizon
+   schedule write).
+7. **G1 teardown** — `_check_soc_threshold`, the at-floor override
+   removal and 2-tick session-end confirmation, runs **last**.
+
+So G6 runs *first* (not last) and the G1 teardown runs *last* (not
+first); G3 is a clamp inside `calculate_discharge_power`, not a
+standalone guard. The *outcomes* match the priority chain because the
+guards are mutually exclusive in practice — but a port that literally
+evaluates "G1 first, stop on first hit" would mis-sequence the
+deferred-start and teardown logic. Preserve the *priority semantics*
+(no feed-in calculation may override a floor breach), and use the
+runtime sequence above as the implementation skeleton. For example,
+the feed-in budget must never be allowed to drive a paced burst during
+the last 10 minutes of available energy — that is what G2's
+end-of-discharge guard prevents, and it is checked (step 6) before any
+power is applied.
 
 ### G1 — Min SoC suspension (P-002 / C-002)
 
@@ -265,6 +302,41 @@ short enough that the forgone export is negligible.
 
 **Cite.** P-001, C-017, D-003.
 
+### G2b — Consumption-drain suspension (P-002 / C-002)
+
+**Condition.** Evaluated in the **same** function as G1/G2
+(`should_suspend_discharge`), *after* the end-of-discharge guard. This
+is the primary purpose of the suspend function: if household
+consumption alone would drain the battery to (or past) `min_soc`
+within the remaining window, then adding *any* forced-discharge power
+on top of house load risks breaching the floor — so the session must
+suspend to self-use and let the inverter meter the battery against
+house load exactly.
+
+```
+consumption = max(0, net_consumption_kw)
+if consumption <= 0:
+    return false        # no house load — no drain risk, do not suspend
+hours_to_min = energy_above_min_kwh / consumption
+suspend if hours_to_min <= remaining_hours × (1 + headroom)
+```
+
+Note the `(1 + headroom)` inflation on `remaining_hours`: the guard
+fires slightly *early*, biasing toward self-use when the drain margin
+is thin. `energy_above_min_kwh` is the same quantity computed in G2
+(`(current_soc − min_soc) / 100 × battery_capacity_kwh`); if it is
+`≤ 0` the function has already returned `true` (already at/below min
+SoC) before reaching this branch.
+
+**Why it matters for a port.** A port that implements only G1 (at/below
+floor) and G2 (end-of-discharge guard) but omits this forward-looking
+drain check will keep force-discharging in scenarios where the
+reference suspends — a direct P-001/P-002 divergence. This branch, not
+G2, is what protects against the common case of a heavy house load
+that would empty the battery before the window ends.
+
+**Cite.** P-002, C-002, D-001, D-004.
+
 ### G3 — Safety floor (P-001 / C-001 / D-001)
 
 **Condition.** Always evaluated when the algorithm is about to
@@ -306,8 +378,12 @@ without permanently inflating the floor.
 
 ### G4 — Feed-in budget pacing (P-003 / D-005)
 
-**Condition.** `feedin_target_kwh` is set and remaining export budget
-exists.
+**Condition.** `feedin_remaining_kwh is not None` AND
+`feedin_remaining_kwh >= 0` AND `remaining_hours > 0`. Note the bound
+is `>= 0`, not `> 0`: a *zero* remaining budget still enters the
+capping branch, where it can drive `target_energy_kwh <= 0` and return
+the safety floor (see §7.6). "Budget exhausted" is handled inside the
+branch, not by excluding it.
 
 When a feed-in target is configured, the algorithm caps the target
 energy that drives pacing so the export budget is spread across the
@@ -406,7 +482,7 @@ but the schedule end stays fixed, so the margin *grows* — no
 heartbeat extensions are needed on every tick, only when power is
 actually adjusted.
 
-**Cite.** D-023, C-024, C-027.
+**Cite.** D-023, C-027.
 
 ### G6 — Deferred-start computation (P-001 / P-004 / D-002 / D-044)
 
@@ -453,15 +529,26 @@ discharge_hours = energy_to_discharge_kwh / effective_kw
 **Feed-in cap on SoC deadline.** When `feedin_target_kwh` is set, the
 session will stop at the feed-in target — not at `min_soc`. The full
 SoC drain is therefore not the binding constraint. Compute the
-feed-in-time alternative and take the smaller:
+feed-in-time alternative and take the smaller. **This cap is applied
+only when `feedin_target_kwh > 0` AND `effective_kw > 0`** (i.e. there
+is a real feed-in budget and forced discharge can actually export):
 
 ```
-export_rate_kw = effective_kw
-if grid_export_limit_w > 0:
-    export_rate_kw = min(export_rate_kw, grid_export_limit_w / 1000)
-feedin_hours    = feedin_target_kwh / export_rate_kw
-discharge_hours = min(discharge_hours, feedin_hours)
+if feedin_target_kwh > 0 and effective_kw > 0:
+    export_rate_kw = effective_kw
+    if grid_export_limit_w > 0:
+        export_rate_kw = min(export_rate_kw, grid_export_limit_w / 1000)
+    if export_rate_kw > 0:
+        feedin_hours = feedin_target_kwh / export_rate_kw
+    else:
+        feedin_hours = feedin_target_kwh / effective_kw   # clamp collapsed rate → fall back to effective_kw
+    discharge_hours = min(discharge_hours, feedin_hours)
 ```
+
+The `export_rate_kw <= 0` branch can only arise if the configured
+export clamp is itself ≤ 0; in that case the divisor falls back to
+`effective_kw` (already known > 0 by the outer guard) rather than
+dividing by zero.
 
 Apply the headroom buffer:
 
@@ -799,6 +886,37 @@ negotiate past the floor. The user may see sessions that achieve no
 export; that is the correct outcome when the reserve policy leaves no
 spare energy for the session's window.
 
+### 7.11 Paced power collapses below threshold on the software-pacing path
+
+On the software-pacing path (no export-limit actuator), when a
+`feedin_target_kwh` is set and the freshly-computed paced power falls
+below `min_power_change_w` while the last written power was non-zero,
+the listener does not hold a tiny forced-discharge power. Instead it
+**switches the inverter to SELF_USE at power 0** (writing `fd_soc =
+min_soc`) and persists the session. This is the active expression of
+the P-001 fail-safe: rather than dribble out a sub-threshold forced
+discharge that risks import, it hands the remaining window back to
+self-use. The session is not ended — a subsequent tick may resume
+pacing if conditions change. A port should reproduce this
+self-use hand-off rather than clamping to `MIN_DISCHARGE_POWER_W` on
+the software-pacing path. (On the export-limit *actuator* path the
+modulation is expressed via the export-limit register instead — see
+§7.4 and C-037 — so this self-use switch is specific to the
+no-actuator software-pacing path.)
+
+### 7.12 Deferred → active transition latency (known gap)
+
+The deferred-start decision (G6) is re-evaluated on the periodic
+discharge tick. Unlike the **charge** listener — which schedules a
+point-in-time wake at the committed deferred-start so the
+deferred→active transition fires promptly — the **discharge** listener
+has no equivalent point-in-time wake. The discharge transition
+therefore waits for the next periodic tick (up to one
+`SMART_DISCHARGE_CHECK_SECONDS = 60 s` cadence) after `now` crosses
+`deferred`. At the 60 s discharge cadence this lag is bounded and
+minor, but a SaaS port at a coarser cadence should add a point-in-time
+wake (mirroring the charge side) to avoid a multi-minute late start.
+
 ---
 
 ## 8. Failure modes & circuit breaker (C-024)
@@ -831,9 +949,17 @@ If the adapter does not recover within
 session aborts. Abort path:
 
 1. Cancel the smart-discharge listeners.
-2. Remove any forced-discharge override (`apply_mode(SELF_USE)`).
-3. Restore the export-limit actuator to its configured hardware max.
-4. Surface the abort as an HA Repair issue (P-005, C-026).
+2. **If discharge had actually started** (`discharging_started ==
+   true`): remove the forced-discharge override (`apply_mode(SELF_USE)`)
+   *and* restore the export-limit actuator to its configured hardware
+   max. In the reference these two are bundled — the export-limit
+   restore lives inside the override-removal routine
+   (`_remove_discharge_override → _restore_export_limit`), so it only
+   fires when the override is removed. If the session aborts *before*
+   forced discharge ever started (still in the deferred phase), neither
+   the override nor the actuator was modified, so neither needs
+   restoring.
+3. Surface the abort as an HA Repair issue (P-005, C-026).
 
 **Timing at 1-minute discharge ticks.** Total time before abort:
 3 min (tier 1) + 5 min (tier 2) = **8 minutes**.
@@ -856,8 +982,30 @@ limit hit, abort, suspend, early stop — the algorithm MUST:
 1. Cancel all listeners synchronously *before* any awaits (C-016 —
    prevents stale callbacks from re-enabling the override during
    teardown).
-2. Remove the forced-discharge override (`apply_mode(SELF_USE)`).
+2. Remove the forced-discharge override (`apply_mode(SELF_USE)`) — but
+   **only if forced discharge had actually started**
+   (`discharging_started == true`). Exit paths from the deferred phase
+   never applied an override, so there is nothing to remove.
 3. Restore the export-limit actuator to its configured hardware max.
+   In the reference this is **bundled into step 2** — the restore runs
+   inside the override-removal routine — so it shares step 2's
+   `discharging_started` gate. A re-implementer that seeds the
+   export-limit actuator at session start independent of
+   `discharging_started` must take care to restore it on *all* exit
+   paths, not only the ones that remove an override.
+
+**Brand-layer persistent-register caveat.** An entity-mode / Modbus
+adapter that writes the session's discharge floor into the inverter's
+*persistent* Min-SoC register (rather than into a transient schedule
+group) MUST restore the user's configured Min-SoC on teardown. The
+FoxESS entity adapter does this inline in its mode-application path: on
+`FORCE_DISCHARGE` it writes `fd_soc` to the Min-SoC entity, and on any
+other mode (self-use teardown) it writes back the user's configured
+`min_soc_on_grid`. Omitting the restore leaves the session floor as the
+standing self-use floor and causes post-session grid import. A cloud
+adapter that only writes transient schedule groups has no such
+obligation. A re-implementer for a register-based brand must add this
+restore to the C-025 exit contract.
 
 Per-session state (peak tracker, taper tick counters, feed-in
 baseline, export-limit last-write) MUST NOT leak into the next
@@ -875,19 +1023,21 @@ numbers will drift, but the function names are stable.
 
 | Section / guard | Reference function                                 | File                                   | Function lines    | Tightened by coarse pacing? |
 |-----------------|----------------------------------------------------|----------------------------------------|-------------------|-----------------------------|
-| §3 outputs      | `_check_discharge_soc_inner`                       | `smart_battery/listeners.py`           | ~1598–1673        | yes — coarser tick cadence  |
-| G1 (min SoC)    | `_check_soc_threshold`                             | `smart_battery/listeners.py`           | ~1568–1596        | no                          |
-| G1 + G2         | `should_suspend_discharge`                         | `smart_battery/algorithms.py`          | 362–413           | no                          |
-| G2 (end guard)  | `_END_GUARD_MINUTES = 10`                          | `smart_battery/algorithms.py`          | 282–294 (constant) | no                         |
-| G3 (safety floor) | `safety_floor_w`, `clamp_export_limit_w`         | `smart_battery/algorithms.py`          | 333–359           | no                          |
-| G3 + G4         | `calculate_discharge_power`                        | `smart_battery/algorithms.py`          | 416–499           | yes — feed-in pacing changes under coarse cadence |
-| G4 (feed-in)    | `_check_feedin_limit`, `_maybe_schedule_feedin_stop` | `smart_battery/listeners.py`         | ~1194–1288        | yes — early-stop scheduler runs at finer cadence than tick |
-| G5 (safe end)   | `compute_safe_schedule_end`                        | `smart_battery/algorithms.py`          | 297–330           | no                          |
-| G6 (deferral)   | `calculate_discharge_deferred_start`               | `smart_battery/algorithms.py`          | 559–708           | yes — deadline must include sub-tick safety margin under coarse cadence |
-| §5 peak tracker | `PEAK_DECAY_PER_TICK = 0.85`                       | `smart_battery/algorithms.py`          | 266–271 (constant) | yes — half-life changes with cadence |
-| §7.3 SoC unavail | `_handle_soc_unavailable`                         | `smart_battery/listeners.py`           | ~1290–1315        | yes — abort threshold scales with tick cadence |
-| §8 circuit breaker | `_with_circuit_breaker`                         | `smart_battery/listeners.py`           | ~297–388          | yes — tier 1/2 timing scales with cadence |
-| §8.4 boundary cleanup | `_remove_discharge_override`, `_restore_export_limit` | `smart_battery/listeners.py`    | ~986–1022         | no                          |
+| §3 outputs / tick body | `_check_discharge_soc_inner`                | `smart_battery/listeners.py`           | 1803–1878         | yes — coarser tick cadence  |
+| G1 (min SoC teardown) | `_check_soc_threshold`                       | `smart_battery/listeners.py`           | 1729–1802         | no                          |
+| G1 + G2 + G2b   | `should_suspend_discharge`                         | `smart_battery/algorithms.py`          | 410–461           | no                          |
+| G2 (end guard)  | `_END_GUARD_MINUTES = 10.0`                        | `smart_battery/algorithms.py`          | 330 (constant)    | no                          |
+| G3 (safety floor) | `safety_floor_w`, `clamp_export_limit_w`         | `smart_battery/algorithms.py`          | 381–409           | no                          |
+| G3 + G4         | `calculate_discharge_power`                        | `smart_battery/algorithms.py`          | 464–547           | yes — feed-in pacing changes under coarse cadence |
+| G4 (feed-in)    | `_check_feedin_limit`, `_maybe_schedule_feedin_stop` | `smart_battery/listeners.py`         | 1352–1447         | yes — early-stop scheduler runs at finer cadence than tick |
+| G4 suspend/resume + power apply | `_handle_suspend_resume`, `_apply_discharge_power` | `smart_battery/listeners.py`  | 1475–1728         | yes — software-pacing self-use switch (§7.11) |
+| G5 (safe end)   | `compute_safe_schedule_end`                        | `smart_battery/algorithms.py`          | 345–380           | no                          |
+| G6 (deferral)   | `calculate_discharge_deferred_start`, `_start_deferred_discharge` | algorithms.py / listeners.py | 607–756 / 1224–1351 | yes — deadline must include sub-tick safety margin under coarse cadence |
+| §5 peak tracker | `PEAK_DECAY_PER_TICK = 0.85` (applied in tick body) | `smart_battery/algorithms.py` / `listeners.py` | 314 (const) / 1808–1812 (applied) | yes — half-life changes with cadence |
+| §7.3 SoC unavail | `_handle_soc_unavailable`                         | `smart_battery/listeners.py`           | 1448–1474         | yes — abort threshold scales with tick cadence |
+| §8 circuit breaker | `_with_circuit_breaker`                         | `smart_battery/listeners.py`           | 316–405           | yes — tier 1/2 timing scales with cadence |
+| §8.4 boundary cleanup | `_remove_discharge_override`, `_restore_export_limit` | `smart_battery/listeners.py`    | 1126–1162         | no                          |
+| §7.11 software-pacing self-use switch | `_apply_discharge_power` (`feedin_self_use`) | `smart_battery/listeners.py`   | 1636–1669         | yes                         |
 
 **Constants reference:** `smart_battery/const.py` (canonical
 single-source-of-truth for `MIN_DISCHARGE_POWER_W`,
@@ -923,12 +1073,20 @@ single-source-of-truth for `MIN_DISCHARGE_POWER_W`,
 A port of this algorithm conforms to the contract when ALL of the
 following are demonstrably true:
 
-- [ ] G1..G6 fire in the listed order; the first guard wins.
-- [ ] G1 requires 2 consecutive below-threshold SoC reads before
-  ending the session.
+- [ ] Guards respect the **priority semantics** of §1.2 (no feed-in /
+  revenue calculation overrides a floor breach), evaluated in the
+  runtime sequence described at the top of §4 (G6 deferred-start first,
+  G1 teardown last — *not* a literal top-to-bottom "first guard wins").
+- [ ] G1 removes the forced-discharge override on the **first**
+  at-floor tick (capacity-independent), but requires **2 consecutive**
+  below-threshold SoC reads before *ending* the session.
 - [ ] G2 uses `max(0, net_consumption_kw, consumption_peak_kw)` for
-  consumption; the guard does not fire on solar-dominated zero-load
+  consumption; the end-guard does not fire on solar-dominated zero-load
   conditions.
+- [ ] G2b (the consumption-drain suspend) fires when
+  `energy_above_min / consumption <= remaining_hours × (1 + headroom)`
+  with `consumption = max(0, net_consumption_kw) > 0`; a port that
+  implements only G1+G2 and omits this is non-conformant.
 - [ ] G3's safety floor uses `peak × 1.5 × 1000`; the floor is
   *never* applied when it would exceed `max_power_w`.
 - [ ] G4 caps target energy by `feedin_remaining + house_absorption`,
