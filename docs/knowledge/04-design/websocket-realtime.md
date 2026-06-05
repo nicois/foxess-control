@@ -70,6 +70,34 @@ covers the gate→False-while-running case it does not reach. Inverse: an
 active paced session (gate True) must leave a running WS untouched —
 the reconcile must not be over-eager.
 
+The gate is also **bounded at both ends of the session window**, not
+just the start. The scheduled-phase guard blocks WS while `now < start`
+(service called before the window opens); a symmetric window-end guard
+blocks WS once `now >= end` for both the charge and discharge branches.
+The end guard matters because session teardown is *asynchronous*: the
+end-of-window timer (`_on_charge_timer_expire` / `_on_timer_expire`)
+awaits override removal **plus** the 30 s WS linger (D-009) before
+`cancel_smart_*` clears the session state. During that interval the
+state still satisfies `charging_started` / `discharging_started` and the
+paced-power test, so without a `now >= end` guard the gate returns True
+past the window end. The WS-aware listener interval
+(`_ws_aware_charge_cb` / `_ws_aware_discharge_cb`) keeps ticking on its
+own HA timer until `cancel_smart_*` unsubscribes it, and each tick
+routes through `_maybe_start_realtime_ws` — re-arming (or refusing to
+reconcile down) the very connection the teardown is concurrently
+stopping. The observable symptom was a `data_freshness` `ws → api → ws`
+sawtooth on the REST-poll cadence and the WebSocket streaming for
+*hours* of effective idle after a CHARGE session ended (live
+2026-06-02, v1.0.21-beta.1, both the self-use-lull gate fix and the
+reconcile-down fix already present — this is a third, distinct leak).
+The window-end guard closes it deterministically: once `now >= end` the
+gate returns False, so the next `_maybe_start_realtime_ws` call (any
+listener tick still in flight) reconciles the WS down rather than
+holding it up — independent of whether the session-cancel hook's own
+teardown wins or loses the race. C-020 (UI reflects true state) and
+C-025 (session boundary cleanliness — no resource left streaming past
+the window end).
+
 Existing configurations with the old `ws_all_sessions=True` boolean
 are migrated to `ws_mode=smart_sessions` automatically.
 **Context**: WebSocket uses a separate web session (username + MD5
@@ -90,8 +118,9 @@ transient cloud outages without manual intervention.
 - Keep the boolean toggle: rejected because it couldn't express
   "always connected" without overloading the meaning
 - Per-session-type toggles: rejected as too granular
-**Traces**: C-005, C-020;
+**Traces**: C-005, C-020, C-025;
 `tests/test_realtime_ws.py::TestStaleness`,
+`tests/test_init.py::TestWsGateClosesAtWindowEnd`,
 `tests/test_services.py::TestHandleSmartDischarge::test_deferred_to_discharging_triggers_ws`,
 `tests/e2e/test_e2e.py::TestDataSource::test_ws_always_connects_without_session`,
 `tests/e2e/test_e2e.py::TestDataSource::test_ws_mode_persists_via_options_flow`

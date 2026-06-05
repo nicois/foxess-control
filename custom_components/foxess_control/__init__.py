@@ -975,6 +975,26 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
                 ds_start,
             )
             return False
+        # Block WS once the window has ENDED but the session state has not
+        # yet been cleared (C-025: session boundary cleanliness).  The
+        # end-of-window timer's teardown is async — it awaits override
+        # removal plus the 30s WS linger before ``cancel_smart_discharge``
+        # clears the state — so for a window of seconds the lingering
+        # state still satisfies the paced-power test below.  Without a
+        # symmetric ``now >= end`` guard the gate returns True past the
+        # window end, and the WS-aware interval (still ticking until it
+        # is unsubscribed) keeps re-arming the connection that teardown is
+        # concurrently stopping — the live ws→api→ws idle sawtooth, WS
+        # streaming for hours of effective idle (C-020 leak, live
+        # 2026-06-02).  Mirrors the scheduled-phase guard above.
+        ds_end = ds.get("end")
+        if ds_end is not None and now >= ds_end:
+            _LOGGER.debug(
+                "WS check: discharge window ended (now=%s, end=%s)",
+                now,
+                ds_end,
+            )
+            return False
 
         min_soc = ds.get("min_soc", 0)
         last_pw = ds.get("last_power_w", 0)
@@ -1012,6 +1032,7 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
 
     cs = dd.smart_charge_state
     # Also check charge scheduled phase: block WS before charge window opens.
+    charge_window_ended = False
     if cs is not None and cs.get("charging_started", False):
         cs_start = cs.get("start")
         if cs_start is not None and now < cs_start:
@@ -1021,6 +1042,24 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
                 cs_start,
             )
             return False
+        # Block WS once the charge window has ENDED but the session state
+        # has not yet been cleared (C-020/C-025).  The end-of-window
+        # timer's teardown is async (override removal + 30s WS linger
+        # before ``cancel_smart_charge`` clears the state), so the
+        # lingering ``charging_started=True`` state would otherwise keep
+        # the gate True past the window end and let the still-ticking
+        # WS-aware charge interval re-arm the connection that teardown is
+        # concurrently stopping — the live ws→api→ws idle sawtooth, WS
+        # streaming for hours of effective idle (live 2026-06-02).
+        # Mirrors the scheduled-phase guard above.
+        cs_end = cs.get("end")
+        if cs_end is not None and now >= cs_end:
+            _LOGGER.debug(
+                "WS check: charge window ended (now=%s, end=%s)",
+                now,
+                cs_end,
+            )
+            charge_window_ended = True
 
     # smart_sessions: keep WS up for any *active* session.  A discharge
     # session that has parked the inverter in self-use (suspend / feed-in
@@ -1035,7 +1074,9 @@ def _should_start_realtime_ws(hass: HomeAssistant) -> bool:
         and ds.get("discharging_started", False)
         and ds.get("last_power_w", 0) > 0
     )
-    charge_active = cs is not None and cs.get("charging_started", False)
+    charge_active = (
+        cs is not None and cs.get("charging_started", False) and not charge_window_ended
+    )
     return discharge_active or charge_active
 
 
