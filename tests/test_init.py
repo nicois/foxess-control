@@ -2227,3 +2227,172 @@ class TestWsTornDownWhenGateFlipsFalse:
             "(active paced discharge) — over-eager teardown."
         )
         assert dd.realtime_ws is not None
+
+
+class TestWsGateClosesAtWindowEnd:
+    """Regression (THIRD distinct WS idle leak): the WebSocket stays
+    connected and streaming for HOURS after a smart CHARGE session ends
+    in ``ws_mode=smart_sessions``.
+
+    Live evidence (2026-06-02, deployed v1.0.21-beta.1 with both prior
+    WS fixes 1837f10 + 5d09045 present):
+
+      * A smart CHARGE session ran 11:00–13:59 (Melbourne).  After it
+        ended at 13:59 the system was idle until a discharge session at
+        17:50 — a ~3h50m idle gap.
+      * Throughout the gap ``sensor.foxess_data_freshness`` flipped
+        ``ws → api → ws`` 44 times (one per REST poll), i.e. WS frames
+        kept arriving.  The WS streamed straight through the
+        charge-session-end boundary with no teardown.
+      * Fix 5d09045's reconcile-teardown debug line ("WS: gate now False
+        with WS running — tearing down") appeared ZERO times in the gap —
+        the reconcile branch never fired, because the gate returned
+        *True* every time it was consulted during the idle gap.
+
+    Root cause (distinct from both prior fixes): ``_should_start_realtime_ws``
+    guards the *scheduled* phase (``now < start`` → block) but has NO
+    symmetric ``now >= end`` guard.  A session whose window has ENDED
+    but whose state has not yet been cleared (the end-of-window timer's
+    teardown is async — it awaits override removal plus the 30s WS
+    linger before ``cancel_smart_*`` clears the state) still satisfies
+    ``charging_started``/``discharging_started`` and the paced-power
+    test, so the gate returns True.  The WS-aware interval wrapper
+    (``_ws_aware_charge_cb``) keeps ticking on its own HA timer until it
+    is unsubscribed, and each tick re-arms (or refuses to reconcile
+    down) the very WS that session-end teardown is concurrently trying
+    to stop — producing the ``ws → api → ws`` sawtooth and leaving the
+    WS streaming during effective idle.  C-020 (UI must reflect true
+    state) and C-025 (session boundary cleanliness — no resource left
+    streaming past the window end).
+
+    These tests assert the observable gate/lifecycle contract:
+    once ``now >= end`` the gate must return False for BOTH charge and
+    discharge, and a running WS must be torn down (not re-armed) by the
+    reconcile chokepoint.  On current ``develop`` the gate returns True
+    past window end and the tests FAIL.
+    """
+
+    def _make_hass(self) -> tuple[MagicMock, "FoxESSControlData"]:
+        hass = _make_ws_hass(ws_mode=WS_MODE_SMART_SESSIONS)
+        dd: FoxESSControlData = hass.data[DOMAIN]
+        return hass, dd
+
+    def test_charge_state_lingering_past_window_end_blocks_ws(self) -> None:
+        """Gate must return False once a charge window has ended.
+
+        Models the live case: a charge session 11:00–13:59 whose state
+        has not yet been cleared (async teardown in flight) while
+        ``now`` has advanced past ``end``.
+        """
+        hass, dd = self._make_hass()
+        dd.smart_charge_state = dict(
+            charging_started=True,
+            start=datetime.datetime(2026, 4, 22, 11, 0, 0),
+            end=datetime.datetime(2026, 4, 22, 13, 59, 0),
+            target_soc=100,
+            last_power_w=0,
+            max_power_w=10500,
+        )
+        # now well past the window end, before the state is cleared.
+        now = datetime.datetime(2026, 4, 22, 15, 0, 0)
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is False, (
+                "Gate kept WS armed for a charge session whose window has "
+                "already ended (now >= end) — C-020/C-025 idle leak."
+            )
+
+    def test_discharge_state_lingering_past_window_end_blocks_ws(self) -> None:
+        """Gate must return False once a discharge window has ended,
+        even with paced power still recorded in the lingering state."""
+        hass, dd = self._make_hass()
+        dd.smart_discharge_state = dict(
+            discharging_started=True,
+            start=datetime.datetime(2026, 4, 22, 17, 50, 0),
+            end=datetime.datetime(2026, 4, 22, 18, 30, 0),
+            min_soc=30,
+            last_power_w=4000,
+            max_power_w=10500,
+        )
+        now = datetime.datetime(2026, 4, 22, 20, 0, 0)
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is False, (
+                "Gate kept WS armed for a discharge session whose window "
+                "has already ended (now >= end) — C-020/C-025 idle leak."
+            )
+
+    def test_charge_window_open_still_allows_ws(self) -> None:
+        """Inverse (must NOT regress): an active charge session whose
+        window is still open keeps WS up."""
+        hass, dd = self._make_hass()
+        dd.smart_charge_state = dict(
+            charging_started=True,
+            start=datetime.datetime(2026, 4, 22, 11, 0, 0),
+            end=datetime.datetime(2026, 4, 22, 13, 59, 0),
+            target_soc=100,
+            last_power_w=5000,
+            max_power_w=10500,
+        )
+        now = datetime.datetime(2026, 4, 22, 12, 30, 0)  # inside the window
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is True, (
+                "Gate wrongly blocked WS during an active (window-open) charge session."
+            )
+
+    def test_discharge_window_open_still_allows_ws(self) -> None:
+        """Inverse (must NOT regress): paced discharge inside its window
+        keeps WS up."""
+        hass, dd = self._make_hass()
+        dd.smart_discharge_state = dict(
+            discharging_started=True,
+            start=datetime.datetime(2026, 4, 22, 17, 50, 0),
+            end=datetime.datetime(2026, 4, 22, 18, 30, 0),
+            min_soc=30,
+            last_power_w=4000,
+            max_power_w=10500,
+        )
+        now = datetime.datetime(2026, 4, 22, 18, 0, 0)  # inside the window
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is True, (
+                "Gate wrongly blocked WS during an active (window-open) "
+                "paced discharge session."
+            )
+
+    @pytest.mark.asyncio
+    async def test_stale_tick_after_charge_window_end_tears_ws_down(self) -> None:
+        """Lifecycle: a WS-aware interval tick firing AFTER the charge
+        window ended (state not yet cleared) must tear the running WS
+        DOWN, not keep re-arming it.
+
+        This is the mechanism behind the live ``ws → api → ws`` sawtooth:
+        the WS-aware charge interval keeps ticking on its own HA timer
+        until ``cancel_smart_charge`` unsubscribes it (which only
+        completes after the async override-removal + 30s WS linger).
+        Between window-end and that clear, every tick routes through
+        ``_maybe_start_realtime_ws``.  With the gate returning True past
+        ``end`` the connection is held up / re-armed; the gate must
+        instead return False so the reconcile chokepoint tears it down.
+        """
+        hass, dd = self._make_hass()
+        dd.smart_charge_state = dict(
+            charging_started=True,
+            start=datetime.datetime(2026, 4, 22, 11, 0, 0),
+            end=datetime.datetime(2026, 4, 22, 13, 59, 0),
+            target_soc=100,
+            last_power_w=0,
+            max_power_w=10500,
+        )
+
+        fake_ws = _FakeRunningWS()
+        dd.realtime_ws = fake_ws  # type: ignore[assignment]
+
+        now = datetime.datetime(2026, 4, 22, 14, 0, 30)  # 90s past end
+        with patch("custom_components.foxess_control.dt_util.now", return_value=now):
+            assert _should_start_realtime_ws(hass) is False
+            await _maybe_start_realtime_ws(hass)
+
+        assert fake_ws.disconnected, (
+            "A WS-aware interval tick after the charge window ended kept "
+            "the WS connected (re-armed) instead of tearing it down — the "
+            "live ws->api->ws idle sawtooth (C-020/C-025)."
+        )
+        assert dd.realtime_ws is None
