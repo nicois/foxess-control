@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from custom_components.foxess_control.foxess.realtime_ws import (
     FoxESSRealtimeWS,
@@ -665,20 +669,26 @@ class TestReconnectRespectsGate:
     """
 
     @staticmethod
-    def _make_ws(should_reconnect: object) -> FoxESSRealtimeWS:
+    def _make_ws(
+        should_reconnect: Callable[[], bool] | None,
+    ) -> FoxESSRealtimeWS:
         on_data = AsyncMock()
         on_disconnect = MagicMock()
         web_session = AsyncMock()
         web_session.async_ensure_token = AsyncMock(return_value="tok")
-        ws = FoxESSRealtimeWS("plant1", web_session, on_data, on_disconnect)
-        # The reconcile predicate.  Set as an attribute so the test
-        # exercises the *behaviour* of ``_try_reconnect`` (does it consult
-        # the gate?) rather than failing at construction — on current
-        # ``develop`` ``_try_reconnect`` ignores any such predicate and
-        # reconnects unconditionally, so the behavioural assertions below
-        # fail, matching the live idle-reconnect symptom.
-        ws.should_reconnect = should_reconnect  # type: ignore[attr-defined]
-        return ws
+        # The reconcile predicate wired to the (mocked) start-gate.  The
+        # test exercises the *behaviour* of ``_try_reconnect`` — does it
+        # consult the gate before scheduling reconnect I/O?  On
+        # pre-fix code the reconnect loop ignores the predicate and
+        # reconnects unconditionally, so the gate-False behavioural
+        # assertions fail, matching the live idle-reconnect symptom.
+        return FoxESSRealtimeWS(
+            "plant1",
+            web_session,
+            on_data,
+            on_disconnect,
+            should_reconnect=should_reconnect,
+        )
 
     @pytest.mark.asyncio
     async def test_no_reconnect_when_gate_false(self) -> None:

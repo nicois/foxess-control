@@ -1164,7 +1164,25 @@ async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
 
     _sim = os.environ.get("FOXESS_SIMULATOR_URL")
     _ws_url = _sim.replace("http://", "ws://") + "/dew/v0/wsmaitian" if _sim else None
-    ws = FoxESSRealtimeWS(plant_id, web_session, on_data, on_disconnect, ws_url=_ws_url)
+
+    def _should_reconnect() -> bool:
+        # The autonomous reconnect loop's single reconciliation point:
+        # reconnect only when the start-gate still authorises the WS.
+        # Without this the loop would resurrect the connection after an
+        # idle stale-disconnect (every ~5.5 min), below the start
+        # chokepoint's visibility — the connect→stale→reconnect leak
+        # (C-020, live 2026-06-07).  During an active session the gate
+        # returns True so a stale/dropped WS still reconnects (D-008/D-009).
+        return _should_start_realtime_ws(hass)
+
+    ws = FoxESSRealtimeWS(
+        plant_id,
+        web_session,
+        on_data,
+        on_disconnect,
+        ws_url=_ws_url,
+        should_reconnect=_should_reconnect,
+    )
     try:
         await ws.async_connect()
         dd.realtime_ws = ws

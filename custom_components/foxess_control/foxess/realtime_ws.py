@@ -224,11 +224,25 @@ class FoxESSRealtimeWS:
         on_data: Callable[[dict[str, Any]], Awaitable[None]],
         on_disconnect: Callable[[], None],
         ws_url: str | None = None,
+        should_reconnect: Callable[[], bool] | None = None,
     ) -> None:
         self._plant_id = plant_id
         self._web_session = web_session
         self._on_data = on_data
         self._on_disconnect = on_disconnect
+        # The single reconciliation predicate: "should the live WS
+        # connection exist right now?".  Wired by the brand layer to
+        # ``_should_start_realtime_ws(hass)`` — the SAME gate the start
+        # chokepoint (``_maybe_start_realtime_ws``) consults.  Checked by
+        # ``_try_reconnect`` before scheduling any reconnect I/O so the
+        # otherwise-autonomous reconnect loop cannot resurrect a
+        # connection the gate says should be DOWN (the idle
+        # connect→stale→reconnect leak, live 2026-06-07: the loop gated
+        # only on the instance-local ``_no_reconnect``/``_stop_event``
+        # flags and never saw the gate's answer).  ``None`` preserves the
+        # legacy unconditional-reconnect behaviour (e.g. ``always`` mode
+        # and tests that supply no predicate).  C-020 / C-025 / D-008.
+        self.should_reconnect = should_reconnect
         if ws_url is not None:
             self.WS_URL = ws_url
         self._ws: aiohttp.ClientWebSocketResponse | None = None
@@ -397,19 +411,52 @@ class FoxESSRealtimeWS:
         self._connected = False
         self._on_disconnect()
 
+    def _reconnect_allowed(self) -> bool:
+        """Return True if the reconnect loop may (re)establish the WS.
+
+        Single reconciliation point for the reconnect decision.  Three
+        ways the answer can be "no":
+
+        * ``_no_reconnect`` — ``request_stop``/``async_disconnect`` have
+          requested teardown (the 2026-05-31 linger-race guard).
+        * ``_stop_event`` — the listen loop is shutting down.
+        * ``should_reconnect()`` returns False — the brand-layer gate
+          (``_should_start_realtime_ws``) says the WS should be DOWN
+          right now (no active session).  Before this, ``_try_reconnect``
+          was fully autonomous and never consulted the gate, so during
+          confirmed idle a connect→stale(30s)→disconnect→reconnect(6s)
+          cycle self-perpetuated below the start-gate's visibility — the
+          ``data_freshness`` ws↔api sawtooth (C-020 leak, live
+          2026-06-07).  A ``None`` predicate keeps the legacy
+          unconditional-reconnect behaviour (``always`` mode).  The
+          legitimate case is preserved: during an ACTIVE session the gate
+          returns True, so a stale/dropped WS still reconnects
+          (D-008/D-009).
+        """
+        if self._no_reconnect or self._stop_event.is_set():
+            return False
+        if self.should_reconnect is not None and not self.should_reconnect():
+            _LOGGER.info(
+                "FoxESS WebSocket: gate says WS should be down "
+                "(no active session) — not reconnecting"
+            )
+            return False
+        return True
+
     async def _try_reconnect(self) -> None:
         """Attempt to reconnect with exponential backoff.
 
-        Short-circuits immediately if shutdown has been requested
-        (``request_stop`` was called or ``async_disconnect`` set
-        ``_stop_event``).  This is the primary guard against the
-        2026-05-31 leak: when the listen loop hit a stale-detection
-        or server-CLOSED frame during ``_stop_realtime_ws``'s linger
-        phase, the previous code ran ``on_disconnect`` and entered
-        the reconnect for-loop with ``_stop_event`` still unset,
-        successfully reconnecting and outliving the stop sequence.
+        Short-circuits immediately if reconnect is not allowed
+        (``_reconnect_allowed`` — shutdown requested, listen loop
+        stopping, or the brand-layer gate says the WS should be down).
+        This consolidates three guards: the 2026-05-31 linger-race guard
+        (``_no_reconnect`` set by ``request_stop`` so a CLOSED/stale frame
+        during ``_stop_realtime_ws``'s linger cannot resurrect the
+        connection), the ``_stop_event`` shutdown guard, and the
+        2026-06-07 idle-leak guard (the gate predicate — the reconnect
+        loop now respects the same answer the start chokepoint does).
         """
-        if self._no_reconnect or self._stop_event.is_set():
+        if not self._reconnect_allowed():
             self._connected = False
             return
         self._connected = False
@@ -419,7 +466,7 @@ class FoxESSRealtimeWS:
         await self._close_ws()
 
         for attempt in range(self.RECONNECT_MAX_ATTEMPTS):
-            if self._no_reconnect or self._stop_event.is_set():
+            if not self._reconnect_allowed():
                 return
 
             delay = min(
@@ -434,7 +481,7 @@ class FoxESSRealtimeWS:
             )
             await asyncio.sleep(delay)
 
-            if self._no_reconnect or self._stop_event.is_set():
+            if not self._reconnect_allowed():
                 return
 
             try:

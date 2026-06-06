@@ -98,6 +98,34 @@ teardown wins or loses the race. C-020 (UI reflects true state) and
 C-025 (session boundary cleanliness — no resource left streaming past
 the window end).
 
+The reconcile is **also wired into the WS object's own reconnect loop**,
+not just the start chokepoint. `FoxESSRealtimeWS` takes a
+`should_reconnect` predicate (wired by `_maybe_start_realtime_ws` to
+`_should_start_realtime_ws(hass)` — the *same* gate). `_try_reconnect`
+consults it (via `_reconnect_allowed`) before scheduling any reconnect
+I/O. Before this, the reconnect loop was fully autonomous: it gated only
+on the instance-local `_no_reconnect` / `_stop_event` flags and never
+saw the gate's answer. During confirmed idle (no active session) the
+listen loop's 30 s stale-timeout (C-005) fired `_try_reconnect`, which —
+with `_no_reconnect` unset — re-established the connection ~6 s later,
+*below the start-gate's and coordinator's visibility*. The result was a
+self-perpetuating connect → stale(30 s) → disconnect → reconnect(6 s)
+cycle every ~5.5 min with no session running, every frame `timeDiff=61`
+(discarded per C-005, so the WS delivered nothing useful) — the
+`data_freshness` ws↔api sawtooth (C-020 leak, live 2026-06-07, deployed
+v1.0.21-beta.2 with all three prior start-gate fixes present; this is a
+*fourth*, distinct leak in a layer the start-gate fixes never touched).
+Routing the reconnect decision through the same gate makes "the live WS
+connection state matches `_should_start_realtime_ws`" a single
+reconciliation contract honoured by every path: session start/end, the
+periodic gate-evaluation tick, the reconcile-down in
+`_maybe_start_realtime_ws`, AND the WS object's own reconnect loop. The
+legitimate case is preserved: during an ACTIVE session the gate returns
+True, so a stale/dropped WS still reconnects (D-009). A `None` predicate
+(no gate supplied) keeps the legacy unconditional-reconnect behaviour for
+`always` mode, where `_should_start_realtime_ws` returns True
+unconditionally anyway. C-020, C-025.
+
 Existing configurations with the old `ws_all_sessions=True` boolean
 are migrated to `ws_mode=smart_sessions` automatically.
 **Context**: WebSocket uses a separate web session (username + MD5
@@ -354,6 +382,10 @@ cases.
   not the Open API key.
 - Token URL-encoded to handle `+` and `=` characters.
 - Exponential backoff reconnection: 5 attempts, base 5s, max 60s, jitter.
+  The reconnect loop consults the `should_reconnect` gate (wired to
+  `_should_start_realtime_ws`) before each attempt — it will not revive a
+  connection the gate says should be down (no active session), closing the
+  idle reconnect leak (C-020, 2026-06-07).
 - Feed-in energy is integrated trapezoidally between REST polls for
   more accurate cumulative tracking.
 - Interpolated SoC (`_soc_interpolated`) is stored at full float
