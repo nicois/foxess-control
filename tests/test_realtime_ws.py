@@ -623,3 +623,174 @@ class TestWsPlausibilityFilter:
         # After reconnect, _last_accepted should be None
         ws2 = FoxESSRealtimeWS("plant1", web_session, on_data, on_disconnect)
         assert ws2._last_accepted is None
+
+
+class TestReconnectRespectsGate:
+    """Regression (FOURTH, distinct from the three start-gate fixes): the
+    autonomous reconnect loop must NOT resurrect the connection when the
+    WS should be DOWN (no active session).
+
+    Live evidence (2026-06-07, UTC; ``ws_mode=smart_sessions``, confirmed
+    idle — ``intelligente_steuerung=idle``, both laden/entladen off,
+    ``betriebsmodus=SelfUse``), straight from the rolling debug log::
+
+        10:20:30  WebSocket connected
+        10:20:30  WebSocket: skipping stale message (timeDiff=61)
+        10:25:59  WebSocket stale (no data in 30s)
+        10:25:59  WebSocket disconnected, falling back to REST polling
+        10:25:59  WebSocket reconnecting in 6.0s (attempt 1/5)
+        10:26:06  WebSocket connected
+        10:26:06  WebSocket: skipping stale message (timeDiff=61)
+
+    A self-perpetuating connect → stale(30s) → disconnect → reconnect(6s)
+    cycle running with NO active session, every ~5.5 min — the
+    ``data_freshness`` ws↔api sawtooth.  Every frame is ``timeDiff=61`` →
+    discarded per C-005, so the WS delivers NOTHING useful: pure churn
+    (C-020 leak).
+
+    Root cause: ``_try_reconnect`` is fully autonomous — it gates only on
+    the instance-local ``_no_reconnect`` / ``_stop_event`` flags.  It never
+    consults ``_should_start_realtime_ws``.  The three prior fixes all live
+    in the start chokepoint (``_should_start_realtime_ws`` /
+    ``_maybe_start_realtime_ws``), which the reconnect loop never calls —
+    so the gate's correct "WS should be DOWN" answer never reaches the
+    reconnect decision, and the loop revives the connection 6s later,
+    below the coordinator's/start-gate's visibility.
+
+    The unified reconcile: ``FoxESSRealtimeWS`` takes a
+    ``should_reconnect`` predicate (wired to ``_should_start_realtime_ws``).
+    ``_try_reconnect`` consults it before scheduling any network I/O.
+    C-020 (UI reflects true state), C-025 (boundary cleanliness),
+    C-005 (stale-discard context), D-008/D-009 (reconnect/linger contract).
+    """
+
+    @staticmethod
+    def _make_ws(should_reconnect: object) -> FoxESSRealtimeWS:
+        on_data = AsyncMock()
+        on_disconnect = MagicMock()
+        web_session = AsyncMock()
+        web_session.async_ensure_token = AsyncMock(return_value="tok")
+        ws = FoxESSRealtimeWS("plant1", web_session, on_data, on_disconnect)
+        # The reconcile predicate.  Set as an attribute so the test
+        # exercises the *behaviour* of ``_try_reconnect`` (does it consult
+        # the gate?) rather than failing at construction — on current
+        # ``develop`` ``_try_reconnect`` ignores any such predicate and
+        # reconnects unconditionally, so the behavioural assertions below
+        # fail, matching the live idle-reconnect symptom.
+        ws.should_reconnect = should_reconnect  # type: ignore[attr-defined]
+        return ws
+
+    @pytest.mark.asyncio
+    async def test_no_reconnect_when_gate_false(self) -> None:
+        """Gate False (idle) → _try_reconnect must NOT reconnect.
+
+        Drives the real ``_try_reconnect`` (not a mock) with the
+        predicate returning False, exactly as it would during confirmed
+        idle.  No ``_do_connect`` may be scheduled, no backoff sleep, and
+        the connection must end up DOWN.  On current ``develop`` the
+        reconnect loop has no gate awareness and reconnects anyway — this
+        test FAILS, matching the live symptom.
+        """
+        gate_calls = {"n": 0}
+
+        def gate_false() -> bool:
+            gate_calls["n"] += 1
+            return False
+
+        ws = self._make_ws(gate_false)
+        ws._connected = True
+        ws._stop_event.clear()
+
+        connect_attempts = {"n": 0}
+
+        async def _count_connect(_token: str) -> None:
+            connect_attempts["n"] += 1
+            ws._connected = True
+
+        with (
+            patch.object(ws, "_do_connect", side_effect=_count_connect),
+            patch.object(ws, "_close_ws", new_callable=AsyncMock),
+            patch(
+                "custom_components.foxess_control.foxess.realtime_ws.asyncio.sleep",
+                new_callable=AsyncMock,
+            ) as mock_sleep,
+        ):
+            await ws._try_reconnect()
+
+        assert gate_calls["n"] > 0, (
+            "_try_reconnect never consulted the should_reconnect gate — "
+            "the reconnect loop is still autonomous (the leak)."
+        )
+        assert connect_attempts["n"] == 0, (
+            "_try_reconnect re-established the WS while the gate said it "
+            "should be DOWN (no active session) — the self-perpetuating "
+            "idle reconnect cycle (C-020 leak)."
+        )
+        assert mock_sleep.await_count == 0, (
+            "_try_reconnect scheduled a backoff sleep despite the gate "
+            "refusing — it should short-circuit before any backoff."
+        )
+        assert ws._connected is False, "WS must be DOWN when the gate is False."
+
+    @pytest.mark.asyncio
+    async def test_reconnect_when_gate_true(self) -> None:
+        """Inverse (must NOT regress): active session → reconnect DOES happen.
+
+        During a genuine active session the gate returns True; a
+        stale/dropped WS must still reconnect (D-008/D-009 — the
+        legitimate reconnect case).
+        """
+        ws = self._make_ws(lambda: True)
+        ws._connected = True
+        ws._stop_event.clear()
+
+        connect_attempts = {"n": 0}
+
+        async def _count_connect(_token: str) -> None:
+            connect_attempts["n"] += 1
+            ws._connected = True
+
+        with (
+            patch.object(ws, "_do_connect", side_effect=_count_connect),
+            patch.object(ws, "_close_ws", new_callable=AsyncMock),
+            patch(
+                "custom_components.foxess_control.foxess.realtime_ws.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
+        ):
+            await ws._try_reconnect()
+
+        assert connect_attempts["n"] == 1, (
+            "Active session (gate True): a stale/dropped WS must reconnect "
+            "— the legitimate reconnect case was broken."
+        )
+        assert ws._connected is True
+
+    @pytest.mark.asyncio
+    async def test_no_gate_defaults_to_reconnect(self) -> None:
+        """Back-compat: no predicate supplied → reconnect as before.
+
+        ``always`` mode and existing call sites that pass no predicate
+        must retain the legacy autonomous-reconnect behaviour.
+        """
+        ws = self._make_ws(None)
+        ws._connected = True
+        ws._stop_event.clear()
+
+        connect_attempts = {"n": 0}
+
+        async def _count_connect(_token: str) -> None:
+            connect_attempts["n"] += 1
+            ws._connected = True
+
+        with (
+            patch.object(ws, "_do_connect", side_effect=_count_connect),
+            patch.object(ws, "_close_ws", new_callable=AsyncMock),
+            patch(
+                "custom_components.foxess_control.foxess.realtime_ws.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
+        ):
+            await ws._try_reconnect()
+
+        assert connect_attempts["n"] == 1
