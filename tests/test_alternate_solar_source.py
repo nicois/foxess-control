@@ -212,3 +212,42 @@ def test_fetch_all_present_value_resets_missing_counter(
     # Third consecutive does fire.
     coord._fetch_all()
     assert spy.call_count == 1
+
+
+def test_ws_inject_adds_held_additional_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.foxess_control import domain_data as dd_mod
+
+    cfg = dd_mod.build_config({"additional_pv_power_variable": "meterPower2"})
+    hass = MagicMock()
+    monkeypatch.setattr(
+        "custom_components.foxess_control.coordinator._cfg", lambda _h: cfg
+    )
+    inverter = MagicMock()
+    coord = _make_coordinator(hass, inverter)
+    coord.data = {"pvPower": 0.0}
+    coord._additional_pv_kw = 3.0  # as if a prior REST poll cached it
+
+    coord.inject_realtime_data({"pvPower": 1.5})
+
+    assert coord.data["pvPower"] == 4.5
+
+
+def test_ws_inject_zero_held_value_no_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.foxess_control import domain_data as dd_mod
+
+    cfg = dd_mod.build_config({})
+    hass = MagicMock()
+    monkeypatch.setattr(
+        "custom_components.foxess_control.coordinator._cfg", lambda _h: cfg
+    )
+    inverter = MagicMock()
+    coord = _make_coordinator(hass, inverter)
+    coord.data = {"pvPower": 0.0}
+
+    coord.inject_realtime_data({"pvPower": 1.5})
+
+    assert coord.data["pvPower"] == 1.5

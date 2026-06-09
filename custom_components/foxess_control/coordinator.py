@@ -613,6 +613,18 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.data is None:
             return
 
+        # AC-coupled additional solar: add the last REST-polled external PV
+        # term to the WS solar reading so streaming frames also reflect total
+        # generation. _additional_pv_kw is 0.0 when unconfigured or before the
+        # first REST poll, so this is a no-op for everyone else. Done before
+        # the change-detection short-circuit and any grid-direction use of
+        # pvPower below.
+        if self._additional_pv_kw and "pvPower" in ws_data:
+            ws_data = dict(ws_data)
+            ws_data["pvPower"] = (
+                float(ws_data.get("pvPower") or 0.0) + self._additional_pv_kw
+            )
+
         compound_id = ws_data.pop("_battery_compound_id", None)
         if compound_id:
             domain_data = self.hass.data.get(DOMAIN)
