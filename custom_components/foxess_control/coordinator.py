@@ -28,6 +28,26 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
+def _cfg(hass: HomeAssistant) -> Any:
+    """Module-level config accessor (monkeypatchable in tests).
+
+    Delegates to :func:`._helpers._cfg` via a lazy import to avoid a
+    circular import at module load (``_helpers`` imports
+    ``get_coordinator_soc`` from this module).
+    """
+    from ._helpers import _cfg as _cfg_impl
+
+    return _cfg_impl(hass)
+
+
+def _coerce_kw(value: Any) -> float:
+    """Coerce a polled value to float kW; missing/non-numeric -> 0.0."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def get_coordinator_soc(hass: HomeAssistant) -> float | None:
     """Read SoC from the first available coordinator in hass.data."""
     return _get_coordinator_soc(hass, DOMAIN)
@@ -68,6 +88,11 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # WebSocket feed-in energy integration state
         self._ws_last_time: float | None = None
         self._ws_feedin_power_kw: float = 0.0
+        # Last REST-polled value of the optional additional PV variable
+        # (AC-coupled second inverter, e.g. meterPower2), in kW. Held so
+        # WS frames can also reflect total solar between polls. 0.0 when
+        # the feature is unconfigured or the variable is missing.
+        self._additional_pv_kw: float = 0.0
         # Monotonic timestamp of the most recent WS inject — distinct from
         # _ws_last_time, which is also written by REST polls and so cannot
         # answer "was the most recent update from WS or REST?".  Used by
@@ -132,11 +157,28 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _fetch_all(self) -> dict[str, Any]:
         """Fetch real-time data and work mode in a single executor job."""
-        data = self.inverter.get_real_time(POLLED_VARIABLES)
+        try:
+            extra_var = _cfg(self.hass).additional_pv_power_variable
+        except Exception:
+            # Config/domain data unavailable (e.g. early startup) — fall back
+            # to the base variable set; the feature is purely additive.
+            extra_var = None
+        variables = [*POLLED_VARIABLES, extra_var] if extra_var else POLLED_VARIABLES
+        data = self.inverter.get_real_time(variables)
 
         missing = [v for v in POLLED_VARIABLES if v not in data]
         if missing:
             _LOGGER.debug("Polled variables missing from API response: %s", missing)
+
+        if extra_var:
+            extra_kw = _coerce_kw(data.get(extra_var))
+            if extra_var not in data:
+                _LOGGER.debug(
+                    "Additional PV variable %r not in API response; adding 0",
+                    extra_var,
+                )
+            self._additional_pv_kw = extra_kw
+            data["pvPower"] = _coerce_kw(data.get("pvPower")) + extra_kw
 
         try:
             mode = self.inverter.get_current_mode()
