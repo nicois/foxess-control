@@ -347,7 +347,11 @@
           "battery_capacity_kwh": "Batteriekapazität (kWh)",
           "min_power_change": "Minimale Leistungsänderung für intelligentes Laden (W)",
           "api_min_soc": "Minimaler API-fdSoc (%) — ⚠️ Werte unter 11 funktionieren möglicherweise nicht mit allen Firmware-Versionen",
-          "polling_interval": "API-Abfrageintervall (Sekunden)"
+          "polling_interval": "API-Abfrageintervall (Sekunden)",
+          "additional_pv_power_variable": "Zusätzliche Solarleistungs-Variable"
+        },
+        "data_description": {
+          "additional_pv_power_variable": "Optional. Für AC-gekoppelte Systeme, bei denen die Erzeugung eines zweiten Wechselrichters in einer separaten FoxESS-Variable gemeldet wird (z. B. meterPower2). Ihr Wert wird zum Solarwert addiert. Andernfalls leer lassen."
         }
       }
     }

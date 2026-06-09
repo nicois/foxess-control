@@ -351,7 +351,11 @@
           "battery_capacity_kwh": "Capacidad de batería (kWh)",
           "min_power_change": "Cambio mínimo de potencia para carga inteligente (W)",
           "api_min_soc": "fdSoc API mínimo (%) — ⚠️ Valores por debajo de 11 pueden no funcionar con todas las versiones de firmware",
-          "polling_interval": "Intervalo de consulta de API (segundos)"
+          "polling_interval": "Intervalo de consulta de API (segundos)",
+          "additional_pv_power_variable": "Variable de potencia solar adicional"
+        },
+        "data_description": {
+          "additional_pv_power_variable": "Opcional. Para sistemas acoplados en CA donde la generación de un segundo inversor se reporta en una variable de FoxESS independiente (p. ej. meterPower2). Su valor se suma a la lectura solar. Déjelo en blanco en caso contrario."
         }
       }
     }

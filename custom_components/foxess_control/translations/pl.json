@@ -347,7 +347,11 @@
           "battery_capacity_kwh": "Pojemność baterii (kWh)",
           "min_power_change": "Minimalna zmiana mocy dla inteligentnego ładowania (W)",
           "api_min_soc": "Minimalny fdSoc API (%) — ⚠️ Wartości poniżej 11 mogą nie działać ze wszystkimi wersjami firmware",
-          "polling_interval": "Interwał odpytywania API (sekundy)"
+          "polling_interval": "Interwał odpytywania API (sekundy)",
+          "additional_pv_power_variable": "Dodatkowa zmienna mocy fotowoltaicznej"
+        },
+        "data_description": {
+          "additional_pv_power_variable": "Opcjonalne. Dla systemów sprzężonych po stronie AC, w których produkcja drugiego falownika jest raportowana w osobnej zmiennej FoxESS (np. meterPower2). Jej wartość jest dodawana do odczytu fotowoltaiki. W przeciwnym razie pozostaw puste."
         }
       }
     }

@@ -284,7 +284,11 @@
           "bms_polling_interval": "BMS Temperature Polling Interval (seconds)",
           "smart_headroom": "Smart Headroom (%)",
           "grid_export_limit": "Grid Export Limit (W) — net export cap set on inverter (0 = no limit)",
-          "ws_mode": "WebSocket real-time data mode"
+          "ws_mode": "WebSocket real-time data mode",
+          "additional_pv_power_variable": "Additional solar power variable"
+        },
+        "data_description": {
+          "additional_pv_power_variable": "Optional. For AC-coupled systems where a second inverter's generation is reported in a separate FoxESS variable (e.g. meterPower2). Its value is added to the solar reading. Leave blank otherwise."
         }
       },
       "modbus": {

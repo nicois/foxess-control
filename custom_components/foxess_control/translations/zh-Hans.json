@@ -351,7 +351,11 @@
           "battery_capacity_kwh": "电池容量 (kWh)",
           "min_power_change": "智能充电最小功率变化 (W)",
           "api_min_soc": "API 最低 fdSoc (%) — ⚠️ 低于 11 的值可能不适用于所有固件版本",
-          "polling_interval": "API 轮询间隔（秒）"
+          "polling_interval": "API 轮询间隔（秒）",
+          "additional_pv_power_variable": "额外的光伏功率变量"
+        },
+        "data_description": {
+          "additional_pv_power_variable": "可选。适用于交流耦合系统，其中第二台逆变器的发电量通过单独的 FoxESS 变量上报（例如 meterPower2）。其数值将加到光伏读数上。否则请留空。"
         }
       }
     }
