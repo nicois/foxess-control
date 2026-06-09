@@ -31,6 +31,10 @@ _LOGGER = logging.getLogger(__name__)
 def _cfg(hass: HomeAssistant) -> Any:
     """Module-level config accessor (monkeypatchable in tests).
 
+    Module-level seam so ``_fetch_all`` is monkeypatchable and to avoid the
+    ``_helpers`` import cycle; other call sites import ``_helpers._cfg``
+    directly.
+
     Delegates to :func:`._helpers._cfg` via a lazy import to avoid a
     circular import at module load (``_helpers`` imports
     ``get_coordinator_soc`` from this module).
@@ -40,8 +44,17 @@ def _cfg(hass: HomeAssistant) -> Any:
     return _cfg_impl(hass)
 
 
+# Consecutive polls a configured additional PV variable may be absent before
+# its persistent absence is surfaced as a config error (C-020/C-026).
+_ADDITIONAL_PV_MISSING_LIMIT = 3
+
+
 def _coerce_kw(value: Any) -> float:
-    """Coerce a polled value to float kW; missing/non-numeric -> 0.0."""
+    """Coerce a polled value to float kW; missing/non-numeric -> 0.0.
+
+    Returns the source number as a float *without unit conversion* —
+    correctness assumes the configured variable is already in kW.
+    """
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -89,10 +102,16 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._ws_last_time: float | None = None
         self._ws_feedin_power_kw: float = 0.0
         # Last REST-polled value of the optional additional PV variable
-        # (AC-coupled second inverter, e.g. meterPower2), in kW. Held so
-        # WS frames can also reflect total solar between polls. 0.0 when
-        # the feature is unconfigured or the variable is missing.
+        # (AC-coupled second inverter, e.g. meterPower2), in kW. Held so the
+        # WS inject path will be able to reflect total solar between polls
+        # (consumed by that path in a later task). 0.0 when the feature is
+        # unconfigured or the variable is missing.
         self._additional_pv_kw: float = 0.0
+        # Consecutive polls the configured additional PV variable has been
+        # absent from the API response. After _ADDITIONAL_PV_MISSING_LIMIT
+        # polls we surface a config error once (C-020/C-026) — a typo'd or
+        # unsupported variable name otherwise silently contributes 0 forever.
+        self._additional_pv_missing_count: int = 0
         # Monotonic timestamp of the most recent WS inject — distinct from
         # _ws_last_time, which is also written by REST polls and so cannot
         # answer "was the most recent update from WS or REST?".  Used by
@@ -172,11 +191,49 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if extra_var:
             extra_kw = _coerce_kw(data.get(extra_var))
-            if extra_var not in data:
+            if extra_var in data:
+                self._additional_pv_missing_count = 0
+            else:
+                self._additional_pv_missing_count += 1
                 _LOGGER.debug(
                     "Additional PV variable %r not in API response; adding 0",
                     extra_var,
                 )
+                # Fire ONCE, exactly at the limit, so a persistently-missing
+                # (typo'd / unsupported) variable surfaces in diagnostics
+                # (C-020/C-026) without spamming on every subsequent poll.
+                if self._additional_pv_missing_count == _ADDITIONAL_PV_MISSING_LIMIT:
+                    try:
+                        domain_data = self.hass.data.get(DOMAIN)
+                        buffer = getattr(domain_data, "recent_errors", None)
+                        record_operational_error(
+                            _LOGGER,
+                            buffer,
+                            category="config",
+                            attempted=(f"poll additional PV variable {extra_var!r}"),
+                            exc=ValueError(
+                                "configured variable not returned by the "
+                                "FoxESS API (check the name; AC-coupled extra "
+                                "solar source)"
+                            ),
+                            hint=(
+                                "missing for "
+                                f"{_ADDITIONAL_PV_MISSING_LIMIT} consecutive "
+                                "polls; verify the variable name is valid for "
+                                "this inverter model"
+                            ),
+                            context={
+                                "variable": extra_var,
+                                "consecutive_missing": (
+                                    self._additional_pv_missing_count
+                                ),
+                            },
+                        )
+                    except Exception:  # pragma: no cover - logging must not break poll
+                        _LOGGER.debug(
+                            "Failed to record missing-additional-PV error",
+                            exc_info=True,
+                        )
             self._additional_pv_kw = extra_kw
             data["pvPower"] = _coerce_kw(data.get("pvPower")) + extra_kw
 
