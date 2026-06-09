@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.21-beta.4
 
 ### Added
 - **Additional solar source for AC-coupled installs** (cloud mode). New optional config `additional_pv_power_variable` (e.g. `meterPower2`) names a FoxESS telemetry variable whose value is added to `pvPower`, so the control algorithm sees true total generation when a second inverter's output is reported in a separate variable rather than the FoxESS `pvPower` reading. REST-polled and held across WebSocket frames; raw additive; off by default (blank). A persistently-missing configured variable is surfaced as a diagnostics error (C-020/C-026). As a side benefit, feeding the external term into `pvPower` improves the WS grid-direction inference that previously diverged on unmeasured external generation.
