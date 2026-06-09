@@ -38,6 +38,7 @@ class IntegrationConfig:
     ws_mode: str
     entity_mode: bool
     export_limit_entity: str | None = None
+    additional_pv_power_variable: str | None = None
 
 
 def build_config(
@@ -46,6 +47,7 @@ def build_config(
 ) -> IntegrationConfig:
     """Build an IntegrationConfig from a config entry's options dict."""
     from .const import (
+        CONF_ADDITIONAL_PV_POWER_VARIABLE,
         CONF_API_MIN_SOC,
         CONF_BATTERY_CAPACITY_KWH,
         CONF_BMS_POLLING_INTERVAL,
@@ -108,6 +110,9 @@ def build_config(
         ws_mode=ws_mode,
         entity_mode=bool(entry_options.get(CONF_WORK_MODE_ENTITY)),
         export_limit_entity=export_limit_entity,
+        additional_pv_power_variable=(
+            entry_options.get(CONF_ADDITIONAL_PV_POWER_VARIABLE) or None
+        ),
     )
 
 
