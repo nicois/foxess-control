@@ -11,9 +11,13 @@ from custom_components.foxess_control.const import (
 )
 from custom_components.foxess_control.coordinator import FoxESSDataCoordinator
 from custom_components.foxess_control.domain_data import build_config
+from custom_components.foxess_control.foxess.client import FoxESSClient
+from custom_components.foxess_control.foxess.inverter import Inverter
 
 if TYPE_CHECKING:
     import pytest
+
+    from .conftest import SimulatorHandle
 
 
 def test_additional_pv_variable_defaults_to_none() -> None:
@@ -251,3 +255,56 @@ def test_ws_inject_zero_held_value_no_change(
     coord.inject_realtime_data({"pvPower": 1.5})
 
     assert coord.data["pvPower"] == 1.5
+
+
+# === Simulator-backed end-to-end coverage ===========================
+# The mock-based tests above prove the coordinator's sum/inject logic.
+# This test closes the remaining gap: it drives the REAL FoxESS REST
+# path (FoxESSClient.post -> /op/v0/device/real/query -> Inverter
+# ._parse_real_time) against the project simulator, proving that an
+# arbitrary configured variable such as ``meterPower2`` (an AC-coupled
+# solar inverter on a second meter channel) is served by real/query and
+# surfaces in get_real_time's parsed dict — exactly the dict
+# ``FoxESSDataCoordinator._fetch_all`` sums into pvPower.  Per CLAUDE.md
+# C-028 ("simulator over mocks") this is the canonical integration
+# layer; the in-process ``foxess_sim`` fixture runs a real aiohttp app,
+# so no container/E2E harness is needed.
+
+
+def test_simulator_serves_meter_power2_through_real_query(
+    foxess_sim: SimulatorHandle,
+) -> None:
+    """Real Inverter.get_real_time() over the simulator returns both
+    pvPower and the configured extra variable meterPower2 with the
+    seeded values (fuzzing disabled for determinism)."""
+    FoxESSClient.MIN_REQUEST_INTERVAL = 0.0
+    # Disable jitter so the seeded values are returned verbatim.
+    foxess_sim.set(fuzzing=False, solar_kw=2.0, meter_power2_kw=3.0)
+
+    client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
+    inv = Inverter(client, "SIM0001")
+
+    result = inv.get_real_time(["pvPower", "meterPower2"])
+
+    assert result["pvPower"] == 2.0
+    assert result["meterPower2"] == 3.0
+    # Summing the two (what _fetch_all does) yields the AC-coupled total.
+    assert result["pvPower"] + result["meterPower2"] == 5.0
+
+
+def test_simulator_meter_power2_defaults_to_zero(
+    foxess_sim: SimulatorHandle,
+) -> None:
+    """meterPower2 is served (value 0.0) even when never set, so a
+    coordinator configured for it adds zero rather than treating it as
+    a persistently-missing variable."""
+    FoxESSClient.MIN_REQUEST_INTERVAL = 0.0
+    foxess_sim.set(fuzzing=False, solar_kw=1.0)
+
+    client = FoxESSClient("test-api-key", base_url=foxess_sim.url)
+    inv = Inverter(client, "SIM0001")
+
+    result = inv.get_real_time(["pvPower", "meterPower2"])
+
+    assert result["pvPower"] == 1.0
+    assert result["meterPower2"] == 0.0

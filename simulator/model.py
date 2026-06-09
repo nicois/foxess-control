@@ -100,6 +100,13 @@ class InverterModel:
     solar_kw: float = 0.0
     load_kw: float = 0.5
 
+    # Second meter (e.g. an AC-coupled solar inverter reported on a
+    # separate FoxESS meter channel such as ``meterPower2``).  Served
+    # verbatim from ``get_real_time_response`` so a coordinator
+    # configured with an "alternate solar source" variable can sum it
+    # into pvPower.  Defaults to 0.0 so existing tests are unaffected.
+    meter_power2_kw: float = 0.0
+
     # Fuzzing: add noise to readings to prevent test overfitting
     fuzzing: bool = True
 
@@ -385,6 +392,7 @@ class InverterModel:
             "loads": self.loads_total_kwh,
             "energyThroughput": self.charge_total_kwh + self.discharge_total_kwh,
             "meterPower": self.grid_import_kw - self.grid_export_kw,
+            "meterPower2": f(self.meter_power2_kw),
             "RVolt": 240.0,
             "RCurrent": (self.grid_import_kw - self.grid_export_kw) * 1000 / 240,
             "RFreq": 50.0,
@@ -458,6 +466,7 @@ class InverterModel:
             "max_power_w": self.max_power_w,
             "solar_kw": round(self.solar_kw, 3),
             "load_kw": round(self.load_kw, 3),
+            "meter_power2_kw": round(self.meter_power2_kw, 3),
             "bat_charge_kw": round(self.bat_charge_kw, 3),
             "bat_discharge_kw": round(self.bat_discharge_kw, 3),
             "grid_import_kw": round(self.grid_import_kw, 3),
