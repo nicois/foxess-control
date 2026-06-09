@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import requests
 import voluptuous as vol
@@ -22,6 +22,7 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    CONF_ADDITIONAL_PV_POWER_VARIABLE,
     CONF_API_KEY,
     CONF_BAT_CHARGE_POWER_ENTITY,
     CONF_BAT_DISCHARGE_POWER_ENTITY,
@@ -56,6 +57,9 @@ from .smart_battery.config_flow_base import (
     entity_mapping_schema,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
 # Map foxess_modbus original_name → our CONF_* key.
 _MODBUS_NAME_MAP: dict[str, str] = {
     "Work Mode": CONF_WORK_MODE_ENTITY,
@@ -82,6 +86,21 @@ def _detect_foxess_modbus_entities(
 
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _additional_pv_schema_dict(opts: Mapping[str, Any]) -> dict[Any, Any]:
+    """Schema fragment for the optional AC-coupled additional PV variable.
+
+    Cloud-only, brand-specific — kept out of the brand-agnostic
+    ``battery_options_schema`` (C-021). Blank default preserves current
+    behaviour.
+    """
+    return {
+        vol.Optional(
+            CONF_ADDITIONAL_PV_POWER_VARIABLE,
+            default=opts.get(CONF_ADDITIONAL_PV_POWER_VARIABLE, ""),
+        ): str,
+    }
 
 
 def _validate_credentials(api_key: str, device_serial: str) -> None:
@@ -389,6 +408,7 @@ class FoxessControlOptionsFlow(OptionsFlow):
             return self.async_create_entry(data=user_input)
 
         schema = battery_options_schema(self._config_entry)
+        schema = schema.extend(_additional_pv_schema_dict(self._config_entry.options))
         # Show WebSocket option only when web credentials are configured
         if self._config_entry.data.get(CONF_WEB_USERNAME):
             opts = self._config_entry.options

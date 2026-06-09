@@ -559,3 +559,37 @@ class TestSchemaBuildersNoEntry:
         defaults = schema({})
         assert CONF_MIN_SOC_ON_GRID in defaults
         assert CONF_BATTERY_CAPACITY_KWH in defaults
+
+
+def test_additional_pv_schema_dict_exposes_key() -> None:
+    """The AC-coupled additional-PV field appears in the options schema fragment."""
+    from custom_components.foxess_control.config_flow import (
+        _additional_pv_schema_dict,
+    )
+    from custom_components.foxess_control.const import (
+        CONF_ADDITIONAL_PV_POWER_VARIABLE,
+    )
+
+    schema_keys = {str(k) for k in _additional_pv_schema_dict({})}
+    assert CONF_ADDITIONAL_PV_POWER_VARIABLE in schema_keys
+
+
+def test_additional_pv_schema_dict_defaults_to_current_value() -> None:
+    """The field defaults to the currently-saved option value."""
+    import voluptuous as vol
+
+    from custom_components.foxess_control.config_flow import (
+        _additional_pv_schema_dict,
+    )
+    from custom_components.foxess_control.const import (
+        CONF_ADDITIONAL_PV_POWER_VARIABLE,
+    )
+
+    frag = _additional_pv_schema_dict(
+        {CONF_ADDITIONAL_PV_POWER_VARIABLE: "meterPower2"}
+    )
+    # Build a schema and confirm the default round-trips.
+    schema = vol.Schema(frag)
+    # An empty submission should fill the default for the optional key.
+    result = schema({})
+    assert result.get(CONF_ADDITIONAL_PV_POWER_VARIABLE) == "meterPower2"
