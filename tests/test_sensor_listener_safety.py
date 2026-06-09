@@ -280,8 +280,11 @@ class TestSensorListenerFailureSurfacesRepair:
         assert pre, "Pre-condition: Repair should exist after failure"
 
         # Now the sensor recovers — replace the raising stub with a no-op
-        # and trigger another fan-out.
-        sensor.async_write_ha_state = MagicMock()  # type: ignore[method-assign]
+        # and trigger another fan-out. Route through _wire_sensor (param
+        # typed `Any`) rather than a direct typed assignment: HA marks
+        # async_write_ha_state @final, so a direct `sensor.async_write_ha_state
+        # = ...` needs a mypy ignore whose code is unstable across HA versions.
+        _wire_sensor(sensor, None)
         coord.async_update_listeners()
 
         post = [

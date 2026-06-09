@@ -47,4 +47,9 @@ repos:
     rev: v1.20.0
     hooks:
       - id: mypy
-        additional_dependencies: [types-requests, responses, pytest, homeassistant, voluptuous]
+        # homeassistant is PINNED: it was previously unpinned and floated to
+        # latest, so mypy results drifted across hook-env rebuilds (e.g.
+        # async_write_ha_state became @final, changing a test's ignore code
+        # from [method-assign] to [misc]). Pin to the version the integration
+        # is developed/tested against and bump deliberately.
+        additional_dependencies: [types-requests, responses, pytest, "homeassistant==2026.5.4", voluptuous]
