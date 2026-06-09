@@ -376,6 +376,59 @@ sides, sensor path adds a post-hoc smoother);
 `tests/test_sensor.py::TestFoxESSPolledSensor` rolling-median
 cases.
 
+### D-061: Additive external-solar source for AC-coupled installs
+**Decision**: A cloud-mode-only optional config
+`additional_pv_power_variable` (e.g. `meterPower2`) names a FoxESS
+telemetry variable whose value is **added to `pvPower`** so the control
+algorithm sees true total generation. The REST poll fetches the named
+variable and adds it to `pvPower`; the added value is **cached and
+re-added on every WS frame** (the WS `wsmaitian` schema does not carry
+the extra variable). The term is **raw additive — no clamp** — and the
+feature is **off by default** (blank value). A persistently-missing
+configured variable surfaces **one** config-category operational error
+after **3 consecutive polls** (C-020/C-026), then stays quiet.
+**Context**: On AC-coupled installs a separate grid-tied inverter's
+generation is invisible to the hybrid inverter's `pvPower`, but FoxESS
+sometimes reports it on a second CT channel (`meterPower2`). With that
+generation unmeasured, the power-balance grid-direction inference
+(D-010) diverges and persistently swaps direction (GH issue #3, the
+case D-010's fallback was added to detour). Without a way to fold the
+external term in, the algorithm under-counts generation and the WS
+direction inference stays degraded.
+**Rationale**: Reading the variable on the REST poll and *holding* the
+value across WS frames keeps the brand layer from coupling to the
+undocumented `wsmaitian` frame schema — the extra term lives entirely
+in the cloud poll path, while WS frames simply re-apply the last-known
+hold. Adding raw (no clamp) keeps the result CT-orientation honest: the
+installer's CT wiring decides the sign, and the integration does not
+second-guess it. Feeding the external term into `pvPower` is also a
+side benefit for the D-010 balance: with generation now measured, the
+grid-direction inference that previously diverged on unmeasured
+external solar converges. Config is read via `IntegrationConfig`
+(C-035), never raw `entry.options`.
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: other
+**Boundary**: brand-layer (coordinator) only. The algorithm reads
+`pvPower` unchanged; `smart_battery/` is untouched, so C-021/C-039
+(brand-agnostic core, dependency inversion) are preserved — the core
+never learns that `pvPower` may include an external term.
+**Alternatives considered**:
+- Read the extra variable from the WS frame too: rejected — couples
+  the brand layer to the undocumented `wsmaitian` schema; the REST-hold
+  avoids it.
+- Clamp the added term to >= 0: rejected — CT orientation is the
+  installer's call; clamping would hide a reversed CT instead of
+  reporting it honestly.
+- Push the summation into `smart_battery/`: rejected — would force the
+  brand-agnostic core to know about a FoxESS-specific telemetry
+  variable, violating C-021/C-039.
+- Hard error / refuse setup when the variable is missing: rejected —
+  surface one diagnostics error after 3 polls (C-020/C-026) and keep
+  running on `pvPower` alone rather than break the integration.
+**Traces**: C-035, C-021, C-039, C-020, C-026; D-010 (grid-direction
+balance the external term improves).
+
 ## Key Behaviours
 
 - WebSocket requires web portal credentials (username + MD5(password)),

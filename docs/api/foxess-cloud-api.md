@@ -365,9 +365,16 @@ Two things to know that diverge from the public docs:
 **Instantaneous power variables** (kW floats): `SoC` (%),
 `batChargePower`, `batDischargePower`, `loadsPower`, `pvPower`,
 `pv1Power`, `pv2Power`, `gridConsumptionPower`, `feedinPower`,
-`generationPower`, `meterPower`, `epsPower`, `batVolt` (V),
-`batCurrent` (A), `batTemperature` / `ambientTemperation` /
-`invTemperation` (°C), `RVolt` / `RCurrent` / `RFreq`.
+`generationPower`, `meterPower`, `meterPower2`, `epsPower`,
+`batVolt` (V), `batCurrent` (A), `batTemperature` /
+`ambientTemperation` / `invTemperation` (°C), `RVolt` / `RCurrent` /
+`RFreq`.
+
+`meterPower2` — Second grid-meter / CT channel. On AC-coupled installs
+this commonly carries a separate inverter's generation; the integration
+can be configured (cloud-mode option `additional_pv_power_variable`) to
+add it to `pvPower` so the control algorithm sees true total generation.
+Sign depends on CT orientation; the integration adds it raw (no clamp).
 
 **Cumulative energy counters** (kWh, lifetime, monotonic
 `total_increasing` — take the delta between two readings for an
