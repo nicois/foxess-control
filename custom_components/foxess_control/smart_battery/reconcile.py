@@ -24,7 +24,7 @@ class ReconcileVerdict(enum.Enum):
 
 
 def _norm(mode: str | None) -> str:
-    """Normalise a reported/commanded mode; None reports as SelfUse.
+    """Normalise a reported/commanded mode; None or empty string reports as SelfUse.
 
     ``get_current_mode`` returns None when no enabled group covers now —
     the inverter is in self-use.  Treat that as SelfUse so a commanded
