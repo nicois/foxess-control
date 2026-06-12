@@ -22,8 +22,10 @@ from homeassistant.helpers import issue_registry as ir
 from custom_components.foxess_control._helpers import _dd
 from custom_components.foxess_control.const import DOMAIN
 from custom_components.foxess_control.domain_data import FoxESSControlData
+from custom_components.foxess_control.foxess import WorkMode
 from custom_components.foxess_control.foxess_adapter import (
     _SCHEDULE_NOT_APPLIED_ISSUE,
+    _record_commanded_mode,
     reconcile_work_mode,
 )
 
@@ -109,20 +111,15 @@ class TestCommandedClockStability:
     async def test_reissuing_same_mode_does_not_reset_grace_clock(
         self, reconcile_hass: HomeAssistant
     ) -> None:
-        from custom_components.foxess_control.foxess import WorkMode
-        from custom_components.foxess_control.foxess_adapter import (
-            _record_commanded_mode,
-        )
-
         hass = reconcile_hass
         dd = _dd(hass)
         long_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=10)
-        dd.commanded_work_mode = WorkMode.FORCE_CHARGE.value
-        dd.commanded_work_mode_at = long_ago.isoformat()
+        _set_commanded(hass, WorkMode.FORCE_CHARGE.value, long_ago)
 
         # Re-issue the SAME mode now (mimics the listener's periodic apply_mode).
         _record_commanded_mode(hass, WorkMode.FORCE_CHARGE)
 
+        assert dd.commanded_work_mode_at is not None
         recorded = datetime.datetime.fromisoformat(dd.commanded_work_mode_at)
         age = datetime.datetime.now(datetime.UTC) - recorded
         assert age > datetime.timedelta(minutes=5), (
@@ -134,20 +131,15 @@ class TestCommandedClockStability:
     async def test_changing_mode_does_reset_clock(
         self, reconcile_hass: HomeAssistant
     ) -> None:
-        from custom_components.foxess_control.foxess import WorkMode
-        from custom_components.foxess_control.foxess_adapter import (
-            _record_commanded_mode,
-        )
-
         hass = reconcile_hass
         dd = _dd(hass)
         long_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=10)
-        dd.commanded_work_mode = WorkMode.SELF_USE.value
-        dd.commanded_work_mode_at = long_ago.isoformat()
+        _set_commanded(hass, WorkMode.SELF_USE.value, long_ago)
 
         _record_commanded_mode(hass, WorkMode.FORCE_CHARGE)
 
         assert dd.commanded_work_mode == WorkMode.FORCE_CHARGE.value
+        assert dd.commanded_work_mode_at is not None
         recorded = datetime.datetime.fromisoformat(dd.commanded_work_mode_at)
         age = datetime.datetime.now(datetime.UTC) - recorded
         assert age < datetime.timedelta(minutes=1), (
