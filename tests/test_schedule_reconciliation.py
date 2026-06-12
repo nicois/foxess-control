@@ -11,8 +11,9 @@ intent + reported mode + grace.
 from __future__ import annotations
 
 import datetime
-from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
+import threading
+from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -21,8 +22,10 @@ from homeassistant.helpers import issue_registry as ir
 
 from custom_components.foxess_control._helpers import _dd
 from custom_components.foxess_control.const import DOMAIN
+from custom_components.foxess_control.coordinator import FoxESSDataCoordinator
 from custom_components.foxess_control.domain_data import FoxESSControlData
 from custom_components.foxess_control.foxess import WorkMode
+from custom_components.foxess_control.foxess.inverter import Inverter
 from custom_components.foxess_control.foxess_adapter import (
     _SCHEDULE_NOT_APPLIED_ISSUE,
     _record_commanded_mode,
@@ -256,3 +259,156 @@ class TestCommandedClockStability:
             "Apply→remove of the same mode is a new expectation and must "
             "reset the grace clock"
         )
+
+
+class TestReconcileRunsOnEventLoop:
+    """Issue #11: the reconcile call MUST run on the event loop, not in the
+    executor thread that runs ``_fetch_all``.
+
+    Root cause of the silent no-op: ``reconcile_work_mode`` was called from
+    inside ``FoxESSDataCoordinator._fetch_all``, which the coordinator
+    dispatches via ``await hass.async_add_executor_job(self._fetch_all)`` —
+    i.e. in a worker thread.  ``reconcile_work_mode`` may create/delete an HA
+    Repair issue (IssueRegistry.async_get_or_create / async_delete), and those
+    call ``hass.verify_event_loop_thread(...)``, which RAISES off the loop.
+    The exception is swallowed by ``reconcile_work_mode``'s broad ``except``
+    (correctly — it must never break the poll), so the Repair is NEVER
+    created in the live integration.
+
+    This test exercises the real threading: a real ``HomeAssistant`` (real
+    executor + real IssueRegistry), with ``verify_event_loop_thread`` LEFT
+    INTACT (NOT stubbed — the stub is what hid the bug in the other tests
+    here).  ``_fetch_all`` is replaced with a stub that records which thread
+    it runs on and returns a mismatching ``_work_mode``.  We then drive the
+    coordinator's real ``_async_update_data`` and assert a Repair issue IS
+    created.
+
+    Before the fix (reconcile inside ``_fetch_all`` / executor thread): the
+    issue-registry call raises and is swallowed → NO issue → FAIL.
+    After the fix (reconcile on the loop in ``_async_update_data``): the
+    issue is created → PASS.
+    """
+
+    @pytest_asyncio.fixture  # type: ignore[untyped-decorator]
+    async def real_loop_hass(self) -> HomeAssistant:
+        # NOTE: deliberately does NOT stub verify_event_loop_thread — that
+        # stub is exactly what masks this bug.  A real IssueRegistry +
+        # real executor are required to reproduce the executor-vs-loop split.
+        ha = HomeAssistant("/tmp")
+        ha.data[ir.DATA_REGISTRY] = ir.IssueRegistry(ha)
+        ha.data[DOMAIN] = FoxESSControlData()
+        return ha
+
+    @pytest.mark.asyncio
+    async def test_conflict_surfaces_repair_through_coordinator_flow(
+        self, real_loop_hass: HomeAssistant
+    ) -> None:
+        hass = real_loop_hass
+        loop_thread_id = threading.get_ident()
+
+        # Seed a commanded intent that is past the grace window so the poll
+        # produces a genuine CONFLICT verdict.
+        long_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=10)
+        dd = _dd(hass)
+        dd.commanded_work_mode = WorkMode.FORCE_CHARGE.value
+        dd.commanded_work_mode_at = long_ago.isoformat()
+        dd.commanded_kind = "apply"
+
+        with patch("homeassistant.helpers.frame.report_usage"):
+            coord = FoxESSDataCoordinator(
+                hass, MagicMock(spec=Inverter), update_interval_seconds=300
+            )
+
+        # Replace _fetch_all with a stub that (a) records the thread it runs
+        # on — proving it executes off the event loop in a real worker thread
+        # — and (b) returns a work mode that conflicts with the commanded
+        # ForceCharge.  Keep it a plain (sync) function so the coordinator
+        # dispatches it via the REAL async_add_executor_job.
+        fetch_thread_ids: list[int] = []
+
+        def _fake_fetch_all() -> dict[str, Any]:
+            fetch_thread_ids.append(threading.get_ident())
+            return {"SoC": 50.0, "_work_mode": WorkMode.SELF_USE.value}
+
+        coord._fetch_all = _fake_fetch_all  # type: ignore[method-assign]
+
+        try:
+            await coord._async_update_data()
+        finally:
+            await hass.async_stop()
+
+        # Sanity: prove the threading reality this test depends on — _fetch_all
+        # genuinely ran in a worker thread, NOT on the event loop.  If this
+        # ever fails, the test is no longer exercising the bug.
+        assert fetch_thread_ids, "_fetch_all should have been invoked"
+        assert fetch_thread_ids[0] != loop_thread_id, (
+            "_fetch_all must run in an executor (worker) thread, not on the "
+            "event loop — otherwise this test does not exercise the bug"
+        )
+
+        # The reconcile must have created the Repair.  It can only do so if it
+        # ran on the event loop (verify_event_loop_thread is intact); if it ran
+        # in the executor thread (the bug) the issue-registry call raised and
+        # was swallowed, leaving no issue.
+        registry = ir.async_get(hass)
+        issues = [
+            i
+            for i in registry.issues.values()
+            if i.domain == DOMAIN and i.issue_id == _SCHEDULE_NOT_APPLIED_ISSUE
+        ]
+        assert issues, (
+            "Expected a schedule_not_applied Repair to be created via the "
+            "coordinator's _async_update_data flow.  If absent, reconcile_work_mode "
+            "ran in the executor thread (inside _fetch_all) where the HA issue "
+            "registry refuses to mutate off the event loop (issue #11)."
+        )
+
+    @pytest.mark.asyncio
+    async def test_reconcile_in_executor_thread_is_a_silent_noop(
+        self, real_loop_hass: HomeAssistant
+    ) -> None:
+        """Directly demonstrate the failure mode: calling reconcile_work_mode
+        from a worker thread (as the old _fetch_all did) creates NO issue,
+        whereas calling it on the loop DOES.
+
+        This pins the root cause independently of the coordinator wiring:
+        the difference is purely which thread the call runs on.
+        """
+        hass = real_loop_hass
+        long_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=10)
+        dd = _dd(hass)
+        dd.commanded_work_mode = WorkMode.FORCE_CHARGE.value
+        dd.commanded_work_mode_at = long_ago.isoformat()
+        dd.commanded_kind = "apply"
+
+        def _issues() -> list[IssueEntry]:
+            registry = ir.async_get(hass)
+            return [
+                i
+                for i in registry.issues.values()
+                if i.domain == DOMAIN and i.issue_id == _SCHEDULE_NOT_APPLIED_ISSUE
+            ]
+
+        try:
+            # Off-loop (the bug): reconcile swallows the loop-affinity error,
+            # so NO issue is created.
+            await hass.async_add_executor_job(
+                reconcile_work_mode,
+                hass,
+                DOMAIN,
+                WorkMode.SELF_USE.value,
+                datetime.timedelta(seconds=300),
+            )
+            assert not _issues(), (
+                "Reconciling from a worker thread must NOT create the Repair — "
+                "the issue registry refuses to mutate off the event loop and the "
+                "error is swallowed (this is the issue-#11 silent no-op)"
+            )
+
+            # On the loop (the fix): the issue IS created.
+            reconcile_work_mode(
+                hass, DOMAIN, WorkMode.SELF_USE.value, datetime.timedelta(seconds=300)
+            )
+            assert _issues(), "Reconciling on the event loop must create the Repair"
+        finally:
+            await hass.async_stop()
