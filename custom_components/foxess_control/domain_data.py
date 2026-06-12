@@ -145,6 +145,13 @@ class FoxESSControlData(SmartBatteryDomainData):
     # Work mode (cleared on session cancel for immediate UI update)
     work_mode: str | None = None
 
+    # Last work mode the integration commanded via a cloud schedule write,
+    # and when (ISO 8601 string).  Used by the poll-time reconciler to
+    # detect a divergence between commanded and actually-applied mode
+    # (issue #11).  "SelfUse" represents a commanded override removal.
+    commanded_work_mode: str | None = None
+    commanded_work_mode_at: str | None = None
+
     # Proactive schedule conflict detection
     upcoming_conflicts: list[str] = field(default_factory=list)
 
