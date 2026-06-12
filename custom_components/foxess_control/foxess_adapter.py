@@ -216,6 +216,9 @@ def reconcile_work_mode(
         commanded_at_iso = dd.commanded_work_mode_at
         if commanded is None or commanded_at_iso is None:
             return
+        # Legacy/None commanded_kind (intent recorded before this field
+        # existed, or a persisted pre-upgrade session) falls back to APPLY —
+        # the pre-fix behaviour; it self-heals on the next remove_override.
         kind = (
             CommandKind.REMOVE
             if dd.commanded_kind == CommandKind.REMOVE.value
