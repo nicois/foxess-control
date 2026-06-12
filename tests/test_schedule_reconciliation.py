@@ -28,6 +28,7 @@ from custom_components.foxess_control.foxess_adapter import (
     _record_commanded_mode,
     reconcile_work_mode,
 )
+from custom_components.foxess_control.smart_battery.reconcile import CommandKind
 
 if TYPE_CHECKING:
     from homeassistant.helpers.issue_registry import IssueEntry
@@ -45,10 +46,16 @@ async def reconcile_hass() -> HomeAssistant:
     return ha
 
 
-def _set_commanded(hass: HomeAssistant, mode_value: str, at: datetime.datetime) -> None:
+def _set_commanded(
+    hass: HomeAssistant,
+    mode_value: str,
+    at: datetime.datetime,
+    kind: str = "apply",
+) -> None:
     dd = _dd(hass)
     dd.commanded_work_mode = mode_value
     dd.commanded_work_mode_at = at.isoformat()
+    dd.commanded_kind = kind
 
 
 def _issues(hass: HomeAssistant) -> list[IssueEntry]:
@@ -106,6 +113,88 @@ class TestReconcileSurfacing:
         assert not _issues(hass), "Issue should clear once modes reconcile"
 
 
+class TestReconcileRemoveKind:
+    """Removal watches the REMOVED mode (false-positive Repair fix).
+
+    When an override is removed, the recorded intent is kind="remove" with
+    the removed mode as the watched mode.  A conflict is only the inverter
+    STILL reporting that mode — not it reporting an unrelated managed group
+    (e.g. a standalone Feed-in schedule), which previously raised a spurious
+    schedule_not_applied Repair that never self-healed.
+    """
+
+    @pytest.mark.asyncio
+    async def test_removed_force_charge_reports_feedin_no_repair(
+        self, reconcile_hass: HomeAssistant
+    ) -> None:
+        # Regression for the false positive: removed ForceCharge, but a
+        # standalone user Feed-in group makes get_current_mode report
+        # "Feedin".  Past grace, this must NOT raise a Repair.
+        hass = reconcile_hass
+        long_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=10)
+        _set_commanded(hass, WorkMode.FORCE_CHARGE.value, long_ago, kind="remove")
+
+        reconcile_work_mode(hass, DOMAIN, "Feedin", datetime.timedelta(seconds=300))
+
+        assert not _issues(hass), (
+            "Removing ForceCharge while a standalone Feed-in group is active "
+            "must not raise a spurious schedule_not_applied Repair"
+        )
+        dd = _dd(hass)
+        assert not any(
+            e.get("category") == "schedule_not_applied" for e in dd.recent_errors
+        ), "Should not record a schedule_not_applied operational error"
+
+    @pytest.mark.asyncio
+    async def test_removed_force_charge_still_force_charge_raises_repair(
+        self, reconcile_hass: HomeAssistant
+    ) -> None:
+        # Genuine issue-#11 case preserved: removed ForceCharge but the
+        # inverter STILL reports ForceCharge past grace → real conflict.
+        hass = reconcile_hass
+        long_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=10)
+        _set_commanded(hass, WorkMode.FORCE_CHARGE.value, long_ago, kind="remove")
+
+        reconcile_work_mode(
+            hass, DOMAIN, "ForceCharge", datetime.timedelta(seconds=300)
+        )
+
+        assert _issues(hass), (
+            "A removed ForceCharge that the inverter still reports is a "
+            "genuine conflict and must raise a Repair"
+        )
+        dd = _dd(hass)
+        assert any(
+            e.get("category") == "schedule_not_applied" for e in dd.recent_errors
+        ), "Expected a schedule_not_applied operational error"
+
+    @pytest.mark.asyncio
+    async def test_removed_force_charge_reports_self_use_no_repair(
+        self, reconcile_hass: HomeAssistant
+    ) -> None:
+        hass = reconcile_hass
+        long_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=10)
+        _set_commanded(hass, WorkMode.FORCE_CHARGE.value, long_ago, kind="remove")
+
+        reconcile_work_mode(hass, DOMAIN, "SelfUse", datetime.timedelta(seconds=300))
+
+        assert not _issues(hass), "Removed mode no longer reported → no conflict"
+
+    @pytest.mark.asyncio
+    async def test_record_commanded_mode_remove_writes_watched_mode(
+        self, reconcile_hass: HomeAssistant
+    ) -> None:
+        # The production recorder must store the REMOVED mode as the watched
+        # mode with kind="remove" — not "SelfUse".
+        hass = reconcile_hass
+        _record_commanded_mode(hass, WorkMode.FORCE_CHARGE, kind=CommandKind.REMOVE)
+
+        dd = _dd(hass)
+        assert dd.commanded_work_mode == WorkMode.FORCE_CHARGE.value
+        assert dd.commanded_kind == "remove"
+        assert dd.commanded_work_mode_at is not None
+
+
 class TestCommandedClockStability:
     @pytest.mark.asyncio
     async def test_reissuing_same_mode_does_not_reset_grace_clock(
@@ -144,4 +233,26 @@ class TestCommandedClockStability:
         age = datetime.datetime.now(datetime.UTC) - recorded
         assert age < datetime.timedelta(minutes=1), (
             "A genuine mode change must reset the grace clock"
+        )
+
+    @pytest.mark.asyncio
+    async def test_changing_kind_does_reset_clock(
+        self, reconcile_hass: HomeAssistant
+    ) -> None:
+        # Applying then removing the SAME mode is a new expectation: the
+        # kind change (apply → remove) must reset the grace clock.
+        hass = reconcile_hass
+        dd = _dd(hass)
+        long_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=10)
+        _set_commanded(hass, WorkMode.FORCE_CHARGE.value, long_ago, kind="apply")
+
+        _record_commanded_mode(hass, WorkMode.FORCE_CHARGE, kind=CommandKind.REMOVE)
+
+        assert dd.commanded_kind == "remove"
+        assert dd.commanded_work_mode_at is not None
+        recorded = datetime.datetime.fromisoformat(dd.commanded_work_mode_at)
+        age = datetime.datetime.now(datetime.UTC) - recorded
+        assert age < datetime.timedelta(minutes=1), (
+            "Apply→remove of the same mode is a new expectation and must "
+            "reset the grace clock"
         )

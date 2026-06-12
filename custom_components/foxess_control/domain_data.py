@@ -145,12 +145,18 @@ class FoxESSControlData(SmartBatteryDomainData):
     # Work mode (cleared on session cancel for immediate UI update)
     work_mode: str | None = None
 
-    # Last work mode the integration commanded via a cloud schedule write,
-    # and when (ISO 8601 string).  Used by the poll-time reconciler to
-    # detect a divergence between commanded and actually-applied mode
-    # (issue #11).  "SelfUse" represents a commanded override removal.
+    # Last work-mode intent the integration commanded via a cloud schedule
+    # write, and when (ISO 8601 string).  Used by the poll-time reconciler
+    # to detect a divergence between commanded and actually-applied mode
+    # (issue #11).  ``commanded_work_mode`` is the *watched* mode and
+    # ``commanded_kind`` ("apply"/"remove") says how to interpret it:
+    #   - "apply": conflict if the inverter does NOT report the watched mode.
+    #   - "remove": the watched mode is the one that was REMOVED; conflict
+    #     only if the inverter STILL reports it (an unrelated managed group
+    #     such as a standalone Feed-in is fine).
     commanded_work_mode: str | None = None
     commanded_work_mode_at: str | None = None
+    commanded_kind: str | None = None
 
     # Proactive schedule conflict detection
     upcoming_conflicts: list[str] = field(default_factory=list)

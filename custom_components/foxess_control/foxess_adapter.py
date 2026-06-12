@@ -39,6 +39,7 @@ from .smart_battery.algorithms import (
     compute_safe_schedule_end,
 )
 from .smart_battery.logging import record_operational_error
+from .smart_battery.reconcile import CommandKind
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -122,20 +123,36 @@ class ScheduleNotApplied(Exception):
     """
 
 
-def _record_commanded_mode(hass: HomeAssistant, mode: WorkMode) -> None:
-    """Persist the work mode just commanded via a cloud schedule write.
+def _record_commanded_mode(
+    hass: HomeAssistant,
+    mode: WorkMode,
+    *,
+    kind: CommandKind = CommandKind.APPLY,
+) -> None:
+    """Persist the work-mode intent just commanded via a cloud schedule write.
 
-    The timestamp is reset only when the commanded mode *changes*.  The
-    listener re-issues the same mode every adjust tick; if each re-issue
+    ``kind`` records what we did with ``mode`` (the *watched* mode):
+
+    - ``APPLY`` (default): we applied an override and expect the inverter
+      to report ``mode``.
+    - ``REMOVE``: we removed an override; ``mode`` is the mode that was
+      removed.  The reconciler conflicts only if the inverter STILL reports
+      it (an unrelated managed group is fine).
+
+    The timestamp is reset only when the ``(kind, mode)`` intent *changes*.
+    The listener re-issues the same mode every adjust tick; if each re-issue
     reset the clock, a persisting conflict could never cross the grace
-    window (the reconciler would always see it as freshly commanded).
+    window (the reconciler would always see it as freshly commanded).  A
+    removal of a just-applied mode is a *new* expectation, so the kind
+    change resets the clock too.
     """
     try:
         from ._helpers import _dd
 
         dd = _dd(hass)
-        if dd.commanded_work_mode != mode.value:
+        if dd.commanded_work_mode != mode.value or dd.commanded_kind != kind.value:
             dd.commanded_work_mode = mode.value
+            dd.commanded_kind = kind.value
             dd.commanded_work_mode_at = dt_util.utcnow().isoformat()
     except Exception:  # noqa: BLE001 — recording is best-effort
         _LOGGER.debug("Failed to record commanded work mode (non-critical)")
@@ -199,21 +216,36 @@ def reconcile_work_mode(
         commanded_at_iso = dd.commanded_work_mode_at
         if commanded is None or commanded_at_iso is None:
             return
+        kind = (
+            CommandKind.REMOVE
+            if dd.commanded_kind == CommandKind.REMOVE.value
+            else CommandKind.APPLY
+        )
         commanded_at = datetime.datetime.fromisoformat(commanded_at_iso)
         grace = poll_interval + SCHEDULE_RECONCILE_MARGIN
         verdict = reconcile_commanded_mode(
-            commanded, commanded_at, reported_mode, dt_util.utcnow(), grace
+            kind, commanded, commanded_at, reported_mode, dt_util.utcnow(), grace
         )
         if verdict is ReconcileVerdict.CONFLICT:
             reported = reported_mode or SELF_USE
+            if kind is CommandKind.REMOVE:
+                # The watched mode is the one we removed; conflict means it
+                # is STILL active.  Surface "commanded SelfUse" (the intended
+                # post-removal state) so the Repair placeholders read sensibly.
+                msg = (
+                    f"commanded removal of {commanded} but inverter still "
+                    f"reports {reported}"
+                )
+                placeholder_commanded = SELF_USE
+            else:
+                msg = f"commanded {commanded} but inverter reports {reported}"
+                placeholder_commanded = commanded
             record_operational_error(
                 _LOGGER,
                 _recent_errors(hass),
                 category="schedule_not_applied",
                 attempted="reconcile commanded work mode against polled mode",
-                exc=ScheduleNotApplied(
-                    f"commanded {commanded} but inverter reports {reported}"
-                ),
+                exc=ScheduleNotApplied(msg),
                 hint=(
                     "the inverter reports a different work mode than was "
                     "commanded — it may not be applying schedule changes; "
@@ -221,12 +253,13 @@ def reconcile_work_mode(
                 ),
                 context={
                     "commanded": commanded,
+                    "kind": kind.value,
                     "reported": reported,
                     "since": commanded_at_iso,
                 },
             )
             _create_schedule_not_applied_issue(
-                hass, domain, commanded=commanded, reported=reported
+                hass, domain, commanded=placeholder_commanded, reported=reported
             )
         elif verdict is ReconcileVerdict.OK:
             _clear_schedule_not_applied_issue(hass, domain)
@@ -643,7 +676,11 @@ class FoxESSCloudAdapter:
             mode,
             self._min_soc_on_grid,
         )
-        _record_commanded_mode(hass, WorkMode.SELF_USE)
+        # Record the REMOVED mode as the watched mode: a conflict is only
+        # the inverter STILL reporting it.  Recording SelfUse here caused a
+        # false-positive Repair whenever a standalone managed group (e.g.
+        # Feed-in) made get_current_mode report a non-SelfUse mode.
+        _record_commanded_mode(hass, mode, kind=CommandKind.REMOVE)
         self._groups = []
 
     async def set_export_limit_w(
