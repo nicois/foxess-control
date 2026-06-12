@@ -267,9 +267,11 @@ class TestScheduleReconciliation:
         # Shrink the poll cadence so the reconciler runs often and the grace
         # window (poll_interval + 60s) is small.  At the default 300s poll the
         # grace is 360s and the reconciler only evaluates every 5 min, so the
-        # Repair could not appear within a practical test timeout.  At 10s the
-        # grace is ~70s and the poll re-evaluates every 10s.
-        ha_e2e.set_options(polling_interval=10)
+        # Repair could not appear within a practical test timeout.  60s is the
+        # minimum the options flow accepts (config_flow_base: min=60) → grace
+        # ~120s, reconciler re-evaluates every 60s, so the Repair surfaces by
+        # ~120-180s.
+        ha_e2e.set_options(polling_interval=60)
 
         # Inverter silently drops schedule writes: /scheduler/enable returns
         # success but the schedule is never applied.
@@ -287,10 +289,11 @@ class TestScheduleReconciliation:
         )
 
         # The commanded ForceCharge is never applied (silent drop), so once the
-        # ~70s grace elapses the reconciler raises the Repair issue.  Generous
-        # headroom over the grace for poll jitter + reload settling.
+        # ~120s grace elapses the reconciler raises the Repair issue on a
+        # subsequent 60s poll.  240s gives headroom over the worst case
+        # (grace + a full poll interval + reload settling).
         ha_e2e.wait_for_repair_issue(
-            "foxess_control", "schedule_not_applied", timeout_s=150
+            "foxess_control", "schedule_not_applied", timeout_s=240
         )
 
 
