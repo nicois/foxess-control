@@ -404,6 +404,10 @@
     "sensor_write_failed": {
       "title": "Aktualizacja czujnika {entity_id} nie powiodła się",
       "description": "Czujnik `{entity_id}` zgłosił błąd podczas zapisu stanu i nie jest już aktualizowany:\n\n`{error}`\n\nPozostałe czujniki FoxESS nadal się aktualizują — awaria jest ograniczona, ale wartość wskazanego czujnika może być nieaktualna. Powiadomienie zostanie automatycznie usunięte, gdy czujnik znów zapisze stan poprawnie.\n\nJeśli problem nadal występuje, rozważ ponowne uruchomienie Home Assistant lub zgłoszenie błędu."
+    },
+    "schedule_not_applied": {
+      "title": "Falownik nie stosuje zmian harmonogramu",
+      "description": "FoxESS Control nakazał falownikowi tryb **{commanded}**, ale falownik nadal zgłasza tryb **{reported}** długo po tym, jak zmiana powinna była wejść w życie.\n\nZwykle oznacza to, że falownik przyjmuje zapis harmonogramu w API, ale go nie stosuje — często po aktualizacji firmware falownika. Inteligentne ładowanie/rozładowanie może wtedy nie działać zgodnie z konfiguracją (na przykład ładowanie powyżej docelowego SoC).\n\nPowiadomienie zostanie automatycznie usunięte, gdy tryb zgłaszany przez falownik będzie zgodny z nakazanym. Jeśli problem nadal występuje, sprawdź, czy dostępna jest aktualizacja firmware falownika lub informacja o zgodności, i rozważ zgłoszenie problemu wraz z pobranymi danymi diagnostycznymi."
     }
   }
 }

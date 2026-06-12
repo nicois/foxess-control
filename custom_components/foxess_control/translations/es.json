@@ -408,6 +408,10 @@
     "sensor_write_failed": {
       "title": "El sensor {entity_id} no pudo actualizarse",
       "description": "El sensor `{entity_id}` provocó un error al escribir su estado y ha dejado de actualizarse:\n\n`{error}`\n\nEl resto de sensores de FoxESS siguen actualizándose — es un fallo contenido, pero el valor del sensor indicado puede estar desactualizado. El aviso se eliminará automáticamente cuando el sensor escriba con éxito de nuevo.\n\nSi persiste, considere reiniciar Home Assistant o reportar el error."
+    },
+    "schedule_not_applied": {
+      "title": "El inversor no está aplicando los cambios de planificación",
+      "description": "FoxESS Control ordenó al inversor el modo **{commanded}**, pero el inversor sigue informando del modo **{reported}** mucho después de que el cambio debería haber surtido efecto.\n\nNormalmente esto significa que el inversor acepta la escritura de la planificación en la API pero no la aplica — a menudo tras una actualización de firmware del inversor. La carga/descarga inteligente puede no comportarse como se ha configurado (por ejemplo, cargando por encima del SoC objetivo).\n\nEl aviso se eliminará automáticamente cuando el modo informado por el inversor coincida con el ordenado. Si persiste, compruebe si hay una actualización de firmware del inversor o una nota de compatibilidad, y considere reportarlo con una descarga de diagnóstico."
     }
   }
 }

@@ -404,6 +404,10 @@
     "sensor_write_failed": {
       "title": "Il sensore {entity_id} non è riuscito ad aggiornarsi",
       "description": "Il sensore `{entity_id}` ha generato un errore mentre scriveva il proprio stato e non si aggiorna più:\n\n`{error}`\n\nGli altri sensori FoxESS continuano ad aggiornarsi — il guasto è isolato, ma il valore del sensore indicato può essere obsoleto. L'avviso si chiuderà automaticamente quando il sensore tornerà a scrivere correttamente.\n\nSe il problema persiste, valutare di riavviare Home Assistant o segnalare l'errore."
+    },
+    "schedule_not_applied": {
+      "title": "L'inverter non sta applicando le modifiche alla pianificazione",
+      "description": "FoxESS Control ha comandato all'inverter la modalità **{commanded}**, ma l'inverter continua a segnalare la modalità **{reported}** ben oltre il momento in cui la modifica avrebbe dovuto avere effetto.\n\nDi solito ciò significa che l'inverter accetta la scrittura della pianificazione a livello di API ma non la applica — spesso dopo un aggiornamento del firmware dell'inverter. La carica/scarica intelligente potrebbe quindi non comportarsi come configurato (ad esempio caricando oltre il SoC obiettivo).\n\nL'avviso si chiuderà automaticamente quando la modalità segnalata dall'inverter corrisponderà a quella comandata. Se il problema persiste, verificare la presenza di un aggiornamento del firmware dell'inverter o di una nota di compatibilità e valutare di segnalarlo allegando un download di diagnostica."
     }
   }
 }

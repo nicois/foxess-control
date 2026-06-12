@@ -404,6 +404,10 @@
     "sensor_write_failed": {
       "title": "Le capteur {entity_id} n'a pas pu être mis à jour",
       "description": "Le capteur `{entity_id}` a provoqué une erreur en écrivant son état et ne se met plus à jour :\n\n`{error}`\n\nLes autres capteurs FoxESS continuent à se mettre à jour — la défaillance est circonscrite, mais la valeur du capteur indiqué peut être obsolète. L'avertissement se dissipera automatiquement dès que le capteur écrira à nouveau avec succès.\n\nSi le problème persiste, envisagez de redémarrer Home Assistant ou de signaler l'erreur."
+    },
+    "schedule_not_applied": {
+      "title": "L'onduleur n'applique pas les modifications de planification",
+      "description": "FoxESS Control a commandé le mode **{commanded}** à l'onduleur, mais l'onduleur signale toujours le mode **{reported}** bien après le moment où la modification aurait dû prendre effet.\n\nCela signifie généralement que l'onduleur accepte l'écriture de la planification au niveau de l'API mais ne l'applique pas — souvent après une mise à jour du firmware de l'onduleur. La charge/décharge intelligente peut alors ne pas se comporter comme configurée (par exemple en chargeant au-delà du SoC cible).\n\nL'avertissement se dissipera automatiquement dès que le mode signalé par l'onduleur correspondra à celui qui a été commandé. Si le problème persiste, vérifiez s'il existe une mise à jour du firmware de l'onduleur ou une note de compatibilité, et envisagez de le signaler avec un téléchargement de diagnostic."
     }
   }
 }

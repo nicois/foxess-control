@@ -408,6 +408,10 @@
     "sensor_write_failed": {
       "title": "Bijwerken van {entity_id} mislukt",
       "description": "De meting `{entity_id}` veroorzaakte een fout bij het schrijven van zijn status en wordt niet meer bijgewerkt:\n\n`{error}`\n\nDe overige FoxESS-metingen worden nog steeds bijgewerkt — de storing is afgebakend, maar de waarde van de genoemde meting kan verouderd zijn. Het probleem wordt automatisch gesloten zodra de meting weer succesvol schrijft.\n\nAls het probleem aanhoudt, overweeg dan Home Assistant opnieuw te starten of de fout te melden."
+    },
+    "schedule_not_applied": {
+      "title": "Omvormer past planningswijzigingen niet toe",
+      "description": "FoxESS Control heeft de omvormer naar de modus **{commanded}** gestuurd, maar de omvormer meldt nog steeds de modus **{reported}**, ruim nadat de wijziging van kracht had moeten worden.\n\nDit betekent meestal dat de omvormer de planning wel via de API accepteert, maar niet toepast — vaak na een firmware-update van de omvormer. Slim laden/ontladen gedraagt zich dan mogelijk niet zoals geconfigureerd (bijvoorbeeld laden voorbij de doel-SoC).\n\nHet probleem wordt automatisch gesloten zodra de door de omvormer gemelde modus overeenkomt met de opgedragen modus. Als het probleem aanhoudt, controleer dan op een firmware-update of compatibiliteitsnotitie van de omvormer en overweeg het te melden met een diagnose-download."
     }
   }
 }

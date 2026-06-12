@@ -404,6 +404,10 @@
     "sensor_write_failed": {
       "title": "Sensor {entity_id} konnte nicht aktualisiert werden",
       "description": "Der Sensor `{entity_id}` hat beim Schreiben seines Zustands einen Fehler ausgelöst und aktualisiert sich nicht mehr:\n\n`{error}`\n\nAndere FoxESS-Sensoren werden weiterhin aktualisiert — der Ausfall ist begrenzt, aber der Wert des genannten Sensors kann veraltet sein. Der Hinweis verschwindet automatisch, sobald der Sensor wieder erfolgreich schreibt.\n\nBesteht das Problem weiterhin, sollten Sie Home Assistant neu starten oder den Fehler melden."
+    },
+    "schedule_not_applied": {
+      "title": "Wechselrichter übernimmt Zeitplanänderungen nicht",
+      "description": "FoxESS Control hat den Wechselrichter in den Modus **{commanded}** geschaltet, aber der Wechselrichter meldet noch immer den Modus **{reported}**, lange nachdem die Änderung wirksam sein sollte.\n\nDies bedeutet in der Regel, dass der Wechselrichter den Zeitplan-Schreibvorgang über die API zwar annimmt, ihn aber nicht anwendet — häufig nach einem Firmware-Update des Wechselrichters. Intelligentes Laden/Entladen verhält sich dann möglicherweise nicht wie konfiguriert (zum Beispiel Laden über den Ziel-SoC hinaus).\n\nDer Hinweis verschwindet automatisch, sobald der vom Wechselrichter gemeldete Modus dem befohlenen Modus entspricht. Besteht das Problem weiterhin, prüfen Sie auf ein Firmware-Update oder einen Kompatibilitätshinweis des Wechselrichters und erwägen Sie, das Problem mit einem Diagnose-Download zu melden."
     }
   }
 }
