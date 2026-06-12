@@ -757,6 +757,195 @@ git commit -m "test(e2e): schedule_not_applied Repair surfaces on dropped write 
 
 ---
 
+## Task 8: Close the session-start + clock-reset gaps (added after Task 6 investigation)
+
+The Task 6 E2E investigation surfaced TWO real production gaps that make the
+reconciler effectively inert in cloud mode. Both must be fixed for the feature
+to actually cover the issue-#11 scenario.
+
+**Gap A — commanded intent not recorded at session start.** The cloud
+session-start writes in `_services.py` call `inverter.set_schedule(...)`
+DIRECTLY (charge `:682`, discharge `:404`, feed-in `:285`), bypassing the
+adapter's `_record_commanded_mode`. So commanded intent is first recorded only
+on the listener's periodic `apply_mode` tick — up to `SMART_CHARGE_ADJUST_SECONDS`
+(300s) into the session.
+
+**Gap B — the grace clock resets on every identical re-issue.**
+`_record_commanded_mode` unconditionally sets `commanded_work_mode_at = now`.
+The listener re-issues the SAME mode via `apply_mode` every 300s, while the
+grace window is `poll_interval (300) + 60 = 360s`. Because the clock resets
+every 300s but the threshold is 360s, elapsed-since-commanded NEVER crosses
+the grace — so `CONFLICT` can never fire in production. The integration test
+masked this by seeding the timestamp once and never re-recording.
+
+**Scope:** cloud mode only. `reconcile_work_mode` is called ONLY from the
+FoxESS cloud coordinator's `_fetch_all` (`coordinator.py:255`); the
+`EntityCoordinator` never calls it. Do NOT add recording to the entity-mode
+`_apply_mode_via_entities` paths — nothing reads it there and it risks
+confusion. Only the cloud `set_schedule` session-start sites.
+
+**Files:**
+- Modify: `custom_components/foxess_control/foxess_adapter.py` (`_record_commanded_mode`)
+- Modify: `custom_components/foxess_control/_services.py` (cloud session-start write sites)
+- Modify: `tests/test_schedule_reconciliation.py` (add tests for both gaps)
+- Modify: `tests/e2e/test_e2e.py` (un-skip the E2E test)
+
+- [ ] **Step 1 (Gap B): Write the failing test for clock-reset**
+
+Add to `tests/test_schedule_reconciliation.py` a test proving that re-recording
+the SAME commanded mode does NOT reset the grace clock (so a persistent conflict
+eventually surfaces even though the listener re-issues every tick). Because the
+production re-issue happens through `_record_commanded_mode`, drive that helper
+directly:
+
+```python
+class TestCommandedClockStability:
+    @pytest.mark.asyncio
+    async def test_reissuing_same_mode_does_not_reset_grace_clock(
+        self, reconcile_hass: HomeAssistant
+    ) -> None:
+        from custom_components.foxess_control.foxess_adapter import (
+            _record_commanded_mode,
+        )
+        from custom_components.foxess_control.foxess import WorkMode
+
+        hass = reconcile_hass
+        # First record: 10 minutes ago.
+        dd = _dd(hass)
+        long_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
+            minutes=10
+        )
+        dd.commanded_work_mode = WorkMode.FORCE_CHARGE.value
+        dd.commanded_work_mode_at = long_ago.isoformat()
+
+        # Re-issue the SAME mode now (mimics the listener's periodic apply_mode).
+        _record_commanded_mode(hass, WorkMode.FORCE_CHARGE)
+
+        # The timestamp must NOT have jumped to ~now — it must still reflect
+        # the original command, so a persisting conflict can cross the grace.
+        recorded = datetime.datetime.fromisoformat(dd.commanded_work_mode_at)
+        age = datetime.datetime.now(datetime.timezone.utc) - recorded
+        assert age > datetime.timedelta(minutes=5), (
+            "Re-issuing the same commanded mode reset the grace clock — a "
+            "persistent conflict would never cross the grace window"
+        )
+
+    @pytest.mark.asyncio
+    async def test_changing_mode_does_reset_clock(
+        self, reconcile_hass: HomeAssistant
+    ) -> None:
+        from custom_components.foxess_control.foxess_adapter import (
+            _record_commanded_mode,
+        )
+        from custom_components.foxess_control.foxess import WorkMode
+
+        hass = reconcile_hass
+        dd = _dd(hass)
+        long_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
+            minutes=10
+        )
+        dd.commanded_work_mode = WorkMode.SELF_USE.value
+        dd.commanded_work_mode_at = long_ago.isoformat()
+
+        # Command a DIFFERENT mode → clock resets to ~now.
+        _record_commanded_mode(hass, WorkMode.FORCE_CHARGE)
+
+        assert dd.commanded_work_mode == WorkMode.FORCE_CHARGE.value
+        recorded = datetime.datetime.fromisoformat(dd.commanded_work_mode_at)
+        age = datetime.datetime.now(datetime.timezone.utc) - recorded
+        assert age < datetime.timedelta(minutes=1), (
+            "A genuine mode change must reset the grace clock"
+        )
+```
+
+(`_dd` is already imported in this test file from Task 5. If not, import it from `custom_components.foxess_control._helpers`.)
+
+- [ ] **Step 2 (Gap B): Run to verify the first test FAILS**
+
+Run: `python3 -m pytest tests/test_schedule_reconciliation.py::TestCommandedClockStability -v`
+Expected: `test_reissuing_same_mode_does_not_reset_grace_clock` FAILS (current code resets the timestamp unconditionally); `test_changing_mode_does_reset_clock` PASSES.
+
+- [ ] **Step 3 (Gap B): Fix `_record_commanded_mode` to reset the clock only on mode change**
+
+In `custom_components/foxess_control/foxess_adapter.py`, replace the body of `_record_commanded_mode`:
+
+```python
+def _record_commanded_mode(hass: HomeAssistant, mode: WorkMode) -> None:
+    """Persist the work mode just commanded via a cloud schedule write.
+
+    The timestamp is reset only when the commanded mode *changes*.  The
+    listener re-issues the same mode every adjust tick; if each re-issue
+    reset the clock, a persisting conflict could never cross the grace
+    window (the reconciler would always see it as freshly commanded).
+    """
+    try:
+        from ._helpers import _dd
+
+        dd = _dd(hass)
+        if dd.commanded_work_mode != mode.value:
+            dd.commanded_work_mode = mode.value
+            dd.commanded_work_mode_at = dt_util.utcnow().isoformat()
+    except Exception:  # noqa: BLE001 — recording is best-effort
+        _LOGGER.debug("Failed to record commanded work mode (non-critical)")
+```
+
+- [ ] **Step 4 (Gap B): Run to verify both pass**
+
+Run: `python3 -m pytest tests/test_schedule_reconciliation.py::TestCommandedClockStability -v`
+Expected: both PASS.
+
+- [ ] **Step 5 (Gap A): Record commanded intent at the cloud session-start sites**
+
+In `custom_components/foxess_control/_services.py`, at EACH of the three cloud
+(non-entity) session-start `set_schedule` calls, record the commanded mode
+immediately AFTER the successful `await hass.async_add_executor_job(inverter.set_schedule, ...)`:
+
+- Charge (`_do_smart_charge`, ~`:682`): after the `set_schedule`, add
+  `_record_commanded_mode(hass, WorkMode.FORCE_CHARGE)`.
+- Discharge (`_do_smart_discharge`, ~`:404`): after its `set_schedule`, add
+  `_record_commanded_mode(hass, WorkMode.FORCE_DISCHARGE)`.
+- Feed-in (~`:285`): after its `set_schedule`, add
+  `_record_commanded_mode(hass, WorkMode.FEEDIN)`.
+
+Import `_record_commanded_mode` from `.foxess_adapter` at the top of
+`_services.py` (or a function-local import if there's a cycle — check; the
+adapter imports from `_helpers`, services likely already imports adapter
+symbols, so a top-level import is probably fine — verify ruff/import-cycle).
+
+Record ONLY on the cloud (`else`/non-entity) branch, immediately after the
+write succeeds (so a raised write does not record phantom intent — same
+principle as Task 3). Do NOT add recording to the `_apply_mode_via_entities`
+branches.
+
+- [ ] **Step 6 (Gap A): Verify no import cycle + services import cleanly**
+
+Run: `python3 -c "import custom_components.foxess_control._services; print('OK')"`
+Expected: `OK`.
+
+- [ ] **Step 7: Un-skip the E2E test and confirm it collects**
+
+In `tests/e2e/test_e2e.py`, remove the `pytest.skip(...)` from
+`test_schedule_not_applied_surfaces_repair` (keep the body). The grace in E2E
+is `poll_interval + 60`; confirm the test's `timeout_s` exceeds it with headroom
+(E2E polling is short, ~10–60s, so grace ≈ 70–120s; `timeout_s=240` is ample).
+
+Run: `python3 -m pytest tests/e2e/test_e2e.py -k schedule_not_applied --collect-only`
+Expected: collects without error. (Full E2E run requires the containerised
+harness; run it if available — `pytest tests/e2e/test_e2e.py -k schedule_not_applied -n auto` — and report whether it actually surfaced the Repair live. If the harness is unavailable in this environment, report collect-only + that the live run is deferred to CI.)
+
+- [ ] **Step 8: Pre-commit + commit**
+
+Run: `pre-commit run --files custom_components/foxess_control/foxess_adapter.py custom_components/foxess_control/_services.py tests/test_schedule_reconciliation.py tests/e2e/test_e2e.py 2>&1 | tail -20` → all pass.
+
+```bash
+git add custom_components/foxess_control/foxess_adapter.py custom_components/foxess_control/_services.py custom_components/foxess_control/smart_battery/ tests/test_schedule_reconciliation.py tests/e2e/test_e2e.py
+git commit -m "fix: record commanded mode at session start + don't reset grace clock on re-issue (issue #11)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
 ## Task 7: Changelog + final verification
 
 **Files:**
