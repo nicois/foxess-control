@@ -182,6 +182,7 @@ def reconcile_work_mode(
     try:
         from ._helpers import _dd
         from .smart_battery.reconcile import (
+            SELF_USE,
             ReconcileVerdict,
             reconcile_commanded_mode,
         )
@@ -197,7 +198,7 @@ def reconcile_work_mode(
             commanded, commanded_at, reported_mode, dt_util.utcnow(), grace
         )
         if verdict is ReconcileVerdict.CONFLICT:
-            reported = reported_mode or "SelfUse"
+            reported = reported_mode or SELF_USE
             record_operational_error(
                 _LOGGER,
                 _recent_errors(hass),
@@ -566,7 +567,6 @@ class FoxESSCloudAdapter:
         this horizon and reverts to self-use.
         """
         safe_end = self._safe_end(mode, power_w, fd_soc)
-        _record_commanded_mode(hass, mode)
 
         # Surface the horizon in session state for the Lovelace card
         if mode == WorkMode.FORCE_DISCHARGE and safe_end != self._end:
@@ -586,6 +586,7 @@ class FoxESSCloudAdapter:
                     g["endMinute"] = safe_end.minute
                     break
             await hass.async_add_executor_job(self._inverter.set_schedule, self._groups)
+            _record_commanded_mode(hass, mode)
             return
 
         # Slow path: build from scratch (initial call or post-recovery)
@@ -621,6 +622,7 @@ class FoxESSCloudAdapter:
             raise
         self._groups = groups
         await hass.async_add_executor_job(self._inverter.set_schedule, groups)
+        _record_commanded_mode(hass, mode)
 
     async def remove_override(
         self,
@@ -628,13 +630,13 @@ class FoxESSCloudAdapter:
         mode: WorkMode,
     ) -> None:
         """Remove the override, reverting to self-use."""
-        _record_commanded_mode(hass, WorkMode.SELF_USE)
         await hass.async_add_executor_job(
             _remove_mode_from_schedule,
             self._inverter,
             mode,
             self._min_soc_on_grid,
         )
+        _record_commanded_mode(hass, WorkMode.SELF_USE)
         self._groups = []
 
     async def set_export_limit_w(
