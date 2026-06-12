@@ -244,16 +244,6 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("Failed to fetch work mode, skipping", exc_info=True)
             data["_work_mode"] = None
 
-        # Reconcile the last-commanded mode against what the inverter
-        # actually reports (issue #11).  Detect-and-surface only; the
-        # reconciler swallows its own errors and never raises.
-        from .foxess_adapter import reconcile_work_mode
-
-        interval = self.update_interval or datetime.timedelta(
-            seconds=DEFAULT_POLLING_INTERVAL
-        )
-        reconcile_work_mode(self.hass, DOMAIN, data["_work_mode"], interval)
-
         return data
 
     async def _retry_pending_cleanup(self) -> None:
@@ -471,6 +461,18 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # This is the min cell temperature from the BMS — more operationally
         # relevant than the Open API's batTemperature (inverter sensor).
         await self._fetch_bms_temperature(data)
+
+        # Reconcile the last-commanded work mode against what the inverter
+        # actually reports (issue #11).  MUST run on the event loop (not in
+        # _fetch_all, which runs in an executor thread) because it may create/
+        # delete HA Repair issues, which assert event-loop affinity.  Detect-
+        # and-surface only; the reconciler swallows its own errors.
+        from .foxess_adapter import reconcile_work_mode
+
+        interval = self.update_interval or datetime.timedelta(
+            seconds=DEFAULT_POLLING_INTERVAL
+        )
+        reconcile_work_mode(self.hass, DOMAIN, data.get("_work_mode"), interval)
 
         # REST poll is authoritative — reset WebSocket feed-in integration
         self._ws_feedin_power_kw = 0.0
