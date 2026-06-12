@@ -224,7 +224,7 @@ async def handle_scheduler_enable(request: web.Request) -> web.Response:
                 return _api_response(None, errno=42023, msg="Time overlap")
 
     model = _model(request)
-    if getattr(model, "silent_drop_schedule", False):
+    if model.silent_drop_schedule:
         # Firmware ACKs but does not apply (issue #11 test seam).
         _LOGGER.info("Schedule silently dropped (silent_drop_schedule)")
         return _api_response(None)

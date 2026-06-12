@@ -101,6 +101,4 @@ class TestReconcileSurfacing:
         reconcile_work_mode(
             hass, DOMAIN, "ForceCharge", datetime.timedelta(seconds=300)
         )
-        assert not [i for i in _issues(hass) if i.active], (
-            "Issue should clear once modes reconcile"
-        )
+        assert not _issues(hass), "Issue should clear once modes reconcile"
