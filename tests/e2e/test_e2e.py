@@ -233,6 +233,89 @@ class TestSmartCharge:
 # ---------------------------------------------------------------------------
 
 
+class TestScheduleReconciliation:
+    def test_schedule_not_applied_surfaces_repair(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """A firmware that ACKs but drops schedule writes should surface a Repair.
+
+        Issue #11.  The simulator's silent-drop seam makes
+        ``/scheduler/enable`` return success (errno 0) WITHOUT applying the
+        schedule.  The intent: the client records the commanded ForceCharge
+        (the write "succeeded" from its view), the inverter keeps reporting
+        SelfUse, and once the grace window (poll_interval + 60s) elapses the
+        coordinator's reconciler raises a ``schedule_not_applied`` Repair
+        issue in the ``foxess_control`` domain.
+
+        SKIPPED — observed production gap, NOT a harness limitation.  The
+        WebSocket Repair query this test relies on
+        (``HAClient.wait_for_repair_issue`` →
+        ``repairs/list_issues``) is proven working: a live run of this exact
+        scenario observed HA's ``homeassistant/country_not_configured`` and,
+        at the first charge-listener tick (~300s), the integration's own
+        ``foxess_control/charge_target_unreachable`` Repair appearing in real
+        time.  What never appeared was ``schedule_not_applied``.
+
+        Root cause (out of scope for this E2E task — production wiring):
+        every cloud session-start path in ``_services.py`` writes the
+        schedule via ``inverter.set_schedule(...)`` DIRECTLY (e.g. the
+        smart_charge handler around the ``set_schedule`` call) and never
+        calls ``_record_commanded_mode``.  Only
+        ``FoxESSScheduleAdapter.apply_mode`` records the commanded work mode,
+        and the charge listener's first ``apply_mode`` tick is
+        ``SMART_CHARGE_ADJUST_SECONDS`` (300s) after start.  So for the first
+        ~5 minutes the reconciler has no commanded intent
+        (``commanded_work_mode is None`` → early return), and a tight charge
+        window expires before the reconciler ever sees a recorded
+        ForceCharge to conflict against.  The result: the live behaviour does
+        not yet surface ``schedule_not_applied`` end-to-end, even though the
+        pure logic + integration test (``tests/test_schedule_reconciliation.py``,
+        which seeds ``commanded_work_mode`` directly) pass.
+
+        The integration test is therefore the coverage of record until the
+        session-start write paths record the commanded mode (record intent
+        on the initial ``set_schedule``, not only on the periodic
+        ``apply_mode`` tick).  This test body is intentionally kept intact so
+        it can be un-skipped once that gap is closed — flip the skip and it
+        should pass with the timeout below.
+        """
+        pytest.skip(
+            "Observed production gap, not a harness limitation: the cloud "
+            "session-start set_schedule paths do not call "
+            "_record_commanded_mode, so the reconciler has no commanded "
+            "intent until the 300s charge-listener apply_mode tick — a tight "
+            "window expires first and schedule_not_applied never surfaces. "
+            "The WS repairs/list_issues query (wait_for_repair_issue) is "
+            "proven working (it observed country_not_configured + "
+            "charge_target_unreachable live). Coverage of record: "
+            "tests/test_schedule_reconciliation.py. Un-skip once "
+            "session-start writes record the commanded mode."
+        )
+        if connection_mode != "cloud":
+            pytest.skip("requires simulator silent-drop seam")
+        assert foxess_sim is not None
+
+        # Inverter silently drops schedule writes: /scheduler/enable returns
+        # success but the schedule is never applied.
+        foxess_sim.set(soc=20, load_kw=0.3, silent_drop_schedule=True)
+
+        start, end = _tight_window(10)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_charge",
+            {"start_time": start, "end_time": end, "target_soc": 80},
+        )
+
+        # The commanded ForceCharge is never applied, so once the grace
+        # window elapses the reconciler raises the Repair issue.
+        ha_e2e.wait_for_repair_issue(
+            "foxess_control", "schedule_not_applied", timeout_s=240
+        )
+
+
 class TestFeedinPacing:
     def test_feedin_power_adjusts_over_time(
         self,

@@ -314,6 +314,70 @@ class HAClient:
         finally:
             ws.close()
 
+    def list_repair_issues(self) -> list[dict[str, Any]]:
+        """Return the current HA Repair issues via the WS ``repairs/list`` command.
+
+        Repair issues are not exposed on the REST ``/api/states`` surface,
+        so this opens a short-lived authenticated WS connection (same
+        pattern as :meth:`enable_entity`), sends ``{"type": "repairs/list"}``,
+        and returns the ``result.issues`` list.  The actual WS command is
+        ``repairs/list_issues`` (registered by the HA ``repairs`` component).
+        Each issue dict carries at least ``domain`` and ``issue_id``.
+        """
+        import websocket as _ws
+
+        ws_url = self.base_url.replace("http://", "ws://") + "/api/websocket"
+        ws = _ws.create_connection(ws_url, timeout=10)
+        try:
+            msg = json.loads(ws.recv())
+            if msg["type"] != "auth_required":
+                raise RuntimeError(f"Expected auth_required, got {msg['type']}")
+            token = str(self._session.headers["Authorization"]).split(" ", 1)[1]
+            ws.send(json.dumps({"type": "auth", "access_token": token}))
+            msg = json.loads(ws.recv())
+            if msg["type"] != "auth_ok":
+                raise RuntimeError(f"Auth failed: {msg}")
+            ws.send(json.dumps({"id": 1, "type": "repairs/list_issues"}))
+            result = json.loads(ws.recv())
+            if not result.get("success"):
+                raise RuntimeError(f"repairs/list_issues failed: {result}")
+            return list(result.get("result", {}).get("issues", []))
+        finally:
+            ws.close()
+
+    def wait_for_repair_issue(
+        self,
+        domain: str,
+        issue_id: str,
+        timeout_s: float = 120,
+        poll_interval: float = 5.0,
+    ) -> dict[str, Any]:
+        """Poll ``repairs/list`` until a matching Repair issue appears.
+
+        Matches on both ``domain`` and ``issue_id``.  Returns the issue
+        dict on success; raises ``TimeoutError`` otherwise.
+        """
+        t0 = time.monotonic()
+        deadline = t0 + timeout_s
+        last: list[dict[str, Any]] = []
+        while time.monotonic() < deadline:
+            last = self.list_repair_issues()
+            for issue in last:
+                if issue.get("domain") == domain and issue.get("issue_id") == issue_id:
+                    _log.warning(
+                        "wait_for_repair_issue %s/%s: %.1fs",
+                        domain,
+                        issue_id,
+                        time.monotonic() - t0,
+                    )
+                    return issue
+            time.sleep(poll_interval)
+        seen = [(i.get("domain"), i.get("issue_id")) for i in last]
+        raise TimeoutError(
+            f"Repair issue {domain}/{issue_id} did not appear within "
+            f"{timeout_s}s (last seen: {seen})"
+        )
+
     def _wait_for_integration_ready(self, timeout_s: float = 15) -> None:
         """Poll until the integration's entities are available after reload."""
         deadline = time.monotonic() + timeout_s
