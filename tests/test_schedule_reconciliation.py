@@ -102,3 +102,54 @@ class TestReconcileSurfacing:
             hass, DOMAIN, "ForceCharge", datetime.timedelta(seconds=300)
         )
         assert not _issues(hass), "Issue should clear once modes reconcile"
+
+
+class TestCommandedClockStability:
+    @pytest.mark.asyncio
+    async def test_reissuing_same_mode_does_not_reset_grace_clock(
+        self, reconcile_hass: HomeAssistant
+    ) -> None:
+        from custom_components.foxess_control.foxess import WorkMode
+        from custom_components.foxess_control.foxess_adapter import (
+            _record_commanded_mode,
+        )
+
+        hass = reconcile_hass
+        dd = _dd(hass)
+        long_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=10)
+        dd.commanded_work_mode = WorkMode.FORCE_CHARGE.value
+        dd.commanded_work_mode_at = long_ago.isoformat()
+
+        # Re-issue the SAME mode now (mimics the listener's periodic apply_mode).
+        _record_commanded_mode(hass, WorkMode.FORCE_CHARGE)
+
+        recorded = datetime.datetime.fromisoformat(dd.commanded_work_mode_at)
+        age = datetime.datetime.now(datetime.UTC) - recorded
+        assert age > datetime.timedelta(minutes=5), (
+            "Re-issuing the same commanded mode reset the grace clock — a "
+            "persistent conflict would never cross the grace window"
+        )
+
+    @pytest.mark.asyncio
+    async def test_changing_mode_does_reset_clock(
+        self, reconcile_hass: HomeAssistant
+    ) -> None:
+        from custom_components.foxess_control.foxess import WorkMode
+        from custom_components.foxess_control.foxess_adapter import (
+            _record_commanded_mode,
+        )
+
+        hass = reconcile_hass
+        dd = _dd(hass)
+        long_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=10)
+        dd.commanded_work_mode = WorkMode.SELF_USE.value
+        dd.commanded_work_mode_at = long_ago.isoformat()
+
+        _record_commanded_mode(hass, WorkMode.FORCE_CHARGE)
+
+        assert dd.commanded_work_mode == WorkMode.FORCE_CHARGE.value
+        recorded = datetime.datetime.fromisoformat(dd.commanded_work_mode_at)
+        age = datetime.datetime.now(datetime.UTC) - recorded
+        assert age < datetime.timedelta(minutes=1), (
+            "A genuine mode change must reset the grace clock"
+        )

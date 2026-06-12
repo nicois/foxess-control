@@ -250,50 +250,16 @@ class TestScheduleReconciliation:
         coordinator's reconciler raises a ``schedule_not_applied`` Repair
         issue in the ``foxess_control`` domain.
 
-        SKIPPED — observed production gap, NOT a harness limitation.  The
-        WebSocket Repair query this test relies on
-        (``HAClient.wait_for_repair_issue`` →
-        ``repairs/list_issues``) is proven working: a live run of this exact
-        scenario observed HA's ``homeassistant/country_not_configured`` and,
-        at the first charge-listener tick (~300s), the integration's own
-        ``foxess_control/charge_target_unreachable`` Repair appearing in real
-        time.  What never appeared was ``schedule_not_applied``.
-
-        Root cause (out of scope for this E2E task — production wiring):
-        every cloud session-start path in ``_services.py`` writes the
-        schedule via ``inverter.set_schedule(...)`` DIRECTLY (e.g. the
-        smart_charge handler around the ``set_schedule`` call) and never
-        calls ``_record_commanded_mode``.  Only
-        ``FoxESSScheduleAdapter.apply_mode`` records the commanded work mode,
-        and the charge listener's first ``apply_mode`` tick is
-        ``SMART_CHARGE_ADJUST_SECONDS`` (300s) after start.  So for the first
-        ~5 minutes the reconciler has no commanded intent
-        (``commanded_work_mode is None`` → early return), and a tight charge
-        window expires before the reconciler ever sees a recorded
-        ForceCharge to conflict against.  The result: the live behaviour does
-        not yet surface ``schedule_not_applied`` end-to-end, even though the
-        pure logic + integration test (``tests/test_schedule_reconciliation.py``,
-        which seeds ``commanded_work_mode`` directly) pass.
-
-        The integration test is therefore the coverage of record until the
-        session-start write paths record the commanded mode (record intent
-        on the initial ``set_schedule``, not only on the periodic
-        ``apply_mode`` tick).  This test body is intentionally kept intact so
-        it can be un-skipped once that gap is closed — flip the skip and it
-        should pass with the timeout below.
+        Previously two production gaps made this inert in cloud mode and the
+        test was skipped: (1) cloud session-start paths in ``_services.py``
+        wrote the schedule via ``inverter.set_schedule(...)`` directly and
+        never recorded the commanded mode, so the reconciler had no intent
+        until the ~300s ``apply_mode`` tick; and (2) ``_record_commanded_mode``
+        reset the grace clock on every identical re-issue, so a persistent
+        conflict could never cross the grace window.  Both are fixed (issue
+        #11): session-start writes now call ``_record_commanded_mode`` and the
+        clock resets only on a genuine mode change.
         """
-        pytest.skip(
-            "Observed production gap, not a harness limitation: the cloud "
-            "session-start set_schedule paths do not call "
-            "_record_commanded_mode, so the reconciler has no commanded "
-            "intent until the 300s charge-listener apply_mode tick — a tight "
-            "window expires first and schedule_not_applied never surfaces. "
-            "The WS repairs/list_issues query (wait_for_repair_issue) is "
-            "proven working (it observed country_not_configured + "
-            "charge_target_unreachable live). Coverage of record: "
-            "tests/test_schedule_reconciliation.py. Un-skip once "
-            "session-start writes record the commanded mode."
-        )
         if connection_mode != "cloud":
             pytest.skip("requires simulator silent-drop seam")
         assert foxess_sim is not None

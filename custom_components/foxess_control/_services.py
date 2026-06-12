@@ -44,6 +44,7 @@ from .foxess_adapter import (
     _check_schedule_safe,
     _is_placeholder,
     _merge_with_existing,
+    _record_commanded_mode,
     _sanitize_group,
 )
 from .smart_battery.algorithms import (
@@ -283,6 +284,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 force,
             )
             await hass.async_add_executor_job(inverter.set_schedule, groups)
+            _record_commanded_mode(hass, WorkMode.FEEDIN)
 
     async def _do_smart_discharge(
         *,
@@ -402,6 +404,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     replace_conflicts,
                 )
                 await hass.async_add_executor_job(inverter.set_schedule, groups)
+                _record_commanded_mode(hass, WorkMode.FORCE_DISCHARGE)
 
         conditions = [
             f"window ends at {end.strftime('%H:%M')}",
@@ -682,6 +685,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     inverter.set_schedule,
                     initial_groups,
                 )
+                _record_commanded_mode(hass, WorkMode.FORCE_CHARGE)
 
         min_power_change = _cfg(hass).min_power_change
 

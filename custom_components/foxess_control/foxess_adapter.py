@@ -123,13 +123,20 @@ class ScheduleNotApplied(Exception):
 
 
 def _record_commanded_mode(hass: HomeAssistant, mode: WorkMode) -> None:
-    """Persist the work mode just commanded via a cloud schedule write."""
+    """Persist the work mode just commanded via a cloud schedule write.
+
+    The timestamp is reset only when the commanded mode *changes*.  The
+    listener re-issues the same mode every adjust tick; if each re-issue
+    reset the clock, a persisting conflict could never cross the grace
+    window (the reconciler would always see it as freshly commanded).
+    """
     try:
         from ._helpers import _dd
 
         dd = _dd(hass)
-        dd.commanded_work_mode = mode.value
-        dd.commanded_work_mode_at = dt_util.utcnow().isoformat()
+        if dd.commanded_work_mode != mode.value:
+            dd.commanded_work_mode = mode.value
+            dd.commanded_work_mode_at = dt_util.utcnow().isoformat()
     except Exception:  # noqa: BLE001 — recording is best-effort
         _LOGGER.debug("Failed to record commanded work mode (non-critical)")
 
