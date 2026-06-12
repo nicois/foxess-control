@@ -264,21 +264,33 @@ class TestScheduleReconciliation:
             pytest.skip("requires simulator silent-drop seam")
         assert foxess_sim is not None
 
+        # Shrink the poll cadence so the reconciler runs often and the grace
+        # window (poll_interval + 60s) is small.  At the default 300s poll the
+        # grace is 360s and the reconciler only evaluates every 5 min, so the
+        # Repair could not appear within a practical test timeout.  At 10s the
+        # grace is ~70s and the poll re-evaluates every 10s.
+        ha_e2e.set_options(polling_interval=10)
+
         # Inverter silently drops schedule writes: /scheduler/enable returns
         # success but the schedule is never applied.
         foxess_sim.set(soc=20, load_kw=0.3, silent_drop_schedule=True)
 
+        # SoC 20% → target 95% in a 10-min window needs ~immediate full-rate
+        # charging, so the session does NOT defer: it writes FORCE_CHARGE at
+        # session start and records the commanded mode right away.  (A
+        # deferred start would delay intent recording past the window.)
         start, end = _tight_window(10)
         ha_e2e.call_service(
             "foxess_control",
             "smart_charge",
-            {"start_time": start, "end_time": end, "target_soc": 80},
+            {"start_time": start, "end_time": end, "target_soc": 95},
         )
 
-        # The commanded ForceCharge is never applied, so once the grace
-        # window elapses the reconciler raises the Repair issue.
+        # The commanded ForceCharge is never applied (silent drop), so once the
+        # ~70s grace elapses the reconciler raises the Repair issue.  Generous
+        # headroom over the grace for poll jitter + reload settling.
         ha_e2e.wait_for_repair_issue(
-            "foxess_control", "schedule_not_applied", timeout_s=240
+            "foxess_control", "schedule_not_applied", timeout_s=150
         )
 
 
