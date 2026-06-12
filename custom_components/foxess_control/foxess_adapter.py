@@ -102,6 +102,131 @@ _WRITE_ERRORS: tuple[type[Exception], ...] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Work-mode reconciliation (issue #11): detect when the inverter ignores a
+# commanded schedule write and keeps reporting a different work mode.
+# ---------------------------------------------------------------------------
+
+# Additive margin on top of one poll interval before a persisting mode
+# mismatch is treated as a real conflict (issue #11).
+SCHEDULE_RECONCILE_MARGIN = datetime.timedelta(seconds=60)
+
+_SCHEDULE_NOT_APPLIED_ISSUE = "schedule_not_applied"
+
+
+class ScheduleNotApplied(Exception):
+    """The inverter's reported work mode diverges from what was commanded.
+
+    Constructed (not raised into control flow) to give
+    ``record_operational_error`` a BaseException with a useful message.
+    """
+
+
+def _record_commanded_mode(hass: HomeAssistant, mode: WorkMode) -> None:
+    """Persist the work mode just commanded via a cloud schedule write."""
+    try:
+        from ._helpers import _dd
+
+        dd = _dd(hass)
+        dd.commanded_work_mode = mode.value
+        dd.commanded_work_mode_at = dt_util.utcnow().isoformat()
+    except Exception:  # noqa: BLE001 — recording is best-effort
+        _LOGGER.debug("Failed to record commanded work mode (non-critical)")
+
+
+def _create_schedule_not_applied_issue(
+    hass: HomeAssistant,
+    domain: str,
+    *,
+    commanded: str,
+    reported: str,
+) -> None:
+    """Raise a Repair issue: the inverter is not applying schedule changes."""
+    try:
+        async_create_issue(
+            hass,
+            domain,
+            _SCHEDULE_NOT_APPLIED_ISSUE,
+            is_fixable=False,
+            severity=IssueSeverity.WARNING,
+            translation_key=_SCHEDULE_NOT_APPLIED_ISSUE,
+            translation_placeholders={
+                "commanded": commanded,
+                "reported": reported,
+            },
+        )
+    except Exception:  # noqa: BLE001 — Repair surfacing is best-effort
+        _LOGGER.debug("Failed to create schedule_not_applied issue (non-critical)")
+
+
+def _clear_schedule_not_applied_issue(hass: HomeAssistant, domain: str) -> None:
+    """Dismiss the schedule_not_applied Repair issue."""
+    try:
+        async_delete_issue(hass, domain, _SCHEDULE_NOT_APPLIED_ISSUE)
+    except Exception:  # noqa: BLE001
+        _LOGGER.debug("Failed to clear schedule_not_applied issue (non-critical)")
+
+
+def reconcile_work_mode(
+    hass: HomeAssistant,
+    domain: str,
+    reported_mode: str | None,
+    poll_interval: datetime.timedelta,
+) -> None:
+    """Reconcile the last-commanded work mode against the polled mode.
+
+    Detect-and-surface only (issue #11): on a confirmed conflict, record
+    an operational error and raise a Repair issue; clear the issue when
+    the modes reconcile.  Never raises — must not break the poll.
+    """
+    try:
+        from ._helpers import _dd
+        from .smart_battery.reconcile import (
+            ReconcileVerdict,
+            reconcile_commanded_mode,
+        )
+
+        dd = _dd(hass)
+        commanded = dd.commanded_work_mode
+        commanded_at_iso = dd.commanded_work_mode_at
+        if commanded is None or commanded_at_iso is None:
+            return
+        commanded_at = datetime.datetime.fromisoformat(commanded_at_iso)
+        grace = poll_interval + SCHEDULE_RECONCILE_MARGIN
+        verdict = reconcile_commanded_mode(
+            commanded, commanded_at, reported_mode, dt_util.utcnow(), grace
+        )
+        if verdict is ReconcileVerdict.CONFLICT:
+            reported = reported_mode or "SelfUse"
+            record_operational_error(
+                _LOGGER,
+                _recent_errors(hass),
+                category="schedule_not_applied",
+                attempted="reconcile commanded work mode against polled mode",
+                exc=ScheduleNotApplied(
+                    f"commanded {commanded} but inverter reports {reported}"
+                ),
+                hint=(
+                    "the inverter reports a different work mode than was "
+                    "commanded — it may not be applying schedule changes; "
+                    "check inverter firmware/compatibility"
+                ),
+                context={
+                    "commanded": commanded,
+                    "reported": reported,
+                    "since": commanded_at_iso,
+                },
+            )
+            _create_schedule_not_applied_issue(
+                hass, domain, commanded=commanded, reported=reported
+            )
+        elif verdict is ReconcileVerdict.OK:
+            _clear_schedule_not_applied_issue(hass, domain)
+        # WITHIN_GRACE: do nothing (neither surface nor clear yet).
+    except Exception:  # noqa: BLE001 — reconciliation must never break the poll
+        _LOGGER.debug("Work-mode reconciliation failed (non-critical)", exc_info=True)
+
+
 def _to_minutes(hour: int, minute: int) -> int:
     """Convert hour:minute to minutes since midnight."""
     return hour * 60 + minute
@@ -441,6 +566,7 @@ class FoxESSCloudAdapter:
         this horizon and reverts to self-use.
         """
         safe_end = self._safe_end(mode, power_w, fd_soc)
+        _record_commanded_mode(hass, mode)
 
         # Surface the horizon in session state for the Lovelace card
         if mode == WorkMode.FORCE_DISCHARGE and safe_end != self._end:
@@ -502,6 +628,7 @@ class FoxESSCloudAdapter:
         mode: WorkMode,
     ) -> None:
         """Remove the override, reverting to self-use."""
+        _record_commanded_mode(hass, WorkMode.SELF_USE)
         await hass.async_add_executor_job(
             _remove_mode_from_schedule,
             self._inverter,
