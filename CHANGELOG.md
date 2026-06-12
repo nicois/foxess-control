@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.22-beta.1
 
 ### Added
 - **Detect when the inverter ignores schedule changes** (issue #11). The integration now reconciles the work mode it commands against the mode the inverter actually reports on each poll (no extra API calls — it reuses the work mode the poll already reads). If the inverter keeps reporting a different mode well after a commanded change — e.g. it accepts a schedule write at the API but does not apply it, as some inverter firmware updates cause — a Repair issue is raised ("Inverter is not applying schedule changes") and the divergence is recorded in diagnostics. Detection only: it does not change control behaviour. Motivated by a report of smart charge running past the target SoC after an inverter firmware update.
