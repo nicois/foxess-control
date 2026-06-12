@@ -118,6 +118,10 @@ class InverterModel:
 
     # Schedule
     schedule_groups: list[ScheduleGroup] = field(default_factory=list)
+    # Test seam (issue #11): when True, /scheduler/enable returns success
+    # (errno 0) but does NOT apply the groups — models a firmware that
+    # ACKs the write at the API but silently fails to apply it.
+    silent_drop_schedule: bool = False
     schedule_enabled: bool = False
 
     # Min SoC thresholds
