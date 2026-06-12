@@ -13,7 +13,7 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, POLLED_VARIABLES
+from .const import DEFAULT_POLLING_INTERVAL, DOMAIN, POLLED_VARIABLES
 from .smart_battery.coordinator import EntityCoordinator as _EntityCoordinator
 from .smart_battery.coordinator import get_coordinator_soc as _get_coordinator_soc
 from .smart_battery.logging import record_operational_error
@@ -243,6 +243,16 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception:
             _LOGGER.debug("Failed to fetch work mode, skipping", exc_info=True)
             data["_work_mode"] = None
+
+        # Reconcile the last-commanded mode against what the inverter
+        # actually reports (issue #11).  Detect-and-surface only; the
+        # reconciler swallows its own errors and never raises.
+        from .foxess_adapter import reconcile_work_mode
+
+        interval = self.update_interval or datetime.timedelta(
+            seconds=DEFAULT_POLLING_INTERVAL
+        )
+        reconcile_work_mode(self.hass, DOMAIN, data["_work_mode"], interval)
 
         return data
 
