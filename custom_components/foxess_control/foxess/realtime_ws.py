@@ -71,10 +71,18 @@ _POWER_KEYS = (
 def _is_plausible(candidate: dict[str, Any], reference: dict[str, Any] | None) -> bool:
     """Return False if any power key in *candidate* diverges >10x from *reference*.
 
+    A pure, silent predicate: it answers "does *candidate* sit in the same
+    power regime as *reference*?" and nothing more.  It does NOT decide
+    whether to drop a frame — that decision belongs to
+    :meth:`FoxESSRealtimeWS._process_mapped_frame`, which uses this
+    predicate twice (against the last accepted frame AND against a pending
+    divergent frame) to tell a *sustained* legitimate transition apart from
+    a *transient* single-frame glitch.
+
     Edge cases preserved from the original coordinator-level filter:
-    - *reference* is ``None`` or missing the key → accept (first message).
-    - Reference value <= 0.1 kW → accept (ramp-up from near-zero).
-    - Candidate value == 0 → accept (genuine stop).
+    - *reference* is ``None`` or missing the key → True (first message).
+    - Reference value <= 0.1 kW → True (ramp-up from near-zero).
+    - Candidate value == 0 → True (genuine stop).
     """
     if reference is None:
         return True
@@ -88,13 +96,6 @@ def _is_plausible(candidate: dict[str, Any], reference: dict[str, Any] | None) -
             and cand_val > 0
             and (cand_val / ref_val > 10 or ref_val / cand_val > 10)
         ):
-            _LOGGER.warning(
-                "WS %s diverges >10x: candidate=%.4f, "
-                "last_accepted=%.4f — dropping anomalous message",
-                key,
-                cand_val,
-                ref_val,
-            )
             return False
     return True
 
@@ -264,6 +265,18 @@ class FoxESSRealtimeWS:
         self._no_reconnect = False
         self._last_useful_data: float = asyncio.get_event_loop().time()
         self._last_accepted: dict[str, Any] | None = None
+        # A divergent frame that has NOT yet been corroborated.  When a
+        # frame diverges >10x from ``_last_accepted`` we cannot yet tell a
+        # genuine regime change (idle→charge, charge→idle, discharge start)
+        # from a one-off garbage reading (the 2026-04-27 incident: frames
+        # flashing to ~20% of true value).  We hold the first divergent
+        # frame here and drop it; if the NEXT frame agrees with it (same
+        # new regime), the transition is *sustained* and we accept it.  A
+        # lone divergent frame followed by a return to the old regime is a
+        # *transient* glitch and stays dropped.  This bounds the blackhole
+        # to a single frame instead of "until a REST poll re-anchors the
+        # reference" (live 2026-06-15 charge-start data loss).
+        self._pending: dict[str, Any] | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -316,9 +329,79 @@ class FoxESSRealtimeWS:
         )
         await self._ws.send_str("getdata")
         self._last_accepted = None
+        self._pending = None
         self._connected = True
         self._last_useful_data = asyncio.get_event_loop().time()
         _LOGGER.info("FoxESS WebSocket connected (plant=%s)", self._plant_id)
+
+    def _process_mapped_frame(self, mapped: dict[str, Any]) -> dict[str, Any] | None:
+        """Decide whether a mapped WS frame should be injected.
+
+        Returns the frame to forward to the coordinator, or ``None`` if it
+        should be dropped.  Owns the ``_last_accepted`` / ``_pending``
+        corroboration state — the single place the plausibility filter
+        makes its accept/drop decision (the listen loop's ~line-401 call
+        site).
+
+        The filter must catch genuine single-frame anomalies (a transient
+        garbage reading — the 2026-04-27 incident) WITHOUT rejecting a
+        *sustained* legitimate transition (idle→charge, charge→idle,
+        discharge start).  A real transition is corroborated across
+        consecutive frames; a glitch is not.  The single-frame >10x guard
+        (``_is_plausible``) alone cannot tell them apart, so it dropped
+        every frame of a charge start until a REST poll re-anchored the
+        reference (live 2026-06-15: idle batChargePower≈0.359 kW → ≈10 kW
+        was a 27x jump, above the 0.1 kW near-zero exemption).
+
+        Algorithm (confirm-before-drop / accept-on-repeat):
+
+        * In-regime (plausible vs ``_last_accepted``) → accept, clear any
+          pending divergent frame.
+        * Divergent, and a pending frame exists that the candidate AGREES
+          with (same new regime) → the new regime is *sustained*: accept
+          and re-anchor.  Only the very first frame of the transition was
+          dropped.
+        * Divergent with no corroboration → hold as pending and drop.  If
+          the next frame returns to the old regime, the pending frame was a
+          lone glitch and stays dropped (cleared on the next in-regime
+          accept).
+
+        Preserves the original edge cases via ``_is_plausible``: no
+        reference / missing key / near-zero reference / candidate==0 are
+        all "plausible" and accepted on the first branch.  C-004 (the
+        watts→kW mapping) and C-005 (stale-frame discard) are handled
+        upstream and untouched.
+        """
+        if _is_plausible(mapped, self._last_accepted):
+            self._last_accepted = mapped
+            self._pending = None
+            return mapped
+
+        # Divergent from the last accepted regime.  Corroborated by the
+        # pending frame?  (Both diverge from the stale reference but agree
+        # with EACH OTHER → a sustained new regime, not a one-off.)
+        if self._pending is not None and _is_plausible(mapped, self._pending):
+            _LOGGER.info(
+                "WS divergent regime corroborated by consecutive frames "
+                "— accepting transition (last_accepted=%s, now=%s)",
+                self._last_accepted,
+                mapped,
+            )
+            self._last_accepted = mapped
+            self._pending = None
+            return mapped
+
+        # First (or uncorroborated) divergent frame — hold and drop.  A
+        # genuine transition is confirmed by the next frame; a transient
+        # glitch is discarded when the stream returns to the old regime.
+        _LOGGER.warning(
+            "WS frame diverges >10x from last accepted (%s vs %s) "
+            "— holding for corroboration, dropping this frame",
+            mapped,
+            self._last_accepted,
+        )
+        self._pending = mapped
+        return None
 
     async def _listen_loop(self) -> None:
         """Receive messages, reconnect on failure."""
@@ -398,12 +481,12 @@ class FoxESSRealtimeWS:
 
             mapped = map_ws_to_coordinator(data)
             if mapped:
-                if not _is_plausible(mapped, self._last_accepted):
+                accepted = self._process_mapped_frame(mapped)
+                if accepted is None:
                     continue
-                self._last_accepted = mapped
                 self._last_useful_data = asyncio.get_event_loop().time()
                 try:
-                    await self._on_data(mapped)
+                    await self._on_data(accepted)
                 except Exception:
                     _LOGGER.debug("Error in WebSocket data callback", exc_info=True)
 
