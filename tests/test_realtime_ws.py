@@ -629,6 +629,240 @@ class TestWsPlausibilityFilter:
         assert ws2._last_accepted is None
 
 
+class TestSustainedTransitionAccepted:
+    """Regression: a SUSTAINED legitimate power transition (idle→charge,
+    charge→idle, discharge start) must be accepted, while a TRANSIENT
+    single-frame glitch is still rejected.
+
+    Live symptom (2026-06-15, UTC; smart charge start)::
+
+        01:02:33 WS batChargePower diverges >10x: candidate=10.0000,
+                 last_accepted=0.3590 — dropping anomalous message
+        01:02:37 ... candidate=9.9500, last_accepted=0.3590 — dropping
+        (repeats every ~5s until 01:05:02 when a REST poll re-anchors
+         last_accepted to a charging-scale value)
+
+    The idle reference (batChargePower≈0.359 kW) is above the 0.1 kW
+    near-zero floor, so the ramp-up exemption does not apply, and every
+    charging-scale frame (~10 kW, a 27× jump) is dropped by the bare
+    single-frame >10× guard.  With no WS frame accepted, nothing is
+    injected — the ``data_freshness`` badge sticks on ``api`` and the WS
+    goes stale→disconnect→reconnect every ~30s until a REST poll
+    re-anchors the reference.
+
+    The fix must distinguish a *sustained* new regime (corroborated by
+    consecutive frames) from a *transient* glitch (one frame, then back
+    to the old regime).  Both directions and all power keys.
+    """
+
+    # ----- frame-processing path: the public method the listen loop calls
+    # to decide whether a mapped frame is forwarded.  ``_process_mapped_frame``
+    # owns the corroboration state (pending divergent regime) and the
+    # ``_last_accepted`` update — the same logic the listen loop runs at its
+    # ~line 401 call site.  These tests drive that real path with a SEQUENCE
+    # of frames. -----
+
+    @staticmethod
+    def _run_sequence(
+        ws: FoxESSRealtimeWS, frames: list[dict[str, float]]
+    ) -> list[dict[str, float]]:
+        """Feed mapped frames through the public frame-processing path and
+        return the list of frames that would be injected (reach on_data)."""
+        injected: list[dict[str, float]] = []
+        for frame in frames:
+            out = ws._process_mapped_frame(frame)
+            if out is not None:
+                injected.append(out)
+        return injected
+
+    @staticmethod
+    def _ws() -> FoxESSRealtimeWS:
+        return FoxESSRealtimeWS("plant1", AsyncMock(), AsyncMock(), MagicMock())
+
+    @pytest.mark.asyncio
+    async def test_idle_to_charge_sustained_accepted(self) -> None:
+        """idle batChargePower≈0.36 → sustained ≈10 kW must be injected."""
+        ws = self._ws()
+        ws._last_accepted = {"batChargePower": 0.359, "batDischargePower": 0.0}
+        frames = [
+            {"batChargePower": 10.0, "batDischargePower": 0.0},
+            {"batChargePower": 9.95, "batDischargePower": 0.0},
+            {"batChargePower": 10.02, "batDischargePower": 0.0},
+        ]
+        injected = self._run_sequence(ws, frames)
+        # The sustained charging regime must reach the coordinator — the
+        # bug drops ALL of these (0 injected).
+        assert len(injected) >= 2, (
+            f"sustained idle→charge transition dropped: only {len(injected)} "
+            f"of {len(frames)} charging frames injected (symptom: every "
+            f"charging frame rejected, nothing injected)"
+        )
+        assert injected[-1]["batChargePower"] == 10.02
+        assert ws._last_accepted["batChargePower"] == 10.02
+
+    @pytest.mark.asyncio
+    async def test_charge_to_idle_sustained_accepted(self) -> None:
+        """≈10 kW → sustained idle ≈0.36 kW (inverse) must be injected."""
+        ws = self._ws()
+        ws._last_accepted = {"batChargePower": 10.0, "batDischargePower": 0.0}
+        frames = [
+            {"batChargePower": 0.36, "batDischargePower": 0.0},
+            {"batChargePower": 0.35, "batDischargePower": 0.0},
+            {"batChargePower": 0.37, "batDischargePower": 0.0},
+        ]
+        injected = self._run_sequence(ws, frames)
+        assert len(injected) >= 2, (
+            f"sustained charge→idle transition dropped: only {len(injected)} injected"
+        )
+        assert ws._last_accepted["batChargePower"] == 0.37
+
+    @pytest.mark.asyncio
+    async def test_discharge_start_sustained_accepted(self) -> None:
+        """batDischargePower idle→high sustained must be injected."""
+        ws = self._ws()
+        ws._last_accepted = {"batChargePower": 0.0, "batDischargePower": 0.3}
+        frames = [
+            {"batChargePower": 0.0, "batDischargePower": 5.5},
+            {"batChargePower": 0.0, "batDischargePower": 5.4},
+            {"batChargePower": 0.0, "batDischargePower": 5.6},
+        ]
+        injected = self._run_sequence(ws, frames)
+        assert len(injected) >= 2, (
+            f"sustained discharge start dropped: only {len(injected)} injected"
+        )
+        assert ws._last_accepted["batDischargePower"] == 5.6
+
+    @pytest.mark.asyncio
+    async def test_transient_single_frame_glitch_still_rejected(self) -> None:
+        """The filter's real job: a TRUE one-off glitch (steady ≈10 kW, ONE
+        frame at 0.8 kW, then back to ≈10 kW) must be REJECTED.
+
+        This is the 2026-04-27 incident the filter was built for — a lone
+        anomalous frame must NOT corrupt displayed power.
+        """
+        ws = self._ws()
+        ws._last_accepted = {"batChargePower": 10.0, "batDischargePower": 0.0}
+        frames = [
+            {"batChargePower": 9.9, "batDischargePower": 0.0},  # normal
+            {"batChargePower": 0.8, "batDischargePower": 0.0},  # GLITCH
+            {"batChargePower": 10.1, "batDischargePower": 0.0},  # back to normal
+            {"batChargePower": 9.95, "batDischargePower": 0.0},  # normal
+        ]
+        injected = self._run_sequence(ws, frames)
+        glitch_values = [f["batChargePower"] for f in injected]
+        assert 0.8 not in glitch_values, (
+            f"transient single-frame glitch leaked through: {glitch_values}"
+        )
+        # The three normal frames are all injected.
+        assert len(injected) == 3, f"normal frames dropped: {glitch_values}"
+
+    @pytest.mark.asyncio
+    async def test_exactly_10x_accepted(self) -> None:
+        """Boundary: exactly 10× is accepted (strict > 10)."""
+        ws = self._ws()
+        ws._last_accepted = {"batChargePower": 1.0, "batDischargePower": 0.0}
+        out = ws._process_mapped_frame(
+            {"batChargePower": 10.0, "batDischargePower": 0.0}
+        )
+        assert out is not None
+        assert ws._last_accepted["batChargePower"] == 10.0
+
+    @pytest.mark.asyncio
+    async def test_zero_candidate_genuine_stop_accepted(self) -> None:
+        """candidate batChargePower==0 (genuine stop) always accepted."""
+        ws = self._ws()
+        ws._last_accepted = {"batChargePower": 10.0, "batDischargePower": 0.0}
+        out = ws._process_mapped_frame(
+            {"batChargePower": 0.0, "batDischargePower": 0.0}
+        )
+        assert out is not None
+        assert ws._last_accepted["batChargePower"] == 0.0
+
+    # ----- integration level: drive the real listen loop -----
+
+    @staticmethod
+    def _charge_msg(charge_w: float, soc: int = 50) -> aiohttp.WSMessage:
+        import json
+
+        return aiohttp.WSMessage(
+            type=aiohttp.WSMsgType.TEXT,
+            data=json.dumps(
+                {
+                    "errno": 0,
+                    "result": {
+                        "node": {
+                            "solar": {"power": {"value": "0"}},
+                            "grid": {
+                                "power": {"value": str(charge_w)},
+                                "gridStatus": 3,
+                            },
+                            "bat": {
+                                "power": {"value": str(charge_w)},
+                                "soc": soc,
+                                "charge": 1,
+                            },
+                            "load": {"power": {"value": "0"}},
+                        },
+                        "timeDiff": 5,
+                    },
+                }
+            ),
+            extra=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_listen_loop_injects_sustained_charge_transition(self) -> None:
+        """Through the REAL listen loop: an idle→charge transition where the
+        first accepted frame is idle-scale, then sustained ~10 kW frames,
+        must reach on_data — not be black-holed.
+        """
+        on_data = AsyncMock()
+        on_disconnect = MagicMock()
+        web_session = AsyncMock()
+        web_session.async_ensure_token = AsyncMock(return_value="tok")
+
+        ws = FoxESSRealtimeWS("plant1", web_session, on_data, on_disconnect)
+
+        messages = [
+            self._charge_msg(359),  # idle-scale — first frame, accepted
+            self._charge_msg(10000),  # charge start — diverges 27× from idle
+            self._charge_msg(9950),  # sustained charging
+            self._charge_msg(10020),  # sustained charging
+            aiohttp.WSMessage(type=aiohttp.WSMsgType.CLOSED, data=None, extra=None),
+        ]
+
+        mock_ws = AsyncMock()
+        mock_ws.receive = AsyncMock(side_effect=messages)
+        mock_ws.closed = True
+        ws._ws = mock_ws
+        ws._connected = True
+        ws._stop_event.clear()
+
+        with patch.object(
+            ws, "_try_reconnect", new_callable=AsyncMock
+        ) as mock_reconnect:
+
+            async def _fail_reconnect() -> None:
+                ws._connected = False
+
+            mock_reconnect.side_effect = _fail_reconnect
+            await ws._listen_loop()
+
+        # The idle frame plus the sustained charging regime must reach
+        # on_data.  The bug forwards only the idle frame (1 call) and
+        # drops every ~10 kW charging frame.
+        injected_charge = [
+            c.args[0]["batChargePower"]
+            for c in on_data.call_args_list
+            if c.args[0].get("batChargePower", 0) > 5
+        ]
+        assert len(injected_charge) >= 2, (
+            f"listen loop black-holed the charge transition: only "
+            f"{on_data.call_count} total frames injected, charging frames "
+            f"forwarded={injected_charge} (symptom: badge stuck on api)"
+        )
+
+
 class TestReconnectRespectsGate:
     """Regression (FOURTH, distinct from the three start-gate fixes): the
     autonomous reconnect loop must NOT resurrect the connection when the
