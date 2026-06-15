@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.22-beta.2
 
 ### Fixed
 - **WebSocket data was discarded for the first few minutes of every smart session** (C-020). The realtime-frame plausibility filter — which drops a single anomalous frame whose power diverges >10× from the last accepted value — also rejected the *legitimate* power jump at a session's start (idle `batChargePower` ≈0.36 kW → forced-charge ≈10 kW is a 27× jump, above the 0.1 kW near-zero exemption). Every frame was dropped until a REST poll happened to re-anchor the reference to a charging-scale value, so `sensor.foxess_data_freshness` stayed on `api` (not `ws`) for ~3–5 minutes after each charge/discharge start, and the WebSocket repeatedly went stale → disconnected → reconnected in that window (live 2026-06-15). Root cause: the >10× guard compared each frame only against the last accepted value and could not distinguish a *sustained* legitimate transition from a *transient* one-off glitch. Fix: the filter now confirms a divergent reading against the next frame — a transition corroborated by consecutive frames is accepted (after dropping only the first frame), while a lone glitch that is not corroborated is still discarded (preserving the anti-glitch protection added for the 2026-04-27 single-sample-dip incident). Bounds the worst-case data gap to one frame (~5 s) instead of minutes, in both directions (idle→active and active→idle). Regression class `tests/test_realtime_ws.py::TestSustainedTransitionAccepted`.
