@@ -158,6 +158,14 @@ class FoxESSControlData(SmartBatteryDomainData):
     commanded_work_mode_at: str | None = None
     commanded_kind: str | None = None
 
+    # Live inverter schedule captured by the startup reconcile, for the
+    # diagnostics download (issue #11).  Snapshot is the groups as fetched;
+    # _at is an ISO-8601 UTC timestamp; _reconcile is the outcome record
+    # ({action, orphans, detail}).  None until the first startup reconcile.
+    last_schedule_snapshot: list[dict[str, Any]] | None = None
+    last_schedule_snapshot_at: str | None = None
+    last_schedule_reconcile: dict[str, Any] | None = None
+
     # Proactive schedule conflict detection
     upcoming_conflicts: list[str] = field(default_factory=list)
 
