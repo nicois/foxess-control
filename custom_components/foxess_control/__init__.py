@@ -121,6 +121,9 @@ from ._helpers import (
 from ._helpers import (
     _save_taper_profile as _save_taper_profile,
 )
+from ._schedule_reconcile import (
+    reconcile_schedule as reconcile_schedule,
+)
 from .const import (
     CONF_API_KEY,
     CONF_DEVICE_SERIAL,
@@ -1508,6 +1511,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Recover smart sessions persisted before a restart
     await _recover_sessions(hass, inverter)
+
+    # Remove any orphaned managed schedule group left in the inverter when a
+    # prior session's teardown did not complete (issue #11).  Runs after
+    # recovery so resumed sessions are reflected.  Cloud-only; never raises.
+    await reconcile_schedule(hass, inverter)
 
     # Notify coordinator so sensors reflect recovered session state immediately
     # (otherwise RestoreSensor shows stale text until the first poll).
