@@ -2,9 +2,25 @@
 
 from __future__ import annotations
 
+import datetime
 from typing import Any
+from unittest.mock import MagicMock
 
-from custom_components.foxess_control._schedule_reconcile import find_orphan_modes
+import pytest
+import pytest_asyncio
+
+from custom_components.foxess_control._helpers import _dd
+from custom_components.foxess_control._schedule_reconcile import (
+    find_orphan_modes,
+    reconcile_schedule,
+)
+from custom_components.foxess_control.const import DOMAIN
+from custom_components.foxess_control.domain_data import (
+    FoxESSControlData,
+    IntegrationConfig,
+)
+from custom_components.foxess_control.foxess.client import FoxESSClient
+from custom_components.foxess_control.foxess.inverter import Inverter, ScheduleGroup
 
 
 def _g(mode: str, sh: int, eh: int, enable: int = 1) -> dict[str, Any]:
@@ -56,3 +72,155 @@ class TestFindOrphanModes:
         assert find_orphan_modes(groups, covered_modes={"ForceCharge"}) == [
             "ForceDischarge"
         ]
+
+
+# --- Integration tests: the async reconcile_schedule orchestrator ---------
+
+
+@pytest.fixture(autouse=True)
+def _fast_client() -> None:
+    FoxESSClient.MIN_REQUEST_INTERVAL = 0.0
+
+
+@pytest_asyncio.fixture  # type: ignore[untyped-decorator]
+async def reconcile_hass() -> Any:
+    # HomeAssistant() captures the running event loop in __init__, so it must
+    # be built inside an async context (mirrors tests/test_schedule_reconciliation.py).
+    from homeassistant.core import HomeAssistant
+    from homeassistant.helpers import issue_registry as ir
+
+    ha = HomeAssistant("/tmp")
+    ha.data[ir.DATA_REGISTRY] = ir.IssueRegistry(ha)
+    ha.verify_event_loop_thread = MagicMock()  # type: ignore[method-assign]
+    dd = FoxESSControlData()
+    dd.config = IntegrationConfig(
+        min_soc_on_grid=11,
+        api_min_soc=11,
+        battery_capacity_kwh=10.0,
+        min_power_change=100,
+        max_power_w=10000,
+        grid_export_limit_w=5000,
+        smart_headroom=0.10,
+        bms_polling_interval=300.0,
+        ws_mode="auto",
+        entity_mode=False,
+    )
+    ha.data[DOMAIN] = dd
+    return ha
+
+
+def _inv(sim: Any) -> Inverter:
+    return Inverter(FoxESSClient("k", base_url=sim.url), "SIM0001")
+
+
+def _force_charge_group() -> ScheduleGroup:
+    return {
+        "enable": 1,
+        "startHour": 11,
+        "startMinute": 0,
+        "endHour": 13,
+        "endMinute": 59,
+        "workMode": "ForceCharge",
+        "minSocOnGrid": 11,
+        "fdSoc": 100,
+        "fdPwr": 10000,
+    }
+
+
+def _backup_group() -> ScheduleGroup:
+    # Window must NOT overlap _force_charge_group (11:00-13:59); the FoxESS API
+    # rejects overlapping schedule windows (errno 42023 "Time overlap").
+    return {
+        "enable": 1,
+        "startHour": 14,
+        "startMinute": 0,
+        "endHour": 23,
+        "endMinute": 59,
+        "workMode": "Backup",
+        "minSocOnGrid": 20,
+        "fdSoc": 20,
+        "fdPwr": 0,
+    }
+
+
+def _enabled_managed(inv: Inverter) -> list[str]:
+    sched = inv.get_schedule()
+    return [
+        g["workMode"]
+        for g in sched.get("groups", [])
+        if g.get("enable") == 1
+        and g.get("workMode") in ("ForceCharge", "ForceDischarge", "Feedin")
+    ]
+
+
+class TestReconcileOrchestrator:
+    @pytest.mark.asyncio
+    async def test_orphan_force_charge_removed(
+        self, foxess_sim: Any, reconcile_hass: Any
+    ) -> None:
+        inv = _inv(foxess_sim)
+        inv.set_schedule([_force_charge_group()])
+        await reconcile_schedule(reconcile_hass, inv)
+        assert _enabled_managed(inv) == []
+        dd = _dd(reconcile_hass)
+        assert any(
+            e.get("category") == "orphaned_schedule_removed" for e in dd.recent_errors
+        )
+        assert dd.last_schedule_reconcile is not None
+        assert dd.last_schedule_reconcile["action"] == "removed"
+
+    @pytest.mark.asyncio
+    async def test_covered_group_kept(
+        self, foxess_sim: Any, reconcile_hass: Any
+    ) -> None:
+        inv = _inv(foxess_sim)
+        inv.set_schedule([_force_charge_group()])
+        now = datetime.datetime.now(datetime.UTC)
+        # window must MATCH the group (start 11:00, end 13:59) for coverage
+        start = now.replace(hour=11, minute=0, second=0, microsecond=0)
+        end = now.replace(hour=13, minute=59, second=0, microsecond=0)
+        _dd(reconcile_hass).smart_charge_state = {
+            "start": start,
+            "end": end,
+            "target_soc": 100,
+        }
+        await reconcile_schedule(reconcile_hass, inv)
+        assert _enabled_managed(inv) == ["ForceCharge"]
+        reconcile = _dd(reconcile_hass).last_schedule_reconcile
+        assert reconcile is not None
+        assert reconcile["action"] == "none"
+
+    @pytest.mark.asyncio
+    async def test_unmanaged_mode_blocks_removal(
+        self, foxess_sim: Any, reconcile_hass: Any
+    ) -> None:
+        inv = _inv(foxess_sim)
+        inv.set_schedule([_force_charge_group(), _backup_group()])
+        await reconcile_schedule(reconcile_hass, inv)
+        assert "ForceCharge" in _enabled_managed(inv)
+        reconcile = _dd(reconcile_hass).last_schedule_reconcile
+        assert reconcile is not None
+        assert reconcile["action"] == "blocked_unmanaged"
+
+    @pytest.mark.asyncio
+    async def test_no_orphan_no_write(
+        self, foxess_sim: Any, reconcile_hass: Any
+    ) -> None:
+        inv = _inv(foxess_sim)
+        self_use: ScheduleGroup = {
+            "enable": 1,
+            "startHour": 0,
+            "startMinute": 0,
+            "endHour": 23,
+            "endMinute": 59,
+            "workMode": "SelfUse",
+            "minSocOnGrid": 11,
+            "fdSoc": 11,
+            "fdPwr": 10000,
+        }
+        inv.set_schedule([self_use])
+        await reconcile_schedule(reconcile_hass, inv)
+        reconcile = _dd(reconcile_hass).last_schedule_reconcile
+        assert reconcile is not None
+        assert reconcile["action"] == "none"
+        assert _dd(reconcile_hass).last_schedule_snapshot is not None
