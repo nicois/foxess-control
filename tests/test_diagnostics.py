@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 from custom_components.foxess_control.const import DOMAIN
 from custom_components.foxess_control.diagnostics import (
+    _schedule_section,
     async_get_config_entry_diagnostics,
 )
 
@@ -119,3 +120,40 @@ def test_diagnostics_redacts_secrets_everywhere() -> None:
     assert "SN123" not in flat
     assert "LEAKED" not in flat
     assert "SN999" not in flat
+
+
+class TestScheduleSection:
+    def test_reports_cached_snapshot_and_outcome(self) -> None:
+        from custom_components.foxess_control.domain_data import FoxESSControlData
+
+        dd = FoxESSControlData()
+        dd.last_schedule_snapshot = [
+            {"enable": 1, "workMode": "SelfUse", "startHour": 0, "endHour": 23}
+        ]
+        dd.last_schedule_snapshot_at = "2026-06-18T01:00:00+00:00"
+        dd.last_schedule_reconcile = {
+            "action": "removed",
+            "orphans": ["ForceCharge"],
+            "detail": "removed ['ForceCharge']",
+        }
+        out = _schedule_section(dd, entity_mode=False)
+        assert isinstance(out, dict)
+        assert out["as_of"] == "2026-06-18T01:00:00+00:00"
+        assert out["groups"][0]["workMode"] == "SelfUse"
+        assert out["reconcile"]["action"] == "removed"
+
+    def test_entity_mode_reports_na(self) -> None:
+        from custom_components.foxess_control.domain_data import FoxESSControlData
+
+        dd = FoxESSControlData()
+        out = _schedule_section(dd, entity_mode=True)
+        assert out == "n/a (entity mode)"
+
+    def test_no_snapshot_yet(self) -> None:
+        from custom_components.foxess_control.domain_data import FoxESSControlData
+
+        dd = FoxESSControlData()
+        out = _schedule_section(dd, entity_mode=False)
+        assert isinstance(out, dict)
+        assert out["as_of"] is None
+        assert out["groups"] is None

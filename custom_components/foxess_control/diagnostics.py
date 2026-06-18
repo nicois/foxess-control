@@ -89,6 +89,13 @@ async def async_get_config_entry_diagnostics(
     }
     recent_errors = list(getattr(domain_data, "recent_errors", []))
 
+    from ._helpers import _cfg
+
+    try:
+        _entity_mode = _cfg(hass).entity_mode
+    except Exception:  # diagnostics must never raise
+        _entity_mode = False
+
     return async_redact_data(
         {
             "entry": {
@@ -106,9 +113,27 @@ async def async_get_config_entry_diagnostics(
             "taper_profile": taper.to_dict() if taper else None,
             "environment": environment,
             "recent_errors": recent_errors,
+            "schedule": _schedule_section(domain_data, _entity_mode),
         },
         REDACT_KEYS,
     )
+
+
+def _schedule_section(
+    domain_data: FoxESSControlData, entity_mode: bool
+) -> dict[str, Any] | str:
+    """Report the live schedule snapshot + reconcile outcome from the cache.
+
+    Sourced from the startup reconcile's cached snapshot (no live API call
+    on the diagnostics path).  Entity mode has no cloud schedule.
+    """
+    if entity_mode:
+        return "n/a (entity mode)"
+    return {
+        "as_of": getattr(domain_data, "last_schedule_snapshot_at", None),
+        "groups": getattr(domain_data, "last_schedule_snapshot", None),
+        "reconcile": getattr(domain_data, "last_schedule_reconcile", None),
+    }
 
 
 def _safe_session(state: dict[str, Any] | None) -> dict[str, Any] | None:
