@@ -15,6 +15,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from .foxess import WorkMode
+
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
@@ -24,7 +26,11 @@ _LOGGER = logging.getLogger(__name__)
 
 # Managed override modes (the managed set minus SelfUse).  An enabled
 # group in one of these modes that no session covers is an orphan.
-_MANAGED_OVERRIDE_MODES = ("ForceCharge", "ForceDischarge", "Feedin")
+_MANAGED_OVERRIDE_MODES = (
+    WorkMode.FORCE_CHARGE.value,
+    WorkMode.FORCE_DISCHARGE.value,
+    WorkMode.FEEDIN.value,
+)
 
 
 def find_orphan_modes(
@@ -61,8 +67,9 @@ async def reconcile_schedule(hass: HomeAssistant, inverter: Inverter | None) -> 
     any resumed session.  Cloud backend only.  Never raises — must not
     break integration setup.
     """
+    from homeassistant.util import dt as dt_util
+
     from ._helpers import _cfg, _dd
-    from .foxess import WorkMode
     from .foxess_adapter import (
         _MANAGED_WORK_MODES,
         _is_placeholder,
@@ -87,8 +94,6 @@ async def reconcile_schedule(hass: HomeAssistant, inverter: Inverter | None) -> 
             }
             _LOGGER.warning("Startup schedule reconcile: get_schedule failed: %s", err)
             return
-
-        from homeassistant.util import dt as dt_util
 
         groups = [g for g in schedule.get("groups", []) if not _is_placeholder(g)]
         # 2. Cache the snapshot regardless of outcome (feature B).
