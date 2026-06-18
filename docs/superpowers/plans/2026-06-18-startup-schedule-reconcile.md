@@ -239,9 +239,18 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 - Modify: `custom_components/foxess_control/_schedule_reconcile.py` (add `reconcile_schedule`)
 - Test: `tests/test_schedule_reconcile.py` (add simulator-backed integration tests)
 
+**IMPORTANT — how to seed the simulator schedule:** `SimulatorHandle`
+(`tests/conftest.py`) is an HTTP backchannel and does NOT expose `.model`.
+The test snippet below uses `foxess_sim.model.set_schedule(...)` as
+shorthand — REPLACE every such call with seeding through the real Inverter:
+build `inv = Inverter(FoxESSClient("k", base_url=foxess_sim.url), "SIM0001")`
+FIRST, then `inv.set_schedule([group, ...])` (which POSTs to
+`/scheduler/enable` on the sim), then `await reconcile_schedule(hass, inv)`,
+then assert via `inv.get_schedule()`. `.model` does not exist on the handle.
+
 - [ ] **Step 1: Write the failing integration test**
 
-Append to `tests/test_schedule_reconcile.py`:
+Append to `tests/test_schedule_reconcile.py` (seed via `inv.set_schedule`, NOT `foxess_sim.model`):
 
 ```python
 import datetime
