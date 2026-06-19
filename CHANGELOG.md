@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.22-beta.3
 
 ### Fixed
 - **Orphaned schedule groups are now cleared on startup** (issue #11, C-025). A FoxESS schedule group recurs daily, so a managed group (Force Charge / Force Discharge / Feed-in) left in the inverter by a smart session whose teardown did not complete — e.g. Home Assistant restarted mid-session, or the inverter accepted but did not apply the removal write — would re-fire at that window every day with the integration unaware. On startup, after session recovery, the integration now reads the live inverter schedule and removes any managed group that no active session covers, logging it and recording it in diagnostics. If an unmanaged mode (e.g. Backup) is present it does not modify the schedule (C-018) and surfaces the leftover instead. The diagnostics download now also includes the live inverter schedule (as of the last startup) so a leftover group is directly visible. Coverage is matched on work mode only (mirroring the in-session coverage check), not the exact schedule window, so a just-resumed session whose live group has a C-027 safe-horizon end (earlier than the planned window) is not wrongly removed. Note: a Force Charge / Force Discharge / Feed-in schedule group created manually in the FoxESS app (with no active smart session) is treated as an orphan and removed on startup; use an unmanaged mode (e.g. Backup) or the integration's own controls to retain manual schedules.
