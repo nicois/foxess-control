@@ -101,15 +101,21 @@ async def reconcile_schedule(hass: HomeAssistant, inverter: Inverter | None) -> 
         dd.last_schedule_snapshot_at = dt_util.utcnow().isoformat()
 
         # 3. Which managed-override modes does a recovered session cover?
+        #    Work-mode-only coverage — mirrors _has_matching_schedule_group
+        #    (__init__.py): the live group's window legitimately DIFFERS from
+        #    the session window (C-027 sets a safe horizon SoC/rate/safety, and
+        #    _build_override_group sets start from write-time `now`), so an
+        #    exact-window match would wrongly orphan a just-resumed session's
+        #    group.  A present session of a family owns that family's group(s):
+        #    a discharge session covers BOTH ForceDischarge AND Feedin
+        #    (smart_discharge_state has no clean single-mode key, and either
+        #    discharge-family group of an active discharge session must be kept).
         covered: set[str] = set()
-        cs = dd.smart_charge_state
-        if cs is not None and _covers(cs, groups, WorkMode.FORCE_CHARGE.value):
+        if dd.smart_charge_state is not None:
             covered.add(WorkMode.FORCE_CHARGE.value)
-        ds = dd.smart_discharge_state
-        if ds is not None:
-            for m in (WorkMode.FORCE_DISCHARGE.value, WorkMode.FEEDIN.value):
-                if _covers(ds, groups, m):
-                    covered.add(m)
+        if dd.smart_discharge_state is not None:
+            covered.add(WorkMode.FORCE_DISCHARGE.value)
+            covered.add(WorkMode.FEEDIN.value)
 
         orphans = find_orphan_modes(groups, covered)
         if not orphans:
@@ -190,38 +196,14 @@ async def reconcile_schedule(hass: HomeAssistant, inverter: Inverter | None) -> 
                     "a recurring managed schedule group was left in the inverter "
                     "with no active session — likely a teardown that did not "
                     "complete (HA restart mid-session, or a write the inverter did "
-                    "not apply); it has been removed"
+                    "not apply); it has been removed — if you created this group "
+                    "manually in the FoxESS app, recreate it after disabling smart "
+                    "sessions, or it will be removed on each restart"
                 ),
                 context={"removed": removed},
             )
     except Exception:  # noqa: BLE001 — reconcile must never break setup
         _LOGGER.debug("Startup schedule reconcile failed (non-critical)", exc_info=True)
-
-
-def _covers(session: dict[str, Any], groups: list[dict[str, Any]], mode: str) -> bool:
-    """True if *session* legitimately owns a group of *mode* in *groups*.
-
-    A session covers a group when the session's start/end window matches an
-    enabled group of that mode (hour+minute).  The session dict carries
-    ``start``/``end`` datetimes (set during recovery).
-    """
-    start = session.get("start")
-    end = session.get("end")
-    if start is None or end is None:
-        # A session exists but without a window — conservatively treat its
-        # mode as covered so we never remove a group for an active session.
-        return True
-    for g in groups:
-        if g.get("enable") != 1 or g.get("workMode") != mode:
-            continue
-        if (
-            g.get("startHour") == start.hour
-            and g.get("startMinute") == start.minute
-            and g.get("endHour") == end.hour
-            and g.get("endMinute") == end.minute
-        ):
-            return True
-    return False
 
 
 class _OrphanedSchedule(Exception):

@@ -194,3 +194,26 @@ claim about which failure path produced the reporter's orphan.
   errno/circuit-breaker handling.
 - It does not assert which of the three failure paths caused issue #11 — it
   defends against all three and makes the next occurrence self-diagnosing.
+
+## Known limitation — manual managed groups are removed
+
+Coverage is matched on **work mode only** (mirroring the in-session
+`_has_matching_schedule_group` invariant), not on the exact schedule window.
+This is required for correctness: `_build_override_group` sets a group's
+start from the write-time `now`, and for ForceDischarge C-027 sets the end
+to a safe horizon (SoC/rate/safety) that is *earlier* than the session's
+full-window end — so a just-resumed session's live group legitimately has a
+window that differs from the session window. An exact 4-field window match
+would flag that group as an orphan and remove the **just-resumed live
+session's** group — worse than the bug this feature fixes. Work-mode-only
+coverage errs toward keeping a group whenever a session of that family is
+active (a discharge session covers both ForceDischarge and Feedin).
+
+The cost of work-mode-only coverage is that the reconcile **cannot
+distinguish a user-created managed group from a true orphan**: a Force Charge
+/ Force Discharge / Feed-in group created manually in the FoxESS app (with no
+active smart session) looks identical to a leftover orphan and **will be
+removed on startup**. To retain a manual schedule, use an unmanaged mode
+(e.g. Backup), which the C-018 guard preserves, or the integration's own
+controls. Provenance tracking (tagging integration-created groups so a
+manual group can be recognised and kept) is deferred as out of scope.
