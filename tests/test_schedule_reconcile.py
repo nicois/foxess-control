@@ -191,6 +191,79 @@ class TestReconcileOrchestrator:
         assert reconcile["action"] == "none"
 
     @pytest.mark.asyncio
+    async def test_resumed_discharge_with_safe_horizon_group_is_kept(
+        self, foxess_sim: Any, reconcile_hass: Any
+    ) -> None:
+        # A resumed discharge session whose live group has a C-027 safe-horizon
+        # end (earlier than the session's full-window end) and a write-time
+        # start — windows DIFFER from the session. Must be KEPT (work-mode-only
+        # coverage), not removed.
+        inv = _inv(foxess_sim)
+        inv.set_schedule(
+            [
+                {
+                    "enable": 1,
+                    "startHour": 18,
+                    "startMinute": 30,
+                    "endHour": 19,
+                    "endMinute": 30,
+                    "workMode": "ForceDischarge",
+                    "minSocOnGrid": 11,
+                    "fdSoc": 20,
+                    "fdPwr": 5000,
+                }
+            ]
+        )
+        now = datetime.datetime.now(datetime.UTC)
+        # Session's FULL window is 17:00-21:00 — deliberately different from the
+        # live group's 18:30-19:30 safe-horizon window.
+        _dd(reconcile_hass).smart_discharge_state = {
+            "start": now.replace(hour=17, minute=0, second=0, microsecond=0),
+            "end": now.replace(hour=21, minute=0, second=0, microsecond=0),
+            "min_soc": 11,
+        }
+        await reconcile_schedule(reconcile_hass, inv)
+        assert "ForceDischarge" in _enabled_managed(inv), (
+            "a resumed discharge session's safe-horizon group must NOT be removed"
+        )
+        reconcile = _dd(reconcile_hass).last_schedule_reconcile
+        assert reconcile is not None
+        assert reconcile["action"] == "none"
+
+    @pytest.mark.asyncio
+    async def test_resumed_discharge_covers_feedin_group(
+        self, foxess_sim: Any, reconcile_hass: Any
+    ) -> None:
+        # A discharge session also covers a Feedin-family group.
+        inv = _inv(foxess_sim)
+        inv.set_schedule(
+            [
+                {
+                    "enable": 1,
+                    "startHour": 9,
+                    "startMinute": 0,
+                    "endHour": 11,
+                    "endMinute": 0,
+                    "workMode": "Feedin",
+                    "minSocOnGrid": 11,
+                    "fdSoc": 20,
+                    "fdPwr": 5000,
+                }
+            ]
+        )
+        now = datetime.datetime.now(datetime.UTC)
+        _dd(reconcile_hass).smart_discharge_state = {
+            "start": now.replace(hour=8, minute=0, second=0, microsecond=0),
+            "end": now.replace(hour=12, minute=0, second=0, microsecond=0),
+            "min_soc": 11,
+        }
+        await reconcile_schedule(reconcile_hass, inv)
+        assert "Feedin" in _enabled_managed(inv)
+        reconcile = _dd(reconcile_hass).last_schedule_reconcile
+        assert reconcile is not None
+        assert reconcile["action"] == "none"
+
+    @pytest.mark.asyncio
     async def test_unmanaged_mode_blocks_removal(
         self, foxess_sim: Any, reconcile_hass: Any
     ) -> None:
