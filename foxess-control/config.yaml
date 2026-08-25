@@ -14,6 +14,12 @@ arch:
   - i386
 startup: once
 boot: auto
+# Required for Home Assistant base images: they ship s6-overlay v3, whose
+# /init must be PID 1. Omitting this key defaults it to true, which makes
+# the Supervisor put Docker's init (tini) at PID 1 instead, and the add-on
+# dies before run.sh with "s6-overlay-suexec: fatal: can only run as pid 1".
+# See https://developers.home-assistant.io/blog/2022/05/12/s6-overlay-base-images
+init: false
 map:
   - config:rw
 options: {}
