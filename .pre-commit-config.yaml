@@ -57,4 +57,4 @@ repos:
         # Do NOT bump past the 3.13-compatible line until CI's Python moves —
         # 2026.3.0+ require >=3.14.2 and will fail to install on CI. Bump
         # deliberately, in lockstep with the CI Python version.
-        additional_dependencies: [types-requests, responses, pytest, "homeassistant==2026.2.3", voluptuous]
+        additional_dependencies: [types-requests, types-PyYAML, responses, pytest, "homeassistant==2026.2.3", voluptuous]
