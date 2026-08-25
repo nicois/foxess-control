@@ -245,6 +245,33 @@ charge/discharge scenarios through containerised HA + simulator
 | `TestResolveStartEnd::test_crosses_midnight_rejected` | No midnight crossing | C-009 |
 | `TestMergeWithExisting::test_rejects_schedule_with_backup_mode` | Unmanaged mode guard | -- |
 
+## Device-Declared Scheduler Ranges (C-042)
+
+**Constraints**: C-042, C-008, C-025, C-020, C-026
+**Source**: `tests/test_scheduler_device_limits.py` (14 tests)
+
+Drives the real `Inverter` / `FoxESSClient` / `FoxESSCloudAdapter`
+against the simulator shaped like each failing model (declared
+`fdpwr` / `fdsoc` ranges, `workmode.enumList`, `deviceType`,
+`/op/v3/device/scheduler/get`). Issues #12, #14, #17.
+
+| Test | Verifies | Constraint |
+|---|---|---|
+| `TestForceDischargeAgainstDeclaredLimits::test_force_discharge_accepted_on_h3` | H3-12.0-M full-power discharge is not rejected with 40257 | C-042 |
+| `::test_feedin_accepted_on_evo` | EVO 10-5-H feed-in write accepted | C-042 |
+| `::test_self_use_teardown_accepted_on_h3` | SelfUse baseline (teardown) accepted | C-025 |
+| `::test_max_power_reported_within_declared_limit` | Pacing ceiling = declared max, not the overshoot | C-042 |
+| `::test_explicit_power_above_declared_limit_accepted` | User-supplied `power:` above the ceiling is clamped, not refused | C-042 |
+| `TestNoRegressionForWorkingModels::test_kh10_payload_unchanged` | KH10 payload byte-identical (declared max == capacity × 1050) | C-042 |
+| `::test_schedule_write_event_reports_payload_as_written` | `schedule_write` event carries the clamped payload | D-049 |
+| `::test_properties_endpoint_absent_falls_back_to_capacity` | No declared properties → previous behaviour unchanged | C-042 |
+| `::test_missing_capacity_still_raises` | Missing `capacity` still fails setup loudly (issue #13 is separate) | -- |
+| `TestModelStringIsIrrelevant::test_absent_device_type_still_writes` | Absent `deviceType` does not affect payload construction | C-042 |
+| `::test_unrecognised_device_type_still_writes` | Unknown model string does not affect payload construction | C-042 |
+| `::test_device_type_is_surfaced_for_diagnostics` | `inverter_model` reports the real model name | C-020, C-026 |
+| `TestWorkModeEnumeration::test_unsupported_mode_warns_with_supported_list` | Undeclared work mode logs the supported list; write still attempted | C-020 |
+| `TestThroughCloudAdapter::test_apply_mode_force_discharge_accepted` | Production adapter path accepted end-to-end | C-042 |
+
 ## Session Management & Service Handlers
 
 **Constraints**: C-003, C-012, C-013, C-016, C-024, C-025

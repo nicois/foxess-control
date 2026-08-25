@@ -318,12 +318,17 @@ Response (`result`):
 
 Per-device metadata. The most important field is `capacity`, the
 inverter's rated power **in kW** as an integer (e.g. `10` for a
-10 kW unit). This determines the ceiling for `fdPwr` writes — the
-FoxESS app writes `capacity * 1050` watts as the default
-force-discharge power.
+10 kW unit). The FoxESS app writes `capacity * 1050` watts as the
+default force-discharge power, but **that is not a reliable ceiling
+for `fdPwr` on every model** — see
+`POST /op/v3/device/scheduler/get` below for the authoritative,
+device-declared limit (`C-042`).
 
 Other useful fields: `deviceType` (model name string),
-`hasBattery`, `hasPV`, `status`.
+`hasBattery`, `hasPV`, `status`, `productType`, and
+`function` (a capability map, e.g. `{"scheduler": true}` — false on
+devices with no scheduler at all, such as batteryless
+micro-inverters).
 
 The response is single-shot per session for most clients; cache the
 result. Capacity does not change at runtime.
@@ -569,7 +574,46 @@ on the wire:
 | `workMode` | string | enum below | Behaviour during the window |
 | `minSocOnGrid` | int | `0`–`100` | Minimum SoC the inverter will hold while on grid (%) |
 | `fdSoc` | int | `11`–`100` | Force-discharge / force-charge target SoC (%) |
-| `fdPwr` | int | `1`–rated W | Force-discharge / force-charge power **in watts** |
+| `fdPwr` | int | `1`–declared max W | Force-discharge / force-charge power **in watts** |
+
+The `minSocOnGrid` / `fdSoc` / `fdPwr` ranges above are the *general*
+shape; the exact bounds are **declared per device** — see
+`POST /op/v3/device/scheduler/get`.
+
+### `POST /op/v3/device/scheduler/get` — declared field ranges
+
+Undocumented by FoxESS. Body `{"deviceSN": "<sn>"}`. Returns the
+schedule plus a `properties` map giving, for **this specific device**,
+the accepted range of every group field and the work modes it
+supports:
+
+```json
+{
+  "enable": 1,
+  "maxGroupCount": 96,
+  "properties": {
+    "fdpwr":        {"unit": "W", "precision": 1.0, "range": {"min": 0.0, "max": 10500.0}},
+    "fdsoc":        {"unit": "%", "precision": 1.0, "range": {"min": 10.0, "max": 100.0}},
+    "minsocongrid": {"unit": "%", "precision": 1.0, "range": {"min": 10.0, "max": 100.0}},
+    "workmode":     {"enumList": ["SelfUse", "Feedin", "Backup",
+                                  "ForceCharge", "ForceDischarge"]}
+  }
+}
+```
+
+Values outside a declared range, and work modes outside `enumList`,
+are rejected by `scheduler/enable` with `errno 40257`. **Clamp to
+these ranges before writing** (`C-042`): `capacity * 1050` matches
+`fdpwr.range.max` on a KH10 but overshoots on H3 / EVO families,
+where the declared ceiling is the plain nameplate rating — the cause
+of "40257 on every write" reports (issues #12, #14, #17).
+
+Group shape differs from `/op/v0/`: value fields are nested under
+`extraParam`. Read this endpoint for the ranges; keep writing via
+`/op/v0/device/scheduler/enable` with flat fields.
+
+Companion: `POST /op/v1/device/scheduler/get/flag` →
+`{"enable": true, "support": true}`.
 
 ### `workMode` enum
 
@@ -606,6 +650,10 @@ violated. **Validate them client-side before writing.**
   with a narrower slot (e.g. 18:00–21:00 ForceDischarge); the
   SelfUse window must end before the narrower slot begins. Errno
   `42023` ("Time overlap, please reselect time") on violation.
+- **`fdPwr <= declared ceiling`** (`C-042`). Above the device's
+  `properties.fdpwr.range.max` the write returns `errno 40257`.
+  `capacity_kw * 1050` exceeds that ceiling on several model
+  families, so clamp to the declared value when it is available.
 - **`fdPwr` is in watts.** Write `10500` for 10.5 kW. This
   contradicts user intuition (especially users coming from
   `foxess_modbus`, which expresses the same field in kW). Always

@@ -68,7 +68,15 @@ def _run_server(
     async def _start() -> None:
         runner = aiohttp.web.AppRunner(app)
         await runner.setup()
-        site = aiohttp.web.TCPSite(runner, "localhost", 0)
+        # Bind 127.0.0.1, NOT "localhost": a dual-stack "localhost" bind
+        # creates TWO sockets and port 0 is resolved *per socket*, so the
+        # IPv4 and IPv6 ports differ (e.g. 127.0.0.1:39303 + [::1]:45927).
+        # Handing out ``http://localhost:39303`` then reaches whichever
+        # server happens to own [::1]:39303 when the client resolves
+        # localhost to ::1 first — cross-talk between concurrently-running
+        # test servers, and a flake that grows with the number of
+        # simulator instances (C-031).
+        site = aiohttp.web.TCPSite(runner, "127.0.0.1", 0)
         await site.start()
         sock = site._server.sockets[0]  # type: ignore[union-attr]
         port_holder.append(sock.getsockname()[1])
@@ -134,7 +142,7 @@ def foxess_sim() -> Generator[SimulatorHandle, None, None]:
     thread.start()
     ready.wait(timeout=5)
 
-    handle = SimulatorHandle(f"http://localhost:{port_holder[0]}")
+    handle = SimulatorHandle(f"http://127.0.0.1:{port_holder[0]}")
     yield handle
 
     handle.reset()

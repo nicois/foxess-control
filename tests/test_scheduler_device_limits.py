@@ -301,6 +301,16 @@ class TestModelStringIsIrrelevant:
         result = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
 
         assert result["environment"]["inverter_model"] == "H3-12.0-M"
+        assert result["environment"]["scheduler_limits"] == {
+            "fd_pwr_max_w": 12000,
+            "work_modes": [
+                "Backup",
+                "Feedin",
+                "ForceCharge",
+                "ForceDischarge",
+                "SelfUse",
+            ],
+        }
 
 
 class TestWorkModeEnumeration:

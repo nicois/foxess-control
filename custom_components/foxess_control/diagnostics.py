@@ -69,6 +69,11 @@ async def async_get_config_entry_diagnostics(
 
     taper = domain_data.taper_profile
 
+    # Read once, before the environment dict: ``device_type`` is populated
+    # as a side effect of the (cached) device-detail fetch behind
+    # ``max_power_w``, so it must be resolved first to be reported.
+    max_power_w = inverter.max_power_w if inverter else None
+
     web_session = getattr(domain_data, "web_session", None)
     cloud_base_url = getattr(web_session, "BASE_URL", None)
     ws_connected = bool(ws is not None and getattr(ws, "is_connected", False))
@@ -81,8 +86,13 @@ async def async_get_config_entry_diagnostics(
         "ws_connected": ws_connected,
         "battery_compound_id_status": compound_status,
         "plant_id_present": bool(getattr(domain_data, "plant_id", None)),
-        "inverter_model": getattr(inverter, "model", None) if inverter else None,
-        "max_power_w": inverter.max_power_w if inverter else None,
+        # ``Inverter`` exposes the model as ``device_type``; the old
+        # ``model`` lookup did not exist, so every report showed null and
+        # sent bug triage after a model-specific theory that does not
+        # exist (issues #12/#14/#17).
+        "inverter_model": inverter.device_type if inverter else None,
+        "max_power_w": max_power_w,
+        "scheduler_limits": _scheduler_limits(inverter),
         "data_source": (
             coordinator_data.get("data_source") if coordinator_data else None
         ),
@@ -104,7 +114,7 @@ async def async_get_config_entry_diagnostics(
             },
             "coordinator": coordinator_data,
             "inverter": {
-                "max_power_w": inverter.max_power_w if inverter else None,
+                "max_power_w": max_power_w,
             },
             "smart_charge_state": _safe_session(charge_state),
             "smart_discharge_state": _safe_session(discharge_state),
@@ -117,6 +127,23 @@ async def async_get_config_entry_diagnostics(
         },
         REDACT_KEYS,
     )
+
+
+def _scheduler_limits(inverter: Any) -> dict[str, Any] | None:
+    """Report the schedule-group ranges the inverter declares it accepts.
+
+    Read from the cached ``/op/v3/device/scheduler/get`` probe taken at
+    setup — never triggers a live API call on the diagnostics path.
+    Present so a future "errno 40257" report says immediately whether the
+    declared ceilings were read and what they were (C-020 / C-026, C-042).
+    """
+    if inverter is None:
+        return None
+    try:
+        snapshot: dict[str, Any] | None = inverter.declared_limits_snapshot
+        return snapshot
+    except Exception:  # noqa: BLE001 — diagnostics must never raise
+        return None
 
 
 def _schedule_section(

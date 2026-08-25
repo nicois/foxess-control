@@ -76,6 +76,71 @@ The `properties` object has been observed as empty but its purpose is undocument
 
 Unused group slots are returned with `"workMode": "Invalid"` and `"enable": 0`.
 
+## Scheduler field ranges are declared per device (`/op/v3/device/scheduler/get`)
+
+**Documentation says:** nothing — the `/op/v3/` scheduler namespace is undocumented.
+
+**Actual behaviour:** `POST /op/v3/device/scheduler/get` with `{"deviceSN": "..."}`
+returns, alongside the groups, a `properties` object describing **the accepted range of
+every schedule-group field for that specific device**, plus the work modes it supports:
+
+```json
+{
+  "enable": 1,
+  "maxGroupCount": 96,
+  "properties": {
+    "fdpwr":        {"unit": "W", "precision": 1.0, "range": {"min": 0.0, "max": 10500.0}},
+    "fdsoc":        {"unit": "%", "precision": 1.0, "range": {"min": 10.0, "max": 100.0}},
+    "minsocongrid": {"unit": "%", "precision": 1.0, "range": {"min": 10.0, "max": 100.0}},
+    "maxsoc":       {"unit": "%", "precision": 1.0, "range": {"min": 10.0, "max": 100.0}},
+    "pvlimit":      {"unit": "W", "precision": 1.0, "range": {"min": 0.0, "max": 20000.0}},
+    "importlimit":  {"unit": "W", "precision": 1.0, "range": {"min": 0.0, "max": 100000.0}},
+    "exportlimit":  {"unit": "W", "precision": 1.0, "range": {"min": 0.0, "max": 100000.0}},
+    "reactivepower":{"unit": "Var", "precision": 1.0, "range": {"min": -6000.0, "max": 6000.0}},
+    "starthour":    {"unit": "", "precision": 1.0, "range": {"min": 0.0, "max": 23.0}},
+    "workmode":     {"enumList": ["ForceDischarge", "Feedin", "ForceCharge(BAT)",
+                                  "ForceDischarge(BAT)", "Backup", "SelfUse",
+                                  "ForceCharge"], "unit": "", "precision": 1.0}
+  }
+}
+```
+
+Any value outside its declared range — and any `workMode` outside `enumList` — is
+rejected by `/op/v0/device/scheduler/enable` with errno `40257` ("Parameters do not
+meet expectations"). **`properties` is the authoritative source for these limits; the
+`capacity * 1050` heuristic below is not.**
+
+Note the `/op/v3/` group shape differs from `/op/v0/`: the value fields are nested
+under `extraParam` (`{"startHour": .., "workMode": .., "extraParam": {"fdPwr": ..,
+"minSocOnGrid": .., "maxSoc": ..}}`). This module still *writes* via
+`/op/v0/device/scheduler/enable` (flat fields) and reads `/op/v3/` only for the
+declared ranges.
+
+Companion endpoint: `POST /op/v1/device/scheduler/get/flag` returns
+`{"enable": true, "support": true}` — `support` is false on devices with no scheduler
+at all (e.g. batteryless micro-inverters). `/op/v0/device/detail` reports the same
+capability as `function: {"scheduler": true}`.
+
+## Scheduler Enable (`/op/v0/device/scheduler/enable`) — `fdPwr` ceiling is per device
+
+**Documentation says:** nothing about an upper bound on `fdPwr`.
+
+**Actual behaviour:** `fdPwr` above the device's declared `fdpwr.range.max` is rejected
+with errno `40257`. The `capacity * 1050` value the FoxESS app writes matches that
+ceiling **only on some model families**: a KH10 reports `capacity: 10` and declares
+`fdpwr.range.max: 10500`, so `10 * 1050` is exactly right. Other families declare the
+plain nameplate rating, so the same arithmetic overshoots and *every* scheduler write
+fails — including the SelfUse baseline written on session teardown:
+
+| Model | `capacity` | `capacity * 1050` | declared `fdpwr` max | result |
+|---|---|---|---|---|
+| KH10 | 10 | 10500 | 10500 | accepted |
+| H3-12.0-M | 12 | 12600 | 12000 (inferred) | **40257** |
+| H3-15.0-Smart | 15 | 15750 | 15000 (inferred) | **40257** |
+| EVO 10-5-H | 5 | 5250 | 5000 (inferred) | **40257** |
+
+Always clamp `fdPwr` to the declared ceiling before writing (see C-042).
+
 ## Scheduler Enable (`/op/v0/device/scheduler/enable`) — `fdPwr` must be non-zero
 
 **Documentation says:** `fdPwr` is the force discharge power limit in watts, with `0`

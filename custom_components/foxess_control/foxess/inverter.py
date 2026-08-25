@@ -18,6 +18,23 @@ _LOGGER = logging.getLogger(__name__)
 
 _SCHEDULE_ENDPOINT = "/op/v0/device/scheduler/enable"
 
+# Returns, per device, a ``properties`` map describing the accepted range
+# of every schedule-group field plus the supported work-mode enumeration.
+# Read-only; the write itself still goes to ``_SCHEDULE_ENDPOINT``.
+_SCHEDULER_PROPERTIES_ENDPOINT = "/op/v3/device/scheduler/get"
+
+# Mapping from schedule-group field name to the (lower-cased) key the API
+# uses for it in the declared ``properties`` map.  Only fields whose value
+# this module chooses are listed; the time fields are already bounded by
+# construction (C-009).
+_CLAMPED_FIELDS: tuple[tuple[str, str], ...] = (
+    ("fdPwr", "fdpwr"),
+    ("fdSoc", "fdsoc"),
+    ("minSocOnGrid", "minsocongrid"),
+)
+
+_PLACEHOLDER_WORK_MODES = frozenset({"Invalid", ""})
+
 
 def _parse_real_time(result: Any) -> dict[str, Any]:
     """Extract variable->value map from the real-time query response.
@@ -45,25 +62,218 @@ class Inverter:
         self.sn = serial_number
         self._max_power_w: int | None = None
         self._device_type: str | None = None
+        self._scheduler_properties: dict[str, Any] | None = None
+        self._scheduler_properties_probed = False
+        self._warned_work_modes: set[str] = set()
 
     @property
     def max_power_w(self) -> int:
-        """Inverter rated power in watts, queried from device detail."""
+        """Inverter rated power in watts — the ceiling for ``fdPwr`` writes.
+
+        Derived from the ``capacity`` field of device detail (kW) via the
+        ``capacity * 1050`` factor the FoxESS app uses, then clamped to the
+        maximum ``fdPwr`` the device itself declares (see
+        :attr:`fd_pwr_limit_w`).
+
+        The ``* 1050`` factor was reverse-engineered from a KH10, whose
+        declared ceiling happens to be exactly ``capacity * 1050``.  Other
+        model families (H3, EVO) declare the plain nameplate rating, so the
+        factor overshoots and *every* schedule write — including the SelfUse
+        baseline written on session teardown — is rejected with errno 40257
+        (issues #12, #14, #17).  Clamping is one-directional: the declared
+        ceiling can only lower the value, never raise it above the rating.
+        """
         if self._max_power_w is None:
             detail = self.get_detail()
-            capacity_kw: int = detail.get("capacity", 0)
+            capacity_kw: float = detail.get("capacity", 0)
             if capacity_kw <= 0:
                 raise RuntimeError(
                     "Could not determine inverter capacity from device detail"
                 )
-            self._max_power_w = capacity_kw * self.CAPACITY_TO_FD_PWR
             self._device_type = detail.get("deviceType")
+            rated_w = int(capacity_kw * self.CAPACITY_TO_FD_PWR)
+            declared = self.fd_pwr_limit_w
+            if declared is not None and declared < rated_w:
+                _LOGGER.info(
+                    "Inverter %s declares a maximum fdPwr of %d W; using that "
+                    "instead of the %d W derived from its %s kW rating",
+                    self._device_type or self.sn,
+                    declared,
+                    rated_w,
+                    capacity_kw,
+                )
+                rated_w = declared
+            self._max_power_w = rated_w
         return self._max_power_w
 
     @property
     def device_type(self) -> str | None:
-        """Inverter model name, cached from device detail."""
+        """Inverter model name, cached from device detail.
+
+        ``None`` until :attr:`max_power_w` has been read (which happens at
+        integration setup), or when the device omits ``deviceType``.  The
+        model name is informational only — no payload shaping depends on it.
+        """
         return self._device_type
+
+    # --- Device-declared scheduler limits ---
+
+    @property
+    def scheduler_properties(self) -> dict[str, Any]:
+        """Per-device schedule-group field metadata, or ``{}``.
+
+        Probed once, lazily.  Any failure (endpoint absent on older
+        firmware/regions, transport error, unexpected shape) yields ``{}``
+        so callers fall back to the previous capacity-only behaviour rather
+        than failing setup — this must never turn a working install into a
+        broken one.
+        """
+        if not self._scheduler_properties_probed:
+            self._scheduler_properties_probed = True
+            self._scheduler_properties = self._probe_scheduler_properties()
+        return self._scheduler_properties or {}
+
+    def _probe_scheduler_properties(self) -> dict[str, Any] | None:
+        try:
+            result: Any = self.client.post(
+                _SCHEDULER_PROPERTIES_ENDPOINT, {"deviceSN": self.sn}
+            )
+        except Exception:  # noqa: BLE001 — capability probe is best-effort
+            _LOGGER.debug(
+                "Could not read declared scheduler properties from %s; "
+                "falling back to the capacity-derived fdPwr ceiling",
+                _SCHEDULER_PROPERTIES_ENDPOINT,
+                exc_info=True,
+            )
+            return None
+        if not isinstance(result, dict):
+            return None
+        props = result.get("properties")
+        return props if isinstance(props, dict) else None
+
+    def _declared_range(self, field: str) -> tuple[int, int] | None:
+        """Return the (min, max) the device declares for *field*, or None."""
+        entry = self.scheduler_properties.get(field)
+        if not isinstance(entry, dict):
+            return None
+        raw = entry.get("range")
+        if not isinstance(raw, dict):
+            return None
+        low, high = raw.get("min"), raw.get("max")
+        if not isinstance(low, int | float) or not isinstance(high, int | float):
+            return None
+        if high <= 0 or high < low:
+            return None
+        return int(low), int(high)
+
+    @property
+    def fd_pwr_limit_w(self) -> int | None:
+        """Maximum ``fdPwr`` the device declares it accepts, or ``None``."""
+        declared = self._declared_range("fdpwr")
+        return declared[1] if declared else None
+
+    @property
+    def declared_work_modes(self) -> frozenset[str]:
+        """Work modes the device declares it supports, or an empty set."""
+        entry = self.scheduler_properties.get("workmode")
+        if isinstance(entry, dict):
+            modes = entry.get("enumList")
+            if isinstance(modes, list):
+                return frozenset(str(m) for m in modes)
+        return frozenset()
+
+    @property
+    def declared_limits_snapshot(self) -> dict[str, Any] | None:
+        """Already-probed declared limits, or ``None`` if not probed yet.
+
+        Never triggers I/O, so it is safe to read from the event loop (the
+        diagnostics platform).  ``None`` distinguishes "never probed" from
+        "probed and the device declared nothing".
+        """
+        if not self._scheduler_properties_probed:
+            return None
+        return {
+            "fd_pwr_max_w": self.fd_pwr_limit_w,
+            "work_modes": sorted(self.declared_work_modes) or None,
+        }
+
+    def _clamp_to_declared_ranges(
+        self, groups: list[ScheduleGroup]
+    ) -> list[ScheduleGroup]:
+        """Clamp group values into the ranges the device declares.
+
+        Out-of-range values are rejected wholesale with errno 40257, which
+        the user sees as an opaque service failure.  Clamping keeps the
+        operation working with the closest value the hardware accepts,
+        which is always the safe direction: ``fdPwr`` can only come down
+        (less export, never more import) and ``fdSoc`` / ``minSocOnGrid``
+        can only come up (a higher reserve — P-002 over P-003/P-004).
+
+        Caller dicts are never mutated: the cloud adapter caches its groups
+        and re-writes them each tick, so clamping must be idempotent and
+        must not overwrite the session's intended values.
+        """
+        ranges = {api: self._declared_range(prop) for api, prop in _CLAMPED_FIELDS}
+        if not any(ranges.values()):
+            return list(groups)
+
+        clamped: list[ScheduleGroup] = []
+        for group in groups:
+            adjusted: dict[str, Any] = dict(group)
+            for key, bounds in ranges.items():
+                value = adjusted.get(key)
+                if bounds is None or not isinstance(value, int | float):
+                    continue
+                if isinstance(value, bool):  # pragma: no cover - defensive
+                    continue
+                new_value = int(min(max(value, bounds[0]), bounds[1]))
+                if new_value != value:
+                    _LOGGER.info(
+                        "Clamping schedule %s from %s to %d "
+                        "(device-declared range %d-%d)",
+                        key,
+                        value,
+                        new_value,
+                        bounds[0],
+                        bounds[1],
+                    )
+                    adjusted[key] = new_value
+            # C-008: minSocOnGrid <= fdSoc must survive the clamp.
+            fd_soc, min_soc = adjusted.get("fdSoc"), adjusted.get("minSocOnGrid")
+            if (
+                isinstance(fd_soc, int | float)
+                and isinstance(min_soc, int | float)
+                and min_soc > fd_soc
+            ):
+                adjusted["minSocOnGrid"] = int(fd_soc)
+            clamped.append(adjusted)  # type: ignore[arg-type]
+        return clamped
+
+    def _warn_unsupported_work_modes(self, groups: list[ScheduleGroup]) -> None:
+        """Log once per mode the device does not list as supported (C-020).
+
+        Advisory only — the write is still attempted, because refusing on a
+        device that under-reports its enumeration would break an install
+        that works today.
+        """
+        declared = self.declared_work_modes
+        if not declared:
+            return
+        for group in groups:
+            mode = str(group.get("workMode", ""))
+            if mode in _PLACEHOLDER_WORK_MODES or mode in declared:
+                continue
+            if mode in self._warned_work_modes:
+                continue
+            self._warned_work_modes.add(mode)
+            _LOGGER.warning(
+                "Inverter %s does not list work mode '%s' among the modes it "
+                "supports (%s); the scheduler write will probably be rejected "
+                "with FoxESS API error 40257",
+                self._device_type or self.sn,
+                mode,
+                ", ".join(sorted(declared)),
+            )
 
     @classmethod
     def auto_detect(cls, client: FoxESSClient) -> Inverter:
@@ -149,17 +359,24 @@ class Inverter:
         :mod:`smart_battery.events`: the groups list as written to the
         API plus whatever the API returned.  The POST runs first so a
         failing write does not produce a misleading event.
+
+        This is also the single choke point where every group is clamped
+        to the ranges the device declares it accepts, so no caller — not
+        even a user-supplied ``power:`` service argument — can produce a
+        payload the inverter rejects with errno 40257.
         """
+        payload = self._clamp_to_declared_ranges(groups)
+        self._warn_unsupported_work_modes(payload)
         response = self.client.post(
             _SCHEDULE_ENDPOINT,
-            {"deviceSN": self.sn, "groups": groups},
+            {"deviceSN": self.sn, "groups": payload},
         )
         # Copy the groups list defensively so downstream payload
         # consumers cannot mutate the caller's data through the event.
         emit_event(
             _LOGGER,
             SCHEDULE_WRITE,
-            groups=[dict(g) for g in groups],
+            groups=[dict(g) for g in payload],
             response=response,
             endpoint=_SCHEDULE_ENDPOINT,
             call_site=call_site,

@@ -188,6 +188,67 @@ class TestSmartDischarge:
         )
         assert soc < 80
 
+    def test_discharge_on_device_with_lower_declared_fd_pwr(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """Discharge works on a model whose declared fdPwr ceiling is lower.
+
+        Issues #12/#14/#17, C-042.  ``fdPwr`` was derived as
+        ``capacity_kw * 1050`` — correct for a KH10, whose declared ceiling
+        is exactly that, but 5 % above the ceiling declared by H3 / EVO
+        models.  The API rejected the whole write with errno 40257, so
+        Force Discharge failed immediately and the operations sensor never
+        left idle.
+
+        The simulator is shaped like an H3-12.0-M (``capacity`` 12 kW →
+        12600 W by the old heuristic, declared ceiling 12000 W).  The
+        integration is reloaded after the change so it re-reads device
+        detail and the declared ranges, then the discharge must actually
+        start (C-020: determinable from the UI alone).
+        """
+        if connection_mode != "cloud":
+            pytest.skip("declared scheduler ranges are a cloud-API concept")
+        assert foxess_sim is not None
+
+        foxess_sim.set(
+            soc=80,
+            load_kw=0.5,
+            device_type="H3-12.0-M",
+            max_power_w=12600,
+            fd_pwr_max_w=12000,
+            max_grid_export_limit_w=12000,
+        )
+        # Reload so a fresh Inverter re-reads device detail + declared ranges.
+        ha_e2e.reload_integration()
+
+        start, end = _tight_window(10)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+
+        state = ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        assert state == "discharging"
+
+        # The override is genuinely in force on the inverter, within the
+        # ceiling the device declares it accepts.
+        groups = [
+            g
+            for g in foxess_sim.state()["schedule_groups"]
+            if g["workMode"] == "ForceDischarge"
+        ]
+        assert groups, "no ForceDischarge group in force on the inverter"
+        assert groups[0]["fdPwr"] <= 12000
+
 
 # ---------------------------------------------------------------------------
 # Smart charge (both modes)

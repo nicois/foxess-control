@@ -60,11 +60,15 @@ async def _start_test_server(
     """Start the test server and return (runner, base_url)."""
     runner = aiohttp.web.AppRunner(app)
     await runner.setup()
-    site = aiohttp.web.TCPSite(runner, "localhost", 0)
+    # 127.0.0.1, not "localhost" — see the note in tests/conftest.py: a
+    # dual-stack bind assigns *different* ports to the IPv4 and IPv6
+    # sockets, so the advertised port is only valid for one family and the
+    # client can land on an unrelated test server (C-031).
+    site = aiohttp.web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
     sock = site._server.sockets[0]  # type: ignore[union-attr]
     port = sock.getsockname()[1]
-    return runner, f"http://localhost:{port}"
+    return runner, f"http://127.0.0.1:{port}"
 
 
 # ---------------------------------------------------------------------------

@@ -52,6 +52,7 @@ serves and any lower-priority goal it trades against.
 - **C-009**: FoxESS API: schedule windows must not cross midnight
 - **C-018**: Refuse to modify schedule when unmanaged modes (e.g. Backup) are present
 - **C-019**: Discharge SoC unavailability aborts session after 3 checks (matching charge C-012)
+- **C-042**: Schedule writes clamp `fdPwr`/`fdSoc`/`minSocOnGrid` to the ranges the device declares in `/op/v3/device/scheduler/get` `properties`; `max_power_w` is the *lower* of `capacity * 1050` and the declared `fdpwr` max. `capacity * 1050` overshoots on non-KH models → errno 40257 on every write
 
 ### Architecture
 - **C-021**: Brand-agnostic code belongs in `smart_battery/`; brand-specific code must not live there

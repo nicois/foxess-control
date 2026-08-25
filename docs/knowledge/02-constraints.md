@@ -726,6 +726,56 @@ provides IDE autocomplete.
 pre-commit.
 **Traces**: `.semgrep/foxess-architecture.yaml::no-raw-hass-data-access`
 
+### C-042: Schedule writes clamp to device-declared parameter ranges
+**Priority enforced**: P-003 (energy target) and P-005 (operational
+transparency) — an out-of-range value costs the whole operation, not
+just that field, and the API's rejection names neither the field nor
+the limit
+**Statement**: Before any write to
+`/op/v0/device/scheduler/enable`, every group's `fdPwr`, `fdSoc` and
+`minSocOnGrid` must be clamped into the range the device declares for
+it in `properties` (from `POST /op/v3/device/scheduler/get`), and
+`minSocOnGrid <= fdSoc` (C-008) must be re-established afterwards.
+`Inverter.max_power_w` — the value the pacing algorithms treat as the
+hardware ceiling — must likewise be the *lower* of the
+`capacity * 1050` heuristic and the declared `fdpwr.range.max`.
+Clamping is one-directional (the declared ceiling may lower `fdPwr`,
+never raise it above the nameplate rating) and happens at the single
+`Inverter._post_schedule` choke point, so no caller — including a
+user-supplied `power:` service argument — can construct a rejected
+payload. When the declared properties are unavailable (older
+firmware/region, transport failure) the previous capacity-only
+behaviour applies unchanged; an unavailable probe must never fail
+setup. A work mode outside the declared `workmode.enumList` is
+logged with the device's supported list but still attempted — the
+enumeration is advisory, and refusing on it would break an install
+that works today.
+**Rationale**: `fdPwr = capacity_kw * 1050` was reverse-engineered
+from a KH10, whose declared ceiling is exactly `10 * 1050 = 10500`.
+Other model families declare the plain nameplate rating, so the
+same arithmetic overshoots by 5 % and the API rejects the write with
+`errno 40257` ("Parameters do not meet expectations") — which names
+neither `fdPwr` nor the ceiling. Because `fdPwr` is pinned at
+`max_power_w` in *every* group this integration writes, including the
+SelfUse baseline written on teardown (C-025), the effect is total:
+force discharge, feed-in, force charge and session teardown all fail
+on H3-15.0-Smart, H3-12.0-M and EVO 10-5-H while polling, real-time
+data and setup all work (issues #12, #14, #17). The model name is
+**not** the discriminator — no payload shaping depends on it; the
+declared range is.
+**Violation consequence**: The integration is functionally dead for
+every model whose declared ceiling is below `capacity * 1050`: no
+override can be applied and no override can be removed, so a
+schedule group written before an upgrade cannot even be torn down
+(C-025, P-001/P-002).
+**Traces**: C-008 (fdSoc / minSocOnGrid invariants), C-025 (session
+boundary cleanliness), C-020 / C-026 (declared limits surfaced in
+diagnostics), `API_DEVIATIONS.md` §"Scheduler field ranges are
+declared per device";
+`custom_components/foxess_control/foxess/inverter.py::Inverter._clamp_to_declared_ranges`,
+`::Inverter.fd_pwr_limit_w`, `::Inverter.max_power_w`;
+`tests/test_scheduler_device_limits.py` (14 tests)
+
 ### C-040: Brand-agnostic code has brand-agnostic tests
 **Priority enforced**: P-006 (brand portability) — the test-level
 complement to C-021 (where code lives) and C-039 (how modules are
