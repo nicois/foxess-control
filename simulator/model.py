@@ -83,6 +83,11 @@ class InverterModel:
     battery_id: str = "sim-battery-id-001"
     battery_sn: str = "SIM0001BAT001"
 
+    # Model name reported as ``deviceType`` by /op/v0/device/detail
+    # (e.g. "KH10", "H3-12.0-M").  ``None`` models a device-detail
+    # response with no ``deviceType`` field at all.
+    device_type: str | None = "KH10"
+
     # Battery
     soc: float = 50.0
     battery_temperature: float = 25.0
@@ -184,6 +189,127 @@ class InverterModel:
     # Autonomous rate limiting (per-endpoint, seconds between requests)
     # Default 0 = disabled, so existing tests are unaffected.
     rate_limit_seconds: float = 0.0
+
+    # --- Device-declared scheduler limits ---------------------------------
+    # ``/op/v3/device/scheduler/get`` returns, per device, a ``properties``
+    # map describing the accepted range of every schedule-group field plus
+    # the supported work-mode enumeration.  ``/scheduler/enable`` rejects
+    # any group whose values fall outside those ranges with errno 40257
+    # ("Parameters do not meet expectations").
+    #
+    # ``fd_pwr_max_w`` is the declared ``fdPwr`` ceiling.  ``None`` means
+    # "same as ``max_power_w``", which models a KH10: its declared ceiling
+    # (10500 W) happens to equal the ``capacity x 1050`` value the FoxESS
+    # app writes, which is why that heuristic works on a KH but overshoots
+    # on other model families (H3 / EVO — issues #12, #14, #17).
+    fd_pwr_max_w: int | None = None
+    fd_soc_min: int = 10
+    fd_soc_max: int = 100
+    # Work modes the device declares in ``properties.workmode.enumList``.
+    # Empty list models a device that declares no enumeration.
+    scheduler_work_modes: list[str] = field(
+        default_factory=lambda: [
+            "SelfUse",
+            "Feedin",
+            "Backup",
+            "ForceCharge",
+            "ForceDischarge",
+        ]
+    )
+    # When False, /op/v3/device/scheduler/get is not served (HTTP 404) —
+    # models a firmware/region where the properties endpoint is absent.
+    scheduler_properties_supported: bool = True
+
+    def fd_pwr_limit_w(self) -> int:
+        """Maximum ``fdPwr`` this device accepts in a schedule group."""
+        return self.max_power_w if self.fd_pwr_max_w is None else self.fd_pwr_max_w
+
+    def get_device_detail_response(self) -> dict[str, Any]:
+        """Build the ``/op/v0/device/detail`` result.
+
+        ``capacity`` is the nameplate rating in kW, as the real API
+        returns it.  ``deviceType`` is omitted entirely when
+        ``device_type`` is None.
+        """
+        detail: dict[str, Any] = {
+            "capacity": self.max_power_w / 1050,
+            "hasBattery": True,
+            "hasPV": True,
+            "function": {"scheduler": True},
+        }
+        if self.device_type is not None:
+            detail["deviceType"] = self.device_type
+        return detail
+
+    def get_scheduler_properties_response(self) -> dict[str, Any]:
+        """Build the ``/op/v3/device/scheduler/get`` result."""
+        properties: dict[str, Any] = {
+            "fdpwr": {
+                "unit": "W",
+                "precision": 1.0,
+                "range": {"min": 0.0, "max": float(self.fd_pwr_limit_w())},
+            },
+            "fdsoc": {
+                "unit": "%",
+                "precision": 1.0,
+                "range": {
+                    "min": float(self.fd_soc_min),
+                    "max": float(self.fd_soc_max),
+                },
+            },
+            "minsocongrid": {
+                "unit": "%",
+                "precision": 1.0,
+                "range": {"min": 10.0, "max": 100.0},
+            },
+            "starthour": {
+                "unit": "",
+                "precision": 1.0,
+                "range": {"min": 0.0, "max": 23.0},
+            },
+            "endhour": {
+                "unit": "",
+                "precision": 1.0,
+                "range": {"min": 0.0, "max": 23.0},
+            },
+        }
+        if self.scheduler_work_modes:
+            properties["workmode"] = {
+                "enumList": list(self.scheduler_work_modes),
+                "unit": "",
+                "precision": 1.0,
+            }
+        return {
+            "enable": 1 if self.schedule_enabled else 0,
+            "maxGroupCount": 8,
+            "groups": [],
+            "properties": properties,
+        }
+
+    def check_schedule_group(self, group: dict[str, Any]) -> str | None:
+        """Return a rejection reason for *group*, or None when acceptable.
+
+        Mirrors the live API's parameter validation: values outside the
+        declared ranges — and work modes outside the declared enumeration —
+        are rejected with errno 40257.
+        """
+        mode = group.get("workMode", "")
+        if mode in ("Invalid", ""):
+            return None
+        if self.scheduler_work_modes and mode not in self.scheduler_work_modes:
+            return f"workMode {mode} not supported by this device"
+        fd_pwr = group.get("fdPwr")
+        if isinstance(fd_pwr, int | float) and fd_pwr > self.fd_pwr_limit_w():
+            return f"fdPwr {fd_pwr} exceeds device maximum {self.fd_pwr_limit_w()}"
+        fd_soc = group.get("fdSoc")
+        if isinstance(fd_soc, int | float) and not (
+            self.fd_soc_min <= fd_soc <= self.fd_soc_max
+        ):
+            return (
+                f"fdSoc {fd_soc} outside device range "
+                f"{self.fd_soc_min}-{self.fd_soc_max}"
+            )
+        return None
 
     def get_active_mode(self) -> str:
         """Return the work mode active at the current simulated time."""
@@ -503,7 +629,9 @@ class InverterModel:
         """Full state dump for backchannel."""
         return {
             "device_sn": self.device_sn,
+            "device_type": self.device_type,
             "plant_id": self.plant_id,
+            "fd_pwr_max_w": self.fd_pwr_limit_w(),
             "soc": round(self.soc, 2),
             "soc_int": int(self.soc),
             "battery_capacity_kwh": self.battery_capacity_kwh,

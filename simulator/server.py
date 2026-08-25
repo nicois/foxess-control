@@ -159,7 +159,25 @@ async def handle_device_detail(request: web.Request) -> web.Response:
         return rl
     if fault := _check_fault(request):
         return fault
-    return _api_response({"capacity": _model(request).max_power_w / 1050})
+    return _api_response(_model(request).get_device_detail_response())
+
+
+async def handle_scheduler_properties(request: web.Request) -> web.Response:
+    """Serve ``/op/v3/device/scheduler/get`` (declared field ranges).
+
+    Returns HTTP 404 when the model marks the endpoint unsupported, so
+    callers exercise the "properties unavailable" fallback path.
+    """
+    model = _model(request)
+    if not model.scheduler_properties_supported:
+        return web.Response(status=404, text="Not Found")
+    if sig_err := _check_signature(request):
+        return sig_err
+    if rl := _check_rate_limit(request):
+        return rl
+    if fault := _check_fault(request):
+        return fault
+    return _api_response(model.get_scheduler_properties_response())
 
 
 async def handle_real_query(request: web.Request) -> web.Response:
@@ -203,6 +221,7 @@ async def handle_scheduler_enable(request: web.Request) -> web.Response:
         return fault
     body = await request.json()
     groups = body.get("groups", [])
+    model = _model(request)
 
     # Validate constraints
     for g in groups:
@@ -212,6 +231,14 @@ async def handle_scheduler_enable(request: web.Request) -> web.Response:
         min_soc_on_grid = g.get("minSocOnGrid", 0)
         if min_soc_on_grid > fd_soc:
             return _api_response(None, errno=40257, msg="minSocOnGrid > fdSoc")
+        # Values outside the device-declared ranges (see
+        # /op/v3/device/scheduler/get) are rejected with the same errno the
+        # live API returns — issues #12, #14, #17.
+        if reason := model.check_schedule_group(g):
+            _LOGGER.info("Schedule rejected: %s", reason)
+            return _api_response(
+                None, errno=40257, msg="Parameters do not meet expectations"
+            )
 
     # Check for overlaps
     for i, a in enumerate(groups):
@@ -223,7 +250,6 @@ async def handle_scheduler_enable(request: web.Request) -> web.Response:
             if a_start < b_end and b_start < a_end:
                 return _api_response(None, errno=42023, msg="Time overlap")
 
-    model = _model(request)
     if model.silent_drop_schedule:
         # Firmware ACKs but does not apply (issue #11 test seam).
         _LOGGER.info("Schedule silently dropped (silent_drop_schedule)")
@@ -495,6 +521,7 @@ def create_app() -> web.Application:
     app.router.add_get("/op/v0/device/detail", handle_device_detail)
     app.router.add_post("/op/v0/device/real/query", handle_real_query)
     app.router.add_post("/op/v0/device/scheduler/get", handle_scheduler_get)
+    app.router.add_post("/op/v3/device/scheduler/get", handle_scheduler_properties)
     app.router.add_post("/op/v0/device/scheduler/enable", handle_scheduler_enable)
     app.router.add_get("/op/v0/device/battery/soc/get", handle_battery_soc_get)
     app.router.add_post("/op/v0/device/battery/soc/set", handle_battery_soc_set)
