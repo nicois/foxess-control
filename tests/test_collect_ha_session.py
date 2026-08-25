@@ -115,3 +115,59 @@ class TestEntityRolesContract:
             f"for these roles and the script silently falls back to the "
             f"English default — defeating the locale-aware lookup."
         )
+
+    def test_english_fallbacks_match_the_role_they_stand_in_for(
+        self, collect_module: Any
+    ) -> None:
+        """Each English fallback must be the entity_id that the role's
+        own ``unique_id`` suffix produces.
+
+        The ``solar_power`` fallback used to be ``sensor.foxess_generation``
+        — the inverter *output* power sensor, not the PV sensor.  On any
+        install where the WS command is unavailable the collector silently
+        recorded inverter output (PV + battery discharge) in the
+        ``solar_power`` column, which is the same mislabelling that made
+        the HA Energy dashboard double-count battery discharge as solar.
+        """
+        import json
+        from pathlib import Path
+
+        from custom_components.foxess_control import _ENTITY_ROLES
+
+        repo_root = Path(__file__).resolve().parent.parent
+        en = json.loads(
+            (
+                repo_root
+                / "custom_components"
+                / "foxess_control"
+                / "translations"
+                / "en.json"
+            ).read_text(encoding="utf-8")
+        )
+        sensor_names = {
+            key: str(val.get("name", ""))
+            for key, val in en.get("entity", {}).get("sensor", {}).items()
+        }
+
+        def _slug(name: str) -> str:
+            return "".join(ch if ch.isalnum() else "_" for ch in name.lower()).strip(
+                "_"
+            )
+
+        mismatched: list[str] = []
+        for role, fallback in collect_module.DEFAULT_ROLES:
+            suffix = _ENTITY_ROLES.get(role)
+            expected_name = sensor_names.get(suffix or "")
+            if not expected_name:
+                # binary_sensor / non-sensor roles are covered elsewhere.
+                continue
+            domain = fallback.split(".", 1)[0]
+            expected = f"{domain}.foxess_{_slug(expected_name)}"
+            if fallback != expected:
+                mismatched.append(f"{role}: {fallback} != {expected}")
+
+        assert not mismatched, (
+            "scripts/collect_ha_session.py English fallbacks disagree with "
+            "the entity_ids Home Assistant derives from the English names "
+            f"of the roles' own sensors: {mismatched}"
+        )

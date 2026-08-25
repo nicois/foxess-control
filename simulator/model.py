@@ -133,8 +133,26 @@ class InverterModel:
     grid_consumption_total_kwh: float = 0.0
     charge_total_kwh: float = 0.0
     discharge_total_kwh: float = 0.0
+    # ``generation`` — the inverter's cumulative AC *output* energy.  NOT
+    # photovoltaic yield: it includes energy the battery discharged, so it
+    # rises overnight with zero sun.  Verified against a live KH10
+    # (2026-08-25/26): Δgeneration 16.5 kWh == Δloads 7.2 + Δfeedin 9.2 −
+    # Δimport 0.0 while pvPower stayed at 0.  See
+    # docs/api/foxess-cloud-api.md.
     generation_total_kwh: float = 0.0
+    # ``PVEnergyTotal`` — the genuine PV-only lifetime yield counter.  Flat
+    # whenever the panels produce nothing, however hard the battery is
+    # discharging.  This is the correct HA Energy-dashboard solar source.
+    pv_energy_total_kwh: float = 0.0
     loads_total_kwh: float = 0.0
+
+    # Variables this device does not support.  The real
+    # ``/op/v0/device/real/query`` silently OMITS an unsupported (or
+    # misspelled) variable from ``datas`` and still answers ``errno: 0`` —
+    # probed read-only against a live KH10 on 2026-08-26.  Modelling that
+    # lets tests prove a shared POLLED_VARIABLES entry degrades gracefully
+    # on models that lack it (C-033).
+    unsupported_variables: list[str] = field(default_factory=list)
 
     # Simulated time (starts at real time, advanced by tick/fast_forward)
     sim_time: datetime.datetime = field(
@@ -335,7 +353,11 @@ class InverterModel:
         self.grid_consumption_total_kwh += self.grid_import_kw * dt_hours
         self.charge_total_kwh += self.bat_charge_kw * dt_hours
         self.discharge_total_kwh += self.bat_discharge_kw * dt_hours
-        self.generation_total_kwh += self.solar_kw * dt_hours
+        # PV-only yield (PVEnergyTotal): panels only.
+        self.pv_energy_total_kwh += self.solar_kw * dt_hours
+        # Inverter AC output (generation): what left the inverter towards
+        # the house and the grid, whatever its source (PV *or* battery).
+        self.generation_total_kwh += self.inverter_output_kw * dt_hours
         self.loads_total_kwh += self.load_kw * dt_hours
 
         # Advance simulated time
@@ -369,6 +391,20 @@ class InverterModel:
         """Apply jitter if fuzzing is enabled."""
         return _jitter(value) if self.fuzzing else value
 
+    @property
+    def inverter_output_kw(self) -> float:
+        """Instantaneous AC output of the inverter (``generationPower``).
+
+        Energy leaving the inverter towards the house and the grid,
+        regardless of whether it came from the panels or the battery:
+        ``load + export - import``, floored at zero (while charging from
+        the grid the inverter is a net consumer, and the real counter does
+        not run backwards).  Matches the live KH10 observation that
+        ``generationPower`` tracked battery discharge power overnight with
+        ``pvPower`` pinned at 0.
+        """
+        return max(0.0, self.load_kw + self.grid_export_kw - self.grid_import_kw)
+
     def get_real_time_response(self, variables: list[str]) -> list[dict[str, Any]]:
         """Return real-time data in API format (with optional fuzzing)."""
         f = self._fuzz
@@ -380,7 +416,7 @@ class InverterModel:
             "pvPower": f(self.solar_kw),
             "gridConsumptionPower": f(self.grid_import_kw),
             "feedinPower": f(self.grid_export_kw),
-            "generationPower": f(self.solar_kw),
+            "generationPower": f(self.inverter_output_kw),
             "batTemperature": 25.0,
             "batVolt": 52.0,
             "batCurrent": (self.bat_charge_kw - self.bat_discharge_kw) * 1000 / 52,
@@ -391,6 +427,7 @@ class InverterModel:
             "feedin": self.feedin_total_kwh,
             "gridConsumption": self.grid_consumption_total_kwh,
             "generation": self.generation_total_kwh,
+            "PVEnergyTotal": self.pv_energy_total_kwh,
             "chargeEnergyToTal": self.charge_total_kwh,
             "dischargeEnergyToTal": self.discharge_total_kwh,
             "loads": self.loads_total_kwh,
@@ -403,9 +440,12 @@ class InverterModel:
             "epsPower": 0.0,
             "ResidualEnergy": self.soc / 100.0 * self.battery_capacity_kwh,
         }
+        unsupported = set(self.unsupported_variables)
         datas = []
         for v in variables:
-            if v in var_map:
+            # Unknown / unsupported names are silently omitted (errno stays
+            # 0) — see the ``unsupported_variables`` field docstring.
+            if v in var_map and v not in unsupported:
                 datas.append({"variable": v, "value": var_map[v]})
         return [{"datas": datas, "deviceSN": self.device_sn}]
 
@@ -488,6 +528,9 @@ class InverterModel:
             "ws_time_diff": self.ws_time_diff,
             "feedin_total_kwh": round(self.feedin_total_kwh, 3),
             "grid_consumption_total_kwh": round(self.grid_consumption_total_kwh, 3),
+            "generation_total_kwh": round(self.generation_total_kwh, 3),
+            "pv_energy_total_kwh": round(self.pv_energy_total_kwh, 3),
+            "unsupported_variables": list(self.unsupported_variables),
             "rate_limit_seconds": self.rate_limit_seconds,
         }
 

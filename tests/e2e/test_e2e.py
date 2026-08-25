@@ -980,6 +980,101 @@ class TestDataSource:
         )
 
 
+class TestEnergyDashboardSolarSource:
+    """The entity HA presents as solar energy must be PV-only.
+
+    Production report (KH10, 2026-08-26): users wired the sensor named
+    "Solar Generation Energy" (German "Solarenergie",
+    ``sensor.foxess_solarenergie``) into the HA Energy dashboard as their
+    *solar* source.  It is fed by the FoxESS ``generation`` variable — the
+    inverter's cumulative AC **output** energy — so it climbed all night
+    while the battery discharged, double-counting the battery (one night's
+    home consumption came out as 26.6 kWh against a real 7.2 kWh load).
+
+    ``sensor.foxess_solar_pv_energy`` (``PVEnergyTotal``) is the PV-only
+    counter and the correct Energy-dashboard solar source;
+    ``sensor.foxess_inverter_output_energy`` is the relabelled output
+    counter.  Both are asserted here because the fix is the *pair*: a new
+    PV sensor is useless if the mislabelled one still reads as solar.
+    """
+
+    def test_pv_energy_flat_overnight_while_output_energy_rises(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        if connection_mode != "cloud":
+            pytest.skip("cloud cumulative energy counters are cloud-mode only")
+        assert foxess_sim is not None
+
+        pv_entity = "sensor.foxess_solar_pv_energy"
+        out_entity = "sensor.foxess_inverter_output_energy"
+
+        # Night: no sun, house load carried entirely by the battery.
+        foxess_sim.set(fuzzing=False, soc=90, solar_kw=0.0, load_kw=1.5)
+        ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_battery_soc", "ge", 89, timeout_s=120
+        )
+        # Both entities must exist and carry a numeric reading (proves the
+        # new variable is polled and the rename kept a working entity).
+        pv_before = ha_e2e.wait_for_numeric_state(pv_entity, "ge", 0.0, timeout_s=120)
+        out_before = ha_e2e.wait_for_numeric_state(out_entity, "ge", 0.0, timeout_s=120)
+
+        # 4 h of night.
+        foxess_sim.fast_forward(4 * 3600, step=900)
+
+        # The next poll must show the inverter having put ~6 kWh out...
+        out_after = ha_e2e.wait_for_numeric_state(
+            out_entity, "gt", out_before + 1.0, timeout_s=240
+        )
+        # ...and the PV counter must not have budged.
+        pv_after = float(ha_e2e.get_state(pv_entity))
+        assert float(ha_e2e.get_state("sensor.foxess_solar_power")) == 0.0
+        assert pv_after == pytest.approx(pv_before, abs=0.01), (
+            f"{pv_entity} rose {pv_after - pv_before:.3f} kWh overnight with "
+            f"zero solar power while inverter output rose "
+            f"{out_after - out_before:.3f} kWh — the Energy dashboard's solar "
+            f"source is counting battery discharge as solar yield"
+        )
+
+    def test_pv_energy_rises_with_sun_and_stays_below_output(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """Daytime with the battery also discharging: PV yield must rise,
+        but by strictly less than inverter output."""
+        if connection_mode != "cloud":
+            pytest.skip("cloud cumulative energy counters are cloud-mode only")
+        assert foxess_sim is not None
+
+        pv_entity = "sensor.foxess_solar_pv_energy"
+        out_entity = "sensor.foxess_inverter_output_energy"
+
+        foxess_sim.set(fuzzing=False, soc=80, solar_kw=3.0, load_kw=5.0)
+        ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_solar_power", "ge", 2.9, timeout_s=120
+        )
+        pv_before = ha_e2e.wait_for_numeric_state(pv_entity, "ge", 0.0, timeout_s=120)
+        out_before = ha_e2e.wait_for_numeric_state(out_entity, "ge", 0.0, timeout_s=120)
+
+        foxess_sim.fast_forward(2 * 3600, step=900)
+
+        pv_after = ha_e2e.wait_for_numeric_state(
+            pv_entity, "gt", pv_before + 1.0, timeout_s=240
+        )
+        out_after = float(ha_e2e.get_state(out_entity))
+        pv_delta = pv_after - pv_before
+        out_delta = out_after - out_before
+        assert pv_delta < out_delta, (
+            f"PV energy rose {pv_delta:.3f} kWh but inverter output rose only "
+            f"{out_delta:.3f} kWh — with 3 kW PV, 5 kW load and the battery "
+            f"covering the shortfall, output must exceed PV yield"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Entity-mode-only tests
 # ---------------------------------------------------------------------------
