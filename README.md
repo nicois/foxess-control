@@ -337,7 +337,7 @@ The integration polls inverter data at a configurable interval and creates the f
 | `sensor.foxess_bms_battery_temperature` | BMS cell temperature (web portal) | °C |
 | `sensor.foxess_grid_consumption` | Power drawn from grid | kW |
 | `sensor.foxess_grid_feed_in` | Power fed to grid | kW |
-| `sensor.foxess_generation` | Total generation power | kW |
+| `sensor.foxess_inverter_output` | Inverter AC output power — PV **plus** battery discharge. Not solar; use `sensor.foxess_solar_power` for that. (Was `sensor.foxess_generation` / "Generation" before 1.0.22; existing installs keep the old entity ID.) | kW |
 | `sensor.foxess_battery_voltage` | Battery voltage | V |
 | `sensor.foxess_battery_current` | Battery current | A |
 | `sensor.foxess_pv1_power` | PV string 1 power | kW |
@@ -346,7 +346,8 @@ The integration polls inverter data at a configurable interval and creates the f
 | `sensor.foxess_inverter_temperature` | Inverter temperature | °C |
 | `sensor.foxess_grid_feed_in_energy` | Cumulative grid feed-in energy (lifetime) | kWh |
 | `sensor.foxess_grid_consumption_energy` | Cumulative grid consumption energy (lifetime) | kWh |
-| `sensor.foxess_solar_generation_energy` | Cumulative solar generation energy (lifetime) | kWh |
+| `sensor.foxess_solar_pv_energy` | Cumulative **photovoltaic-only** yield (lifetime, FoxESS `PVEnergyTotal`). **This is the sensor to use as the HA Energy dashboard's solar source.** Unavailable on models that do not report it. | kWh |
+| `sensor.foxess_inverter_output_energy` | Cumulative inverter AC **output** energy (lifetime) — includes battery discharge, so it rises overnight with no sun. Do **not** use it as an Energy-dashboard solar source. (Was `sensor.foxess_solar_generation_energy` / "Solar Generation Energy" before 1.0.22; existing installs keep the old entity ID.) | kWh |
 | `sensor.foxess_battery_charge_energy` | Cumulative battery charge energy (lifetime) | kWh |
 | `sensor.foxess_battery_discharge_energy` | Cumulative battery discharge energy (lifetime) | kWh |
 | `sensor.foxess_house_load_energy` | Cumulative house load energy (lifetime) | kWh |

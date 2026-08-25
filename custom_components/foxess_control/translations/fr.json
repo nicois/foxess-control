@@ -29,7 +29,7 @@
         "name": "Injection réseau"
       },
       "generation_power": {
-        "name": "Production"
+        "name": "Sortie de l'onduleur"
       },
       "bat_volt": {
         "name": "Tension batterie"
@@ -56,7 +56,10 @@
         "name": "Énergie consommée réseau"
       },
       "generation_energy": {
-        "name": "Énergie solaire produite"
+        "name": "Énergie de sortie de l'onduleur"
+      },
+      "pv_energy": {
+        "name": "Énergie solaire photovoltaïque"
       },
       "charge_energy_total": {
         "name": "Énergie de charge batterie"

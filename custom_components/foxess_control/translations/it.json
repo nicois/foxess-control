@@ -29,7 +29,7 @@
         "name": "Immissione in rete"
       },
       "generation_power": {
-        "name": "Produzione"
+        "name": "Uscita inverter"
       },
       "bat_volt": {
         "name": "Tensione batteria"
@@ -56,7 +56,10 @@
         "name": "Energia consumata dalla rete"
       },
       "generation_energy": {
-        "name": "Energia solare prodotta"
+        "name": "Energia in uscita dall'inverter"
+      },
+      "pv_energy": {
+        "name": "Energia solare fotovoltaica"
       },
       "charge_energy_total": {
         "name": "Energia di ricarica batteria"

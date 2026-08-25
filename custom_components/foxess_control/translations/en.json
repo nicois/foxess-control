@@ -29,7 +29,7 @@
         "name": "Grid Feed-in"
       },
       "generation_power": {
-        "name": "Generation"
+        "name": "Inverter Output"
       },
       "bat_volt": {
         "name": "Battery Voltage"
@@ -56,7 +56,10 @@
         "name": "Grid Consumption Energy"
       },
       "generation_energy": {
-        "name": "Solar Generation Energy"
+        "name": "Inverter Output Energy"
+      },
+      "pv_energy": {
+        "name": "Solar PV Energy"
       },
       "charge_energy_total": {
         "name": "Battery Charge Energy"

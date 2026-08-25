@@ -144,7 +144,14 @@ POLLED_VARIABLES = [
     # Cumulative energy counters (lifetime kWh)
     "feedin",
     "gridConsumption",
+    # Inverter cumulative AC *output* energy — includes battery discharge,
+    # NOT photovoltaic yield.  Use PVEnergyTotal for solar.
     "generation",
+    # Photovoltaic-only lifetime yield.  Not every FoxESS model reports it;
+    # an unsupported variable is silently omitted from the real/query
+    # ``datas`` array (errno stays 0), so requesting it for everyone is
+    # safe — the sensor simply reads unavailable where it is absent.
+    "PVEnergyTotal",
     "chargeEnergyToTal",
     "dischargeEnergyToTal",
     "loads",

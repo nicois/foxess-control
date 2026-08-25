@@ -372,6 +372,42 @@ Key tests:
   interaction, feedin deadline
 - Graceful degradation when data missing
 
+## PV-Only Energy vs Inverter Output Energy (C-041)
+
+**Constraints**: C-020, C-028, C-033, C-041
+**Source**: `tests/test_pv_energy_sensor.py` (44 tests, 2026-08-26),
+`tests/e2e/test_e2e.py::TestEnergyDashboardSolarSource` (2 tests)
+
+Reproduces and guards the production report where the sensor named
+"Solar Generation Energy" / "Solarenergie" (fed by the inverter's AC
+*output* counter `generation`) climbed all night while the panels
+produced nothing, double-counting battery discharge on the HA Energy
+dashboard. The unit tests drive the real REST path — `FoxESSClient` →
+`/op/v0/device/real/query` → `Inverter` → `FoxESSDataCoordinator` →
+`FoxESSPolledSensor` — against the simulator (C-028), and resolve "the
+entity HA presents as solar" from the *translation catalogue*, because
+`_attr_translation_key` (not the descriptor's `name` field) is what HA
+displays.
+
+Cases: PV zero + battery discharging (the solar-energy entity must not
+move); PV producing while the battery also discharges (must rise, and
+by strictly less than inverter output); every energy sensor named as
+solar must be fed by a PV-only variable, checked against both the
+English and German catalogues; `PVEnergyTotal` unsupported by the model
+(entity unavailable, poll survives, all other sensors unaffected —
+the real API silently omits unsupported variables with `errno: 0`);
+value present but `null` (unavailable, never 0 on a `TOTAL_INCREASING`
+sensor); the renamed output sensors still track inverter output;
+translation-key / unique-id stability (upgrade safety for existing
+installs); locale completeness for the new `pv_energy` key; and the
+API reference wording that originated the mislabelling.
+
+Simulator fidelity landed with the tests (C-033): `generation` /
+`generationPower` now model inverter AC output (`load + export −
+import`) rather than PV yield, `PVEnergyTotal` is served PV-only, and
+an `unsupported_variables` seam models the real API's silent omission
+of variables a device does not report.
+
 ## Rolling-Median WS Power Display Filter (D-054)
 
 **Constraints**: C-020, C-038

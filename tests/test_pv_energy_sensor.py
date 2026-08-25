@@ -544,9 +544,16 @@ class TestDocumentedSemantics:
         ]
         assert rows, "no `generation` row in the cumulative-counter table"
         for row in rows:
-            assert not _claims_solar(row), (
+            low = row.lower()
+            # A *disclaimer* mentioning solar is fine (and wanted); the row
+            # must not describe `generation` AS solar generation energy.
+            assert "solar generation energy" not in low, (
                 f"docs/api/foxess-cloud-api.md still describes `generation` "
-                f"as solar: {row.strip()!r}"
+                f"as solar generation energy: {row.strip()!r}"
+            )
+            assert "output" in low, (
+                f"the `generation` row must say it is the inverter's AC "
+                f"output energy, got {row.strip()!r}"
             )
 
     def test_api_doc_documents_pv_energy_total(self) -> None:

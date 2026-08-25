@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **New `sensor.foxess_solar_pv_energy` — "Solar PV Energy"** (C-041). Cumulative **photovoltaic-only** yield, from the FoxESS `PVEnergyTotal` variable, which the integration did not previously poll at all. Energy device class, `total_increasing`, kWh, enabled by default. **This is the sensor to use as the Home Assistant Energy dashboard's solar source.** On inverter models that do not report `PVEnergyTotal` the entity simply reads unavailable — the FoxESS API silently omits an unsupported variable from the response (verified against a live KH10), so the rest of the poll is unaffected and no reconfiguration is needed.
+
+### Fixed
+- **Two sensors were mislabelled as solar when they measure inverter output** (C-041), which caused the HA Energy dashboard to count battery discharge twice. `sensor.foxess_solar_generation_energy` ("Solar Generation Energy" / German "Solarenergie") and `sensor.foxess_generation` ("Generation") are fed by the FoxESS `generation` / `generationPower` variables — the inverter's cumulative AC **output** energy and power, which include everything the battery discharged. The solar name and solar icon led users to wire the energy one into the Energy dashboard as their **solar** source alongside the battery-discharge sensor as their **battery** source; on a live KH10 one night's computed home consumption came out as 26.6 kWh against an actual house load of 7.2 kWh (raw cloud history for that night: `generation` +18.2 kWh, `PVEnergyTotal` +0.2 kWh, `pvPower` flat at 0). They are now named **"Inverter Output Energy"** and **"Inverter Output"** in every language, and no longer carry solar icons. **This is a friendly-name change only** — unique IDs are unchanged and Home Assistant keeps the entity IDs of already-registered entities, so existing automations, dashboards, statistics and history are untouched. Fresh installs get entity IDs derived from the new names (`sensor.foxess_inverter_output_energy`, `sensor.foxess_inverter_output`). If you had either sensor set as your Energy dashboard solar source, switch it to the new `sensor.foxess_solar_pv_energy`.
+- **`scripts/collect_ha_session.py` recorded inverter output in its `solar_power` column** when the locale-aware entity lookup was unavailable — the English fallback pointed at `sensor.foxess_generation` instead of `sensor.foxess_solar_power`.
+- **`docs/api/foxess-cloud-api.md` documented `generation` as "Lifetime solar generation energy"** — the origin of the mislabelling. It now describes `generation` / `generationPower` as the inverter's AC output side, documents `PVEnergyTotal` as the PV-only counter, records that `todayYield` reads `0.0` on the KH10 and must not be relied on, and documents that `real/query` silently omits unsupported variables (`errno: 0`) rather than rejecting the request.
+
 ## 1.0.22-beta.3
 
 ### Fixed

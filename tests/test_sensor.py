@@ -1990,6 +1990,7 @@ class TestFoxESSPolledSensor:
                 "feedin": 657.1,
                 "gridConsumption": 690.0,
                 "generation": 1347.0,
+                "PVEnergyTotal": 1102.5,
                 "chargeEnergyToTal": 1028.4,
                 "dischargeEnergyToTal": 1211.4,
                 "loads": 923.1,
@@ -2007,7 +2008,7 @@ class TestFoxESSPolledSensor:
             FoxESSPolledSensor(coordinator, entry, desc)
             for desc in POLLED_SENSOR_DESCRIPTIONS
         ]
-        assert len(sensors) == 28
+        assert len(sensors) == 29
         # All should have a non-None value
         for s in sensors:
             assert s.native_value is not None
@@ -2395,8 +2396,8 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(hass, entry, mock_add)  # type: ignore[arg-type]
 
-        # 11 base + 28 polled + 1 work mode + 1 freshness = 41
-        assert len(added) == 41
+        # 11 base + 29 polled + 1 work mode + 1 freshness = 42
+        assert len(added) == 42
         assert isinstance(added[0], InverterOverrideStatusSensor)
         assert isinstance(added[1], SmartOperationsOverviewSensor)
         assert isinstance(added[2], ChargePowerSensor)
@@ -2420,9 +2421,9 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(hass, entry, mock_add)  # type: ignore[arg-type]
 
-        assert len(added) == 41  # 11 existing + 28 polled + 1 work mode + 1 freshness
+        assert len(added) == 42  # 11 existing + 29 polled + 1 work mode + 1 freshness
         polled = [e for e in added if isinstance(e, FoxESSPolledSensor)]
-        assert len(polled) == 28
+        assert len(polled) == 29
         work_mode = [e for e in added if isinstance(e, FoxESSWorkModeSensor)]
         assert len(work_mode) == 1
 
@@ -2573,8 +2574,8 @@ class TestDebugLog:
 
         await async_setup_entry(hass, entry, mock_add)  # type: ignore[arg-type]
 
-        # 41 base + 3 log sensors = 44
-        assert len(added) == 44
+        # 42 base + 3 log sensors = 45
+        assert len(added) == 45
         debug_sensors = [e for e in added if isinstance(e, DebugLogSensor)]
         assert len(debug_sensors) == 1
         info_sensors = [e for e in added if isinstance(e, InfoLogSensor)]

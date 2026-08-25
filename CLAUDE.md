@@ -45,6 +45,7 @@ serves and any lower-priority goal it trades against.
 - **C-022**: Unreachable charge target surfaced to user
 - **C-026**: Persistent errors surfaced via sensor state, not just logs
 - **C-038**: Sensor display formulas must call the same algorithm functions as listeners, with the same parameter lists (prevents UI/listener phase divergence)
+- **C-041**: Sensor names (and icons) must state the quantity actually measured — nothing may be named *solar*/*PV* unless fed by a PV-only variable (`pvPower`, `pv1Power`, `pv2Power`, `PVEnergyTotal`). `generation`/`generationPower` are inverter **output** (PV + battery discharge)
 
 ### FoxESS API
 - **C-008**: FoxESS API: fdSoc >= 11 and minSocOnGrid <= fdSoc

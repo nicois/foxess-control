@@ -29,7 +29,7 @@
         "name": "Netzeinspeisung"
       },
       "generation_power": {
-        "name": "Erzeugung"
+        "name": "Wechselrichter-Ausgang"
       },
       "bat_volt": {
         "name": "Batteriespannung"
@@ -56,7 +56,10 @@
         "name": "Netzbezugsenergie"
       },
       "generation_energy": {
-        "name": "Solarenergie"
+        "name": "Wechselrichter-Ausgangsenergie"
+      },
+      "pv_energy": {
+        "name": "Solar-PV-Energie"
       },
       "charge_energy_total": {
         "name": "Ladeenergie"

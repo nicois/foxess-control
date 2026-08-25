@@ -365,7 +365,9 @@ Two things to know that diverge from the public docs:
 **Instantaneous power variables** (kW floats): `SoC` (%),
 `batChargePower`, `batDischargePower`, `loadsPower`, `pvPower`,
 `pv1Power`, `pv2Power`, `gridConsumptionPower`, `feedinPower`,
-`generationPower`, `meterPower`, `meterPower2`, `epsPower`,
+`generationPower` (inverter AC *output*, not PV — see the
+`generation` / `PVEnergyTotal` note below), `meterPower`,
+`meterPower2`, `epsPower`,
 `batVolt` (V), `batCurrent` (A), `batTemperature` /
 `ambientTemperation` / `invTemperation` (°C), `RVolt` / `RCurrent` /
 `RFreq`.
@@ -382,7 +384,8 @@ interval, or use the underlying meter's own statistics):
 
 | Variable | Meaning |
 |---|---|
-| `generation` | Lifetime solar generation energy |
+| `generation` | Lifetime inverter **AC output** energy — everything the inverter put out, whatever the source. **Not** photovoltaic yield: it rises while the battery discharges, with zero sun. Use `PVEnergyTotal` for solar. |
+| `PVEnergyTotal` | Lifetime **photovoltaic-only** yield — the genuine solar counter, and the correct HA Energy-dashboard *solar* source. Not reported by every model. |
 | `chargeEnergyToTal` | Lifetime **battery charge** energy *(note the `ToTal` capitalisation — a FoxESS API quirk, not a typo to "fix")* |
 | `dischargeEnergyToTal` | Lifetime **battery discharge** energy (everything the battery put out, into house load **and** export combined) |
 | `feedin` | Lifetime **grid feed-in (export)** energy — energy exported to the grid, i.e. discharge/solar **beyond** household self-consumption |
@@ -400,6 +403,34 @@ measured from **`feedin`**, NOT from `dischargeEnergyToTal` — a
 discharge-energy cap would strand usable battery energy and cannot
 measure export. Both variables exist and are pollable; pick the one
 that matches the quantity you actually want to bound.
+
+**`generation` vs `PVEnergyTotal` — do not confuse them either.**
+The variable catalogue (`GET /op/v0/device/variable/get`) labels
+`generation` "Cumulative power generation" and `generationPower`
+"Output Power", which reads like solar but is not: both are the
+inverter's AC **output** side. On a live KH10 over one night
+(2026-08-25 18:00 → 2026-08-26 08:00 AEST, `pvPower` flat at 0 and the
+battery discharging), `generation` rose 18.2 kWh while `PVEnergyTotal`
+rose 0.2 kWh — and Δ`generation` reconciled exactly as Δ`loads` +
+Δ`feedin` − Δ`gridConsumption`. Wiring `generation` into an energy
+dashboard as the *solar* source therefore double-counts battery
+discharge (once as solar, once as battery). Use `PVEnergyTotal`.
+
+**`todayYield` is not a substitute.** The catalogue labels it "Today's
+power generation" (unit `kW`, which is already suspicious for a yield
+figure) and it reads **0.0** on the KH10 — for all 167 samples of the
+night above, and it is omitted entirely from `real/query` responses.
+Do not rely on it; derive today's yield from `PVEnergyTotal` deltas.
+
+**Unsupported variables are omitted, not rejected.** Requesting a
+variable the device does not report (or a misspelled name — the names
+are case-sensitive) does **not** fail the request: `errno` stays `0`
+and the variable is simply absent from `datas`. Probed read-only
+against a live KH10 on 2026-08-26 with a deliberately bogus name
+alongside real ones; requesting only unsupported names returns
+`result: []`. This is what makes a shared poll list containing
+model-specific variables such as `PVEnergyTotal` safe — consumers must
+treat absence as "unavailable", never as zero.
 
 Power values from this endpoint are in **kilowatts** (floats). Note
 this differs from the WebSocket and from schedule writes — see §8.

@@ -29,7 +29,7 @@
         "default": "mdi:transmission-tower-export"
       },
       "generation_power": {
-        "default": "mdi:solar-power-variant"
+        "default": "mdi:flash"
       },
       "bat_volt": {
         "default": "mdi:flash-triangle"
@@ -56,7 +56,10 @@
         "default": "mdi:transmission-tower-import"
       },
       "generation_energy": {
-        "default": "mdi:solar-power-variant"
+        "default": "mdi:flash-outline"
+      },
+      "pv_energy": {
+        "default": "mdi:solar-power"
       },
       "charge_energy_total": {
         "default": "mdi:battery-charging"

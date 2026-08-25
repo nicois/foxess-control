@@ -29,7 +29,7 @@
         "name": "Teruglevering"
       },
       "generation_power": {
-        "name": "Opwekking"
+        "name": "Omvormer-uitvoer"
       },
       "bat_volt": {
         "name": "Batterijspanning"
@@ -56,7 +56,10 @@
         "name": "Netverbruiksenergie"
       },
       "generation_energy": {
-        "name": "Opgewekte zonne-energie"
+        "name": "Omvormer-uitvoerenergie"
+      },
+      "pv_energy": {
+        "name": "Zonne-PV-energie"
       },
       "charge_energy_total": {
         "name": "Batterij laadenergie"

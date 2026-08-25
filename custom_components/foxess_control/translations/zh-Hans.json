@@ -29,7 +29,7 @@
         "name": "馈网功率"
       },
       "generation_power": {
-        "name": "发电功率"
+        "name": "逆变器输出"
       },
       "bat_volt": {
         "name": "电池电压"
@@ -56,7 +56,10 @@
         "name": "电网用电量"
       },
       "generation_energy": {
-        "name": "光伏发电量"
+        "name": "逆变器输出电量"
+      },
+      "pv_energy": {
+        "name": "光伏总发电量"
       },
       "charge_energy_total": {
         "name": "电池充电量"

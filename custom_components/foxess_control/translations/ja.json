@@ -29,7 +29,7 @@
         "name": "売電電力"
       },
       "generation_power": {
-        "name": "発電電力"
+        "name": "インバーター出力"
       },
       "bat_volt": {
         "name": "バッテリー電圧"
@@ -56,7 +56,10 @@
         "name": "系統消費電力量"
       },
       "generation_energy": {
-        "name": "太陽光発電量"
+        "name": "インバーター出力電力量"
+      },
+      "pv_energy": {
+        "name": "PV発電量"
       },
       "charge_energy_total": {
         "name": "バッテリー充電量"

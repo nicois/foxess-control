@@ -29,7 +29,7 @@
         "name": "Oddawanie do sieci"
       },
       "generation_power": {
-        "name": "Produkcja"
+        "name": "Wyjście falownika"
       },
       "bat_volt": {
         "name": "Napięcie baterii"
@@ -56,7 +56,10 @@
         "name": "Energia pobrana z sieci"
       },
       "generation_energy": {
-        "name": "Energia solarna wyprodukowana"
+        "name": "Energia wyjściowa falownika"
+      },
+      "pv_energy": {
+        "name": "Energia fotowoltaiczna"
       },
       "charge_energy_total": {
         "name": "Energia ładowania baterii"

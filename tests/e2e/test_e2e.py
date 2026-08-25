@@ -1013,11 +1013,16 @@ class TestEnergyDashboardSolarSource:
 
         # Night: no sun, house load carried entirely by the battery.
         foxess_sim.set(fuzzing=False, soc=90, solar_kw=0.0, load_kw=1.5)
+        # Gate on the renamed *output power* sensor reaching the new load.
+        # It is not one of the median-filtered WS power channels
+        # (_WS_MEDIAN_FILTERED_VARIABLES), so it tracks the very first poll
+        # that sees the new simulator state — unlike sensor.foxess_solar_power
+        # or _house_load, which need three samples to clear the filter.
         ha_e2e.wait_for_numeric_state(
-            "sensor.foxess_battery_soc", "ge", 89, timeout_s=120
+            "sensor.foxess_inverter_output", "ge", 1.4, timeout_s=180
         )
-        # Both entities must exist and carry a numeric reading (proves the
-        # new variable is polled and the rename kept a working entity).
+        # Both energy entities must exist and carry a numeric reading (proves
+        # the new variable is polled and the rename kept a working entity).
         pv_before = ha_e2e.wait_for_numeric_state(pv_entity, "ge", 0.0, timeout_s=120)
         out_before = ha_e2e.wait_for_numeric_state(out_entity, "ge", 0.0, timeout_s=120)
 
@@ -1026,7 +1031,7 @@ class TestEnergyDashboardSolarSource:
 
         # The next poll must show the inverter having put ~6 kWh out...
         out_after = ha_e2e.wait_for_numeric_state(
-            out_entity, "gt", out_before + 1.0, timeout_s=240
+            out_entity, "gt", out_before + 1.0, timeout_s=300
         )
         # ...and the PV counter must not have budged.
         pv_after = float(ha_e2e.get_state(pv_entity))
@@ -1054,8 +1059,11 @@ class TestEnergyDashboardSolarSource:
         out_entity = "sensor.foxess_inverter_output_energy"
 
         foxess_sim.set(fuzzing=False, soc=80, solar_kw=3.0, load_kw=5.0)
+        # Output power == load here (no export, no import).  Gated on the
+        # unfiltered output sensor rather than sensor.foxess_solar_power,
+        # which is median-filtered and needs three polls to settle.
         ha_e2e.wait_for_numeric_state(
-            "sensor.foxess_solar_power", "ge", 2.9, timeout_s=120
+            "sensor.foxess_inverter_output", "ge", 4.9, timeout_s=180
         )
         pv_before = ha_e2e.wait_for_numeric_state(pv_entity, "ge", 0.0, timeout_s=120)
         out_before = ha_e2e.wait_for_numeric_state(out_entity, "ge", 0.0, timeout_s=120)
@@ -1063,7 +1071,7 @@ class TestEnergyDashboardSolarSource:
         foxess_sim.fast_forward(2 * 3600, step=900)
 
         pv_after = ha_e2e.wait_for_numeric_state(
-            pv_entity, "gt", pv_before + 1.0, timeout_s=240
+            pv_entity, "gt", pv_before + 1.0, timeout_s=300
         )
         out_after = float(ha_e2e.get_state(out_entity))
         pv_delta = pv_after - pv_before

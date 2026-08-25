@@ -443,6 +443,45 @@ exported via the diagnostics download);
 `tests/test_sensor_listener_safety.py::TestSensorListenerFailureSurfacesRepair` (6),
 `tests/test_error_recording.py`, `tests/test_diagnostics.py`
 
+### C-041: Sensor names must state the quantity actually measured
+**Priority enforced**: P-005 (operational transparency) — an entity
+name is the *only* thing most users ever read about a sensor; if the
+name says one physical quantity and the feed carries another, the UI
+is actively lying and no amount of correct data helps
+**Statement**: The user-visible name of a sensor (the
+`entity.sensor.<key>.name` entry in `strings.json` and every
+`translations/*.json`, since `_attr_translation_key` — not the
+descriptor's `name` field — is what HA displays) and its icon must
+describe the physical quantity of the variable feeding it. In
+particular no sensor may be named or iconed as *solar* / *PV* unless
+it is fed by a photovoltaic-only variable (`pvPower`, `pv1Power`,
+`pv2Power`, `PVEnergyTotal`). Inverter-output variables
+(`generation`, `generationPower`) include battery discharge and must
+be named as output.
+**Rationale**: Production report 2026-08-26 (live KH10). The FoxESS
+variable catalogue labels `generation` "Cumulative power generation",
+which was documented and shipped as "Solar Generation Energy"
+(German "Solarenergie"). It is the inverter's cumulative AC *output*
+energy, so it rises overnight with the battery discharging and zero
+sun. The name led users to wire it into the HA Energy dashboard as
+their **solar** source alongside the battery-discharge sensor as their
+**battery** source, double-counting battery discharge: one night's
+computed home consumption was 26.6 kWh against a real house load of
+7.2 kWh. The data was never wrong — only its label.
+**Violation consequence**: Users build automations, dashboards and
+long-term statistics on a quantity other than the one they believe
+they selected. Because HA statistics are retained, the damage
+outlives the fix.
+**Traces**: C-020 (operational transparency), C-033 (the simulator
+modelled `generation` as PV yield, which hid the bug from the whole
+test suite);
+`tests/test_pv_energy_sensor.py` (44 tests: behavioural
+PV-zero/PV-producing reproduction over the real REST path, name/icon
+audit across the descriptor list and the en/de catalogues, locale
+completeness, graceful degradation when the variable is unsupported),
+`tests/test_collect_ha_session.py::TestEntityRolesContract`
+(the same mislabelling in the session-collector fallback list)
+
 ### C-038: Sensor-listener parameter parity
 **Priority enforced**: P-005 (operational transparency) — when the
 UI and the listener use different formulas, the user cannot trust

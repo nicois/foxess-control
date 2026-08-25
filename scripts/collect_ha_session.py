@@ -89,7 +89,10 @@ except ImportError:  # pragma: no cover
 DEFAULT_ROLES: list[tuple[str, str]] = [
     ("battery_soc", "sensor.foxess_battery_soc"),
     ("house_load", "sensor.foxess_house_load"),
-    ("solar_power", "sensor.foxess_generation"),
+    # PV power, NOT the inverter's AC output (`sensor.foxess_inverter_output`,
+    # formerly `sensor.foxess_generation`) — output includes battery
+    # discharge and would land in the solar column.
+    ("solar_power", "sensor.foxess_solar_power"),
     ("pv1_power", "sensor.foxess_pv1_power"),
     ("pv2_power", "sensor.foxess_pv2_power"),
     ("grid_consumption", "sensor.foxess_grid_consumption"),

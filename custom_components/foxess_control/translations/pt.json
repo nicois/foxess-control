@@ -29,7 +29,7 @@
         "name": "Injeção na rede"
       },
       "generation_power": {
-        "name": "Produção"
+        "name": "Saída do inversor"
       },
       "bat_volt": {
         "name": "Tensão da bateria"
@@ -56,7 +56,10 @@
         "name": "Energia consumida da rede"
       },
       "generation_energy": {
-        "name": "Energia solar produzida"
+        "name": "Energia de saída do inversor"
+      },
+      "pv_energy": {
+        "name": "Energia solar fotovoltaica"
       },
       "charge_energy_total": {
         "name": "Energia de carga da bateria"

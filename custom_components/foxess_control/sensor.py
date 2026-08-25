@@ -386,14 +386,19 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "mdi:transmission-tower-export",
         display_precision=2,
     ),
+    # `generationPower` is the inverter's AC *output* power — PV plus
+    # battery discharge, minus grid import.  Deliberately NOT a solar name
+    # or icon: users wired the old "Generation"/solar-icon sensors into the
+    # HA Energy dashboard as their solar source and double-counted the
+    # battery.  For solar use `pvPower` / `PVEnergyTotal`.
     _PolledSensorDescription(
         "generationPower",
-        "Generation",
+        "Inverter Output",
         "generation_power",
         SensorDeviceClass.POWER,
         "kW",
         SensorStateClass.MEASUREMENT,
-        "mdi:solar-power-variant",
+        "mdi:flash",
         display_precision=2,
     ),
     _PolledSensorDescription(
@@ -489,14 +494,31 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         "mdi:transmission-tower-import",
         display_precision=2,
     ),
+    # Photovoltaic-only lifetime yield — the correct HA Energy dashboard
+    # *solar* source.  Reads unavailable on models that do not report
+    # `PVEnergyTotal` (the variable is simply absent from the poll
+    # response); the rest of the poll is unaffected.
+    _PolledSensorDescription(
+        "PVEnergyTotal",
+        "Solar PV Energy",
+        "pv_energy",
+        SensorDeviceClass.ENERGY,
+        "kWh",
+        SensorStateClass.TOTAL_INCREASING,
+        "mdi:solar-power",
+        display_precision=2,
+    ),
+    # Inverter cumulative AC *output* energy — everything the inverter put
+    # out, whether it came from the panels or the battery.  Not solar; see
+    # the `generationPower` note above.
     _PolledSensorDescription(
         "generation",
-        "Solar Generation Energy",
+        "Inverter Output Energy",
         "generation_energy",
         SensorDeviceClass.ENERGY,
         "kWh",
         SensorStateClass.TOTAL_INCREASING,
-        "mdi:solar-power-variant",
+        "mdi:flash-outline",
         display_precision=2,
     ),
     _PolledSensorDescription(
