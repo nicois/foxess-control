@@ -105,6 +105,15 @@ class InverterModel:
     solar_kw: float = 0.0
     load_kw: float = 0.5
 
+    # Third and fourth MPPT strings, reported as ``pv3Power`` / ``pv4Power``.
+    # Default 0.0 mirrors a live KH10, which reports both at 0.0 kW (~1.1 V)
+    # because those inputs are unused — a device with four *populated*
+    # strings is simulated by setting these via the backchannel.  ``pv1Power``
+    # / ``pv2Power`` remain a half-split of ``solar_kw`` so existing tests
+    # are unaffected.
+    pv3_kw: float = 0.0
+    pv4_kw: float = 0.0
+
     # Second meter (e.g. an AC-coupled solar inverter reported on a
     # separate FoxESS meter channel such as ``meterPower2``).  Served
     # verbatim from ``get_real_time_response`` so a coordinator
@@ -548,6 +557,8 @@ class InverterModel:
             "batCurrent": (self.bat_charge_kw - self.bat_discharge_kw) * 1000 / 52,
             "pv1Power": self.solar_kw * 0.5,
             "pv2Power": self.solar_kw * 0.5,
+            "pv3Power": self.pv3_kw,
+            "pv4Power": self.pv4_kw,
             "ambientTemperation": 20.0,
             "invTemperation": 35.0,
             "feedin": self.feedin_total_kwh,

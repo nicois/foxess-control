@@ -402,8 +402,17 @@ Key tests:
 ## PV-Only Energy vs Inverter Output Energy (C-041)
 
 **Constraints**: C-020, C-028, C-033, C-041
-**Source**: `tests/test_pv_energy_sensor.py` (44 tests, 2026-08-26),
-`tests/e2e/test_e2e.py::TestEnergyDashboardSolarSource` (2 tests)
+**Source**: `tests/test_pv_energy_sensor.py` (63 tests, 2026-08-26),
+`tests/e2e/test_e2e.py::TestEnergyDashboardSolarSource` (3 tests)
+
+`TestPvStringPowerSensors` (19 tests) covers per-string PV3/PV4 power
+(issue #15): polled variables, descriptor parity derived from the PV1
+descriptor rather than hardcoded, distinct per-string values over the
+real REST path, graceful unavailability on a 2-string model that omits
+the variables, locale completeness across all 11 catalogues, and icons.
+E2E `test_pv3_and_pv4_report_per_string_power` enables the two
+disabled-by-default entities in real HA and asserts they carry their
+own distinct readings.
 
 Reproduces and guards the production report where the sensor named
 "Solar Generation Energy" / "Solarenergie" (fed by the inverter's AC

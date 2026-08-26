@@ -43,6 +43,12 @@
       "pv2_power": {
         "name": "Moc PV2"
       },
+      "pv3_power": {
+        "name": "Moc PV3"
+      },
+      "pv4_power": {
+        "name": "Moc PV4"
+      },
       "ambient_temp": {
         "name": "Temperatura otoczenia"
       },

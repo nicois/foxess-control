@@ -369,7 +369,8 @@ Two things to know that diverge from the public docs:
 
 **Instantaneous power variables** (kW floats): `SoC` (%),
 `batChargePower`, `batDischargePower`, `loadsPower`, `pvPower`,
-`pv1Power`, `pv2Power`, `gridConsumptionPower`, `feedinPower`,
+`pv1Power`, `pv2Power`, `pv3Power`, `pv4Power`,
+`gridConsumptionPower`, `feedinPower`,
 `generationPower` (inverter AC *output*, not PV — see the
 `generation` / `PVEnergyTotal` note below), `meterPower`,
 `meterPower2`, `epsPower`,

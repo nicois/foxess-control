@@ -43,6 +43,12 @@
       "pv2_power": {
         "name": "PV2-vermogen"
       },
+      "pv3_power": {
+        "name": "PV3-vermogen"
+      },
+      "pv4_power": {
+        "name": "PV4-vermogen"
+      },
       "ambient_temp": {
         "name": "Omgevingstemperatuur"
       },

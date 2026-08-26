@@ -43,6 +43,12 @@
       "pv2_power": {
         "name": "PV2 功率"
       },
+      "pv3_power": {
+        "name": "PV3 功率"
+      },
+      "pv4_power": {
+        "name": "PV4 功率"
+      },
       "ambient_temp": {
         "name": "环境温度"
       },

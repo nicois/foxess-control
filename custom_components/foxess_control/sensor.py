@@ -449,6 +449,32 @@ POLLED_SENSOR_DESCRIPTIONS: list[_PolledSensorDescription] = [
         enabled_default=False,
         display_precision=2,
     ),
+    # Third and fourth MPPT strings (issue #15). Models with only two
+    # strings omit these variables, so the entities read unavailable.
+    _PolledSensorDescription(
+        "pv3Power",
+        "PV3 Power",
+        "pv3_power",
+        SensorDeviceClass.POWER,
+        "kW",
+        SensorStateClass.MEASUREMENT,
+        "mdi:solar-panel",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
+        display_precision=2,
+    ),
+    _PolledSensorDescription(
+        "pv4Power",
+        "PV4 Power",
+        "pv4_power",
+        SensorDeviceClass.POWER,
+        "kW",
+        SensorStateClass.MEASUREMENT,
+        "mdi:solar-panel",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
+        display_precision=2,
+    ),
     _PolledSensorDescription(
         "ambientTemperation",
         "Ambient Temperature",

@@ -139,6 +139,10 @@ POLLED_VARIABLES = [
     "batCurrent",
     "pv1Power",
     "pv2Power",
+    # Third and fourth MPPT strings (issue #15). Present on multi-MPPT
+    # models; a 2-string inverter simply omits them from the response.
+    "pv3Power",
+    "pv4Power",
     "ambientTemperation",
     "invTemperation",
     # Cumulative energy counters (lifetime kWh)

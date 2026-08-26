@@ -342,6 +342,8 @@ The integration polls inverter data at a configurable interval and creates the f
 | `sensor.foxess_battery_current` | Battery current | A |
 | `sensor.foxess_pv1_power` | PV string 1 power | kW |
 | `sensor.foxess_pv2_power` | PV string 2 power | kW |
+| `sensor.foxess_pv3_power` | PV string 3 power (multi-MPPT models) | kW |
+| `sensor.foxess_pv4_power` | PV string 4 power (multi-MPPT models) | kW |
 | `sensor.foxess_ambient_temperature` | Ambient temperature | °C |
 | `sensor.foxess_inverter_temperature` | Inverter temperature | °C |
 | `sensor.foxess_grid_feed_in_energy` | Cumulative grid feed-in energy (lifetime) | kWh |
@@ -364,7 +366,7 @@ The cumulative energy sensors use `SensorStateClass.TOTAL_INCREASING` and are co
 
 These sensors update automatically and are always available (not dependent on an active smart operation). They are backed by Home Assistant's `DataUpdateCoordinator`, so all entities update atomically from a single poll. In cloud mode, the work mode sensor makes an additional API call per poll cycle to read the active schedule. In entity mode, work mode is read from the mapped select entity.
 
-> **Note:** Diagnostic-only sensors (temperatures, voltages, currents, grid frequency, EPS, throughput) are categorised as `DIAGNOSTIC` so they don't clutter default dashboards. Rarely-used sensors (PV1/PV2, battery voltage/current, ambient/inverter temp, grid current/frequency, EPS, throughput) are disabled by default — enable them in Settings > Devices > Entities as needed.
+> **Note:** Diagnostic-only sensors (temperatures, voltages, currents, grid frequency, EPS, throughput) are categorised as `DIAGNOSTIC` so they don't clutter default dashboards. Rarely-used sensors (PV1-PV4, battery voltage/current, ambient/inverter temp, grid current/frequency, EPS, throughput) are disabled by default — enable them in Settings > Devices > Entities as needed.
 
 ### Debug log sensors
 

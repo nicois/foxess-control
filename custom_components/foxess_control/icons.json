@@ -43,6 +43,12 @@
       "pv2_power": {
         "default": "mdi:solar-panel"
       },
+      "pv3_power": {
+        "default": "mdi:solar-panel"
+      },
+      "pv4_power": {
+        "default": "mdi:solar-panel"
+      },
       "ambient_temp": {
         "default": "mdi:thermometer"
       },

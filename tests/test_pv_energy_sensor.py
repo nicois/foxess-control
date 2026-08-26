@@ -80,7 +80,16 @@ _SOLAR_WORDS = ("solar", "pv", "photovoltaic", "photovoltaik")
 
 # Variables that genuinely carry photovoltaic-only measurements.  Anything
 # else must not be presented to the user as solar.
-_PV_ONLY_VARIABLES = frozenset({"pvPower", "pv1Power", "pv2Power", "PVEnergyTotal"})
+_PV_ONLY_VARIABLES = frozenset(
+    {
+        "pvPower",
+        "pv1Power",
+        "pv2Power",
+        "pv3Power",
+        "pv4Power",
+        "PVEnergyTotal",
+    }
+)
 
 
 def _claims_solar(name: str) -> bool:
@@ -566,3 +575,111 @@ class TestDocumentedSemantics:
             "todayYield reads 0.0 on KH10 — that trap must be documented "
             "so nobody reaches for it as the PV source"
         )
+
+
+# ---------------------------------------------------------------------------
+# Per-string PV power for multi-MPPT inverters (issue #15)
+# ---------------------------------------------------------------------------
+
+
+class TestPvStringPowerSensors:
+    """PV3/PV4 power sensors, following the established PV1/PV2 pattern.
+
+    Issue #15: KH-series inverters have more than two MPPT inputs. A live
+    KH10 probed on 2026-08-26 reports ``pv3Power`` and ``pv4Power`` from
+    ``real/query`` (0.0 kW at ~1.1 V — present but unused inputs), so the
+    variables are real and the integration simply never asked for them.
+    """
+
+    @pytest.mark.parametrize("variable", ["pv3Power", "pv4Power"])
+    def test_string_power_is_polled(self, variable: str) -> None:
+        assert variable in POLLED_VARIABLES, (
+            f"{variable} is not polled, so a PV3/PV4 sensor could never have a value"
+        )
+
+    @pytest.mark.parametrize(
+        ("variable", "key"),
+        [("pv3Power", "pv3_power"), ("pv4Power", "pv4_power")],
+    )
+    def test_descriptor_matches_the_pv1_pattern(self, variable: str, key: str) -> None:
+        """Every attribute is compared against PV1 rather than hardcoded.
+
+        The issue asks for sensors "matching the existing PV1/PV2
+        pattern", so deriving the expectation from PV1 keeps them aligned
+        if that pattern is ever changed.
+        """
+        pv1 = _desc("pv1Power")
+        descriptor = _desc(variable)
+        assert descriptor.unique_id_suffix == key
+        for attr in (
+            "device_class",
+            "unit",
+            "state_class",
+            "icon",
+            "entity_category",
+            "enabled_default",
+            "display_precision",
+        ):
+            assert getattr(descriptor, attr) == getattr(pv1, attr), (
+                f"{variable} descriptor {attr}={getattr(descriptor, attr)!r} "
+                f"differs from the established PV1 pattern "
+                f"{getattr(pv1, attr)!r}"
+            )
+
+    def test_string_power_is_disabled_by_default(self) -> None:
+        """Diagnostic strings must not clutter a fresh install (issue #15)."""
+        for variable in ("pv3Power", "pv4Power"):
+            assert _desc(variable).enabled_default is False
+
+    def test_per_string_power_reaches_the_entities(
+        self, foxess_sim: SimulatorHandle, rig: _Rig
+    ) -> None:
+        """A four-string inverter's per-string readings reach HA."""
+        foxess_sim.set(
+            fuzzing=False,
+            soc=60,
+            solar_kw=4.0,
+            load_kw=1.0,
+            pv3_kw=1.25,
+            pv4_kw=0.75,
+        )
+        rig.poll()
+
+        assert rig.state("pv3_power") == pytest.approx(1.25)
+        assert rig.state("pv4_power") == pytest.approx(0.75)
+
+    def test_absent_on_a_two_string_inverter_degrades_gracefully(
+        self, foxess_sim: SimulatorHandle, rig: _Rig
+    ) -> None:
+        """A 2-MPPT model omits pv3/pv4 — unavailable, and nothing else breaks."""
+        foxess_sim.set(
+            fuzzing=False,
+            soc=60,
+            solar_kw=2.0,
+            load_kw=1.0,
+            unsupported_variables=["pv3Power", "pv4Power"],
+        )
+        data = rig.poll()
+
+        assert "pv3Power" not in data
+        assert "pv4Power" not in data
+        assert rig.state("pv3_power") is None
+        assert rig.state("pv4_power") is None
+        # The rest of the poll is untouched.
+        for key in ("battery_soc", "pv_power", "pv1_power", "pv2_power"):
+            assert rig.state(key) is not None, f"{key} was collateral damage"
+
+    @pytest.mark.parametrize("locale_path", _LOCALE_FILES)
+    def test_locale_declares_the_string_sensors(self, locale_path: str) -> None:
+        names = _entity_names(locale_path)
+        for key in ("pv3_power", "pv4_power"):
+            assert key in names, f"{locale_path} does not name {key}"
+        assert names["pv3_power"] != names["pv4_power"], (
+            f"{locale_path} gives PV3 and PV4 the same name"
+        )
+
+    def test_icons_declared(self) -> None:
+        icons = json.loads((_INTEGRATION / "icons.json").read_text())
+        sensors = icons["entity"]["sensor"]
+        for key in ("pv3_power", "pv4_power"):
+            assert key in sensors, f"icons.json does not declare {key}"

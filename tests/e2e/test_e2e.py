@@ -1104,6 +1104,47 @@ class TestEnergyDashboardSolarSource:
             f"source is counting battery discharge as solar yield"
         )
 
+    def test_pv3_and_pv4_report_per_string_power(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """Issue #15: multi-MPPT inverters expose PV3/PV4 in Home Assistant.
+
+        Disabled by default, following the PV1/PV2 pattern, so the test
+        enables them and reloads.  The observable contract is that a
+        four-string inverter's per-string readings reach HA as distinct
+        values — not that they merely exist.
+        """
+        if connection_mode != "cloud":
+            pytest.skip("per-string PV variables are cloud-mode only")
+        assert foxess_sim is not None
+
+        foxess_sim.set(
+            fuzzing=False,
+            soc=70,
+            solar_kw=4.0,
+            load_kw=1.0,
+            pv3_kw=1.25,
+            pv4_kw=0.75,
+        )
+        for eid in ("sensor.foxess_pv3_power", "sensor.foxess_pv4_power"):
+            ha_e2e.enable_entity(eid)
+        ha_e2e.reload_integration()
+
+        # Distinct per-string values, so a single shared reading would fail.
+        pv3 = ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_pv3_power", "ge", 1.2, timeout_s=180
+        )
+        pv4 = ha_e2e.wait_for_numeric_state(
+            "sensor.foxess_pv4_power", "ge", 0.7, timeout_s=180
+        )
+        assert pv3 > pv4, (
+            f"PV3 ({pv3}) and PV4 ({pv4}) must carry their own readings; "
+            f"the simulator was set to 1.25 and 0.75 kW respectively"
+        )
+
     def test_pv_energy_rises_with_sun_and_stays_below_output(
         self,
         ha_e2e: HAClient,
