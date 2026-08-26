@@ -54,20 +54,30 @@ jobs:
       - name: Build E2E container
         run: podman build -t ha-foxess-e2e tests/e2e/
       - name: Select random half of tests
-        id: select-tests
         run: |
-          all_tests=$(find tests/e2e/ -name 'test_*.py' | sort)
-          total=$(echo "$all_tests" | wc -l)
+          # Select at TEST granularity, not per file.  There are only three
+          # E2E files (76 + 90 + 8 tests), so a random half of *files* can
+          # draw the two heaviest — 166 of 174 tests, which overruns this
+          # job's 30-minute timeout and is cancelled.  Each of the three
+          # possible pairs is equally likely, so roughly a third of the
+          # matrix was cancelled on every run regardless of test health
+          # (6 of 20 on run 32953128115, 10 on 2026-06-19).  Selecting
+          # individual tests keeps the randomised co-location this workflow
+          # exists to probe while making every job the same size.
+          python -m pytest tests/e2e/ --collect-only -q -p no:randomly \
+            | grep -E '^tests/e2e/.*::' > all_tests.txt
+          total=$(wc -l < all_tests.txt)
           half=$(( (total + 1) / 2 ))
-          selected=$(echo "$all_tests" | shuf | head -n "$half" | tr '\n' ' ')
-          echo "files=$selected" >> "$GITHUB_OUTPUT"
-          echo "Selected $half of $total test files: $selected"
-      - name: "tests (run ${{ matrix.run }})"
+          shuf all_tests.txt | head -n "$half" > selected_tests.txt
+          echo "Selected $half of $total tests"
+      - name: tests
+        env:
+          RUN_ID: ${{ matrix.run }}
         run: |
-          python -m pytest ${{ steps.select-tests.outputs.files }} \
+          xargs -a selected_tests.txt python -m pytest \
             --tb=short \
             -n auto \
-            --junitxml=e2e-${{ matrix.run }}.xml \
+            --junitxml="e2e-${RUN_ID}.xml" \
             -q
       - uses: actions/upload-artifact@v7
         if: always()
