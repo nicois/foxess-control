@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.22-beta.5
 
 ### Fixed
 - **The overview card presented a disconnected browser as stale inverter data** (C-020). If the Home Assistant frontend loses its WebSocket — tab suspended, laptop asleep, network blip — the page's copy of `last_update` freezes while the card keeps computing its age as `Date.now() - last_update`, so the displayed age grows without bound. A user reported "API - last updated 45 minutes ago" with solar reading zero; the integration had in fact polled successfully every 5 minutes throughout (every poll `success: True`, server-side `age_seconds` never above 300 s across 22 consecutive intervals). The card now checks `hass.connected` and distinguishes the two causes, because they need opposite responses: a disconnected frontend means check the browser or network, whereas genuinely old data means check the inverter or the cloud API. When either applies the readings are dimmed and desaturated behind a full-strength amber banner naming the cause and the age, so a stale card cannot be mistaken for a live one at a glance. Styled entirely from theme variables, so it reads correctly in light and dark themes, and translated into all nine languages the card ships.

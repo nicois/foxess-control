@@ -548,7 +548,7 @@ That's it — no configuration required. The card auto-discovers the `sensor.fox
 
 **What the card shows:**
 
-- **Header**: Battery SoC gauge with colour-coded fill (green/orange/red by level), data source badge with staleness indicator
+- **Header**: Battery SoC gauge with colour-coded fill (green/orange/red by level), data source badge, and an amber stale banner with dimmed readings when the data is not live
 - **Action buttons**: Charge and Discharge buttons open inline parameter forms (start time, end time, SoC target). Cancel button (with double-tap confirmation) appears during active sessions.
 - **Smart Charge** (green section): Time window, power, target SoC with progress bar, remaining time badge. Shows "Charge Scheduled" with a dim indicator when deferred, "Smart Charge" with a pulsing dot when actively charging.
 - **Smart Discharge** (orange section): Time window, power, min SoC, feed-in energy limit. Shows "Discharge Scheduled" before the window opens, "Discharge Deferred" during the deferred self-use phase, and "Smart Discharge" with a pulsing dot when actively discharging. Power is hidden during the deferred phase since no forced discharge is active.
@@ -595,7 +595,8 @@ No configuration required — all entities are auto-discovered. The card shows:
 - **Grid**: Import/export power with direction indicator, voltage and frequency (clickable for history)
 - **Battery**: SoC gauge, charge/discharge rate with direction indicator, BMS cell temperature, inverter temperature, residual energy (clickable for history)
 - **Work mode**: Current inverter work mode badge in the header
-- **Data source badge**: Shows current data source (WS/API/Modbus) with staleness indicator
+- **Data source badge**: Shows the current data source (WS/API/Modbus). It appends an age only when something is wrong — thresholds follow each source's cadence (60 s for WebSocket, which pushes every ~5 s; 900 s for REST polling, i.e. three missed polls), so a bare `API` means everything is current.
+- **Stale indication**: When the data is not live the readings are dimmed and desaturated behind an amber banner naming the cause. The card distinguishes **"No connection to Home Assistant"** — your browser has lost its WebSocket, so the values on screen are frozen even though the integration may be polling fine — from **"Inverter data stale"**, where HA is connected but the data really is old. The two need opposite responses: check your browser and network for the first, the inverter or cloud API for the second. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md#stale-data--data-not-updating).
 
 Clicking any energy flow node opens the HA entity history dialog. Sub-details (cell temperature, PV strings, grid voltage/frequency, residual energy) are individually clickable.
 

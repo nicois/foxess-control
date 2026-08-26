@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 6
-last_verified: 2026-06-03
+last_verified: 2026-08-27
 traces_up: [02-constraints.md, 04-design/]
 # This file describes the Jekyll/Liquid safety test and quotes the
 # Jinja tag names literally as examples.  The section that quotes
@@ -719,7 +719,7 @@ to Jekyll 3.10 — `{% raw %}` is the only reliable escape.)
 | `TestOverviewCard::test_house_load_never_greyed` | House node active at low load | C-020 |
 | `TestOverviewCard::test_data_source_badge_matches_mode[api/ws/entity]` | Badge reflects active data path + staleness suffix | C-020 |
 | `TestOverviewCard::test_pv_values_consistent_with_solar_total[api/ws/entity]` | PV1+PV2 ≈ total solar | C-020 |
-| `TestOverviewCard::test_stale_badge_shown_for_old_api_data[api/ws/entity]` | Staleness indicator on old data | C-020 |
+| `TestOverviewCard::test_normal_api_age_is_not_flagged_stale[api/ws/entity]` | A healthy install between polls (32 s of age) must NOT be flagged stale — guards the cry-wolf fix | C-020 |
 | `TestControlCard::test_card_renders` | Control card in shadow DOM | -- |
 | `TestControlCard::test_soc_displayed` | SoC percentage in header | -- |
 | `TestControlCard::test_progress_hidden_when_idle` | No progress section when idle | C-020 |

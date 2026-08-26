@@ -1,7 +1,7 @@
 ---
 project: FoxESS Control
 level: 2
-last_verified: 2026-06-02
+last_verified: 2026-08-27
 traces_up: [01-vision.md]
 traces_down: [03-architecture.md, 04-design/]
 ---

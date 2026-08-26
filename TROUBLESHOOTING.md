@@ -45,7 +45,21 @@ Common issues and how to diagnose them. For each problem, work through the check
 
 **Symptom:** Sensor values seem frozen, the data freshness badge shows a stale age, or dashboard values don't change.
 
-1. **Check data_source:** Look at `sensor.foxess_data_freshness` — it shows the active source (`ws`, `api`, or `modbus`) and `age_seconds`. If `age_seconds` is growing, data isn't being refreshed.
+**First, work out which of two very different problems you have.** The overview card cannot compute a data age without help from your browser, so an age shown on screen can be wrong in one specific way: if the Home Assistant frontend has lost its WebSocket connection (tab suspended, laptop asleep, flaky Wi-Fi), the page keeps the last values it received and the age climbs at wall-clock rate — even though the integration is polling perfectly. A real report of "45 minutes stale" turned out to be exactly this, with every poll succeeding every 5 minutes throughout.
+
+Since 1.0.22-beta.5 the card tells you which it is:
+
+| What the card shows | What it means | Where to look |
+|---|---|---|
+| ⚠ **No connection to Home Assistant** — dimmed readings | Your browser is not receiving updates. The values on screen are frozen at whatever arrived last. | Your browser, device sleep, network — not the inverter. Reload the page. |
+| ⚠ **Inverter data stale** — dimmed readings | HA is connected, but the integration's data really is old (no successful poll for 15 minutes, or no WebSocket frame for 1 minute). | Continue with the steps below. |
+| Normal card, badge reads `API` / `WS` | Everything is current. | Nothing to do. |
+
+An easy cross-check that never involves the browser: open `sensor.foxess_data_freshness` and read its **`age_seconds` attribute**. That value is computed on the server at each update, so on a healthy install it can never exceed your polling interval (300 s by default). If the card claims 45 minutes while `age_seconds` reads 30, the integration is fine and the browser is not.
+
+Note that this entity's *state* is the data **source** (`api`), not the age, so Home Assistant's "last changed" for it is not a freshness indicator — that string rarely changes, so it can read hours old on a perfectly healthy system.
+
+1. **Check data_source:** Look at `sensor.foxess_data_freshness` — it shows the active source (`ws`, `api`, or `modbus`) and `age_seconds`. If the `age_seconds` **attribute** is larger than your polling interval, data really isn't being refreshed.
 2. **Check polling interval:** The default REST polling interval is 300 seconds (5 minutes). Values only update on each poll cycle. If you need faster updates, enable WebSocket mode or reduce the polling interval (at the cost of more API quota usage).
 3. **API quota:** The FoxESS Cloud allows approximately 1440 requests per day (1 per minute). If you're running multiple integrations against the same account or have reduced the polling interval aggressively, you may be hitting rate limits. Check HA logs for "rate limit" or errno 40400 messages.
 4. **Inverter offline:** If the inverter itself is offline (e.g. powered down overnight for hybrid systems without EPS), the API returns stale data. This is normal — values will refresh when the inverter comes back online.
