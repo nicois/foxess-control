@@ -607,6 +607,49 @@ WS flag flaps during entity-mode's heavier state-change burst; DOM
 facts survive the churn — encoded from the 2026-05-03 entity-mode
 diagnosis)
 
+### C-043: Test infrastructure isolates shared host resources per checkout and per run
+**Priority enforced**: P-007 (engineering process integrity) — test
+infrastructure that manufactures failures destroys the signal the
+tests exist to provide, and pushes the team onto CI as the only
+trustworthy gate
+**Statement**: Every host-level resource the test suites create —
+container names, published host ports, lock files — must be named or
+allocated so that two pytest invocations running at the same time on
+one machine cannot collide, whether they run from the same checkout
+or different ones. Any cleanup step must be able to *prove* a
+resource belongs to this run (or to a run that is provably dead)
+before removing it; a name-prefix match is not proof. Host ports must
+come from the OS (bind port 0) combined with an exclusive claim held
+for the life of the run — never from a hash of a path, which can
+collide silently.
+**Rationale**: `tests/e2e/conftest.py` named containers
+`ha-e2e-{PYTEST_XDIST_WORKER}` and the `ha_e2e` fixture removed that
+name at *setup* as a hygiene step. Two concurrent runs both chose
+`ha-e2e-gw0`, so the run that reached a test second issued `podman rm
+-f` against the other run's live container; the losing run then polled
+a dead container until its budget expired and reported `TimeoutError:
+HA did not become ready within 120s` at setup. Reproduced directly
+2026-08-26: the same two-test subset run from two working directories
+at once gave `1 passed, 1 skipped, 2 errors` (both `TimeoutError`, 121.9s
+setup) against `2 passed, 2 skipped` for the run that won. Separately,
+`_find_free_port()` probed a port and released it before `podman run -p`
+bound it, so a concurrent probe could be handed the same port —
+measured at 6 concurrent processes x 50 ports producing duplicates in
+5 of 6 rounds. Host isolation is not a nicety here: this repo is
+developed with many worktrees on one machine, and a soak run is
+expected to overlap an E2E run.
+**Violation consequence**: Cascades of unattributable E2E failures
+that look like product regressions, so local E2E becomes unusable and
+CI becomes the only trustworthy signal — the practical death of
+C-031, which this constraint exists to keep honest.
+**Traces**: `tests/e2e/conftest.py::_container_name` (checkout token +
+run pid + worker id), `::container_is_reclaimable` (ownership proof),
+`::reclaim_stale_containers`, `::allocate_free_port` / `::claim_port`
+(OS probe + host-wide claim registry under a file lock);
+`tests/soak/conftest.py` (same helpers, `ha-soak` prefix);
+`.githooks/pre-push` (no blanket `name=ha-e2e-` stop);
+`tests/test_e2e_container_isolation.py` (29 tests)
+
 ### C-032: Reproduce failure before fixing
 **Priority enforced**: P-007 (engineering process integrity) —
 without a failing test, "fixed" is unverifiable

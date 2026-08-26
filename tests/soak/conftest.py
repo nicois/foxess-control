@@ -38,12 +38,15 @@ from tests.e2e.conftest import (
     E2E_TOKEN,
     HA_CONFIG_SEED,
     REPO_ROOT,
+    SOAK_CONTAINER_PREFIX,
     SimulatorHandle,
     _build_container_once,
-    _find_free_port,
+    _container_name,
     _kill_process,
     _stop_container,
     _worker_id,
+    allocate_free_port,
+    reclaim_stale_containers,
 )
 from tests.e2e.ha_client import HAClient
 
@@ -599,7 +602,17 @@ def _container_built() -> None:
 
 @pytest.fixture(scope="session")
 def _worker_ports() -> dict[str, int]:
-    return {"sim": _find_free_port(), "ha": _find_free_port()}
+    return {"sim": allocate_free_port(), "ha": allocate_free_port()}
+
+
+@pytest.fixture(scope="session")
+def _stale_containers_reclaimed() -> None:
+    """Reclaim leftovers of crashed runs of this checkout (C-043).
+
+    A soak run and an E2E run must be able to share a host, so this only
+    ever removes containers whose owning run is provably gone.
+    """
+    reclaim_stale_containers()
 
 
 @pytest.fixture
@@ -635,10 +648,13 @@ def ha_e2e(
     foxess_sim: SimulatorHandle,
     _worker_ports: dict[str, int],
     _container_built: None,
+    _stale_containers_reclaimed: None,
 ) -> Generator[HAClient, None, None]:
     ha_port = _worker_ports["ha"]
     wid = _worker_id()
-    name = f"ha-soak-{os.getpid()}-{wid}"
+    # Shared helper: unique per (checkout, run, worker), so the hygiene
+    # removal below cannot reach a concurrent run's container (C-043).
+    name = _container_name(prefix=SOAK_CONTAINER_PREFIX)
     _stop_container(name)
 
     tmpdir = tempfile.mkdtemp(prefix="ha-soak-")

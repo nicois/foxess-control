@@ -26,7 +26,7 @@ serving it.
 | P-004 Maximise feed-in revenue | (aspirational — no C-NNN) | (no D-NNN currently declares P-004 as primary; D-044 serves P-003 but advances P-004 as a secondary effect) | ASPIRATIONAL |
 | P-005 Operational transparency | C-004, C-005, C-006, C-020, C-022, C-026, C-038 | D-008, D-009, D-010, D-020, D-021, D-027, D-028, D-029, D-030, D-035, D-036, D-038, D-039, D-040, D-041 (ws), D-048, D-050, D-051, D-053, D-054, D-055, D-056, D-058, D-059, D-060 | ENFORCED |
 | P-006 Brand portability | C-015, C-021, C-039, C-040 | D-022 | ENFORCED |
-| P-007 Engineering process integrity | C-015, C-028, C-029, C-030, C-031, C-032, C-033, C-034, C-035, C-036 | D-019, D-031, D-034, D-041 (lovelace), D-045, D-049 | ENFORCED |
+| P-007 Engineering process integrity | C-015, C-028, C-029, C-030, C-031, C-032, C-033, C-034, C-035, C-036, C-043 | D-019, D-031, D-034, D-041 (lovelace), D-045, D-049 | ENFORCED |
 
 **Notes:**
 - **P-004 is intentionally aspirational**. The feed-in target as a
@@ -122,6 +122,7 @@ against a scenario that the system couldn't actually reach.
 | C-031 No flaky tests | -- | `TestWaitForLovelacePanelStagedBudget` (3), `TestWaitForLovelacePanelRetries` (4), `TestWaitForLovelacePanelNavigationDuringPanelRender` (2), `TestWaitForLovelacePanelCloudVariantSignalStability` (2) — all guard the `_wait_for_lovelace_panel` helper against the specific flake patterns historically observed on Flaky Test Detection | COVERED |
 | C-032 Reproduce failure before fixing | -- | `TestSocInterpolationDuringDischarge`; `/regression-test` skill | ACCEPTED |
 | C-033 Minimise simulator–production deviations | -- | -- (process constraint; traces to C-028, C-031, C-032) | ACCEPTED |
+| C-043 Test infrastructure isolates host resources per checkout and run | -- | `tests/test_e2e_container_isolation.py` (29 — two simultaneous runs of one checkout get different container names, eight-way concurrent spawn, different checkouts differ, name stable within a run so teardown resolves what setup created, serial/single/32-worker neighbourhoods, cleanup reclaims own + crashed-run leftovers and refuses live sibling / other-checkout / legacy-unqualified names, soak prefix shares the helper, allocator never returns a bound or already-claimed port, six concurrent live runs x 50 ports x 4 rounds share none) | COVERED |
 
 | C-034 Module size budget | -- | -- (enforced by `.githooks/check-module-size`) | ACCEPTED |
 | C-035 Typed config access | -- | -- (enforced by semgrep `no-raw-entry-options`) | ACCEPTED |
@@ -166,7 +167,9 @@ against a scenario that the system couldn't actually reach.
 - **C-030**: E2E parallel before tagging — enforced by `.githooks/
   pre-push`. No D-NNN expected.
 - **C-031**: No flaky tests — meta-constraint enforced by discipline,
-  traces to C-028, C-029.
+  traces to C-028, C-029, C-043 (which removes the largest known
+  *manufactured* source of flakes: concurrent runs on one host
+  destroying each other's containers and sharing host ports).
 - **C-032**: Reproduce before fix — meta-constraint enforced by
   `/regression-test` skill.
 - **C-033**: Simulator–production deviations — process constraint
@@ -255,9 +258,9 @@ C-014.
   were written to a kW-unit number entity. D-052 (solar-seen / Gen Load
   / hide solar box) retired after three mid-beta pivots failed to land
   on a genuinely-useful dashboard surface — see META reflection 2026-05-08.
-- **Fully covered**: 26 (67%)
+- **Fully covered**: 27 (66%)
 - **Partial (actionable)**: 0
-- **Accepted (non-actionable)**: 14 (33%) — C-009, C-013, C-015, C-023,
+- **Accepted (non-actionable)**: 14 (34%) — C-009, C-013, C-015, C-023,
   C-028–C-036, C-039 (C-038 and C-040 kept as COVERED via their
   related D-NNN + tests even though neither has a *dedicated*
   design decision — see the Non-actionable section for reasoning)

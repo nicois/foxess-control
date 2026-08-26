@@ -16,11 +16,15 @@ state from prior tests.
 
 from __future__ import annotations
 
+import atexit
 import contextlib
+import hashlib
 import itertools
 import logging
 import os
+import re
 import shutil
+import socket
 import subprocess
 import tempfile
 import time
@@ -211,6 +215,12 @@ REPO_ROOT = E2E_DIR.parent.parent
 HA_CONFIG_SEED = E2E_DIR / "ha_config"
 CONTAINER_IMAGE = "ha-foxess-e2e"
 
+# Container-name prefixes this repo owns.  Anything not matching one of
+# these is another tool's container and is never touched.
+CONTAINER_PREFIX = "ha-e2e"
+SOAK_CONTAINER_PREFIX = "ha-soak"
+MANAGED_PREFIXES = (CONTAINER_PREFIX, SOAK_CONTAINER_PREFIX)
+
 
 # ---------------------------------------------------------------------------
 # Simulator handle
@@ -265,13 +275,139 @@ class SimulatorHandle:
 # ---------------------------------------------------------------------------
 
 
-def _find_free_port() -> int:
-    import socket
+# ---------------------------------------------------------------------------
+# Host-port allocation (C-043)
+#
+# Asking the OS for a free port (bind port 0, read it, release it) is
+# necessary but not sufficient: ``podman run -p`` binds the port seconds
+# after the probe socket closed, and in that window a *concurrent* pytest
+# run's probe is free to be handed the very same port.  Measured on a
+# 32-core host, six concurrent processes drawing 50 ports each produced
+# duplicates in 5 of 6 rounds.
+#
+# So the OS probe is paired with a host-wide claim registry: a directory
+# of ``<port>`` files, each naming its owning pid, mutated only under a
+# cross-process file lock.  A port is only returned once it has been both
+# (a) confirmed free by the kernel and (b) claimed exclusively, so two
+# cooperating runs cannot be handed the same port however their probes
+# interleave.  Claims are released at interpreter exit and any claim
+# whose owner pid is gone is reaped, so a crashed run does not sterilise
+# its ports.
+#
+# Deliberately NOT a hash of the checkout path: two different paths can
+# hash to the same port, and there would be no way to notice.
+# ---------------------------------------------------------------------------
 
+_PORT_CLAIM_DIR = Path(tempfile.gettempdir()) / "foxess-e2e-port-claims"
+_PORT_CLAIM_LOCK = Path(tempfile.gettempdir()) / "foxess-e2e-port-claims.lock"
+_OWN_PORT_CLAIMS: set[int] = set()
+_PORT_CLAIMS_REAPED = False
+
+
+def _pid_is_alive(pid: int) -> bool:
+    """True if ``pid`` names a live process on this host.
+
+    ``PermissionError`` means the process exists but belongs to another
+    user — alive.  Unknown ``OSError`` is treated as alive so an
+    ambiguous answer never authorises destroying someone's resources.
+    """
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+    return True
+
+
+def _probe_free_port() -> int:
+    """Ask the kernel for a port that is free *right now*."""
     with socket.socket() as s:
         s.bind(("", 0))
-        port: int = s.getsockname()[1]
-        return port
+        return int(s.getsockname()[1])
+
+
+def _claim_owner(port: int) -> int | None:
+    try:
+        return int((_PORT_CLAIM_DIR / str(port)).read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def claim_port(
+    port: int,
+    *,
+    pid_is_alive: Callable[[int], bool] | None = None,
+) -> bool:
+    """Reserve ``port`` for this process host-wide.
+
+    Returns ``False`` when a live owner already holds the claim — the
+    owner may be another run, or this same run's other fixture (the
+    simulator and HA ports must differ too).  A claim whose owner is gone
+    is taken over, so a crashed run's ports return to circulation.
+    """
+    alive = pid_is_alive or _pid_is_alive
+    owner = _claim_owner(port)
+    if owner is not None and alive(owner):
+        return False
+    _PORT_CLAIM_DIR.mkdir(parents=True, exist_ok=True)
+    (_PORT_CLAIM_DIR / str(port)).write_text(f"{os.getpid()}\n")
+    _OWN_PORT_CLAIMS.add(port)
+    return True
+
+
+def _reap_stale_port_claims() -> None:
+    """Drop claim files whose owning process no longer exists."""
+    with contextlib.suppress(OSError):
+        for entry in _PORT_CLAIM_DIR.iterdir():
+            if not entry.name.isdigit():
+                continue
+            owner = _claim_owner(int(entry.name))
+            if owner is None or not _pid_is_alive(owner):
+                with contextlib.suppress(OSError):
+                    entry.unlink()
+
+
+def release_port_claims() -> None:
+    """Release this process's claims (registered with ``atexit``)."""
+    for port in list(_OWN_PORT_CLAIMS):
+        if _claim_owner(port) == os.getpid():
+            with contextlib.suppress(OSError):
+                (_PORT_CLAIM_DIR / str(port)).unlink()
+        _OWN_PORT_CLAIMS.discard(port)
+
+
+atexit.register(release_port_claims)
+
+
+def allocate_free_port(*, attempts: int = 128) -> int:
+    """Return a host port that no other cooperating run can be given.
+
+    Probe and claim happen together under a host-wide file lock, so the
+    probe of a concurrent run cannot interleave between our kernel probe
+    and our claim.
+    """
+    global _PORT_CLAIMS_REAPED  # noqa: PLW0603
+    import filelock  # noqa: PLC0415
+
+    with filelock.FileLock(str(_PORT_CLAIM_LOCK), timeout=120):
+        if not _PORT_CLAIMS_REAPED:
+            # Once per process: bounds claim-file growth without paying
+            # for a directory scan on every allocation.
+            _reap_stale_port_claims()
+            _PORT_CLAIMS_REAPED = True
+        for _ in range(attempts):
+            port = _probe_free_port()
+            if claim_port(port):
+                return port
+    raise RuntimeError(
+        f"Could not allocate an unclaimed free host port in {attempts} "
+        f"attempts (claims: {_PORT_CLAIM_DIR})"
+    )
 
 
 def _build_container_once() -> None:
@@ -402,9 +538,122 @@ def wait_for_condition(
         time.sleep(poll_ms / 1000)
 
 
-def _container_name() -> str:
-    """Deterministic container name for this worker."""
-    return f"ha-e2e-{_worker_id()}"
+# ---------------------------------------------------------------------------
+# Container naming and ownership (C-043)
+#
+# The name must be unique per (checkout, run, worker) because the ``ha_e2e``
+# fixture removes leftovers by name at *setup*.  With the old
+# ``ha-e2e-{worker}`` scheme two concurrent runs both chose ``ha-e2e-gw0``,
+# so whichever reached a test second issued ``podman rm -f`` against the
+# other run's live container — the run losing the race then polled a dead
+# container until its 120s budget expired.
+#
+# Three qualifiers, each answering a different collision:
+#   checkout token  8 hex of sha256(resolved REPO_ROOT) — two worktrees
+#                   of this repo never share a name.
+#   run pid         the worker process's own pid — unique among *live*
+#                   processes on the host by definition, so two
+#                   simultaneous runs of the same checkout differ, and
+#                   liveness of the pid tells later runs whether the
+#                   owner is still around.
+#   worker id       the xdist worker, so sibling workers in one run differ.
+#
+# Explicitly not a timestamp: a timestamp both collides (two runs started
+# in the same tick) and is wrong here, because the name must be
+# reproducible for the whole run — setup, ``podman logs`` and teardown all
+# recompute it.
+# ---------------------------------------------------------------------------
+
+_OWNED_NAME_RE = re.compile(
+    r"^(?P<prefix>" + "|".join(MANAGED_PREFIXES) + r")"
+    r"-(?P<checkout>[0-9a-f]{8})"
+    r"-(?P<pid>\d+)"
+    r"-(?P<worker>[A-Za-z0-9_]+)$"
+)
+
+
+def _checkout_token() -> str:
+    """Stable short token for this checkout's path."""
+    return hashlib.sha256(str(Path(REPO_ROOT).resolve()).encode()).hexdigest()[:8]
+
+
+def _container_name(prefix: str = CONTAINER_PREFIX) -> str:
+    """Container name unique to this (checkout, run, worker).
+
+    Stable for the lifetime of the process, so teardown and log capture
+    resolve the same container setup created.
+    """
+    return f"{prefix}-{_checkout_token()}-{os.getpid()}-{_worker_id()}"
+
+
+def container_is_reclaimable(
+    name: str,
+    *,
+    pid_is_alive: Callable[[int], bool] | None = None,
+) -> bool:
+    """True only if removing ``name`` cannot disturb another run.
+
+    Reclaimable means either *ours* — this checkout, this process, this
+    worker — or a leftover of a **dead** run of this same checkout, which
+    is what a crashed run leaves in ``podman ps -a``.
+
+    Everything else is refused, including:
+      * any name from another checkout, dead-looking or not (that
+        checkout's own next run reclaims it; a pid this host has recycled
+        must never look like permission to delete);
+      * a live sibling worker's container in our own run;
+      * the legacy unqualified ``ha-e2e-gw0`` / ``ha-soak-gw0`` names,
+        which an in-flight run of the previous code could still own;
+      * anything that is not one of our prefixes at all.
+    """
+    match = _OWNED_NAME_RE.match(name or "")
+    if match is None or match.group("checkout") != _checkout_token():
+        return False
+    pid = int(match.group("pid"))
+    if pid == os.getpid() and match.group("worker") == _worker_id():
+        return True
+    alive = pid_is_alive or _pid_is_alive
+    return not alive(pid)
+
+
+def _list_container_names() -> list[str]:
+    """All container names podman knows about (empty on any failure)."""
+    try:
+        result = subprocess.run(
+            ["podman", "ps", "-a", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        _log.debug("Could not list containers: %s", exc)
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def reclaim_stale_containers(
+    *,
+    list_names: Callable[[], list[str]] | None = None,
+    remove: Callable[[str], None] | None = None,
+    pid_is_alive: Callable[[int], bool] | None = None,
+) -> list[str]:
+    """Remove only the containers this run is entitled to remove.
+
+    Returns the names removed.  ``list_names`` / ``remove`` /
+    ``pid_is_alive`` are injectable so the decision can be tested against
+    a realistic container list without podman.
+    """
+    lister = list_names or _list_container_names
+    remover = remove or _stop_container
+    reclaimed: list[str] = []
+    for name in lister():
+        if container_is_reclaimable(name, pid_is_alive=pid_is_alive):
+            remover(name)
+            reclaimed.append(name)
+    if reclaimed:
+        _log.warning("reclaimed stale containers: %s", ", ".join(reclaimed))
+    return reclaimed
 
 
 def _stop_container(name: str) -> None:
@@ -446,14 +695,25 @@ def connection_mode(request: pytest.FixtureRequest) -> str:
 
 @pytest.fixture(scope="session")
 def _worker_ports() -> dict[str, int]:
-    """Allocate unique ports for this xdist worker."""
-    return {"sim": _find_free_port(), "ha": _find_free_port()}
+    """Allocate ports no concurrent run can also be given (C-043)."""
+    return {"sim": allocate_free_port(), "ha": allocate_free_port()}
 
 
 @pytest.fixture(scope="session")
 def _container_built() -> None:
     """Ensure the container image is built (once per worker, serialised)."""
     _build_container_once()
+
+
+@pytest.fixture(scope="session")
+def _stale_containers_reclaimed() -> None:
+    """Reclaim leftovers from crashed runs of this checkout (C-043).
+
+    Once per worker, not per test: one ``podman ps -a`` is enough, and it
+    only ever removes containers whose owning run is provably gone (see
+    ``container_is_reclaimable``), so a concurrent run is untouched.
+    """
+    reclaim_stale_containers()
 
 
 @pytest.fixture
@@ -520,6 +780,7 @@ def ha_e2e(
     ha_port: int,
     connection_mode: str,
     _container_built: None,  # noqa: ARG001
+    _stale_containers_reclaimed: None,  # noqa: ARG001
 ) -> Generator[HAClient, None, None]:
     """Start a FRESH HA container for this test.
 
@@ -529,6 +790,9 @@ def ha_e2e(
     """
     wid = _worker_id()
     t0 = time.monotonic()
+    # Unique to this (checkout, run, worker), so the setup-time hygiene
+    # removal below can only ever hit a leftover of *this* worker's own
+    # previous test — never a concurrent run's live container (C-043).
     name = _container_name()
     _stop_container(name)
 

@@ -66,6 +66,7 @@ serves and any lower-priority goal it trades against.
 - **C-028**: Use simulator over mocks; each test gets independent simulator instance
 - **C-029**: E2E tests for HA-dependent behaviour (containerised HA + Playwright)
 - **C-031**: No flaky tests — investigate root cause, don't skip/xfail/tune params
+- **C-043**: Test infrastructure isolates shared host resources per checkout *and* per run — container names carry a checkout token + run pid + worker id; host ports come from an OS probe plus a host-wide claim, never a path hash; cleanup must *prove* ownership (own run, or a provably dead one) before removing anything. Two concurrent pytest runs on one machine must not interfere.
 
 ## Test Quality
 

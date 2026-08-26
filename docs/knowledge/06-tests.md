@@ -591,8 +591,10 @@ missing locale key leaves the user looking at the raw key name.
 
 ## Test Infrastructure Guards (C-031)
 
-**Constraints**: C-031 (no flaky tests), C-020 (observability)
+**Constraints**: C-031 (no flaky tests), C-043 (host-resource
+isolation per checkout and run), C-020 (observability)
 **Source**: `tests/test_e2e_page_fixture.py` (15 tests),
+`tests/test_e2e_container_isolation.py` (29),
 `tests/test_soak_results_db.py::TestSaveRunViolationPersistence` (2)
 
 Unit tests that guard the *test infrastructure itself* — helpers
@@ -616,6 +618,10 @@ table (so post-mortem analysis isn't reduced to a bare counter).
 | `TestSaveRunViolationPersistence::test_no_violation_events_when_clean` | Clean run produces zero violation events (not a tautology fix) | C-020 |
 | `TestPlaywrightFixtureIsolation::*` | pytest-playwright session fixture leaks the greenlet-backed event loop on the xdist main-thread worker; function-scoped override in `tests/conftest.py` releases the context per-test. Deterministic reproduction under `-p no:randomly` (2026-04-28) | C-031 |
 | `TestSafeScreenshot::*` + `TestSafeEvaluate::*` | `_safe_screenshot` / `_safe_evaluate` retry on "Element is not attached to the DOM" / "Execution context was destroyed" / "Target closed" after `networkidle`; unrelated errors (genuine `Timeout`, etc.) propagate unchanged. Mirrors the `_find_card` retry pattern so all gallery-screenshot and card-injection tests inherit the recovery (2026-04-28) | C-031 |
+| `TestContainerNamePerCheckoutAndRun::*` (8) | Container names differ across two *simultaneous* runs of one checkout (real subprocesses), across eight concurrent runs, and across checkouts; stable within a run so teardown resolves what setup created; valid podman identifiers for serial, single- and 32-worker runs | C-043 |
+| `TestLeftoverCleanupOwnership::*` (12) | Cleanup reclaims this run's own container and a *crashed* run's leftover of this checkout, and refuses a live sibling worker's, another checkout's (dead-looking or not), and the legacy unqualified `ha-e2e-gw0` / `ha-soak-gw0` names | C-043 |
+| `TestSoakAndE2ECoexist::*` (4) | `tests/soak/` shares the naming helper rather than building its own scheme, so a soak run and an E2E run can overlap on one host | C-043 |
+| `TestPortAllocationCollisionProof::*` (5) | Allocator never returns a bound or already-claimed port, reaps a dead owner's claim, and six concurrent *live* runs drawing 50 ports each (x4 rounds) share none. Pre-fix the probe-and-release allocator duplicated ports in 5 of 6 rounds | C-043 |
 
 ## CI Hygiene
 
