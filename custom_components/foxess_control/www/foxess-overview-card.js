@@ -33,6 +33,8 @@ const _OV_TRANSLATIONS = {
     discharging: "Discharging",
     not_found: "not found",
     not_discovered: "not discovered",
+    stale_disconnected: "No connection to Home Assistant — readings {age} old",
+    stale_data: "Inverter data stale — last update {age} ago",
   },
   de: {
     title: "FoxESS Übersicht",
@@ -46,6 +48,8 @@ const _OV_TRANSLATIONS = {
     discharging: "Entladen",
     not_found: "nicht gefunden",
     not_discovered: "nicht erkannt",
+    stale_disconnected: "Keine Verbindung zu Home Assistant — Werte {age} alt",
+    stale_data: "Wechselrichterdaten veraltet — letzte Aktualisierung vor {age}",
   },
   fr: {
     title: "FoxESS Aperçu",
@@ -59,6 +63,8 @@ const _OV_TRANSLATIONS = {
     discharging: "Décharge",
     not_found: "introuvable",
     not_discovered: "non détecté",
+    stale_disconnected: "Aucune connexion à Home Assistant — données vieilles de {age}",
+    stale_data: "Données de l’onduleur obsolètes — dernière mise à jour il y a {age}",
   },
   nl: {
     title: "FoxESS Overzicht",
@@ -72,6 +78,8 @@ const _OV_TRANSLATIONS = {
     discharging: "Ontladen",
     not_found: "niet gevonden",
     not_discovered: "niet ontdekt",
+    stale_disconnected: "Geen verbinding met Home Assistant — waarden {age} oud",
+    stale_data: "Omvormergegevens verouderd — laatste update {age} geleden",
   },
   es: {
     title: "FoxESS Resumen",
@@ -85,6 +93,8 @@ const _OV_TRANSLATIONS = {
     discharging: "Descargando",
     not_found: "no encontrado",
     not_discovered: "no detectado",
+    stale_disconnected: "Sin conexión con Home Assistant — datos de hace {age}",
+    stale_data: "Datos del inversor obsoletos — última actualización hace {age}",
   },
   it: {
     title: "FoxESS Panoramica",
@@ -98,6 +108,8 @@ const _OV_TRANSLATIONS = {
     discharging: "Scarica",
     not_found: "non trovato",
     not_discovered: "non rilevato",
+    stale_disconnected: "Nessuna connessione a Home Assistant — dati vecchi di {age}",
+    stale_data: "Dati dell’inverter obsoleti — ultimo aggiornamento {age} fa",
   },
   pl: {
     title: "FoxESS Przegląd",
@@ -111,6 +123,8 @@ const _OV_TRANSLATIONS = {
     discharging: "Rozładowanie",
     not_found: "nie znaleziono",
     not_discovered: "nie wykryto",
+    stale_disconnected: "Brak połączenia z Home Assistant — dane starsze o {age}",
+    stale_data: "Dane falownika przestarzałe — ostatnia aktualizacja {age} temu",
   },
   pt: {
     title: "FoxESS Visão geral",
@@ -124,6 +138,8 @@ const _OV_TRANSLATIONS = {
     discharging: "Descarregando",
     not_found: "não encontrado",
     not_discovered: "não detetado",
+    stale_disconnected: "Sem ligação ao Home Assistant — dados com {age}",
+    stale_data: "Dados do inversor desatualizados — última atualização há {age}",
   },
   "zh-hans": {
     title: "FoxESS 概览",
@@ -150,6 +166,8 @@ const _OV_TRANSLATIONS = {
     discharging: "放電中",
     not_found: "見つかりません",
     not_discovered: "未検出",
+    stale_disconnected: "Home Assistant に接続できません — {age}前の値",
+    stale_data: "インバーターのデータが古い — 最終更新 {age}前",
   },
 };
 
@@ -160,6 +178,16 @@ function _ovGetStrings(lang) {
 }
 
 // Config key → role name returned by the foxess_control/entity_map WS command.
+// How long data may go unrefreshed before the card calls itself stale,
+// per data source, in seconds.  Anchored to the actual cadence each source
+// runs at: the REST poll is DEFAULT_POLLING_INTERVAL (300 s), so three
+// missed polls is a real fault; the WebSocket pushes every ~5 s, so a
+// minute of silence already is.  The previous flat 30 s threshold marked a
+// perfectly healthy REST install stale for ~90% of every interval, which
+// trained users to ignore the indicator entirely.
+const _STALE_AFTER = { ws: 60, api: 900, modbus: 900 };
+const _STALE_AFTER_DEFAULT = 900;
+
 const _ROLE_MAP = {
   solar_entity:             "solar_power",
   house_entity:             "house_load",
@@ -323,12 +351,10 @@ class FoxESSOverviewCard extends HTMLElement {
     return null;
   }
 
-  _dataSourceBadge(source, ageSeconds) {
+  _dataSourceBadge(source, ageSeconds, isStale) {
     if (!source) return "";
     const labels = { ws: "WS", api: "API", modbus: "Modbus" };
     const label = labels[source] || source;
-    const staleThreshold = 30;
-    const isStale = typeof ageSeconds === "number" && ageSeconds > staleThreshold;
     const ageLabel = typeof ageSeconds === "number" ? this._formatAge(ageSeconds) : "";
     const cls = isStale ? "data-source stale" : "data-source";
     const title = ageLabel ? `Data: ${label} (${ageLabel} ago)` : `Data: ${label}`;
@@ -443,6 +469,27 @@ class FoxESSOverviewCard extends HTMLElement {
     const lastUpdate = freshnessEntity && freshnessEntity.attributes && freshnessEntity.attributes.last_update;
     const ageSeconds = lastUpdate ? Math.max(0, Math.round((Date.now() - new Date(lastUpdate).getTime()) / 1000)) : null;
 
+    // Distinguish "this browser is not receiving updates" from "the data
+    // really is old".  The age above is computed client-side against
+    // Date.now(), so a disconnected frontend makes it grow without bound
+    // while every reading on the card is frozen — reporting that as data
+    // staleness sends the user to check the inverter when the problem is
+    // their browser.  hass.connected is the only thing that tells them
+    // apart.  Production report 2026-08-27: the card showed "API · 45m"
+    // for 45 minutes while the integration polled successfully every 5
+    // minutes and its server-side age never exceeded 300 s.
+    const connected = !this._hass || this._hass.connected !== false;
+    const staleAfter = _STALE_AFTER[dataSource] || _STALE_AFTER_DEFAULT;
+    const dataStale = typeof ageSeconds === "number" && ageSeconds > staleAfter;
+    const staleReason = !connected ? "connection" : (dataStale ? "data" : null);
+    const ageText = typeof ageSeconds === "number" ? this._formatAge(ageSeconds) : "";
+    const staleBanner = staleReason
+      ? `<div class="stale-banner"><span class="stale-icon">&#9888;</span>${
+          this._t(staleReason === "connection" ? "stale_disconnected" : "stale_data")
+            .replace("{age}", ageText)
+        }</div>`
+      : "";
+
     const boxes = Array.isArray(this._boxes) ? this._boxes : _DEFAULT_BOXES;
     const boxCount = boxes.length;
     let gridCls = "flow-grid";
@@ -451,9 +498,10 @@ class FoxESSOverviewCard extends HTMLElement {
 
     this.shadowRoot.innerHTML = `
       <style>${FoxESSOverviewCard._styles()}</style>
-      <ha-card>
+      <ha-card class="${staleReason ? "stale" : ""}">
+        ${staleBanner}
         <div class="header">
-          <div class="title">${this._t("title")}${this._dataSourceBadge(dataSource, ageSeconds)}</div>
+          <div class="title">${this._t("title")}${this._dataSourceBadge(dataSource, ageSeconds, staleReason !== null)}</div>
           ${workMode && workMode !== "SelfUse" ? `<span class="work-mode">${this._formatWorkMode(workMode)}</span>` : ""}
         </div>
         <div class="${gridCls}">
@@ -637,6 +685,31 @@ class FoxESSOverviewCard extends HTMLElement {
       .data-source.stale {
         background: rgba(var(--rgb-warning-color, 255, 152, 0), 0.15);
         color: var(--primary-text-color);
+      }
+
+      /* Stale treatment.  The banner stays at full strength while the
+         readings behind it are dimmed and desaturated, so the card cannot
+         be mistaken for live at a glance.  Theme variables only, so it
+         reads correctly in both light and dark themes. */
+      .stale-banner {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.3;
+        color: var(--primary-text-color);
+        background: rgba(var(--rgb-warning-color, 255, 152, 0), 0.28);
+        border-bottom: 2px solid var(--warning-color, #ffa600);
+      }
+      .stale-icon {
+        font-size: 13px;
+      }
+      ha-card.stale .header,
+      ha-card.stale .flow-grid {
+        opacity: 0.55;
+        filter: grayscale(1);
       }
 
       .flow-grid {

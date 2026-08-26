@@ -876,7 +876,7 @@ class TestOverviewCard:
             f"Badge shows '{badge_text}', expected to start with '{expected}'"
         )
 
-    def test_stale_badge_shown_for_old_api_data(
+    def test_normal_api_age_is_not_flagged_stale(
         self,
         page: Page,
         ha_e2e: HAClient,
@@ -884,7 +884,22 @@ class TestOverviewCard:
         data_source: str,
         connection_mode: str,
     ) -> None:
-        """Badge turns amber (stale class) when API data exceeds 10s age."""
+        """A healthy API install must look live between polls.
+
+        This test previously asserted the opposite — that the badge went
+        stale once data aged past 30 s. That threshold was the defect: the
+        REST poll runs every 300 s, so a perfectly healthy install rendered
+        the stale badge for roughly 90% of every interval, which trained
+        users to ignore it. Production report 2026-08-27: a user could not
+        tell a genuinely disconnected dashboard ("API - 45m") from the
+        "API - 2m" it showed the rest of the time.
+
+        Thresholds are now anchored to each source's cadence (WS 60 s,
+        REST 900 s = three missed polls). Boundary conditions and the
+        disconnected-frontend treatment are covered without wall-clock
+        waiting in ``tests/test_overview_card_stale.py``, which drives the
+        shipped card in a real Chromium DOM.
+        """
         if connection_mode != "cloud":
             pytest.skip("data freshness badge is cloud-specific")
         if data_source != "api":
@@ -921,19 +936,31 @@ class TestOverviewCard:
                 if (!card || !card.shadowRoot) return null;
                 const badge = card.shadowRoot.querySelector('.data-source');
                 if (!badge) return null;
+                const haCard = card.shadowRoot.querySelector('ha-card');
+                const banner = card.shadowRoot.querySelector('.stale-banner');
                 return {
                     text: badge.textContent,
                     classes: badge.className,
+                    cardClasses: haCard ? (haCard.getAttribute('class') || '') : null,
+                    banner: banner ? banner.textContent.trim() : null,
                 };
             }""",
             timeout=10000,
         ).json_value()
         assert badge_info is not None, "data-source badge not found"
-        assert "stale" in badge_info["classes"], (
-            f"Badge should have 'stale' class after 32s, got: {badge_info}"
+        assert "stale" not in badge_info["classes"], (
+            f"32s of age is normal for a 300s poll interval, so the badge "
+            f"must not cry stale, got: {badge_info}"
         )
         assert "API" in badge_info["text"], (
             f"Badge should contain 'API', got: {badge_info['text']}"
+        )
+        assert badge_info["cardClasses"] is not None
+        assert "stale" not in badge_info["cardClasses"], (
+            f"a healthy card must not be dimmed, got: {badge_info['cardClasses']}"
+        )
+        assert badge_info["banner"] is None, (
+            f"a healthy card must show no stale banner, got: {badge_info['banner']!r}"
         )
 
     def test_pv_values_consistent_with_solar_total(

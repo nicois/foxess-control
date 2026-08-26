@@ -399,6 +399,30 @@ Key tests:
   interaction, feedin deadline
 - Graceful degradation when data missing
 
+## Card Staleness Indication (C-020)
+
+**Constraints**: C-020
+**Source**: `tests/test_overview_card_stale.py` (13 tests, 2026-08-27),
+`tests/e2e/test_ui.py::TestOverviewCard::test_normal_api_age_is_not_flagged_stale`
+
+The overview card computes its data age client-side as
+`Date.now() - last_update`, so a frontend that has lost its WebSocket
+shows an age that grows without bound while every reading on the card is
+frozen — reported in production as "API - 45m" while the integration was
+polling successfully every 5 minutes. The card now separates
+`hass.connected === false` (check the browser) from genuinely aged data
+(check the inverter), dims and desaturates the readings behind a
+full-strength banner, and uses per-source thresholds (WS 60 s, REST
+900 s) instead of a flat 30 s that fired for ~90% of every poll interval.
+
+Tests drive the shipped card in a real Chromium DOM with a stub `hass`,
+and assert *computed* `opacity` and `filter` rather than class names, so
+a class rename that broke the visual treatment would still fail. The
+stub carries `data_source` attributes on the role entities because that
+is where `_getDataSource` reads from — a stub without them silently
+falls back to the default threshold and the WS boundary case cannot be
+exercised.
+
 ## PV-Only Energy vs Inverter Output Energy (C-041)
 
 **Constraints**: C-020, C-028, C-033, C-041
