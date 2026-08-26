@@ -605,7 +605,20 @@ property — encoded from the cloud-variant diagnosis);
 (`hui-root` is also stronger than `main.hass.connected` — the live
 WS flag flaps during entity-mode's heavier state-change burst; DOM
 facts survive the churn — encoded from the 2026-05-03 entity-mode
-diagnosis)
+diagnosis);
+`tests/test_e2e_lovelace_panel_load_error.py` +
+`tests/e2e/test_ui.py::TestPanelLoadFailureRecovery` (2026-08-26: the
+Lovelace panel is a `Promise.all` over 51 lazily-imported chunks, so a
+single lost asset request makes HA render
+`hass-error-screen "Error while loading page lovelace."` and never
+retry the import. The harness recognised neither that element nor the
+browser console error naming the cause, so every occurrence burned the
+full 75s budget and reported a *timeout* for a document that had
+already died. Fixed by detecting the terminal state, recording the
+browser-side cause, and re-navigating — bounded, and only for that
+positively-identified state, never for a plain timeout. This was the
+whole of Flaky Test Detection's chronic redness: it had never passed
+since `v1.0.21-beta.2`.)
 
 ### C-043: Test infrastructure isolates shared host resources per checkout and per run
 **Priority enforced**: P-007 (engineering process integrity) — test

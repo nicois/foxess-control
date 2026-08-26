@@ -18,6 +18,9 @@ from playwright.sync_api import Error as PlaywrightError
 
 from .conftest import (
     E2EConditionTimeout,
+    E2EPanelLoadError,
+    attach_page_diagnostics,
+    open_lovelace_dashboard,
     set_inverter_state,
     wait_for_condition,
 )
@@ -3052,4 +3055,42 @@ class TestPanelLoadFailureRecovery:
         )
         assert _find_card(page, "foxess-overview-card"), (
             "after recovery the dashboard must render the FoxESS cards"
+        )
+
+    def test_unrecoverable_panel_load_error_names_the_cause(
+        self,
+        abort_panel_chunk_always: dict[str, Any],
+        browser_context: Any,
+        ha_port: int,
+        ha_e2e: HAClient,  # noqa: ARG002 — ensure the container is up
+    ) -> None:
+        """When recovery is exhausted, the error must explain itself.
+
+        The chronic CI failure reported only "pass_check not satisfied
+        within 74991ms" plus a list of two elements — three months of
+        artefacts with the symptom and none of the cause.  The message must
+        now name HA's own error text, the lost asset and the net error.
+        """
+        p = browser_context.new_page()
+        attach_page_diagnostics(p)
+        try:
+            with pytest.raises(E2EPanelLoadError) as caught:
+                open_lovelace_dashboard(p, ha_port, timeout_ms=20000, attempts=2)
+        finally:
+            p.close()
+
+        message = str(caught.value)
+        assert "Error while loading page lovelace" in message, (
+            f"the failure must quote HA's own error text; got {message}"
+        )
+        assert "frontend_latest" in message, (
+            f"the failure must name the lost asset; got {message}"
+        )
+        assert "ERR_CONNECTION_RESET" in message or "net::" in message, (
+            f"the failure must name the network error; got {message}"
+        )
+        blocked = abort_panel_chunk_always["blocked"]
+        assert len(blocked) >= 2, (
+            "every attempt must have lost the chunk (otherwise the recovery "
+            f"path was not exhausted); blocked: {blocked}"
         )

@@ -81,8 +81,8 @@ def _is_fail_check(expr: str) -> bool:
     """True if ``expr`` is the lovelace HA-error ``fail_check`` predicate.
 
     ``wait_for_condition`` polls the ``fail_check`` (the shared
-    ``_LOVELACE_FAIL_CHECK``, which scans for ``ha-panel-error`` /
-    ``hui-error-card``) BEFORE the stage ``pass_check`` on every
+    ``_LOVELACE_FAIL_CHECK``, which scans for ``hass-error-screen`` /
+    ``ha-panel-error`` / ``hui-error-card``) BEFORE the stage ``pass_check`` on every
     iteration.  A MagicMock ``page.evaluate`` that returns truthy for
     *everything* would trip the fail_check and raise ``E2EConditionFailed``
     spuriously.  Tests that drive ``page.evaluate`` must therefore return

@@ -28,8 +28,10 @@ import socket
 import subprocess
 import tempfile
 import time
+from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from weakref import WeakKeyDictionary
 
 import pytest
 import requests
@@ -430,21 +432,115 @@ def _worker_id() -> str:
 
 _CAPTURE_COUNTER = itertools.count(1)
 
-_DOM_SUMMARY_JS = """() => {
-    function present(root, tag) {
-        if (root.querySelector(tag)) return true;
+
+# Elements HA renders when a page or a card is terminally broken.
+#
+# ``hass-error-screen`` is the one that matters and the one that was
+# missing: ``hass-router-page.createErrorScreen`` appends it when a panel's
+# lazy module import rejects, with ``error = "Error while loading page
+# lovelace."``.  That import is a ``Promise.all`` over 51 separate webpack
+# chunks and is never re-issued for the life of the document, so once this
+# element exists the dashboard can never finish rendering — waiting is
+# futile and the only recovery is a fresh navigation
+# (``open_lovelace_dashboard``).
+#
+# ``ha-panel-error`` / ``hui-error-card`` were the original two; they cover
+# an unknown panel and a card that failed to render.  Keeping them means a
+# broken *card* still fails fast rather than timing out.
+_LOVELACE_ERROR_SELECTOR = "hass-error-screen, ha-panel-error, hui-error-card"
+
+# Shared shadow-DOM walkers.  HA nests everything several shadow roots
+# deep, so a flat ``document.querySelector`` finds none of it — the reason
+# the old ``_DOM_SUMMARY_JS`` could never report an error message even
+# when the error element was on screen.
+_DEEP_DOM_JS = """
+    function deepFind(root, sel) {
+        const hit = root.querySelector(sel);
+        if (hit) return hit;
         for (const el of root.querySelectorAll('*')) {
-            if (el.shadowRoot && present(el.shadowRoot, tag)) return true;
+            if (el.shadowRoot) {
+                const found = deepFind(el.shadowRoot, sel);
+                if (found) return found;
+            }
         }
-        return false;
+        return null;
     }
+    function deepPresent(root, sel) { return !!deepFind(root, sel); }
+"""
+
+
+def _js(template: str) -> str:
+    """Expand the shared JS placeholders in a predicate template.
+
+    ``__DEEP__`` becomes the shadow-DOM walkers and ``__ERRORS__`` the
+    terminal-error selector, so every predicate agrees on both.  Plain
+    substitution rather than ``%``/``format`` because the templates are
+    JavaScript and full of braces.
+    """
+    return template.replace("__DEEP__", _DEEP_DOM_JS).replace(
+        "__ERRORS__", _LOVELACE_ERROR_SELECTOR
+    )
+
+
+_DOM_SUMMARY_JS = _js("""() => {
+    __DEEP__
     const tags = ['home-assistant','home-assistant-main','ha-panel-lovelace',
-        'hui-root','ha-panel-error','hui-error-card'].filter(t => present(document, t));
+        'hui-root','hass-error-screen','ha-panel-error',
+        'hui-error-card'].filter(t => deepPresent(document, t));
     let error_text = null;
-    const err = document.querySelector('ha-panel-error, hui-error-card');
-    if (err) error_text = (err.textContent || '').trim().slice(0, 300);
+    const err = deepFind(document, '__ERRORS__');
+    if (err) {
+        // ``error`` is a Lit property on hass-error-screen, not a
+        // reflected attribute, and the rendered message lives in the
+        // element's own shadow root — so textContent alone is empty.
+        const shadowText = err.shadowRoot ? err.shadowRoot.textContent : '';
+        error_text = String(err.error || shadowText || err.textContent || '')
+            .trim().slice(0, 300);
+    }
     return {tags, error_text};
-}"""
+}""")
+
+
+# Browser-side diagnostics recorded per page.
+#
+# HA logs the *reason* a panel failed to load
+# (``console.error("Error loading page", "lovelace", err)``) and Playwright
+# raises ``requestfailed`` naming the lost asset and the net error.  Neither
+# was recorded, which is why three months of Flaky Test Detection artefacts
+# contain the symptom and none of the cause.
+_MAX_DIAGNOSTIC_ENTRIES = 500
+_PAGE_DIAGNOSTICS: WeakKeyDictionary[Any, deque[str]] = WeakKeyDictionary()
+
+
+def attach_page_diagnostics(page: Any) -> deque[str]:
+    """Record console output, page errors and failed requests for ``page``.
+
+    Returns the (bounded) buffer, which ``_capture_failure`` embeds in the
+    failure summary and writes alongside the HTML/PNG capture.  Attach once
+    per page, immediately after it is created and *before* navigating, so
+    load-time failures are captured.
+    """
+    entries: deque[str] = deque(maxlen=_MAX_DIAGNOSTIC_ENTRIES)
+
+    def _on_console(message: Any) -> None:
+        if message.type in ("error", "warning"):
+            entries.append(f"console[{message.type}] {message.text}")
+
+    page.on("console", _on_console)
+    page.on("pageerror", lambda exc: entries.append(f"pageerror {exc}"))
+    page.on(
+        "requestfailed",
+        lambda request: entries.append(
+            f"requestfailed {request.url} :: {request.failure}"
+        ),
+    )
+    _PAGE_DIAGNOSTICS[page] = entries
+    return entries
+
+
+def page_diagnostics(page: Any) -> list[str]:
+    """Diagnostics recorded for ``page``, oldest first (empty if none)."""
+    return list(_PAGE_DIAGNOSTICS.get(page, ()))
 
 
 def _failure_capture_dir() -> Path:
@@ -475,6 +571,16 @@ def _capture_failure(page: Any, description: str) -> str:
     with contextlib.suppress(Exception):
         page.screenshot(path=str(base.with_suffix(".png")), full_page=True)
         parts.append(f"png: {base.with_suffix('.png').name}")
+    # Browser-side cause, if a recorder was attached.  The tail goes in the
+    # message (so the CI log alone explains the failure) and the whole
+    # buffer is written next to the HTML/PNG as an artefact.
+    diagnostics = page_diagnostics(page)
+    if diagnostics:
+        with contextlib.suppress(Exception):
+            base.with_suffix(".log").write_text("\n".join(diagnostics))
+            parts.append(f"log: {base.with_suffix('.log').name}")
+        tail = " ;; ".join(entry[:200] for entry in diagnostics[-6:])
+        parts.append(f"browser: {tail}")
     return " | ".join(parts)
 
 
@@ -484,6 +590,18 @@ class E2EConditionTimeout(AssertionError):
 
 class E2EConditionFailed(AssertionError):
     """A wait_for_condition fail_check tripped before the pass_check."""
+
+
+class E2EPanelLoadError(E2EConditionFailed):
+    """HA rendered a terminal panel/card error screen for this document.
+
+    Distinct from ``E2EConditionTimeout`` because the two demand opposite
+    responses.  A timeout means "not ready yet" — waiting longer might
+    help.  This means "this document will never render": HA's panel module
+    import already rejected and is never retried, so the only way forward
+    is a fresh navigation.  ``open_lovelace_dashboard`` acts on exactly
+    this type and on nothing else.
+    """
 
 
 def wait_for_condition(
@@ -1061,19 +1179,20 @@ _LOVELACE_PANEL_STAGES: tuple[tuple[str, str], ...] = (
 
 
 # Shared fail-fast predicate for lovelace staged waits: trips when HA has
-# rendered an error panel (``ha-panel-error``) or an error card
-# (``hui-error-card``) anywhere in the shadow DOM, so a wait aborts with a
-# captured DOM instead of burning the full overall budget on a dead panel.
-_LOVELACE_FAIL_CHECK = """() => {
-    function present(root, sel) {
-        if (root.querySelector(sel)) return true;
-        for (const el of root.querySelectorAll('*')) {
-            if (el.shadowRoot && present(el.shadowRoot, sel)) return true;
-        }
-        return false;
-    }
-    return present(document, 'ha-panel-error, hui-error-card');
-}"""
+# rendered a terminal error element (``_LOVELACE_ERROR_SELECTOR``) anywhere
+# in the shadow DOM, so a wait aborts with a captured DOM instead of
+# burning the full overall budget on a dead panel.
+#
+# ``hass-error-screen`` was missing here until 2026-08-26, and its absence
+# *was* the chronic Flaky Test Detection failure: HA uses that element (not
+# ``ha-panel-error``) when a panel's lazy module import rejects, so every
+# occurrence polled a permanently-broken document for the full 75s and then
+# reported "pass_check not satisfied" — a timeout message for a page that
+# had failed a second after loading.
+_LOVELACE_FAIL_CHECK = _js("""() => {
+    __DEEP__
+    return deepPresent(document, '__ERRORS__');
+}""")
 
 
 # Per-stage timeout cap in milliseconds.  ``None`` means "use the full
@@ -1114,6 +1233,10 @@ def _wait_for_stage(
     ``E2EConditionFailed`` on failure.  The stage name is embedded in the
     description, so both the capture filename and the CI log identify the
     stuck stage.
+
+    A tripped ``fail_check`` is re-raised as ``E2EPanelLoadError`` so the
+    caller can tell "this document is terminally broken, re-navigate" apart
+    from "not ready yet, keep waiting".
     """
     remaining_ms = int((deadline - time.monotonic()) * 1000)
     if remaining_ms <= 0:
@@ -1122,13 +1245,18 @@ def _wait_for_stage(
             f"before stage could start"
         )
     stage_ms = remaining_ms if max_stage_ms is None else min(remaining_ms, max_stage_ms)
-    wait_for_condition(
-        page,
-        predicate,
-        timeout_ms=stage_ms,
-        fail_check=_LOVELACE_FAIL_CHECK,
-        description=f"lovelace-stage:{stage_name}",
-    )
+    try:
+        wait_for_condition(
+            page,
+            predicate,
+            timeout_ms=stage_ms,
+            fail_check=_LOVELACE_FAIL_CHECK,
+            description=f"lovelace-stage:{stage_name}",
+        )
+    except E2EPanelLoadError:
+        raise
+    except E2EConditionFailed as exc:
+        raise E2EPanelLoadError(str(exc)) from exc
 
 
 def _wait_for_lovelace_panel(page: Any, timeout_ms: int = 75000) -> None:
@@ -1176,9 +1304,12 @@ def _wait_for_lovelace_panel(page: Any, timeout_ms: int = 75000) -> None:
     ``TestWaitForLovelacePanelEntityModeInitRace`` for regression
     tests.
 
-    Raises ``TimeoutError`` if any stage fails within its bounded
-    budget (stage name appears in the error message).  Unrelated
-    Playwright errors propagate unchanged.
+    Raises ``E2EConditionTimeout`` if any stage fails within its bounded
+    budget (stage name appears in the error message), or
+    ``E2EPanelLoadError`` if HA has rendered a terminal error element —
+    in which case waiting cannot help and the caller must re-navigate
+    (see ``open_lovelace_dashboard``).  Unrelated Playwright errors
+    propagate unchanged.
     """
     deadline = time.monotonic() + timeout_ms / 1000
 
@@ -1203,6 +1334,62 @@ def _wait_for_lovelace_panel(page: Any, timeout_ms: int = 75000) -> None:
         )
 
 
+# Number of dashboard navigations allowed per page.  Only a
+# ``E2EPanelLoadError`` — HA's own "this document is dead" signal — consumes
+# one; a slow or hung dashboard still fails on the first attempt.
+#
+# Why re-navigation rather than a deterministic wait: the panel's module
+# import is a ``Promise.all`` over 51 chunk requests.  When one of those
+# requests is lost, ``hass-router-page`` catches the rejection, renders
+# ``hass-error-screen`` and never re-issues the import.  There is no
+# precondition left to wait for — the only thing that will ask for the
+# missing chunk again is a new document.  Three is enough for any plausible
+# transient (two independent losses in a row is ~1 in 10^4 at the observed
+# CI rate) while still failing loudly on a genuinely broken build.
+_PANEL_LOAD_ATTEMPTS = 3
+
+
+def open_lovelace_dashboard(
+    page: Any,
+    ha_port: int,
+    *,
+    timeout_ms: int = 75000,
+    attempts: int = _PANEL_LOAD_ATTEMPTS,
+) -> None:
+    """Navigate ``page`` to the dashboard and wait for a rendered panel.
+
+    Recovers from HA's terminal panel-load error (``E2EPanelLoadError``) by
+    re-navigating, bounded to ``attempts`` navigations in total.  Any other
+    failure — including ``E2EConditionTimeout`` — propagates on the first
+    attempt: this is recovery from an identified terminal state, not a
+    blind retry.
+    """
+    for attempt in range(1, attempts + 1):
+        page.goto(f"http://localhost:{ha_port}/lovelace/0", timeout=60000)
+        page.wait_for_url("**/lovelace/**", timeout=60000)
+        page.wait_for_load_state("networkidle", timeout=30000)
+        try:
+            # Staged DOM milestones, each with its own bounded budget and
+            # retry on context-destroyed errors (HA navigation churn under
+            # CI load).  The 75s overall cap is justified in the helper
+            # docstring: slow GH-runners can spend 60s+ legitimately
+            # booting HA's custom-element registry.
+            _wait_for_lovelace_panel(page, timeout_ms=timeout_ms)
+        except E2EPanelLoadError as exc:
+            if attempt == attempts:
+                raise
+            _log.warning(
+                "[%s] HA rendered a terminal panel-load error on attempt "
+                "%d/%d — re-navigating. %s",
+                _worker_id(),
+                attempt,
+                attempts,
+                exc,
+            )
+            continue
+        return
+
+
 @pytest.fixture
 def page(
     browser_context: BrowserContext,
@@ -1212,15 +1399,10 @@ def page(
     """Function-scoped page navigated to HA dashboard."""
     t0 = time.monotonic()
     p = browser_context.new_page()
-    p.goto(f"http://localhost:{ha_port}/lovelace/0", timeout=60000)
-    p.wait_for_url("**/lovelace/**", timeout=60000)
-    p.wait_for_load_state("networkidle", timeout=30000)
-    # Wait for the HA Lovelace panel via staged DOM milestones.  Each
-    # stage has its own bounded budget and retries on context-destroyed
-    # errors (HA navigation churn under CI load).  The 75s overall cap
-    # is justified in the helper docstring: slow GH-runners can spend
-    # 60s+ legitimately booting HA's custom-element registry.
-    _wait_for_lovelace_panel(p, timeout_ms=75000)
+    # Attach before navigating: the console error and the failed request
+    # that explain a panel-load failure both happen during page load.
+    attach_page_diagnostics(p)
+    open_lovelace_dashboard(p, ha_port)
     _log.warning("[%s] page ready: %.1fs", _worker_id(), time.monotonic() - t0)
     yield p
     p.close()

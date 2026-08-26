@@ -603,6 +603,7 @@ missing locale key leaves the user looking at the raw key name.
 **Constraints**: C-031 (no flaky tests), C-043 (host-resource
 isolation per checkout and run), C-020 (observability)
 **Source**: `tests/test_e2e_page_fixture.py` (15 tests),
+`tests/test_e2e_lovelace_panel_load_error.py` (11),
 `tests/test_e2e_container_isolation.py` (29),
 `tests/test_soak_results_db.py::TestSaveRunViolationPersistence` (2)
 
@@ -623,6 +624,10 @@ table (so post-mortem analysis isn't reduced to a bare counter).
 | `TestWaitForLovelacePanelNavigationDuringPanelRender::*` (2) | Final-stage predicate must include a stable signal beyond bare attach; post-nav retry must use remaining overall budget | C-031 |
 | `TestWaitForLovelacePanelCloudVariantSignalStability::*` (2) | `hui-root` presence is sufficient (stronger than `panel.hass` which races with navigation wire-up) | C-031 |
 | `TestWaitForLovelacePanelEntityModeInitRace::*` (4) | Final-stage predicate accepts `hui-root` as settled signal even when `main.hass.connected` is transiently false (entity-mode WS flap during input-helper state burst, 74951ms timeout in Flaky Test Detection) | C-031 |
+| `TestPanelLoadErrorIsDetectedInTheDom::*` (3) | Against a real Chromium shadow DOM: HA's `hass-error-screen` ("Error while loading page lovelace.", two shadow hops deep) trips `_LOVELACE_FAIL_CHECK` and is named with its message in `_DOM_SUMMARY_JS`; a healthy dashboard does not trip it | C-031 |
+| `TestPanelLoadErrorRecovery::*` (4) | A terminal panel-load error raises `E2EPanelLoadError` and earns one bounded re-navigation; a plain timeout earns none (the fix must not become a blind retry) | C-031 |
+| `TestBrowserDiagnosticsAreCaptured::*` (2) | Console errors / page errors / failed requests are recorded and reach both the failure message and a `.log` artefact — the diagnosability gap that hid this failure for three months | C-031 |
+| `TestPageFixtureRoutesThroughRecovery::*` (2) | Structural: the `page` fixture opens the dashboard through `open_lovelace_dashboard` with diagnostics attached, never a bare `_wait_for_lovelace_panel` | C-031 |
 | `TestSaveRunViolationPersistence::test_violations_persisted_as_events` | Each InvariantViolation persisted as event_type='violation' with rule + detail | C-020 |
 | `TestSaveRunViolationPersistence::test_no_violation_events_when_clean` | Clean run produces zero violation events (not a tautology fix) | C-020 |
 | `TestPlaywrightFixtureIsolation::*` | pytest-playwright session fixture leaks the greenlet-backed event loop on the xdist main-thread worker; function-scoped override in `tests/conftest.py` releases the context per-test. Deterministic reproduction under `-p no:randomly` (2026-04-28) | C-031 |
