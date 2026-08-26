@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.22-beta.4
 
 ### Added
 - **New `sensor.foxess_pv3_power` and `sensor.foxess_pv4_power` — per-string power for multi-MPPT inverters** (issue #15). KH-series and other inverters with more than two MPPT inputs report `pv3Power` / `pv4Power`, which the integration never asked for. Both follow the existing PV1/PV2 pattern exactly: diagnostic category, kW, disabled by default — enable them in Settings → Devices & Services → Entities. On inverters with only two strings the variables are absent from the API response, so the entities simply read unavailable and nothing else is affected. Note the overview card's PV breakdown still shows PV1 + PV2 only.
