@@ -25,6 +25,8 @@ from .ha_client import FATAL_FOR_ACTIVE
 from .selectors import ControlCard, OverviewCard
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from playwright.sync_api import JSHandle, Locator, Page
 
     from .conftest import SimulatorHandle
@@ -2848,3 +2850,206 @@ class TestGalleryScreenshots:
         )
         _robust_reload(page, settle_ms=3000)
         self._screenshot_card(page, "foxess-control-card", "control-deferred.png")
+
+
+# ---------------------------------------------------------------------------
+# Panel-load failure recovery (Flaky Test Detection root cause)
+#
+# HA loads the Lovelace panel as a ``Promise.all`` over 51 lazily-imported
+# webpack chunks.  One lost asset request rejects the whole import,
+# ``hass-router-page`` swaps the panel for ``<hass-error-screen error="Error
+# while loading page lovelace.">`` and never retries — the document is
+# terminally broken.  On GitHub runners that happened on roughly 1 in 100
+# dashboard loads, which is why ``Flaky Test Detection`` (20 jobs x ~98
+# tests) had never once passed.
+#
+# The trigger is environmental (a lost request on a starved runner) and does
+# not reproduce on a developer machine: 820 consecutive local dashboard
+# loads — 500 unconstrained, 320 pinned to 4 cores, both at high xdist
+# parallelism — produced zero failures.  So the trigger is *injected*
+# instead of waited for: a context-level route aborts the panel's own chunk
+# request exactly once.  That reproduces the CI failure deterministically
+# and in full fidelity (real container, real frontend, real error screen,
+# pixel-identical failure capture), and proves the recovery works against
+# the real thing rather than against a mock.
+#
+# Refs C-031, C-029.
+# ---------------------------------------------------------------------------
+
+# A lazily-loaded webpack chunk, e.g. ``/frontend_latest/71508.4a19….js``.
+# The shell's own entry points (``core.…``, ``app.…``) are named, not
+# numbered, so this pattern cannot match them — blocking those would stop
+# HA booting at all, which is *not* the failure under test (the CI capture
+# shows a fully-booted HA).
+_LAZY_CHUNK_RE = re.compile(r"/frontend_latest/\d+\.[0-9a-f]+\.js$")
+
+# Identifies the chunk that defines the Lovelace panel element.  Verified
+# against the shipped bundle: the literal ``ha-panel-lovelace`` occurs in
+# exactly one chunk (``71508.*.js``) and in no entry point — HA's router
+# builds the tag name as ``ha-panel-${component_name}`` at runtime.
+# Sniffing the body rather than hard-coding the chunk id keeps this working
+# across HA frontend releases, where ids and hashes both change.
+_PANEL_CHUNK_MARKER = "ha-panel-lovelace"
+
+# Only dashboard documents and lazy chunks are intercepted, so the rest of
+# the load (translations, icons, fonts, /api) keeps its normal latency.
+_DASHBOARD_URL_RE = re.compile(r"/lovelace/")
+
+
+@contextlib.contextmanager
+def _panel_chunk_fault(
+    browser_context: Any,
+    *,
+    once: bool,
+) -> Generator[dict[str, Any], None, None]:
+    """Abort the Lovelace panel's chunk request on ``browser_context``.
+
+    Registered on the *context* (not the page) so it is already active when
+    the ``page`` fixture performs its own navigation — that navigation is
+    what is under test.
+
+    Only the one chunk that defines ``ha-panel-lovelace`` is aborted, so HA
+    still boots, renders its sidebar and appends ``hass-error-screen`` —
+    exactly the state in the CI failure capture.  With ``once=True`` the
+    harness's recovery navigation sees a healthy server; with
+    ``once=False`` every attempt fails, which is how the exhausted-recovery
+    diagnostics are exercised.
+
+    Arming is deliberately *not* keyed on a navigation count: the very
+    first ``goto`` always redirects
+    ``/lovelace/0`` → ``/auth/authorize`` → ``/lovelace/0?auth_callback=1``
+    (trusted-networks auto-login), so the panel's chunks are requested
+    during the *second* document navigation.
+    """
+    state: dict[str, Any] = {
+        "blocked": [],
+        "navigations_after_block": 0,
+        "handler_errors": [],
+    }
+
+    def _on_document(route: Any) -> None:
+        try:
+            if route.request.resource_type == "document" and state["blocked"]:
+                state["navigations_after_block"] += 1
+            route.continue_()
+        except PlaywrightError as exc:  # see _on_chunk
+            state["handler_errors"].append(str(exc)[:120])
+
+    def _on_chunk(route: Any) -> None:
+        # A route callback must never raise: Playwright re-reports an
+        # exception from a handler on the *next* API call, which lands as a
+        # TargetClosedError at the setup of an unrelated test and — because
+        # ``BrowserType.launch`` then fails too — poisons the whole worker
+        # (observed: 35 errors on gw7).  ``route.fetch`` legitimately fails
+        # whenever a navigation or page close cancels the request mid-flight,
+        # which happens on every recovery navigation.
+        try:
+            if once and state["blocked"]:
+                route.continue_()
+                return
+            # Sniff the body to find the panel's own chunk.  Every other
+            # chunk is fulfilled from the same fetch, so the shell is
+            # unaffected.
+            response = route.fetch()
+            if _PANEL_CHUNK_MARKER in response.text():
+                state["blocked"].append(route.request.url)
+                route.abort("connectionreset")
+            else:
+                route.fulfill(response=response)
+        except PlaywrightError as exc:
+            state["handler_errors"].append(str(exc)[:120])
+            with contextlib.suppress(PlaywrightError):
+                route.abort()
+
+    browser_context.route(_DASHBOARD_URL_RE, _on_document)
+    browser_context.route(_LAZY_CHUNK_RE, _on_chunk)
+    try:
+        yield state
+    finally:
+        # ``unroute_all`` rather than two ``unroute`` calls: a ``route.fetch``
+        # still in flight when the page closes otherwise raises inside the
+        # route callback, and Playwright reports that on the *next* API call
+        # — landing as a ``TargetClosedError`` at the setup of an unrelated
+        # test on the same worker (observed on gw11).  ``ignoreErrors``
+        # drains them, which is what Playwright's own message advises.
+        with contextlib.suppress(PlaywrightError):
+            browser_context.unroute_all(behavior="ignoreErrors")
+
+
+@pytest.fixture
+def abort_panel_chunk_on_first_load(
+    browser_context: Any,
+) -> Generator[dict[str, Any], None, None]:
+    """Lose the panel chunk once.  Request *before* ``page`` in a signature."""
+    with _panel_chunk_fault(browser_context, once=True) as state:
+        yield state
+
+
+@pytest.fixture
+def abort_panel_chunk_always(
+    browser_context: Any,
+) -> Generator[dict[str, Any], None, None]:
+    """Lose the panel chunk on every navigation — recovery cannot succeed."""
+    with _panel_chunk_fault(browser_context, once=False) as state:
+        yield state
+
+
+class TestPanelLoadFailureRecovery:
+    """A lost frontend asset must not end the test run.
+
+    Without recovery this test reproduces the CI signature exactly: the
+    ``page`` fixture errors at setup with ``E2EConditionTimeout:
+    lovelace-stage:ha-panel-lovelace`` after burning its full budget on a
+    document that had already rendered ``hass-error-screen``.
+    """
+
+    @pytest.fixture
+    def browser_context(self, playwright: Any) -> Generator[Any, None, None]:
+        """Class-scoped override: a *cold* context, only for this test.
+
+        The suite's session-scoped ``browser_context`` is shared by every
+        test on the worker, so by the time this test runs the frontend
+        chunks are in the HTTP disk cache and Home Assistant's service
+        worker is active.  Playwright cannot intercept either — a cache hit
+        and a service-worker-fulfilled fetch never reach the network layer —
+        so the injected fault silently failed to fire and the test passed
+        for the wrong reason (observed: passed standalone, "fault injection
+        did not fire" in a full ``-n auto`` run).  A dedicated context has
+        an empty cache and no service worker, which makes the injection
+        deterministic (C-031).
+
+        Incidentally this is also why the *real* failure is concentrated on
+        cache-cold loads: the more of the 51 chunks a context already has
+        cached, the fewer requests there are to lose.
+
+        A private browser (rather than the suite's session-scoped one) keeps
+        the node id free of pytest-playwright's ``browser_name`` parameter,
+        so the E2E workflow's per-nodeid timing database stays stable.
+        """
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            context = browser.new_context()
+            try:
+                yield context
+            finally:
+                context.close()
+        finally:
+            browser.close()
+
+    def test_dashboard_recovers_from_lost_panel_chunk(
+        self,
+        abort_panel_chunk_on_first_load: dict[str, Any],
+        page: Page,
+    ) -> None:
+        state = abort_panel_chunk_on_first_load
+        assert state["blocked"], (
+            "fault injection did not fire — the Lovelace panel chunk was "
+            "never aborted, so this test proves nothing"
+        )
+        assert state["navigations_after_block"] >= 1, (
+            "the harness must re-navigate after the panel-load error; no "
+            "dashboard navigation happened after the chunk was lost"
+        )
+        assert _find_card(page, "foxess-overview-card"), (
+            "after recovery the dashboard must render the FoxESS cards"
+        )
