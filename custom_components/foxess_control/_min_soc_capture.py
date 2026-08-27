@@ -38,6 +38,19 @@ is deliberately paranoid about four things:
    an option, and neither is raising: this runs inside
    ``async_setup_entry`` and must not be able to break setup or a session.
 
+5. **Only the *write* is gated on the option, never the capture.**
+   Capturing is a read and is always safe; the crash-recovery restore is
+   the one place this feature touches the inverter with no
+   ``plan_handback`` decision in front of it, so it checks
+   ``scheduler_handback`` itself.  With the option off — the shipped
+   default — nothing here writes to the inverter at all, which is what
+   makes "existing installs behave exactly as they did before the
+   upgrade" true rather than aspirational.
+
+Because the captured value is authoritative and never re-read, there has
+to be *some* way for a handback user to change their mind.  That way is
+the opt-in transition itself: see :func:`async_recapture_on_opt_in`.
+
 Reads go through ``Inverter.get_min_soc`` (``battery/soc/get``, the
 documented Open API surface).  Writes go through
 ``Inverter.set_setting("MinSocOnGrid", …)`` rather than
@@ -180,10 +193,14 @@ async def async_setup_min_soc_capture(
     setup path, and a floor we could not capture is a feature that stays
     dormant, not an integration that fails to load.
 
-    Runs regardless of whether handback is enabled.  Capturing early is the
-    only way the value can be the user's own: waiting until they opt in
-    would mean reading the register after the integration might already
-    have written to it.
+    **Capture happens whether or not handback is enabled; only the write is
+    gated.**  Reading is harmless, and reading early is the only way the
+    value can be the user's own — waiting until they opt in would mean
+    reading a register the integration might by then have written to.  The
+    *restore*, by contrast, is the one place this feature touches the
+    inverter without a ``plan_handback`` decision in front of it (it runs
+    before any plan exists), so it must honour the option itself, or an
+    install that never opted in would have its Min SoC overwritten.
     """
     try:
         from ._helpers import _cfg, _dd
@@ -196,39 +213,21 @@ async def async_setup_min_soc_capture(
         stored = await load_captured_min_soc(hass)
         if stored is not None:
             dd.captured_min_soc_on_grid = stored
+            if not _cfg(hass).scheduler_handback:
+                _LOGGER.debug(
+                    "Remembering the captured Min SoC on grid (%s%%) but not "
+                    "writing it: scheduler handback is not enabled, so this "
+                    "integration does not touch that register",
+                    stored,
+                )
+                return
             await _restore_after_restart(hass, inverter, stored)
             return
 
-        # 2. Nothing captured yet — and a session owns the floor it holds.
-        if dd.smart_charge_state is not None or dd.smart_discharge_state is not None:
-            _LOGGER.debug(
-                "Not capturing the Min SoC floor: a smart session is active, "
-                "so the value on the device is not the user's own"
-            )
+        # 2. Nothing captured yet — read it, if the device is worth reading.
+        value = await _capture_from_clean_device(hass, inverter)
+        if value is None:
             return
-
-        # 3. ...nor is it, if a managed override group is on the inverter.
-        schedule = await hass.async_add_executor_job(inverter.get_schedule)
-        from .foxess_adapter import _is_placeholder
-
-        groups = [g for g in schedule.get("groups", []) if not _is_placeholder(g)]
-        if has_managed_override_group(groups):
-            _LOGGER.warning(
-                "Not capturing the inverter's Min SoC floor: a managed "
-                "override group is still on the schedule, so the floor on "
-                "the device may be a session value rather than your own.  "
-                "Scheduler handback will restore nothing until a restart "
-                "finds the inverter idle"
-            )
-            return
-
-        # 4. Clean.  Read it once, and never again.
-        settings = await hass.async_add_executor_job(inverter.get_min_soc)
-        raw = settings.get("minSocOnGrid")
-        if raw is None or isinstance(raw, bool):
-            _LOGGER.debug("Inverter reported no minSocOnGrid; nothing captured")
-            return
-        value = int(raw)
         dd.captured_min_soc_on_grid = value
         await _save_captured_min_soc(hass, value)
         _LOGGER.info(
@@ -243,6 +242,117 @@ async def async_setup_min_soc_capture(
             "succeeds",
             exc_info=True,
         )
+
+
+async def _capture_from_clean_device(
+    hass: HomeAssistant, inverter: Inverter
+) -> int | None:
+    """Read ``minSocOnGrid``, but only from a device in a clean state.
+
+    ``None`` means "declined, or could not read" — never a fallback value.
+    Raises nothing of its own beyond what the caller already catches.
+    """
+    from ._helpers import _dd
+
+    dd = _dd(hass)
+
+    # A session owns the floor the device is holding.
+    if dd.smart_charge_state is not None or dd.smart_discharge_state is not None:
+        _LOGGER.debug(
+            "Not capturing the Min SoC floor: a smart session is active, "
+            "so the value on the device is not the user's own"
+        )
+        return None
+
+    # ...and so does a managed override group left on the schedule.
+    schedule = await hass.async_add_executor_job(inverter.get_schedule)
+    from .foxess_adapter import _is_placeholder
+
+    groups = [g for g in schedule.get("groups", []) if not _is_placeholder(g)]
+    if has_managed_override_group(groups):
+        _LOGGER.warning(
+            "Not capturing the inverter's Min SoC floor: a managed override "
+            "group is still on the schedule, so the floor on the device may "
+            "be a session value rather than your own.  Scheduler handback "
+            "will restore nothing until a restart finds the inverter idle"
+        )
+        return None
+
+    settings = await hass.async_add_executor_job(inverter.get_min_soc)
+    raw = settings.get("minSocOnGrid")
+    if raw is None or isinstance(raw, bool):
+        _LOGGER.debug("Inverter reported no minSocOnGrid; nothing captured")
+        return None
+    return int(raw)
+
+
+async def async_recapture_on_opt_in(
+    hass: HomeAssistant,
+    inverter: Inverter | None,
+    *,
+    was_enabled: bool,
+    now_enabled: bool,
+) -> bool:
+    """Re-read the user's floor when handback transitions off → on.
+
+    Returns whether the stored floor was replaced.
+
+    The captured value is authoritative and never re-read, which is what
+    keeps a session value from becoming "the user's value" — but it also
+    means a handback user who legitimately changes their floor in the
+    FoxESS app would be reverted forever, with no way back.  The opt-in
+    transition is the remedy, and it is the *only* safe moment for a
+    re-read: at the instant someone turns the feature on, whatever the
+    register holds is by definition what they chose, because the
+    integration has not been writing to it.  It also gives them a manual
+    remedy — toggle the option off and on — with no new service and no new
+    UI to explain (C-020).
+
+    Deliberately **not** triggered by any other options change: an options
+    save during a session, or after a handback had written the register,
+    would record a value the user never chose, which is the whole hazard
+    this module exists to prevent.
+
+    Every guard the first capture has still applies, and a re-capture that
+    cannot read a clean value **keeps the value already stored**.  Trading
+    a slightly stale floor the user did once choose for no floor at all
+    would be strictly worse: it turns handback into "restore nothing"
+    permanently.  Never raises — an options save must not fail because of
+    this.
+    """
+    if not (now_enabled and not was_enabled):
+        return False
+    try:
+        from ._helpers import _cfg, _dd
+
+        if inverter is None or _cfg(hass).entity_mode:
+            return False
+        value = await _capture_from_clean_device(hass, inverter)
+        if value is None:
+            _LOGGER.warning(
+                "Scheduler handback was just enabled, but the inverter's own "
+                "Min SoC could not be read cleanly right now, so the "
+                "previously captured value is kept.  If it is not the floor "
+                "you want, turn the option off and on again once no smart "
+                "session is running"
+            )
+            return False
+        _dd(hass).captured_min_soc_on_grid = value
+        await _save_captured_min_soc(hass, value)
+        _LOGGER.info(
+            "Scheduler handback enabled: captured the inverter's current Min "
+            "SoC on grid (%s%%) as your own, which is what handback will "
+            "restore after every session",
+            value,
+        )
+        return True
+    except Exception:  # noqa: BLE001 — an options save must never fail here
+        _LOGGER.warning(
+            "Scheduler handback was just enabled but the inverter's Min SoC "
+            "could not be re-read; the previously captured value is kept",
+            exc_info=True,
+        )
+        return False
 
 
 async def _restore_after_restart(

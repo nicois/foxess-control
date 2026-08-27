@@ -132,6 +132,7 @@ from .const import (
     CONF_DEVICE_SERIAL,
     CONF_MIN_POWER_CHANGE,
     CONF_POLLING_INTERVAL,
+    CONF_SCHEDULER_HANDBACK,
     CONF_WEB_PASSWORD,
     CONF_WEB_USERNAME,
     CONF_WORK_MODE_ENTITY,
@@ -142,6 +143,7 @@ from .const import (
     DEFAULT_MIN_POWER_CHANGE,
     DEFAULT_MIN_SOC_ON_GRID,
     DEFAULT_POLLING_INTERVAL,
+    DEFAULT_SCHEDULER_HANDBACK,
     DOMAIN,
     PLATFORMS,
     WS_MODE_ALWAYS,
@@ -1705,7 +1707,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the config entry when options change."""
+    """Reload the config entry when options change.
+
+    Also the only place the scheduler-handback **off → on transition** is
+    visible.  Home Assistant calls this listener after ``entry.options`` has
+    already been replaced but before the reload rebuilds ``dd.config``, so
+    ``dd.config`` still carries the *previous* options — comparing the new
+    value against itself would detect nothing.
+
+    The re-capture runs *before* the reload deliberately: the reload's own
+    crash-recovery pass would otherwise write the stale floor to the device
+    first, and the re-capture would then read back the number we had just
+    written, laundering the integration's value into the user's.
+    """
+    try:
+        from ._min_soc_capture import async_recapture_on_opt_in
+
+        dd = _dd(hass)
+        previous = dd.config
+        entry_data = dd.entries.get(entry.entry_id)
+        await async_recapture_on_opt_in(
+            hass,
+            entry_data.inverter if entry_data is not None else None,
+            was_enabled=bool(previous.scheduler_handback) if previous else False,
+            now_enabled=bool(
+                entry.options.get(CONF_SCHEDULER_HANDBACK, DEFAULT_SCHEDULER_HANDBACK)
+            ),
+        )
+    except Exception:  # noqa: BLE001 — the reload below is the actual job
+        _LOGGER.debug(
+            "Could not check for a scheduler-handback opt-in (non-critical)",
+            exc_info=True,
+        )
     await hass.config_entries.async_reload(entry.entry_id)
 
 

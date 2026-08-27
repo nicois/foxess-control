@@ -121,6 +121,18 @@ CONF_WS_ALL_SESSIONS = "ws_all_sessions"  # legacy boolean; kept for migration
 
 CONF_WS_MODE = "ws_mode"
 CONF_ADDITIONAL_PV_POWER_VARIABLE = "additional_pv_power_variable"
+
+# Scheduler handback (issues #16, #4): when no smart session is running,
+# turn the inverter's Mode Scheduler master switch OFF, set the work mode
+# through the device's own settings, and put the user's own Min SoC back.
+#
+# Opt-in and default OFF, and that default is load-bearing rather than
+# cautious housekeeping: it is the only thing guaranteeing that hundreds of
+# existing installs behave exactly as they did before the upgrade.  With it
+# off, this feature must not write to the inverter at all — see
+# _min_soc_capture and handback.plan_handback, both of which gate on it.
+CONF_SCHEDULER_HANDBACK = "scheduler_handback"
+DEFAULT_SCHEDULER_HANDBACK = False
 WS_MODE_AUTO = "auto"
 WS_MODE_SMART_SESSIONS = "smart_sessions"
 WS_MODE_ALWAYS = "always"

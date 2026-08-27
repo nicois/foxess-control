@@ -39,6 +39,10 @@ class IntegrationConfig:
     entity_mode: bool
     export_limit_entity: str | None = None
     additional_pv_power_variable: str | None = None
+    # Opt-in scheduler handback (issues #16, #4).  Defaults False so an
+    # install that has not asked for it is untouched — and specifically so
+    # nothing writes to the user's persistent Min SoC register.
+    scheduler_handback: bool = False
 
 
 def build_config(
@@ -56,6 +60,7 @@ def build_config(
         CONF_INVERTER_POWER,
         CONF_MIN_POWER_CHANGE,
         CONF_MIN_SOC_ON_GRID,
+        CONF_SCHEDULER_HANDBACK,
         CONF_SMART_HEADROOM,
         CONF_WORK_MODE_ENTITY,
         CONF_WS_ALL_SESSIONS,
@@ -66,6 +71,7 @@ def build_config(
         DEFAULT_INVERTER_POWER,
         DEFAULT_MIN_POWER_CHANGE,
         DEFAULT_MIN_SOC_ON_GRID,
+        DEFAULT_SCHEDULER_HANDBACK,
         DEFAULT_SMART_HEADROOM,
         WS_MODE_AUTO,
         WS_MODE_SMART_SESSIONS,
@@ -112,6 +118,9 @@ def build_config(
         export_limit_entity=export_limit_entity,
         additional_pv_power_variable=(
             entry_options.get(CONF_ADDITIONAL_PV_POWER_VARIABLE) or None
+        ),
+        scheduler_handback=bool(
+            entry_options.get(CONF_SCHEDULER_HANDBACK, DEFAULT_SCHEDULER_HANDBACK)
         ),
     )
 
