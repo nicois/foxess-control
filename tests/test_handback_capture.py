@@ -282,10 +282,10 @@ class TestNeverCapturesASessionValue:
         A whole-day SelfUse group is the *normal* idle state this
         integration leaves behind after every session (C-025), and group
         values never move the persistent register (pinned by
-        test_handback_foxess.py::test_schedule_write_leaves_min_soc_on_grid
-        _setting_alone).  Treating it as "unclean" would mean capture never
-        happens on a real install, and the feature would silently restore
-        nothing forever.
+        ``TestDirectSettingsAndScheduleAreIndependent`` in
+        tests/test_handback_foxess.py).  Treating it as "unclean" would
+        mean capture never happened on a real install, and the feature
+        would silently restore nothing forever.
         """
         _pin_midday(foxess_sim)
         inv = _inv(foxess_sim)
@@ -329,9 +329,9 @@ class TestCrashRecovery:
         """``setting/get`` must agree, since it is the same register.
 
         Two API surfaces onto one device register (pinned by
-        test_handback_foxess.py::test_setting_and_battery_soc_endpoints_are
-        _one_value): a restore that only satisfied one of them would be
-        broken on real hardware with every test green.
+        ``TestDirectMinSocOnGrid`` in tests/test_handback_foxess.py): a
+        restore that satisfied only one of them would be broken on real
+        hardware with every test green.
         """
         inv = _inv(foxess_sim)
         await _seed_store(capture_hass, 0)

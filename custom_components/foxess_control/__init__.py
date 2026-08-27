@@ -121,6 +121,9 @@ from ._helpers import (
 from ._helpers import (
     _save_taper_profile as _save_taper_profile,
 )
+from ._min_soc_capture import (
+    async_setup_min_soc_capture as async_setup_min_soc_capture,
+)
 from ._schedule_reconcile import (
     reconcile_schedule as reconcile_schedule,
 )
@@ -1516,6 +1519,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # prior session's teardown did not complete (issue #11).  Runs after
     # recovery so resumed sessions are reflected.  Cloud-only; never raises.
     await reconcile_schedule(hass, inverter)
+
+    # Capture the user's own persistent Min SoC floor — the only value a
+    # scheduler handback may ever put back — or restore it if a previous run
+    # died with a session floor in the register (issues #4, #16).  Must run
+    # AFTER reconcile_schedule: capture only happens when no managed override
+    # group is on the inverter, and reconcile is what removes the orphans a
+    # failed teardown left behind, so before it "clean" would mean "clean
+    # apart from yesterday's leftovers".  Cloud-only; never raises.
+    await async_setup_min_soc_capture(hass, inverter)
 
     # Notify coordinator so sensors reflect recovered session state immediately
     # (otherwise RestoreSensor shows stale text until the first poll).

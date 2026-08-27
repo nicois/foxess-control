@@ -58,7 +58,7 @@ def plan_handback(
     entity_mode: bool,
     session_active: bool,
     unmanaged_modes: list[str],
-    scheduler_supported: bool,
+    scheduler_supported: bool | None,
     captured_min_soc_on_grid: int | None,
 ) -> HandbackPlan:
     """Decide whether to hand the inverter back to its own settings.
@@ -67,7 +67,18 @@ def plan_handback(
     ``check_schedule_conflicts`` (e.g. ``["Backup (00:00-06:00)"]``);
     *captured_min_soc_on_grid* is the user's own persistent Min SoC as it
     was read **before** the integration last touched it, or ``None`` if it
-    was never captured.
+    was never captured (see ``_min_soc_capture``).
+
+    *scheduler_supported* is a **tri-state**, supplied by
+    :meth:`Inverter.probe_scheduler_support`, because "the device says it
+    has no Mode Scheduler" and "we could not find out" are different facts
+    that happen to have the same consequence.  ``None`` means unknown; the
+    device's own answer is ``True``/``False``.  Conflating them
+    (as an all-False degrade on a malformed reply once did) turns one bad
+    reply into a confident claim about the user's hardware, and a log that
+    lies is worse than one that admits ignorance (C-020, P-005).  Both
+    values decline, so the tri-state changes only the reason, never the
+    decision.
 
     **When nothing was captured, nothing is restored.**  A default is
     never substituted, and a captured value is passed through verbatim —
@@ -94,7 +105,9 @@ def plan_handback(
     1. **Not enabled** — opt-in, default off.  Existing installs must
        behave exactly as they did before the upgrade.
     2. **Entity mode** — there is no cloud Mode Scheduler to hand back.
-    3. **Scheduler unsupported** — likewise nothing to hand back.
+    3. **Scheduler unsupported, or unknown** — likewise nothing to hand
+       back, but reported as two distinct reasons: what the device said,
+       versus that it could not be established.
     4. **Unmanaged modes present** — C-018: the schedule contains modes
        this integration does not manage, which the user put there
        deliberately.  Named in the reason so the log is actionable.
@@ -118,6 +131,17 @@ def plan_handback(
             reason=(
                 "entity mode: control goes through Home Assistant entities, "
                 "so there is no cloud Mode Scheduler to hand back"
+            ),
+        )
+
+    if scheduler_supported is None:
+        return HandbackPlan(
+            act=False,
+            reason=(
+                "could not determine whether this inverter supports Mode "
+                "Scheduler, so the inverter was left exactly as it is — "
+                "this is a failed or malformed read, not a statement about "
+                "the hardware, and it will be retried"
             ),
         )
 

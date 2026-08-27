@@ -373,17 +373,59 @@ class Inverter:
 
         Returns ``{"enable": bool, "support": bool}``.  ``support`` is
         False on devices with no scheduler at all (e.g. a batteryless
-        micro-inverter).  Unexpected response shapes degrade to all-False
-        rather than raising, so a caller can treat this as a capability
-        hint without wrapping every call.
+        micro-inverter).
+
+        Raises:
+            ValueError: the response was not the expected shape.  This used
+                to degrade to all-False, which made one malformed reply
+                indistinguishable from a device that genuinely has no Mode
+                Scheduler.  Handback declined either way, so the *decision*
+                was fail-safe — but the reason it logged was a confident
+                claim about the user's hardware, sending them to look for a
+                firmware limitation that does not exist.  A log that lies is
+                worse than one that says "unknown" (C-020, P-005).
+
+                Raising means there is exactly **one** signal for "we do not
+                know": an exception.  A failed request and a malformed reply
+                are indistinguishable in the only respect that matters, and
+                collapsing them onto one mechanism makes it impossible to
+                treat unknown as False by forgetting to check a sentinel.
+                :meth:`probe_scheduler_support` is the tri-state wrapper for
+                callers that want the capability without the exception.
         """
         result: Any = self.client.post(_SCHEDULER_FLAG_ENDPOINT, {"deviceSN": self.sn})
         if not isinstance(result, dict):
-            return {"enable": False, "support": False}
+            raise ValueError(
+                f"inverter {self._device_type or self.sn} returned an "
+                f"unexpected Mode Scheduler flag response ({result!r}); "
+                "whether it supports Mode Scheduler is unknown"
+            )
         return {
             "enable": bool(result.get("enable", False)),
             "support": bool(result.get("support", False)),
         }
+
+    def probe_scheduler_support(self) -> bool | None:
+        """Does this device support Mode Scheduler?  ``None`` if unknown.
+
+        The tri-state the handback policy consumes.  ``True``/``False`` are
+        the device's own answer; ``None`` means the question could not be
+        answered — the request failed, or the reply was not the expected
+        shape.  Only a caller that can tell those apart can log an honest
+        reason, which is the whole point (C-020, P-005).
+
+        Read-only and best-effort: it never raises and never writes, so it
+        is safe to call on a path that must not be blocked by it.
+        """
+        try:
+            return self.get_scheduler_flag()["support"]
+        except Exception:  # noqa: BLE001 — "unknown" is a valid answer here
+            _LOGGER.debug(
+                "Could not determine Mode Scheduler support for inverter %s",
+                self._device_type or self.sn,
+                exc_info=True,
+            )
+            return None
 
     def set_scheduler_enabled(self, enable: bool) -> None:
         """Turn the Mode Scheduler master switch on or off.

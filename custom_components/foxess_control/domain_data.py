@@ -177,3 +177,13 @@ class FoxESSControlData(SmartBatteryDomainData):
 
     # Session cancel hook return type (brand-specific)
     on_session_cancel: Callable[[], Coroutine[Any, Any, None] | None] | None = None
+
+    # The user's own persistent Min SoC on grid, as read BEFORE this
+    # integration ever wrote to that register — the only value a scheduler
+    # handback may put back (see handback.plan_handback and
+    # _min_soc_capture).  None means "never captured", which means "restore
+    # nothing"; it is never a licence to substitute a default (P-002).
+    # Mirrors the value in the Store, and is captured at most once: any
+    # later read may see a session value, and re-reading is exactly how a
+    # session floor becomes "the user's floor" permanently.
+    captured_min_soc_on_grid: int | None = None
