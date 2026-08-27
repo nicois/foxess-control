@@ -254,6 +254,27 @@ class InverterModel:
     # models a firmware/region where the master-switch write is absent.
     scheduler_set_supported: bool = True
 
+    # --- Direct device settings (off-scheduler) ---------------------------
+    # ``/op/v0/device/setting/{get,set}`` reaches the device's own settings
+    # rather than the Mode Scheduler.  This is the surface the scheduler
+    # handback uses to set the idle state once the master switch is off.
+    #
+    # The work mode as a *device setting*, distinct from the work mode of
+    # any schedule group.  While the master switch is on and a group covers
+    # the current time the group wins; otherwise this is what the inverter
+    # does.  Defaults to SelfUse, which is exactly what ``get_active_mode``
+    # fell back to before this field existed.
+    work_mode_direct: str = "SelfUse"
+    # Work modes declared in ``setting/get`` for key ``WorkMode``.  Verified
+    # read-only against a live KH10 (2026-08-26): **no ForceCharge or
+    # ForceDischarge**.  That is why smart sessions must keep using the
+    # scheduler — the direct surface cannot express a forced mode, so
+    # handback can only ever govern the idle state.  Empty list models
+    # firmware that declares no enumeration at all.
+    setting_work_modes: list[str] = field(
+        default_factory=lambda: ["PeakShaving", "Feedin", "Backup", "SelfUse"]
+    )
+
     def fd_pwr_limit_w(self) -> int:
         """Maximum ``fdPwr`` this device accepts in a schedule group."""
         return self.max_power_w if self.fd_pwr_max_w is None else self.fd_pwr_max_w
@@ -328,6 +349,70 @@ class InverterModel:
         """
         return {"enable": self.scheduler_enabled, "support": self.scheduler_supported}
 
+    def get_setting_response(self, key: str) -> dict[str, Any] | None:
+        """Build the ``/op/v0/device/setting/get`` result, or None if unknown.
+
+        Shapes verified read-only against a live KH10 (2026-08-26).  Two
+        details are load-bearing for the handback feature:
+
+        * ``WorkMode`` declares an ``enumList`` with **no** ForceCharge or
+          ForceDischarge, and no ``range``.
+        * ``MinSocOnGrid`` declares ``range.min`` **0**, where the schedule
+          path's ``minsocongrid`` declares 10 (see
+          :meth:`get_scheduler_properties_response`).  The 10 % floor is a
+          Mode Scheduler restriction, not a hardware limit — issue #4.
+
+        ``value`` is always a string, as the real API returns it, even for
+        the numeric settings.
+        """
+        if key == "WorkMode":
+            response: dict[str, Any] = {
+                "unit": "",
+                "precision": 1.0,
+                "value": self.work_mode_direct,
+            }
+            if self.setting_work_modes:
+                response["enumList"] = list(self.setting_work_modes)
+            return response
+        if key in ("MinSocOnGrid", "MinSoc"):
+            value = self.min_soc_on_grid if key == "MinSocOnGrid" else self.min_soc
+            return {
+                "unit": "%",
+                "precision": 1.0,
+                "range": {"min": 0.0, "max": 100.0},
+                "value": str(value),
+            }
+        return None
+
+    def apply_setting(self, key: str, value: str) -> str | None:
+        """Apply a ``/op/v0/device/setting/set`` write.
+
+        Returns a rejection reason, or None when accepted.  ``MinSocOnGrid``
+        and ``MinSoc`` write the *same* fields the battery-SoC endpoints
+        read: two API surfaces onto one device register, not two registers.
+        Modelling them separately would let a broken Min SoC
+        capture-and-restore pass every test while corrupting the user's
+        floor on real hardware (P-002).
+        """
+        if key == "WorkMode":
+            if self.setting_work_modes and value not in self.setting_work_modes:
+                return f"WorkMode {value} not in the declared enumeration"
+            self.work_mode_direct = value
+            return None
+        if key in ("MinSocOnGrid", "MinSoc"):
+            try:
+                numeric = int(float(value))
+            except (TypeError, ValueError):
+                return f"{key} value {value!r} is not numeric"
+            if not 0 <= numeric <= 100:
+                return f"{key} {numeric} outside range 0-100"
+            if key == "MinSocOnGrid":
+                self.min_soc_on_grid = numeric
+            else:
+                self.min_soc = numeric
+            return None
+        return f"unknown setting key {key!r}"
+
     def check_schedule_group(self, group: dict[str, Any]) -> str | None:
         """Return a rejection reason for *group*, or None when acceptable.
 
@@ -358,13 +443,19 @@ class InverterModel:
 
         A group only drives the inverter while the Mode Scheduler master
         switch is on: with ``scheduler_enabled`` False the device ignores
-        the whole group list and falls back to SelfUse, which is the
-        silent-failure mode a client must not walk into.
+        the whole group list. That is the silent-failure mode a client
+        writing groups must not walk into, and equally the mechanism the
+        scheduler handback relies on.
+
+        Whenever no group is in force — switch off, no groups, or no group
+        covering the current time — the device falls back to its own
+        ``WorkMode`` *setting* (:attr:`work_mode_direct`). That defaults to
+        SelfUse, which is the constant this used to return.
         """
         if not self.scheduler_enabled:
-            return "SelfUse"
+            return self.work_mode_direct
         if not self.schedule_enabled or not self.schedule_groups:
-            return "SelfUse"
+            return self.work_mode_direct
 
         now_min = self.sim_time.hour * 60 + self.sim_time.minute
         for g in self.schedule_groups:
@@ -376,7 +467,7 @@ class InverterModel:
             end = g.endHour * 60 + g.endMinute
             if start <= now_min < end:
                 return g.workMode
-        return "SelfUse"
+        return self.work_mode_direct
 
     def get_active_group(self) -> ScheduleGroup | None:
         """Return the schedule group active at the current simulated time."""
@@ -701,6 +792,8 @@ class InverterModel:
             "scheduler_supported": self.scheduler_supported,
             "scheduler_enable_implies_on": self.scheduler_enable_implies_on,
             "scheduler_set_supported": self.scheduler_set_supported,
+            "work_mode_direct": self.work_mode_direct,
+            "setting_work_modes": list(self.setting_work_modes),
             "schedule_groups": [g.to_dict() for g in self.schedule_groups],
             "min_soc": self.min_soc,
             "min_soc_on_grid": self.min_soc_on_grid,

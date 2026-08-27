@@ -30,6 +30,15 @@ _SCHEDULER_PROPERTIES_ENDPOINT = "/op/v3/device/scheduler/get"
 _SCHEDULER_FLAG_ENDPOINT = "/op/v1/device/scheduler/get/flag"
 _SCHEDULER_SET_ENDPOINT = "/op/v0/device/scheduler/set"
 
+# The device's own settings, reached *without* the Mode Scheduler.  Note
+# these take ``sn`` where the scheduler endpoints take ``deviceSN``.
+_SETTING_GET_ENDPOINT = "/op/v0/device/setting/get"
+_SETTING_SET_ENDPOINT = "/op/v0/device/setting/set"
+
+# Setting keys used by this module.  ``WorkMode`` here is the *device*
+# work mode, not a schedule group's ``workMode`` field.
+_SETTING_WORK_MODE = "WorkMode"
+
 # Mapping from schedule-group field name to the (lower-cased) key the API
 # uses for it in the declared ``properties`` map.  Only fields whose value
 # this module chooses are listed; the time fields are already bounded by
@@ -441,6 +450,76 @@ class Inverter:
                     exc_info=True,
                 )
 
+    # --- Direct device settings (off-scheduler) ---
+
+    def get_setting(self, key: str) -> dict[str, Any]:
+        """Read one inverter setting, with its declared range/enumeration.
+
+        Reaches the device's own settings rather than the Mode Scheduler,
+        so the values it reports are what the inverter does when no
+        schedule group is in force.
+
+        Response shape varies by key — ``WorkMode`` carries an ``enumList``
+        and no ``range``, the SoC keys the reverse — and ``value`` is a
+        string even for numeric settings.  Nothing is validated here: an
+        unexpected shape is returned as-is (a non-dict result degrades to
+        ``{}``) so callers decide what a missing declaration means, rather
+        than having an exception decided for them.
+        """
+        result: Any = self.client.post(
+            _SETTING_GET_ENDPOINT, {"sn": self.sn, "key": key}
+        )
+        return result if isinstance(result, dict) else {}
+
+    def set_setting(self, key: str, value: str) -> None:
+        """Write one inverter setting.
+
+        *value* is a string even for numeric settings, matching what
+        :meth:`get_setting` reads back.  Raises on failure.
+        """
+        self.client.post(
+            _SETTING_SET_ENDPOINT,
+            {"sn": self.sn, "key": key, "value": value},
+        )
+
+    def set_work_mode_direct(self, mode: str) -> None:
+        """Set the work mode *without* the scheduler.
+
+        **Not** :meth:`set_work_mode`, which writes a whole-day *schedule
+        group*.  This writes the device's own ``WorkMode`` *setting*, which
+        governs only while no schedule group is in force — so while a
+        session's group is active (this integration writes 00:00-23:59
+        groups) this call has no visible effect whatsoever.  The names are
+        kept far apart deliberately: confusing them would silently move
+        control between the scheduler and the direct settings.
+
+        *mode* is a plain ``str``, not :class:`WorkMode`, because the two
+        enumerations genuinely differ.  The direct one (observed on a KH10:
+        PeakShaving, Feedin, Backup, SelfUse) offers no ForceCharge or
+        ForceDischarge, which is precisely why smart sessions must keep
+        using the scheduler and this surface can only govern the idle
+        state; it also offers PeakShaving, which :class:`WorkMode` has no
+        member for.
+
+        Raises:
+            ValueError: *mode* is outside the enumeration the device
+                declares.  Unlike the schedule path — which warns and
+                writes anyway, because refusing there could break installs
+                that work today — this refuses, because writing an
+                undeclared value earns an opaque errno 40257 and nothing
+                yet depends on this surface.  A device that declares no
+                enumeration at all (older firmware) is not blocked: there
+                is no basis on which to refuse.
+        """
+        declared = self.get_setting(_SETTING_WORK_MODE).get("enumList")
+        if isinstance(declared, list) and declared and mode not in declared:
+            raise ValueError(
+                f"inverter {self._device_type or self.sn} does not declare work "
+                f"mode {mode!r} as directly settable; it accepts "
+                f"{sorted(str(m) for m in declared)}"
+            )
+        self.set_setting(_SETTING_WORK_MODE, mode)
+
     def _post_schedule(self, groups: list[ScheduleGroup], call_site: str) -> None:
         """POST groups to ``/scheduler/enable`` and emit a SCHEDULE_WRITE event.
 
@@ -488,6 +567,13 @@ class Inverter:
         api_min_soc: int = 11,
     ) -> None:
         """Set the inverter to a single work mode for the entire day.
+
+        Writes a *schedule group* covering 00:00-23:59, so it needs the Mode
+        Scheduler master switch on (see :meth:`_ensure_scheduler_enabled`).
+        **Not** :meth:`set_work_mode_direct`, which writes the device's
+        ``WorkMode`` setting instead and cannot express a forced mode.  All
+        session control goes through this method; only the idle state can go
+        through the direct one.
 
         Args:
             mode: The work mode to set.

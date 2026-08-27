@@ -553,6 +553,65 @@ Note the two distinct `enable` flags: the top-level `enable` of
 `scheduler/get` reflects the schedule, whereas this master switch is
 separate device state that survives an empty group list.
 
+### `POST /op/v0/device/setting/{get,set}` — direct device settings
+
+Undocumented by FoxESS. Reaches the inverter's **own settings**, entirely
+bypassing the Mode Scheduler. `get` takes `{"sn": …, "key": …}` and `set`
+takes `{"sn": …, "key": …, "value": …}` — note `sn`, where the scheduler
+endpoints take `deviceSN`.
+
+`get` returns the current value **plus what the device declares it will
+accept**. Shapes verified read-only against a live KH10 (2026-08-26):
+
+```json
+// key: "WorkMode"
+{"enumList": ["PeakShaving", "Feedin", "Backup", "SelfUse"],
+ "unit": "", "precision": 1.0, "value": "SelfUse"}
+
+// key: "MinSocOnGrid"
+{"unit": "%", "precision": 1.0, "range": {"min": 0.0, "max": 100.0}, "value": "11"}
+
+// key: "MinSoc"
+{"unit": "%", "precision": 1.0, "range": {"min": 0.0, "max": 100.0}, "value": "0"}
+```
+
+The shape varies by key: `WorkMode` carries an `enumList` and no `range`,
+the SoC keys the reverse. `value` is a **string** even for numeric
+settings, and `set` takes a string too. Do not assume either key is
+present.
+
+Two properties of this surface are load-bearing, and explain design
+constraints that otherwise look arbitrary:
+
+**1. The direct `WorkMode` enumeration has no forced modes.** There is no
+`ForceCharge` and no `ForceDischarge` here — only `PeakShaving`, `Feedin`,
+`Backup`, `SelfUse` (and it offers `PeakShaving`, which the schedule
+enumeration does not). A forced charge or discharge can *only* be
+expressed as a schedule group, so any client doing battery scheduling must
+keep using the Mode Scheduler for its sessions no matter what else it
+does. The direct surface can govern the **idle** state and nothing more.
+This is worth an assertion in a test suite rather than a comment: if
+FoxESS ever adds forced modes here, that constraint disappears.
+
+**2. `MinSocOnGrid` accepts 0 here, but not in a schedule group.** The
+same device that declares `range.min = 0.0` for the `MinSocOnGrid`
+*setting* declares `minsocongrid.range.min = 10.0` in
+`/op/v3/device/scheduler/get` (§5), and rejects a group below it with
+`errno 40257`. The 10 % floor is therefore a **Mode Scheduler
+restriction, not a hardware limit** — the only way a lower floor can hold
+is to turn the master switch off and set the value directly.
+
+Because both endpoints reach device state that no schedule group touches,
+they are independent of the scheduler in both directions: writing a
+setting neither creates nor alters groups, and writing groups does not
+move `WorkMode` or `MinSocOnGrid`. A client must not confuse a work-mode
+*setting* write with a work-mode *schedule group* write; they are
+different control paths onto the same inverter.
+
+`MinSocOnGrid` / `MinSoc` are the same device values that
+`/op/v0/device/battery/soc/{get,set}` reads and writes — two API surfaces
+onto one register, not two registers.
+
 ### Read-modify-write summary
 
 To change one part of the schedule (say, switch to ForceCharge for
@@ -646,6 +705,11 @@ Group shape differs from `/op/v0/`: value fields are nested under
 Companion: `POST /op/v1/device/scheduler/get/flag` →
 `{"enable": true, "support": true}` — the Mode Scheduler master switch;
 see §4 "The Mode Scheduler master switch".
+
+The declared `minsocongrid.range.min` of `10.0` is a restriction of the
+scheduler alone: the *setting* of the same name accepts `0`. Likewise the
+`workmode` `enumList` here is the only place forced modes appear. See §4
+"Direct device settings" for both asymmetries.
 
 ### `workMode` enum
 

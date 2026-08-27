@@ -303,6 +303,53 @@ async def handle_scheduler_enable(request: web.Request) -> web.Response:
     return _api_response(None)
 
 
+async def handle_setting_get(request: web.Request) -> web.Response:
+    """Serve ``/op/v0/device/setting/get`` (one direct device setting).
+
+    Note the body key is ``sn``, not the ``deviceSN`` the scheduler
+    endpoints use — the live API is inconsistent about this.
+    """
+    if sig_err := _check_signature(request):
+        return sig_err
+    if rl := _check_rate_limit(request):
+        return rl
+    if fault := _check_fault(request):
+        return fault
+    body = await request.json()
+    result = _model(request).get_setting_response(str(body.get("key", "")))
+    if result is None:
+        return _api_response(
+            None, errno=40257, msg="Parameters do not meet expectations"
+        )
+    return _api_response(result)
+
+
+async def handle_setting_set(request: web.Request) -> web.Response:
+    """Serve ``/op/v0/device/setting/set`` (write one direct device setting).
+
+    Unlike the scheduler, this reaches the device's own settings, so a
+    ``MinSocOnGrid`` below the schedule path's declared floor of 10 is
+    accepted here (issue #4).
+    """
+    if sig_err := _check_signature(request):
+        return sig_err
+    if rl := _check_rate_limit(request):
+        return rl
+    if fault := _check_fault(request):
+        return fault
+    body = await request.json()
+    model = _model(request)
+    reason = model.apply_setting(str(body.get("key", "")), str(body.get("value", "")))
+    if reason is not None:
+        _LOGGER.info("Setting rejected: %s", reason)
+        return _api_response(
+            None, errno=40257, msg="Parameters do not meet expectations"
+        )
+    _LOGGER.info("Setting %s = %s", body.get("key"), body.get("value"))
+    model.tick(0)
+    return _api_response(None)
+
+
 async def handle_plant_list(request: web.Request) -> web.Response:
     if sig_err := _check_signature(request):
         return sig_err
@@ -577,6 +624,8 @@ def create_app() -> web.Application:
     app.router.add_post("/op/v0/device/scheduler/enable", handle_scheduler_enable)
     app.router.add_post("/op/v1/device/scheduler/get/flag", handle_scheduler_flag)
     app.router.add_post("/op/v0/device/scheduler/set", handle_scheduler_set)
+    app.router.add_post("/op/v0/device/setting/get", handle_setting_get)
+    app.router.add_post("/op/v0/device/setting/set", handle_setting_set)
     app.router.add_get("/op/v0/device/battery/soc/get", handle_battery_soc_get)
     app.router.add_post("/op/v0/device/battery/soc/set", handle_battery_soc_set)
     app.router.add_post("/op/v0/plant/list", handle_plant_list)
