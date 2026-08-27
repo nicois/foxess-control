@@ -100,7 +100,9 @@ class TestNeverInventsAMinSoc:
         # minimum, no rounding, no "sensible" substitution.  0 is the
         # whole of issue #4 — reachable as a device setting but not as a
         # schedule group — so a clamp here would silently defeat it.
-        assert _plan(captured_min_soc_on_grid=captured).restore_min_soc_on_grid == captured
+        assert (
+            _plan(captured_min_soc_on_grid=captured).restore_min_soc_on_grid == captured
+        )
 
 
 class TestNotEnabled:
