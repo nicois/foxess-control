@@ -23,6 +23,13 @@ _SCHEDULE_ENDPOINT = "/op/v0/device/scheduler/enable"
 # Read-only; the write itself still goes to ``_SCHEDULE_ENDPOINT``.
 _SCHEDULER_PROPERTIES_ENDPOINT = "/op/v3/device/scheduler/get"
 
+# The Mode Scheduler *master switch*: schedule groups only drive the
+# inverter while it is on.  Distinct from the per-group ``enable`` field
+# and from the group list itself — removing every group does not turn the
+# switch off (issue #16).
+_SCHEDULER_FLAG_ENDPOINT = "/op/v1/device/scheduler/get/flag"
+_SCHEDULER_SET_ENDPOINT = "/op/v0/device/scheduler/set"
+
 # Mapping from schedule-group field name to the (lower-cased) key the API
 # uses for it in the declared ``properties`` map.  Only fields whose value
 # this module chooses are listed; the time fields are already bounded by
@@ -65,6 +72,7 @@ class Inverter:
         self._scheduler_properties: dict[str, Any] | None = None
         self._scheduler_properties_probed = False
         self._warned_work_modes: set[str] = set()
+        self._warned_scheduler_enable = False
 
     @property
     def max_power_w(self) -> int:
@@ -349,6 +357,90 @@ class Inverter:
         sched: dict[str, Any] = result
         return sched
 
+    # --- Mode Scheduler master switch ---
+
+    def get_scheduler_flag(self) -> dict[str, bool]:
+        """Whether Mode Scheduler is enabled, and whether it is supported.
+
+        Returns ``{"enable": bool, "support": bool}``.  ``support`` is
+        False on devices with no scheduler at all (e.g. a batteryless
+        micro-inverter).  Unexpected response shapes degrade to all-False
+        rather than raising, so a caller can treat this as a capability
+        hint without wrapping every call.
+        """
+        result: Any = self.client.post(_SCHEDULER_FLAG_ENDPOINT, {"deviceSN": self.sn})
+        if not isinstance(result, dict):
+            return {"enable": False, "support": False}
+        return {
+            "enable": bool(result.get("enable", False)),
+            "support": bool(result.get("support", False)),
+        }
+
+    def set_scheduler_enabled(self, enable: bool) -> None:
+        """Turn the Mode Scheduler master switch on or off.
+
+        Raises on failure — callers that must not be blocked by it use
+        :meth:`_ensure_scheduler_enabled` instead.
+        """
+        self.client.post(
+            _SCHEDULER_SET_ENDPOINT,
+            {"deviceSN": self.sn, "enable": 1 if enable else 0},
+        )
+
+    def _ensure_scheduler_enabled(self) -> None:
+        """Turn the master switch on before a schedule write, best-effort.
+
+        **Do not delete this as a redundant call.**  Schedule groups only
+        drive the inverter while the Mode Scheduler master switch is on.
+        Removing every group does *not* turn the switch off (issue #16 —
+        FoxCloud still showed the inverter as scheduler-controlled with no
+        groups left), but the converse is **unverified**: nobody has
+        confirmed whether ``scheduler/enable`` turns the switch back *on*
+        from off, and confirming it would mean writing to a production
+        home battery.
+
+        Once anything turns the switch off — the scheduler handback
+        feature, the FoxESS app, the web portal — a session that relied on
+        that coupling would write a schedule that silently never fires:
+        errno 0, nothing surfaced to the user, no mode change, no
+        discharge (P-003, P-005, C-020).  Enabling the switch explicitly
+        removes the dependency on the answer.  The call is idempotent, so
+        the cost is one extra request per schedule write — at the 60 s
+        discharge-pacing cadence, well inside the observed rate-limit
+        budget (docs/api/foxess-cloud-api.md §7), and trivial next to a
+        session that never fires.
+
+        Failure is tolerated deliberately: the endpoint is absent on some
+        firmware and regions, and a device that reports ``support: false``
+        rejects it outright.  A failure here must never abort a write that
+        would otherwise have worked, so it is logged and the write
+        proceeds — exactly the pre-existing behaviour.  Warned once per
+        inverter instance, then demoted to debug: pacing writes the
+        schedule every 60 s, so a warning per write would bury the log of
+        every install whose firmware lacks the endpoint, while total
+        silence would make the handback failure mode undiagnosable.
+        """
+        try:
+            self.set_scheduler_enabled(True)
+        except Exception:  # noqa: BLE001 — best-effort; never block the write
+            if not self._warned_scheduler_enable:
+                self._warned_scheduler_enable = True
+                _LOGGER.warning(
+                    "Could not turn the Mode Scheduler master switch on via %s "
+                    "on inverter %s; writing the schedule anyway.  If work "
+                    "mode changes appear to be ignored, check that Mode "
+                    "Scheduler is enabled in the FoxESS app",
+                    _SCHEDULER_SET_ENDPOINT,
+                    self._device_type or self.sn,
+                    exc_info=True,
+                )
+            else:
+                _LOGGER.debug(
+                    "Mode Scheduler master switch still not settable via %s",
+                    _SCHEDULER_SET_ENDPOINT,
+                    exc_info=True,
+                )
+
     def _post_schedule(self, groups: list[ScheduleGroup], call_site: str) -> None:
         """POST groups to ``/scheduler/enable`` and emit a SCHEDULE_WRITE event.
 
@@ -363,10 +455,15 @@ class Inverter:
         This is also the single choke point where every group is clamped
         to the ranges the device declares it accepts, so no caller — not
         even a user-supplied ``power:`` service argument — can produce a
-        payload the inverter rejects with errno 40257.
+        payload the inverter rejects with errno 40257, and where the Mode
+        Scheduler master switch is turned on so the groups actually take
+        effect (see :meth:`_ensure_scheduler_enabled`).
         """
         payload = self._clamp_to_declared_ranges(groups)
         self._warn_unsupported_work_modes(payload)
+        # Groups are inert while the master switch is off, and whether this
+        # POST implies the switch is unverified — so assert it explicitly.
+        self._ensure_scheduler_enabled()
         response = self.client.post(
             _SCHEDULE_ENDPOINT,
             {"deviceSN": self.sn, "groups": payload},

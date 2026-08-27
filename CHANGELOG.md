@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Schedule writes no longer depend on an unverified API coupling to take effect.** Schedule groups only drive the inverter while its **Mode Scheduler master switch** is on, and that switch is separate device state: removing every group does *not* turn it off (issue #16 — FoxCloud still showed the inverter as scheduler-controlled with no groups left). The converse has never been confirmed. Nobody knows whether `POST /op/v0/device/scheduler/enable` turns the switch back *on* from off, and finding out would mean writing to a production home battery, so it has not been tested. If it does not, then any session started after something turned the switch off — the forthcoming scheduler-handback feature, the FoxESS app, the web portal — would write a schedule that **silently never fires**: `errno 0` from the API, the groups readable back from `scheduler/get`, and the inverter quietly sitting in Self Use with nothing surfaced to the user (P-003, P-005, C-020). The integration now turns the master switch on explicitly (`POST /op/v0/device/scheduler/set`) at the single point every schedule write passes through, so the outcome no longer depends on the answer. The call is idempotent and failure is tolerated — the endpoint is absent on some firmware and regions, and a device reporting `support: false` (e.g. a batteryless micro-inverter) rejects it — so a failed enable can never abort a write that would otherwise have worked; it warns once per inverter, then stays quiet. Nothing changes for installs whose switch is already on: the schedule payload on the wire is byte-identical. Regression class `tests/test_handback_foxess.py`, which pins **both** possible API behaviours in the simulator and asserts the same observable outcome either way — the switch is on and the group is actually in force. Prerequisite for the scheduler handback that closes issues #16 and #4.
+
 ## 1.0.22-beta.5
 
 ### Fixed

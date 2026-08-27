@@ -523,6 +523,36 @@ When the work mode was set via the FoxESS mobile app rather than the
 scheduler API, this endpoint returns `result: null`. Treat `null`
 as the empty schedule `{"enable": 0, "groups": []}` — see §6 and §8.
 
+### The Mode Scheduler master switch
+
+**Master switch.** `POST /op/v1/device/scheduler/get/flag` returns
+`{"enable": bool, "support": bool}` — whether Mode Scheduler is on, and
+whether the device supports it at all. `POST /op/v0/device/scheduler/set`
+with `{"deviceSN": …, "enable": 0|1}` sets it.
+
+Removing every group does **not** turn the switch off (issue #16: FoxCloud
+still showed the inverter as scheduler-controlled with no groups left).
+Whether `scheduler/enable` turns the switch *on* from off is **unverified**
+against real hardware — so the integration enables it explicitly before
+writing groups rather than relying on the coupling.
+
+Schedule groups are **inert while the switch is off**: the inverter
+ignores the group list and behaves as SelfUse. This is a silent failure —
+`scheduler/enable` still answers `errno 0` and `scheduler/get` still
+returns the groups — so a client that assumes the coupling writes
+schedules that never fire, with nothing to show the user. Verifying the
+coupling on real hardware would mean writing to a production home
+battery, which is why the integration removes the dependency on the
+answer instead: `Inverter._ensure_scheduler_enabled` issues
+`scheduler/set enable=1` before every `scheduler/enable`, and tolerates
+failure (the endpoint is absent on some firmware/regions, and a device
+reporting `support: false` rejects it) so a failed enable can never abort
+a write that would otherwise have worked.
+
+Note the two distinct `enable` flags: the top-level `enable` of
+`scheduler/get` reflects the schedule, whereas this master switch is
+separate device state that survives an empty group list.
+
 ### Read-modify-write summary
 
 To change one part of the schedule (say, switch to ForceCharge for
@@ -614,7 +644,8 @@ Group shape differs from `/op/v0/`: value fields are nested under
 `/op/v0/device/scheduler/enable` with flat fields.
 
 Companion: `POST /op/v1/device/scheduler/get/flag` →
-`{"enable": true, "support": true}`.
+`{"enable": true, "support": true}` — the Mode Scheduler master switch;
+see §4 "The Mode Scheduler master switch".
 
 ### `workMode` enum
 
@@ -991,7 +1022,7 @@ implementation. Consult these when re-verifying a claim.
 | §1 Overview | `custom_components/foxess_control/foxess/client.py` (Open API client), `custom_components/foxess_control/foxess/web_session.py` (web-portal client) |
 | §2 Auth — Open API | `custom_components/foxess_control/foxess/client.py::_signed_headers`; deviation notes in `API_DEVIATIONS.md` (Authentication Signature) |
 | §3 Auth — web-portal API | `custom_components/foxess_control/foxess/web_session.py::async_login`, `_make_headers`; signature wrapper at `custom_components/foxess_control/foxess/signature.py`; rationale in `docs/wasm-signature.md` |
-| §4 Endpoint inventory | `custom_components/foxess_control/foxess/inverter.py` (`get_schedule`, `set_schedule`, `set_work_mode`, `get_real_time`, `get_current_mode`, `auto_detect`); `web_session.py::async_get_battery_temperature` |
+| §4 Endpoint inventory | `custom_components/foxess_control/foxess/inverter.py` (`get_schedule`, `set_schedule`, `set_work_mode`, `get_real_time`, `get_current_mode`, `auto_detect`, `get_scheduler_flag`, `set_scheduler_enabled`); `web_session.py::async_get_battery_temperature` |
 | §5 Schedule format | `custom_components/foxess_control/__init__.py::_sanitize_group`, `_merge_with_existing`; `custom_components/foxess_control/foxess/inverter.py::_post_schedule`; type definitions in `custom_components/foxess_control/smart_battery/types.py` (`ScheduleGroup`, `WorkMode`); deviation notes in `API_DEVIATIONS.md` (Scheduler sections) |
 | §6 Response handling | `custom_components/foxess_control/foxess/client.py` (errno mapping, retry logic); circuit breaker in `custom_components/foxess_control/smart_battery/session.py` (search for `C-024`) |
 | §7 Rate limiting | `custom_components/foxess_control/foxess/client.py` (`RATE_LIMIT_RETRIES`, `TRANSIENT_RETRIES`, `MIN_REQUEST_INTERVAL`); simulator at `simulator/server.py` |
