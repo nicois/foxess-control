@@ -1,4 +1,14 @@
-"""Schedule writes must survive a Mode Scheduler master switch that is off.
+"""FoxESS surfaces the scheduler-handback feature is built on.
+
+Two halves, both prerequisites for the handback itself (issues #16, #4):
+
+1. **The Mode Scheduler master switch** — schedule writes must survive a
+   switch that is off, because handback turns it off.
+2. **The direct device settings** — ``/op/v0/device/setting/{get,set}``,
+   which is how the idle state is set once the scheduler is out of the
+   way.
+
+Schedule writes must survive a Mode Scheduler master switch that is off.
 
 Prerequisite for the scheduler-handback feature (issues #16, #4): once
 anything turns the inverter's Mode Scheduler master switch **off**, every
@@ -373,3 +383,264 @@ class TestThroughCloudAdapter:
             "a real session write left the master switch off"
         )
         assert _written_groups(foxess_sim, WorkMode.FORCE_DISCHARGE)
+
+
+class TestDirectWorkModeEnumeration:
+    """What the device declares it will accept *off* the scheduler.
+
+    Load-bearing for the whole handback design: because the direct
+    enumeration has no forced modes, sessions must keep using the
+    scheduler and handback can only ever govern the **idle** state.  If
+    FoxESS ever adds ForceCharge/ForceDischarge here, that constraint
+    disappears and the design should be revisited — so it is asserted
+    rather than assumed, and a failure here is news, not a bug.
+    """
+
+    def test_reads_work_mode_and_its_enumeration(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        inv = _make_inv(foxess_sim)
+
+        setting = inv.get_setting("WorkMode")
+
+        assert setting["value"] == "SelfUse"
+        assert "SelfUse" in setting["enumList"]
+
+    def test_direct_enumeration_has_no_forced_modes(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        """The premise of "sessions keep using the scheduler"."""
+        inv = _make_inv(foxess_sim)
+
+        declared = inv.get_setting("WorkMode")["enumList"]
+
+        forced = {"ForceCharge", "ForceDischarge"} & set(declared)
+        assert not forced, (
+            f"the direct work-mode enumeration now offers {sorted(forced)}; "
+            "sessions may no longer need the scheduler at all, so revisit "
+            "the handback design rather than deleting this assertion"
+        )
+
+    def test_scheduler_enumeration_does_have_forced_modes(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        """Guards the premise: the two enumerations really do differ.
+
+        Without this, the assertion above could "pass" against a
+        simulator that simply declares nothing anywhere.
+        """
+        inv = _make_inv(foxess_sim)
+
+        assert {"ForceCharge", "ForceDischarge"} <= inv.declared_work_modes
+
+
+class TestDirectMinSocOnGrid:
+    """``MinSocOnGrid`` accepts 0 off-scheduler but not inside a group.
+
+    This asymmetry *is* issue #4: the 10 % floor users cannot get below is
+    a restriction of the Mode Scheduler, not of the hardware.  Handing the
+    inverter back is therefore the only way a lower floor can hold.
+    """
+
+    def test_setting_range_allows_zero(self, foxess_sim: SimulatorHandle) -> None:
+        inv = _make_inv(foxess_sim)
+
+        setting = inv.get_setting("MinSocOnGrid")
+
+        assert setting["range"]["min"] == 0.0, (
+            "the direct MinSocOnGrid setting no longer accepts 0; issue #4 "
+            "depends on the 10% floor being a scheduler restriction"
+        )
+        assert setting["unit"] == "%"
+
+    def test_schedule_range_forbids_zero(self, foxess_sim: SimulatorHandle) -> None:
+        """The contrasting half of the asymmetry (C-042)."""
+        inv = _make_inv(foxess_sim)
+
+        declared = inv.scheduler_properties["minsocongrid"]["range"]
+
+        assert declared["min"] == 10.0, (
+            "the scheduler no longer imposes a 10% minSocOnGrid floor — if "
+            "so, issue #4 no longer needs a handback to be fixed"
+        )
+
+    def test_round_trips_a_value(self, foxess_sim: SimulatorHandle) -> None:
+        inv = _make_inv(foxess_sim)
+
+        inv.set_setting("MinSocOnGrid", "15")
+
+        assert inv.get_setting("MinSocOnGrid")["value"] == "15"
+        assert foxess_sim.state()["min_soc_on_grid"] == 15
+
+    def test_round_trips_zero(self, foxess_sim: SimulatorHandle) -> None:
+        """0 is the value the schedule path cannot express — pin it works."""
+        inv = _make_inv(foxess_sim)
+
+        inv.set_setting("MinSocOnGrid", "0")
+
+        assert inv.get_setting("MinSocOnGrid")["value"] == "0"
+        assert foxess_sim.state()["min_soc_on_grid"] == 0
+
+    def test_setting_and_battery_soc_endpoints_are_one_value(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        """``setting/get`` and ``battery/soc/get`` read the same device value.
+
+        Two API surfaces onto one register.  If the simulator modelled them
+        as independent fields, the capture-and-restore of a user's Min SoC
+        could be broken on real hardware while every test passed (P-002).
+        """
+        inv = _make_inv(foxess_sim)
+
+        inv.set_setting("MinSocOnGrid", "7")
+        assert inv.get_min_soc()["minSocOnGrid"] == 7
+
+        inv.set_min_soc(min_soc=5, min_soc_on_grid=23)
+        assert inv.get_setting("MinSocOnGrid")["value"] == "23"
+
+
+class TestSetWorkModeDirect:
+    """Writing the work mode as a device setting, not a schedule group."""
+
+    def test_changes_the_device_setting(self, foxess_sim: SimulatorHandle) -> None:
+        foxess_sim.set(work_mode_direct="Feedin")
+        inv = _make_inv(foxess_sim)
+
+        inv.set_work_mode_direct("SelfUse")
+
+        assert foxess_sim.state()["work_mode_direct"] == "SelfUse"
+        assert inv.get_setting("WorkMode")["value"] == "SelfUse"
+
+    def test_governs_the_inverter_once_the_scheduler_is_off(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        """Guards the premise: the setting is not cosmetic.
+
+        With the master switch off the groups are inert, so whatever the
+        direct setting says is what the inverter actually does — which is
+        the entire mechanism handback relies on.  A test that passed
+        because the simulator stored the value and ignored it would prove
+        nothing.
+        """
+        _pin_midday(foxess_sim)
+        inv = _make_inv(foxess_sim)
+        inv.set_scheduler_enabled(False)
+
+        inv.set_work_mode_direct("Feedin")
+
+        assert foxess_sim.state()["work_mode"] == "Feedin"
+
+    def test_refuses_a_mode_outside_the_declared_enumeration(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        """Refuse locally rather than collect an opaque 40257.
+
+        Deliberately stricter than the *schedule* path, which warns and
+        writes anyway: there, refusing could break installs that work
+        today, whereas nothing depends on this surface yet.
+        """
+        inv = _make_inv(foxess_sim)
+
+        with pytest.raises(ValueError, match="ForceDischarge") as excinfo:
+            inv.set_work_mode_direct("ForceDischarge")
+
+        assert "SelfUse" in str(excinfo.value), (
+            "the error must name the declared enumeration, or the user "
+            "cannot tell what would have been accepted (C-020)"
+        )
+
+    def test_refusing_writes_nothing(self, foxess_sim: SimulatorHandle) -> None:
+        """Raising is not enough — the device must be untouched."""
+        foxess_sim.set(work_mode_direct="Feedin")
+        inv = _make_inv(foxess_sim)
+
+        with pytest.raises(ValueError, match="ForceDischarge"):
+            inv.set_work_mode_direct("ForceDischarge")
+
+        assert foxess_sim.state()["work_mode_direct"] == "Feedin", (
+            "the refused write reached the device anyway"
+        )
+
+    def test_proceeds_when_the_device_declares_no_enumeration(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        """Older firmware declares no ``enumList`` — do not block on it.
+
+        With no declaration there is no basis to refuse, and refusing
+        would make the feature unavailable on hardware that may well
+        accept the write.
+        """
+        foxess_sim.set(setting_work_modes=[])
+        inv = _make_inv(foxess_sim)
+
+        assert "enumList" not in inv.get_setting("WorkMode"), (
+            "precondition: this device must declare no enumeration"
+        )
+
+        inv.set_work_mode_direct("SelfUse")
+
+        assert foxess_sim.state()["work_mode_direct"] == "SelfUse"
+
+
+class TestDirectSettingsAndScheduleAreIndependent:
+    """The two control paths must not leak into each other.
+
+    Confusing :meth:`Inverter.set_work_mode` (schedule group) with
+    :meth:`Inverter.set_work_mode_direct` (device setting) would silently
+    move control between the scheduler and the direct settings — which is
+    the exact subject matter of this feature, so it is pinned.
+    """
+
+    def test_direct_write_creates_no_schedule_group(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        inv = _make_inv(foxess_sim)
+
+        inv.set_work_mode_direct("SelfUse")
+
+        assert foxess_sim.state()["schedule_groups"] == [], (
+            "set_work_mode_direct wrote a schedule group — it must not "
+            "touch the scheduler at all"
+        )
+
+    def test_direct_write_leaves_existing_groups_alone(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        _pin_midday(foxess_sim)
+        inv = _make_inv(foxess_sim)
+        inv.force_discharge(min_soc=20, power=3000)
+        before = foxess_sim.state()["schedule_groups"]
+
+        inv.set_work_mode_direct("SelfUse")
+
+        assert foxess_sim.state()["schedule_groups"] == before
+        assert foxess_sim.state()["work_mode"] == "ForceDischarge", (
+            "the active group must still win while the master switch is on"
+        )
+
+    def test_schedule_write_leaves_the_direct_setting_alone(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        _pin_midday(foxess_sim)
+        foxess_sim.set(work_mode_direct="Feedin")
+        inv = _make_inv(foxess_sim)
+
+        inv.force_discharge(min_soc=20, power=3000)
+
+        assert foxess_sim.state()["work_mode_direct"] == "Feedin", (
+            "a session schedule write overwrote the user's direct work "
+            "mode; handback would restore the wrong idle state"
+        )
+
+    def test_schedule_write_leaves_min_soc_on_grid_setting_alone(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        """C-042 clamps the *group* value, never the device setting."""
+        inv = _make_inv(foxess_sim)
+        inv.set_setting("MinSocOnGrid", "5")
+
+        inv.force_discharge(min_soc=20, power=3000)
+
+        assert inv.get_setting("MinSocOnGrid")["value"] == "5", (
+            "the schedule write moved the persistent Min SoC floor"
+        )
