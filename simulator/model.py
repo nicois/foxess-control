@@ -253,6 +253,12 @@ class InverterModel:
     # When False, ``/op/v0/device/scheduler/set`` is not served (HTTP 404) —
     # models a firmware/region where the master-switch write is absent.
     scheduler_set_supported: bool = True
+    # When True, the flag endpoint answers errno 0 with ``result: null`` —
+    # a shape this API really does produce (``scheduler/get`` does it when
+    # no scheduler is configured).  Lets tests prove that a malformed reply
+    # is reported as *unknown* rather than as "this hardware has no Mode
+    # Scheduler", which would be a confident lie in the log (C-020, P-005).
+    scheduler_flag_null: bool = False
 
     # --- Direct device settings (off-scheduler) ---------------------------
     # ``/op/v0/device/setting/{get,set}`` reaches the device's own settings
@@ -341,12 +347,16 @@ class InverterModel:
             "properties": properties,
         }
 
-    def get_scheduler_flag_response(self) -> dict[str, Any]:
+    def get_scheduler_flag_response(self) -> dict[str, Any] | None:
         """Build the ``/op/v1/device/scheduler/get/flag`` result.
 
         Shape verified against a live KH10: ``{"enable": true,
         "support": true}`` — booleans, not the 0/1 ints the write side uses.
+        ``None`` when :attr:`scheduler_flag_null` is set, modelling the
+        ``result: null`` this API produces elsewhere.
         """
+        if self.scheduler_flag_null:
+            return None
         return {"enable": self.scheduler_enabled, "support": self.scheduler_supported}
 
     def get_setting_response(self, key: str) -> dict[str, Any] | None:
@@ -792,6 +802,7 @@ class InverterModel:
             "scheduler_supported": self.scheduler_supported,
             "scheduler_enable_implies_on": self.scheduler_enable_implies_on,
             "scheduler_set_supported": self.scheduler_set_supported,
+            "scheduler_flag_null": self.scheduler_flag_null,
             "work_mode_direct": self.work_mode_direct,
             "setting_work_modes": list(self.setting_work_modes),
             "schedule_groups": [g.to_dict() for g in self.schedule_groups],

@@ -199,6 +199,45 @@ class TestSchedulerUnsupported:
         assert "scheduler" in reason
 
 
+class TestSchedulerSupportUnknown:
+    """``None`` means the probe failed — say so, do not invent a diagnosis.
+
+    ``scheduler_supported`` is a tri-state because "the device says it has
+    no Mode Scheduler" and "we could not find out" are different facts with
+    the same consequence.  Collapsing them (as an all-False degrade on a
+    malformed reply did) makes one transient bad reply produce a confident
+    claim about the user's hardware, sending them to look for a firmware
+    limitation that does not exist.  A log that lies is worse than one that
+    says "unknown" (C-020, P-005).
+
+    The *decision* is identical — decline, touch nothing — so widening the
+    parameter cannot make handback less safe; only the reason changes.
+    """
+
+    def test_does_not_act(self) -> None:
+        assert _plan(scheduler_supported=None).act is False
+
+    def test_touches_nothing(self) -> None:
+        plan = _plan(scheduler_supported=None)
+        assert plan.disable_scheduler is False
+        assert plan.work_mode is None
+        assert plan.restore_min_soc_on_grid is None
+
+    def test_reason_admits_it_could_not_be_determined(self) -> None:
+        reason = _plan(scheduler_supported=None).reason.lower()
+        assert "could not determine" in reason
+
+    def test_reason_does_not_claim_the_hardware_lacks_a_scheduler(self) -> None:
+        reason = _plan(scheduler_supported=None).reason.lower()
+        assert "reports no mode scheduler support" not in reason
+
+    def test_unknown_and_unsupported_read_differently(self) -> None:
+        assert (
+            _plan(scheduler_supported=None).reason
+            != _plan(scheduler_supported=False).reason
+        )
+
+
 class TestGuardPrecedence:
     """Pin the reason attribution so it cannot drift.
 
@@ -241,6 +280,16 @@ class TestGuardPrecedence:
         assert "scheduler" in reason.lower()
         assert "Backup" not in reason
 
+    def test_unknown_support_beats_unmanaged_modes(self) -> None:
+        # Same slot in the precedence order as an outright "unsupported":
+        # not knowing whether there is a scheduler is at least as permanent
+        # as a Backup group the user can delete.
+        reason = _plan(
+            scheduler_supported=None, unmanaged_modes=["Backup (00:00-06:00)"]
+        ).reason
+        assert "could not determine" in reason.lower()
+        assert "Backup" not in reason
+
     def test_unmanaged_modes_beat_session_active(self) -> None:
         # A Backup group blocks handback permanently and needs the user in
         # the FoxESS app; the session ends on its own.  Report the former.
@@ -280,6 +329,7 @@ class TestNoDeclinedPlanCarriesActions:
             {"session_active": True},
             {"unmanaged_modes": ["Backup (00:00-06:00)"]},
             {"scheduler_supported": False},
+            {"scheduler_supported": None},
         ],
     )
     def test_declined_plan_is_inert(self, override: dict[str, object]) -> None:

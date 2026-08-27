@@ -351,6 +351,99 @@ class TestSchedulerFlagSurface:
         )
 
 
+class TestSchedulerSupportIsHonestAboutFailure:
+    """A read that failed must not masquerade as "no scheduler support".
+
+    ``get_scheduler_flag`` used to degrade an unexpected response shape to
+    all-False, so one malformed reply became "this inverter reports no Mode
+    Scheduler support".  The *decision* was fail-safe either way — handback
+    declines — but the reason logged was a confident lie about the user's
+    hardware, which is worse than admitting ignorance (C-020, P-005): it
+    sends someone looking for a firmware limitation that does not exist.
+
+    So there is exactly one signal for "unknown": an exception.  A failed
+    request and a malformed response are indistinguishable in the only
+    respect that matters — we do not know the answer — and collapsing them
+    onto one mechanism makes it impossible to treat unknown as False by
+    forgetting to check a sentinel.  :meth:`Inverter.probe_scheduler_support`
+    turns that into the tri-state the policy layer consumes.
+    """
+
+    def test_malformed_response_raises_rather_than_reporting_unsupported(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        """``result: null`` is a shape this API really does return."""
+        foxess_sim.set(scheduler_flag_null=True)
+        inv = _make_inv(foxess_sim)
+
+        with pytest.raises(ValueError, match="Mode Scheduler"):
+            inv.get_scheduler_flag()
+
+    def test_probe_reports_support(self, foxess_sim: SimulatorHandle) -> None:
+        inv = _make_inv(foxess_sim)
+        assert inv.probe_scheduler_support() is True
+
+    def test_probe_reports_a_device_that_says_unsupported(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        """The device answered, and the answer was no."""
+        foxess_sim.set(scheduler_supported=False)
+        inv = _make_inv(foxess_sim)
+
+        assert inv.probe_scheduler_support() is False
+
+    def test_probe_reports_unknown_on_a_malformed_response(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        foxess_sim.set(scheduler_flag_null=True)
+        inv = _make_inv(foxess_sim)
+
+        assert inv.probe_scheduler_support() is None, (
+            "a malformed reply was reported as a fact about the hardware"
+        )
+
+    def test_probe_reports_unknown_when_the_request_fails(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        inv = _make_inv(foxess_sim)
+        foxess_sim.fault("api_500")
+
+        assert inv.probe_scheduler_support() is None
+
+    def test_probe_distinguishes_unknown_from_unsupported(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        """The whole point: these two must not be the same value.
+
+        ``None is False`` would be a lie the policy layer cannot detect.
+        """
+        inv = _make_inv(foxess_sim)
+        foxess_sim.set(scheduler_supported=False)
+        answered = inv.probe_scheduler_support()
+
+        foxess_sim.set(scheduler_flag_null=True)
+        unknown = inv.probe_scheduler_support()
+
+        assert answered is False
+        assert unknown is None
+        assert answered is not unknown
+
+    def test_probe_does_not_write_to_the_device(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        """A capability probe is a read.  Nothing about it may change state."""
+        _pin_midday(foxess_sim)
+        inv = _make_inv(foxess_sim)
+        before = foxess_sim.state()
+
+        inv.probe_scheduler_support()
+
+        after = foxess_sim.state()
+        assert after["scheduler_enabled"] == before["scheduler_enabled"]
+        assert after["schedule_groups"] == before["schedule_groups"]
+        assert after["work_mode_direct"] == before["work_mode_direct"]
+
+
 class TestThroughCloudAdapter:
     """Production routes session writes through FoxESSCloudAdapter."""
 
