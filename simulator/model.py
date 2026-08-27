@@ -229,6 +229,31 @@ class InverterModel:
     # models a firmware/region where the properties endpoint is absent.
     scheduler_properties_supported: bool = True
 
+    # --- Mode Scheduler master switch -------------------------------------
+    # Mode Scheduler master switch, as reported by
+    # ``/op/v1/device/scheduler/get/flag``.  Groups only drive the inverter
+    # while this is on.
+    #
+    # Distinct from ``schedule_enabled`` above, which mirrors the ``enable``
+    # field of ``/op/v0/device/scheduler/get`` and is derived from the group
+    # list: removing every group does *not* turn the master switch off
+    # (issue #16 — FoxCloud still showed the inverter as
+    # scheduler-controlled with no groups left).
+    scheduler_enabled: bool = True
+    # Whether the device supports the scheduler at all (``support`` in the
+    # flag response).  A batteryless micro-inverter reports False; the
+    # simulator then rejects ``/op/v0/device/scheduler/set``, so tests can
+    # prove a client tolerates that rather than aborting the schedule write.
+    scheduler_supported: bool = True
+    # Whether ``POST /op/v0/device/scheduler/enable`` implicitly turns the
+    # master switch on.  The real API's behaviour is unverified — checking
+    # would mean writing to a production home battery — so tests pin both:
+    # a client must work either way.
+    scheduler_enable_implies_on: bool = True
+    # When False, ``/op/v0/device/scheduler/set`` is not served (HTTP 404) —
+    # models a firmware/region where the master-switch write is absent.
+    scheduler_set_supported: bool = True
+
     def fd_pwr_limit_w(self) -> int:
         """Maximum ``fdPwr`` this device accepts in a schedule group."""
         return self.max_power_w if self.fd_pwr_max_w is None else self.fd_pwr_max_w
@@ -295,6 +320,14 @@ class InverterModel:
             "properties": properties,
         }
 
+    def get_scheduler_flag_response(self) -> dict[str, Any]:
+        """Build the ``/op/v1/device/scheduler/get/flag`` result.
+
+        Shape verified against a live KH10: ``{"enable": true,
+        "support": true}`` — booleans, not the 0/1 ints the write side uses.
+        """
+        return {"enable": self.scheduler_enabled, "support": self.scheduler_supported}
+
     def check_schedule_group(self, group: dict[str, Any]) -> str | None:
         """Return a rejection reason for *group*, or None when acceptable.
 
@@ -321,7 +354,15 @@ class InverterModel:
         return None
 
     def get_active_mode(self) -> str:
-        """Return the work mode active at the current simulated time."""
+        """Return the work mode active at the current simulated time.
+
+        A group only drives the inverter while the Mode Scheduler master
+        switch is on: with ``scheduler_enabled`` False the device ignores
+        the whole group list and falls back to SelfUse, which is the
+        silent-failure mode a client must not walk into.
+        """
+        if not self.scheduler_enabled:
+            return "SelfUse"
         if not self.schedule_enabled or not self.schedule_groups:
             return "SelfUse"
 
@@ -656,6 +697,10 @@ class InverterModel:
             "grid_export_kw": round(self.grid_export_kw, 3),
             "work_mode": self.get_active_mode(),
             "schedule_enabled": self.schedule_enabled,
+            "scheduler_enabled": self.scheduler_enabled,
+            "scheduler_supported": self.scheduler_supported,
+            "scheduler_enable_implies_on": self.scheduler_enable_implies_on,
+            "scheduler_set_supported": self.scheduler_set_supported,
             "schedule_groups": [g.to_dict() for g in self.schedule_groups],
             "min_soc": self.min_soc,
             "min_soc_on_grid": self.min_soc_on_grid,

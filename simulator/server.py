@@ -9,6 +9,7 @@ simulators can run in the same process without cross-contamination.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import hashlib
 import json
 import logging
@@ -212,6 +213,45 @@ async def handle_scheduler_get(request: web.Request) -> web.Response:
     return _api_response(model.get_schedule_response())
 
 
+async def handle_scheduler_flag(request: web.Request) -> web.Response:
+    """Serve ``/op/v1/device/scheduler/get/flag`` (master-switch state)."""
+    model = _model(request)
+    if sig_err := _check_signature(request):
+        return sig_err
+    if rl := _check_rate_limit(request):
+        return rl
+    if fault := _check_fault(request):
+        return fault
+    return _api_response(model.get_scheduler_flag_response())
+
+
+async def handle_scheduler_set(request: web.Request) -> web.Response:
+    """Serve ``/op/v0/device/scheduler/set`` (master-switch write).
+
+    Returns HTTP 404 when ``scheduler_set_supported`` is False (firmware /
+    region without the endpoint) and errno 40257 when the device declares
+    no scheduler support at all, so callers exercise both failure paths.
+    """
+    model = _model(request)
+    if not model.scheduler_set_supported:
+        return web.Response(status=404, text="Not Found")
+    if sig_err := _check_signature(request):
+        return sig_err
+    if rl := _check_rate_limit(request):
+        return rl
+    if fault := _check_fault(request):
+        return fault
+    if not model.scheduler_supported:
+        return _api_response(
+            None, errno=40257, msg="Parameters do not meet expectations"
+        )
+    body = await request.json()
+    model.scheduler_enabled = bool(body.get("enable", 0))
+    _LOGGER.info("Mode Scheduler master switch: %s", model.scheduler_enabled)
+    model.tick(0)
+    return _api_response(None)
+
+
 async def handle_scheduler_enable(request: web.Request) -> web.Response:
     if sig_err := _check_signature(request):
         return sig_err
@@ -254,6 +294,10 @@ async def handle_scheduler_enable(request: web.Request) -> web.Response:
         # Firmware ACKs but does not apply (issue #11 test seam).
         _LOGGER.info("Schedule silently dropped (silent_drop_schedule)")
         return _api_response(None)
+    if model.scheduler_enable_implies_on:
+        # Whether the real API couples these is UNVERIFIED — the knob lets
+        # tests pin both behaviours.  See the field docstring in model.py.
+        model.scheduler_enabled = True
     model.set_schedule(groups)
     _LOGGER.info("Schedule set: %d groups", len(model.schedule_groups))
     return _api_response(None)
@@ -421,8 +465,16 @@ async def handle_sim_set(request: web.Request) -> web.Response:
     body = await request.json()
     model = _model(request)
     for key, value in body.items():
-        if hasattr(model, key):
-            setattr(model, key, value)
+        if not hasattr(model, key):
+            continue
+        if key == "sim_time" and isinstance(value, str):
+            # ``sim_time`` is a datetime; a raw JSON string would break
+            # tick().  Coercing lets a test pin simulated wall-clock time
+            # so window matching is deterministic (C-031) — a 00:00-23:59
+            # group is otherwise "not active" for the one minute at 23:59.
+            setattr(model, key, datetime.datetime.fromisoformat(value))
+            continue
+        setattr(model, key, value)
     # Re-tick to update derived values
     model.tick(0)
     return web.json_response({"ok": True})
@@ -523,6 +575,8 @@ def create_app() -> web.Application:
     app.router.add_post("/op/v0/device/scheduler/get", handle_scheduler_get)
     app.router.add_post("/op/v3/device/scheduler/get", handle_scheduler_properties)
     app.router.add_post("/op/v0/device/scheduler/enable", handle_scheduler_enable)
+    app.router.add_post("/op/v1/device/scheduler/get/flag", handle_scheduler_flag)
+    app.router.add_post("/op/v0/device/scheduler/set", handle_scheduler_set)
     app.router.add_get("/op/v0/device/battery/soc/get", handle_battery_soc_get)
     app.router.add_post("/op/v0/device/battery/soc/set", handle_battery_soc_set)
     app.router.add_post("/op/v0/plant/list", handle_plant_list)
