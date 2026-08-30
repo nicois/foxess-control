@@ -47,6 +47,7 @@ from .events import (
     emit_event,
     emit_schedule_write,
 )
+from .logging import diagnostic_context, record_operational_error
 from .session import (
     cancel_smart_session,
     save_session,
@@ -313,6 +314,164 @@ def _clear_session_issue(hass: HomeAssistant, domain: str) -> None:
     async_delete_issue(hass, domain, "session_aborted")
 
 
+def _adapter_error_context(
+    session_label: str,
+    err: BaseException,
+    *,
+    count: int,
+) -> dict[str, Any]:
+    """Assemble the structured facts a triage needs about one failed tick.
+
+    Brand-agnostic: the errno is read generically (``errno`` is the
+    conventional attribute on API/OS errors, and is simply absent on
+    exceptions that have none), and anything brand-specific — the payload
+    the brand tried to write, the endpoint, the device's own message —
+    comes from the annotation the brand layer attached to the exception
+    (see :data:`smart_battery.logging.DIAGNOSTIC_CONTEXT_ATTR`).  No brand
+    module is imported (C-039).
+    """
+    context: dict[str, Any] = {
+        "session_type": session_label,
+        "consecutive_error_count": count,
+        "max_consecutive": MAX_CONSECUTIVE_ADAPTER_ERRORS,
+    }
+    errno = getattr(err, "errno", None)
+    if isinstance(errno, int) and not isinstance(errno, bool):
+        context["errno"] = errno
+    attempted = diagnostic_context(err)
+    if attempted:
+        context["attempted_write"] = attempted
+        if "errno" not in context and isinstance(attempted.get("errno"), int):
+            context["errno"] = attempted["errno"]
+    return context
+
+
+def _adapter_error_dedupe_key(
+    category: str,
+    session_label: str,
+    err: BaseException,
+    context: dict[str, Any],
+) -> str:
+    """Signature that decides whether two failures are "the same" failure.
+
+    Includes the attempted payload, so the *same* errno on a *different*
+    payload is new information and gets its own entry — that difference is
+    precisely what identifies which field a device is rejecting.
+    """
+    return "|".join(
+        (
+            category,
+            session_label,
+            type(err).__name__,
+            str(err),
+            repr(context.get("errno")),
+            repr(context.get("attempted_write", {}).get("groups")),
+        )
+    )
+
+
+def _record_adapter_error(
+    hass: HomeAssistant,
+    domain: str,
+    session_label: str,
+    err: BaseException,
+    *,
+    count: int,
+) -> None:
+    """Capture a failed adapter tick into the diagnostics ring buffer (D-059).
+
+    This path — not the coordinator's, not the reconcile's — is the one that
+    actually aborts a user's session, and it was the only significant error
+    path that never reached ``recent_errors``: issue #17 arrived with an
+    *empty* buffer despite three schedule writes rejected with errno 40257.
+    Without this a reporter has nothing structured to send us, which defeats
+    C-026 (persistent errors surfaced via state, not just logs) and C-020
+    exactly where they matter most.
+
+    Buffer policy: consecutive repeats of the same failure signature
+    collapse into one entry carrying ``repeat`` / ``last_t``.  The buffer
+    holds 30 entries and a failing session retries every tick — and session
+    replay restarts it — so appending per occurrence would evict every other
+    error class in the download.  Collapsing bounds the buffer at one entry
+    per distinct failure while losing nothing: the count and both timestamps
+    are kept, and every occurrence is still logged.
+
+    Replaces the old bare ``"transient error (n/m), will retry"`` warning;
+    the retry position is carried in the *attempted* string so the single
+    log line remains self-sufficient.
+
+    Never raises and never alters control flow: C-024's escalation happens
+    in the caller and must not depend on whether recording succeeded.
+    """
+    try:
+        context = _adapter_error_context(session_label, err, count=count)
+        category = "adapter_error"
+        record_operational_error(
+            _LOGGER,
+            getattr(get_domain_data(hass, domain), "recent_errors", None),
+            category=category,
+            attempted=(
+                f"smart {session_label} tick "
+                f"({count}/{MAX_CONSECUTIVE_ADAPTER_ERRORS} consecutive, "
+                "will retry)"
+            ),
+            exc=err,
+            hint=(
+                "the inverter rejected or could not accept the write; compare "
+                "the attempted payload in this record against the ranges the "
+                "device declares in environment.scheduler_limits"
+            ),
+            context=context,
+            severity="warning",
+            dedupe_key=_adapter_error_dedupe_key(category, session_label, err, context),
+        )
+    except Exception:  # noqa: BLE001 — observability must never break control
+        _LOGGER.debug("Failed to record adapter error (non-critical)", exc_info=True)
+
+
+def _record_breaker_open(
+    hass: HomeAssistant,
+    domain: str,
+    session_label: str,
+    err: BaseException,
+    *,
+    count: int,
+) -> None:
+    """Record the C-024 escalation as its own event.
+
+    A distinct category from :func:`_record_adapter_error` so it is never
+    collapsed into the underlying failure: the transition from "retrying"
+    to "holding position" is the moment the session stopped being adjusted,
+    and a user must be able to see that without reading logs (C-020).
+
+    Replaces the old bare warning; recording does not change when or whether
+    the breaker opens.
+    """
+    try:
+        context = _adapter_error_context(session_label, err, count=count)
+        category = "circuit_breaker_open"
+        record_operational_error(
+            _LOGGER,
+            getattr(get_domain_data(hass, domain), "recent_errors", None),
+            category=category,
+            attempted=(
+                f"smart {session_label}: {count} consecutive adapter errors, "
+                "circuit breaker open (holding position for up to "
+                f"{CIRCUIT_BREAKER_TICKS_BEFORE_ABORT} ticks)"
+            ),
+            exc=err,
+            hint=(
+                "the session is holding its last commanded position; it will "
+                "abort to self-use if the adapter does not recover"
+            ),
+            context=context,
+            severity="error",
+            dedupe_key=_adapter_error_dedupe_key(category, session_label, err, context),
+        )
+    except Exception:  # noqa: BLE001 — observability must never break control
+        _LOGGER.debug("Failed to record breaker opening (non-critical)", exc_info=True)
+
+
 async def _with_circuit_breaker(
     cur_state: dict[str, Any],
     session_label: str,
@@ -374,28 +533,16 @@ async def _with_circuit_breaker(
             cur_state["circuit_open"] = False
             cur_state["circuit_open_ticks"] = 0
             cur_state.pop("circuit_open_since", None)
-    except Exception:
+    except Exception as err:
         count = cur_state.get("consecutive_error_count", 0) + 1
         cur_state["consecutive_error_count"] = count
+        _record_adapter_error(hass, domain, session_label, err, count=count)
         if count < MAX_CONSECUTIVE_ADAPTER_ERRORS:
-            _LOGGER.warning(
-                "Smart %s: transient error (%d/%d), will retry: %s",
-                session_label,
-                count,
-                MAX_CONSECUTIVE_ADAPTER_ERRORS,
-                _exc_summary(),
-            )
             return
         cur_state["circuit_open"] = True
         cur_state["circuit_open_ticks"] = 0
         cur_state["circuit_open_since"] = dt_util.now().isoformat()
-        _LOGGER.warning(
-            "Smart %s: %d consecutive errors, circuit breaker open "
-            "(holding position for up to %d ticks)",
-            session_label,
-            count,
-            CIRCUIT_BREAKER_TICKS_BEFORE_ABORT,
-        )
+        _record_breaker_open(hass, domain, session_label, err, count=count)
         label = session_label.capitalize()
         _record_error(
             hass,

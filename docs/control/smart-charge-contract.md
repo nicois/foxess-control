@@ -898,13 +898,20 @@ breaker:
 ```
 on adapter exception:
     consecutive_error_count += 1
+    # D-059: record to the diagnostics ring buffer, category
+    # "adapter_error", with the errno and the payload the brand layer
+    # annotated onto the exception.  Repeats of the same failure
+    # signature collapse into one entry with a repeat count, so a
+    # session retrying every tick cannot evict the buffer.
+    record operational error (warning) "n/m consecutive, will retry"
     if consecutive_error_count < 3:
-        log warning "transient error, will retry"
         return    # try again next tick
     # 3 consecutive errors → open circuit breaker
     circuit_open       = True
     circuit_open_ticks = 0
-    log warning "circuit breaker open, holding position"
+    # Separate category "circuit_breaker_open" so the escalation is
+    # never collapsed into the underlying failure.
+    record operational error (error) "circuit breaker open, holding position"
 
 while circuit_open:
     on each tick:

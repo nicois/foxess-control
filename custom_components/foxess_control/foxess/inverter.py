@@ -7,6 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ..smart_battery.events import SCHEDULE_WRITE, emit_event
+from ..smart_battery.logging import attach_diagnostic_context
 from ..smart_battery.types import MinSocSettings, ScheduleGroup, WorkMode
 
 if TYPE_CHECKING:
@@ -80,8 +81,21 @@ class Inverter:
         self._device_type: str | None = None
         self._scheduler_properties: dict[str, Any] | None = None
         self._scheduler_properties_probed = False
+        self._scheduler_max_group_count: int | None = None
         self._warned_work_modes: set[str] = set()
         self._warned_scheduler_enable = False
+        # Observability for errno 40257 (issue #17): the device rejects a
+        # schedule write *wholesale* and names no field, so the only way to
+        # find the offending parameter is to compare what we sent against
+        # what the device declares it accepts.  Before this, neither was
+        # recoverable from a diagnostics download — the payload existed only
+        # in the ``schedule_write`` event, which is emitted after a
+        # *successful* POST.  Reported by the diagnostics platform.
+        self.last_write_failure: dict[str, Any] | None = None
+        # Timestamp of the most recent *accepted* write, so a retained
+        # failure is distinguishable from a current one (C-020): without it
+        # every report that ever had one bad write would look broken.
+        self.last_write_ok_at: str | None = None
 
     @property
     def max_power_w(self) -> int:
@@ -165,6 +179,12 @@ class Inverter:
             return None
         if not isinstance(result, dict):
             return None
+        # ``maxGroupCount`` is a sibling of ``properties``, not a member of
+        # it, so it has to be captured here or it is lost.  Reported because
+        # it is one of the values a device can reject a write over.
+        group_count = result.get("maxGroupCount")
+        if isinstance(group_count, int) and not isinstance(group_count, bool):
+            self._scheduler_max_group_count = group_count
         props = result.get("properties")
         return props if isinstance(props, dict) else None
 
@@ -205,13 +225,29 @@ class Inverter:
 
         Never triggers I/O, so it is safe to read from the event loop (the
         diagnostics platform).  ``None`` distinguishes "never probed" from
-        "probed and the device declared nothing".
+        "probed and the device declared nothing" — the latter reports an
+        empty ``properties`` map rather than ``None``.
+
+        Reports the **whole** declared map, not just the two derived fields
+        this module happens to consume.  Issue #17 arrived with the ``fdPwr``
+        ceiling correctly clamped and ``ForceCharge`` correctly declared, so
+        the cause has to be one of the parameters that were not reported —
+        the declared ``fdsoc`` / ``minsocongrid`` ranges, ``maxGroupCount``,
+        or a field this module does not yet know about.  Reporting only what
+        we already understand cannot find a cause we do not.
+
+        ``fd_pwr_max_w`` and ``work_modes`` are kept for existing consumers.
         """
         if not self._scheduler_properties_probed:
             return None
         return {
             "fd_pwr_max_w": self.fd_pwr_limit_w,
             "work_modes": sorted(self.declared_work_modes) or None,
+            "max_group_count": self._scheduler_max_group_count,
+            "properties": {
+                name: dict(entry) if isinstance(entry, dict) else entry
+                for name, entry in (self._scheduler_properties or {}).items()
+            },
         }
 
     def _clamp_to_declared_ranges(
@@ -562,6 +598,54 @@ class Inverter:
             )
         self.set_setting(_SETTING_WORK_MODE, mode)
 
+    def _retain_write_failure(
+        self,
+        payload: list[ScheduleGroup],
+        call_site: str,
+        err: BaseException,
+    ) -> None:
+        """Retain a rejected schedule payload so diagnostics can name the field.
+
+        ``FoxESS API error 40257: Parameters do not meet expectations``
+        rejects the write wholesale and identifies nothing, so triage needs
+        both halves of the comparison: the groups we sent (here) and the
+        ranges the device declares (``declared_limits_snapshot``).  Neither
+        reached a diagnostics download before — the payload existed only in
+        the ``schedule_write`` event, which is emitted after a *successful*
+        POST, and the exception itself was swallowed by the listener's retry
+        path.
+
+        Retained in two places for two different readers:
+
+        * on this instance, reported by the diagnostics platform, which
+          covers writes that never touch a session — the SelfUse teardown
+          baseline, a service call, the startup reconcile;
+        * annotated onto the exception, so the brand-agnostic listener that
+          catches it can record it to ``recent_errors`` without importing
+          this module (C-039).
+
+        Secrets: schedule groups are integers plus a work-mode string.  The
+        device serial is deliberately excluded even though ``REDACT_KEYS``
+        would redact the key name, because redaction by key name does not
+        help once a value has been copied into a nested structure.
+        """
+        record: dict[str, Any] = {
+            "at": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
+            "endpoint": _SCHEDULE_ENDPOINT,
+            "call_site": call_site,
+            "groups": [dict(g) for g in payload],
+            "exc_type": type(err).__name__,
+            "error": str(err),
+        }
+        errno = getattr(err, "errno", None)
+        if isinstance(errno, int) and not isinstance(errno, bool):
+            record["errno"] = errno
+        msg = getattr(err, "msg", None)
+        if isinstance(msg, str):
+            record["api_message"] = msg
+        self.last_write_failure = record
+        attach_diagnostic_context(err, record)
+
     def _post_schedule(self, groups: list[ScheduleGroup], call_site: str) -> None:
         """POST groups to ``/scheduler/enable`` and emit a SCHEDULE_WRITE event.
 
@@ -585,9 +669,16 @@ class Inverter:
         # Groups are inert while the master switch is off, and whether this
         # POST implies the switch is unverified — so assert it explicitly.
         self._ensure_scheduler_enabled()
-        response = self.client.post(
-            _SCHEDULE_ENDPOINT,
-            {"deviceSN": self.sn, "groups": payload},
+        try:
+            response = self.client.post(
+                _SCHEDULE_ENDPOINT,
+                {"deviceSN": self.sn, "groups": payload},
+            )
+        except Exception as err:
+            self._retain_write_failure(payload, call_site, err)
+            raise
+        self.last_write_ok_at = datetime.datetime.now(datetime.UTC).isoformat(
+            timespec="seconds"
         )
         # Copy the groups list defensively so downstream payload
         # consumers cannot mutate the caller's data through the event.

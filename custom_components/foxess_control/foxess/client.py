@@ -18,6 +18,10 @@ class FoxESSApiError(Exception):
 
     def __init__(self, errno: int, msg: str) -> None:
         self.errno = errno
+        # Kept as a field, not only interpolated into the message, so
+        # structured error records can carry the device's own wording
+        # verbatim rather than re-parsing it out of ``str(exc)``.
+        self.msg = msg
         super().__init__(f"FoxESS API error {errno}: {msg}")
 
     @property

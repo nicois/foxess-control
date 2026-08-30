@@ -639,7 +639,7 @@ class TestFoxESSRetainsRejectedPayload:
         def _boom(*_a: Any, **_kw: Any) -> Any:
             raise _Hostile("upstream exploded")
 
-        inv.client.post = _boom  # type: ignore[method-assign]
+        inv.client.post = _boom
 
         with pytest.raises(_Hostile):
             inv.self_use(min_soc_on_grid=11)
@@ -655,6 +655,9 @@ class TestFoxESSRetainsRejectedPayload:
 
         ``REDACT_KEYS`` covers serials and tokens by key name, which does
         not help if a secret is embedded in a value, so assert directly.
+        The positive assertion comes first on purpose: "contains no secrets"
+        passes trivially against an implementation that retains nothing, so
+        it is only meaningful once the real payload is known to be there.
         """
         from custom_components.foxess_control.foxess.client import FoxESSApiError
 
@@ -665,6 +668,11 @@ class TestFoxESSRetainsRejectedPayload:
             inv.force_charge(min_soc_on_grid=15, target_soc=100)
 
         blob = json.dumps(inv.last_write_failure)
+        assert "ForceCharge" in blob, (
+            "nothing meaningful was retained, so this test would pass "
+            f"vacuously; retained={inv.last_write_failure!r}"
+        )
+        assert '"fdPwr"' in blob
         assert "SIM0001" not in blob
         assert "test-api-key" not in blob
 
@@ -833,6 +841,15 @@ class TestGlueLayer:
     tested together.  This drives the *real* ``FoxESSCloudAdapter`` and
     ``Inverter`` against the simulator through the *real*, brand-agnostic
     circuit-breaker wrapper, and asserts the reporter's evidence appears.
+
+    Uses the *vendored* listener (``custom_components.foxess_control
+    .smart_battery.listeners``), byte-identical to the root copy per C-015,
+    because that is the one production imports and the one whose
+    ``SmartBatteryDomainData`` class ``FoxESSControlData`` subclasses.
+    Crossing the two copies makes ``get_domain_data`` fail its isinstance
+    check and silently hand back a *fresh* domain-data object — which is how
+    the first version of this test passed a buffer assertion against a
+    buffer nothing was writing to.
     """
 
     @pytest.mark.asyncio
@@ -845,6 +862,12 @@ class TestGlueLayer:
             FoxESSEntryData,
         )
         from custom_components.foxess_control.foxess_adapter import FoxESSCloudAdapter
+        from custom_components.foxess_control.smart_battery.listeners import (
+            _with_circuit_breaker as vendored_with_circuit_breaker,
+        )
+        from custom_components.foxess_control.smart_battery.types import (
+            WorkMode as VendoredWorkMode,
+        )
 
         _reject_force_charge(foxess_sim)
         inv = _make_inv(foxess_sim)
@@ -868,12 +891,16 @@ class TestGlueLayer:
         state: dict[str, Any] = {"session_id": "s1"}
 
         async def _inner(_state: dict[str, Any]) -> None:
-            await adapter.apply_mode(hass, WorkMode.FORCE_CHARGE, 12000, fd_soc=100)
+            await adapter.apply_mode(
+                hass, VendoredWorkMode.FORCE_CHARGE, 12000, fd_soc=100
+            )
 
         async def _on_abort() -> None:
             return None
 
-        await _with_circuit_breaker(state, "charge", _inner, _on_abort, hass, DOMAIN)
+        await vendored_with_circuit_breaker(
+            state, "charge", _inner, _on_abort, hass, DOMAIN
+        )
 
         assert len(dd.recent_errors) == 1, (
             "a real 40257 rejection during a session must reach the "

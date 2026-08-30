@@ -123,7 +123,7 @@ async def async_get_config_entry_diagnostics(
             "taper_profile": taper.to_dict() if taper else None,
             "environment": environment,
             "recent_errors": recent_errors,
-            "schedule": _schedule_section(domain_data, _entity_mode),
+            "schedule": _schedule_section(domain_data, _entity_mode, inverter),
         },
         REDACT_KEYS,
     )
@@ -136,6 +136,12 @@ def _scheduler_limits(inverter: Any) -> dict[str, Any] | None:
     setup — never triggers a live API call on the diagnostics path.
     Present so a future "errno 40257" report says immediately whether the
     declared ceilings were read and what they were (C-020 / C-026, C-042).
+
+    The snapshot carries the device's **whole** declared ``properties`` map,
+    not just the fields this integration consumes: issue #17 rejects writes
+    with the ``fdPwr`` ceiling correctly clamped and ``ForceCharge``
+    correctly declared, so the cause has to lie in a parameter that was not
+    being reported.
     """
     if inverter is None:
         return None
@@ -147,12 +153,19 @@ def _scheduler_limits(inverter: Any) -> dict[str, Any] | None:
 
 
 def _schedule_section(
-    domain_data: FoxESSControlData, entity_mode: bool
+    domain_data: FoxESSControlData, entity_mode: bool, inverter: Any = None
 ) -> dict[str, Any] | str:
     """Report the live schedule snapshot + reconcile outcome from the cache.
 
     Sourced from the startup reconcile's cached snapshot (no live API call
     on the diagnostics path).  Entity mode has no cloud schedule.
+
+    ``last_write_failure`` is the payload the inverter most recently
+    *rejected*, paired with ``last_write_ok_at`` so a historical failure is
+    distinguishable from a current one.  Together with
+    ``environment.scheduler_limits`` this is the pair of facts needed to
+    identify which parameter a device objects to, which errno 40257 itself
+    never says (issue #17, C-020 / C-026).
     """
     if entity_mode:
         return "n/a (entity mode)"
@@ -160,6 +173,8 @@ def _schedule_section(
         "as_of": getattr(domain_data, "last_schedule_snapshot_at", None),
         "groups": getattr(domain_data, "last_schedule_snapshot", None),
         "reconcile": getattr(domain_data, "last_schedule_reconcile", None),
+        "last_write_failure": getattr(inverter, "last_write_failure", None),
+        "last_write_ok_at": getattr(inverter, "last_write_ok_at", None),
     }
 
 
