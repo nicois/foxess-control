@@ -361,10 +361,12 @@
           "min_power_change": "Cambio mínimo de potencia para carga inteligente (W)",
           "api_min_soc": "fdSoc API mínimo (%) — ⚠️ Valores por debajo de 11 pueden no funcionar con todas las versiones de firmware",
           "polling_interval": "Intervalo de consulta de API (segundos)",
-          "additional_pv_power_variable": "Variable de potencia solar adicional"
+          "additional_pv_power_variable": "Variable de potencia solar adicional",
+          "scheduler_handback": "Liberar el inversor cuando esté inactivo"
         },
         "data_description": {
-          "additional_pv_power_variable": "Opcional. Para sistemas acoplados en CA donde la generación de un segundo inversor se reporta en una variable de FoxESS independiente (p. ej. meterPower2). Su valor se suma a la lectura solar. Déjelo en blanco en caso contrario."
+          "additional_pv_power_variable": "Opcional. Para sistemas acoplados en CA donde la generación de un segundo inversor se reporta en una variable de FoxESS independiente (p. ej. meterPower2). Su valor se suma a la lectura solar. Déjelo en blanco en caso contrario.",
+          "scheduler_handback": "Cuando no hay ninguna sesión inteligente en curso: apagar el programador de modos del inversor, establecer el autoconsumo directamente y restaurar el SoC mínimo que usted había configurado. Active esto si también controla el inversor de otra forma (la aplicación de FoxESS, Modbus local), o si quiere un SoC mínimo por debajo del 10 % que impone el programador. Desactivado por defecto; la carga y la descarga inteligentes siguen usando el programador mientras se ejecutan. Actualmente se recuerda {captured_min_soc} como su propio SoC mínimo (un guion significa que aún no se ha capturado nada): se lee una sola vez, con el inversor inactivo, y es el único valor que se vuelve a escribir. Para actualizarlo, desactive esta opción, guarde y vuelva a activarla."
         }
       }
     }

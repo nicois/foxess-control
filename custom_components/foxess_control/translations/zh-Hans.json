@@ -361,10 +361,12 @@
           "min_power_change": "智能充电最小功率变化 (W)",
           "api_min_soc": "API 最低 fdSoc (%) — ⚠️ 低于 11 的值可能不适用于所有固件版本",
           "polling_interval": "API 轮询间隔（秒）",
-          "additional_pv_power_variable": "额外的光伏功率变量"
+          "additional_pv_power_variable": "额外的光伏功率变量",
+          "scheduler_handback": "空闲时释放逆变器"
         },
         "data_description": {
-          "additional_pv_power_variable": "可选。适用于交流耦合系统，其中第二台逆变器的发电量通过单独的 FoxESS 变量上报（例如 meterPower2）。其数值将加到光伏读数上。否则请留空。"
+          "additional_pv_power_variable": "可选。适用于交流耦合系统，其中第二台逆变器的发电量通过单独的 FoxESS 变量上报（例如 meterPower2）。其数值将加到光伏读数上。否则请留空。",
+          "scheduler_handback": "当没有智能会话运行时，关闭逆变器的模式调度器，直接设置自用模式，并恢复你原先配置的最小 SoC。如果你也通过其他方式控制逆变器（FoxESS 应用、本地 Modbus），或者希望使用低于调度器强制的 10% 的最小 SoC，请启用此选项。默认关闭；智能充电和放电在运行期间仍会使用调度器。当前记住的最小 SoC 为 {captured_min_soc}（短划线表示尚未读取到任何值）——该值只在逆变器空闲时读取一次，并且是唯一会被写回的值。若要更新它，请关闭此选项、保存，然后重新开启。"
         }
       }
     }

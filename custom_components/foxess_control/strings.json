@@ -288,10 +288,12 @@
           "smart_headroom": "Smart Headroom (%)",
           "grid_export_limit": "Grid Export Limit (W) — net export cap set on inverter (0 = no limit)",
           "ws_mode": "WebSocket real-time data mode",
-          "additional_pv_power_variable": "Additional solar power variable"
+          "additional_pv_power_variable": "Additional solar power variable",
+          "scheduler_handback": "Release the inverter when idle"
         },
         "data_description": {
-          "additional_pv_power_variable": "Optional. For AC-coupled systems where a second inverter's generation is reported in a separate FoxESS variable (e.g. meterPower2). Its value is added to the solar reading. Leave blank otherwise."
+          "additional_pv_power_variable": "Optional. For AC-coupled systems where a second inverter's generation is reported in a separate FoxESS variable (e.g. meterPower2). Its value is added to the solar reading. Leave blank otherwise.",
+          "scheduler_handback": "When no smart session is running, turn off the inverter's Mode Scheduler, set Self Use directly, and restore the minimum SoC you had configured. Enable this if you also control the inverter another way (the FoxESS app, local Modbus), or if you want a minimum SoC below the 10% the scheduler enforces. Off by default; smart charge and discharge still use the scheduler while they run. Currently remembering {captured_min_soc} as your own minimum SoC (a dash means nothing has been captured yet) — it is read once while the inverter is idle, and is the only value ever written back. To update it, turn this option off, save, then turn it on again."
         }
       },
       "modbus": {

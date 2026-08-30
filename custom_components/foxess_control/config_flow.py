@@ -36,12 +36,14 @@ from .const import (
     CONF_LOADS_POWER_ENTITY,
     CONF_MIN_SOC_ENTITY,
     CONF_PV_POWER_ENTITY,
+    CONF_SCHEDULER_HANDBACK,
     CONF_SOC_ENTITY,
     CONF_WEB_PASSWORD,
     CONF_WEB_USERNAME,
     CONF_WORK_MODE_ENTITY,
     CONF_WS_ALL_SESSIONS,
     CONF_WS_MODE,
+    DEFAULT_SCHEDULER_HANDBACK,
     DOMAIN,
     WS_MODE_ALWAYS,
     WS_MODE_AUTO,
@@ -101,6 +103,74 @@ def _additional_pv_schema_dict(opts: Mapping[str, Any]) -> dict[Any, Any]:
             default=opts.get(CONF_ADDITIONAL_PV_POWER_VARIABLE, ""),
         ): str,
     }
+
+
+def _scheduler_handback_schema_dict(opts: Mapping[str, Any]) -> dict[Any, Any]:
+    """Schema fragment for the opt-in scheduler handback (issues #16, #4).
+
+    Brand-specific: the Mode Scheduler master switch and the 10 %
+    ``minsocongrid`` floor it enforces are FoxESS concepts, so this stays
+    out of ``battery_options_schema`` (C-021).
+
+    The default is load-bearing rather than tidy.  HA replaces the whole
+    options dict with whatever this flow returns, and what it returns for
+    a field the user did not touch is precisely this default — so
+    defaulting to anything but the currently-saved value (falling back to
+    ``DEFAULT_SCHEDULER_HANDBACK``, i.e. off) would enable handback, and
+    with it writes to the user's own Min SoC register, for anyone who
+    merely opens the dialog and presses Submit.
+
+    Declared as a bare ``bool``, which voluptuous enforces as an
+    isinstance check: a stringly-typed ``"false"`` is rejected outright
+    rather than quietly read as truthy.
+    """
+    return {
+        vol.Optional(
+            CONF_SCHEDULER_HANDBACK,
+            default=opts.get(CONF_SCHEDULER_HANDBACK, DEFAULT_SCHEDULER_HANDBACK),
+        ): bool,
+    }
+
+
+# Shown in place of a percentage when nothing has been captured.  Not a
+# number, deliberately: a number here would be a claim about the user's
+# inverter that this integration has not actually read.  The surrounding
+# translated text explains what the dash means, so the whole of what the
+# user reads stays localised.
+_MIN_SOC_NOT_CAPTURED = "—"
+
+
+def _captured_min_soc_text(hass: HomeAssistant) -> str:
+    """The captured Min SoC, formatted for the options dialog (C-020).
+
+    ``_min_soc_capture`` reads the user's own floor at most once and never
+    re-reads it, which is what stops a session value from becoming "the
+    user's value" permanently — but it also means a handback user who
+    changes their floor in the FoxESS app has it reverted.  The remedy is
+    to toggle the option off and on, which re-captures; a remedy for a
+    value the user cannot see is not a remedy, hence this.
+
+    Read-only, and rendered by HA as the toggle's own helper text rather
+    than as a disabled field: a field the user can see but not change
+    invites them to try.
+
+    Never raises.  The options dialog must open even when setup failed,
+    and "we do not know" is a perfectly good thing to say.
+    """
+    if DOMAIN not in getattr(hass, "data", {}):
+        return _MIN_SOC_NOT_CAPTURED
+    try:
+        from ._helpers import _dd
+
+        captured = _dd(hass).captured_min_soc_on_grid
+    except (AttributeError, KeyError, TypeError):
+        _LOGGER.debug("Could not read the captured Min SoC for the options form")
+        return _MIN_SOC_NOT_CAPTURED
+    # 0 is a real captured value — issue #4 is exactly about a 0 % floor —
+    # so this must test for None, not for truthiness.
+    if captured is None:
+        return _MIN_SOC_NOT_CAPTURED
+    return f"{captured}%"
 
 
 def _validate_credentials(api_key: str, device_serial: str) -> None:
@@ -409,6 +479,9 @@ class FoxessControlOptionsFlow(OptionsFlow):
 
         schema = battery_options_schema(self._config_entry)
         schema = schema.extend(_additional_pv_schema_dict(self._config_entry.options))
+        schema = schema.extend(
+            _scheduler_handback_schema_dict(self._config_entry.options)
+        )
         # Show WebSocket option only when web credentials are configured
         if self._config_entry.data.get(CONF_WEB_USERNAME):
             opts = self._config_entry.options
@@ -444,7 +517,13 @@ class FoxessControlOptionsFlow(OptionsFlow):
                     ),
                 }
             )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=schema,
+            description_placeholders={
+                "captured_min_soc": _captured_min_soc_text(self.hass),
+            },
+        )
 
     async def async_step_modbus(
         self, user_input: dict[str, Any] | None = None

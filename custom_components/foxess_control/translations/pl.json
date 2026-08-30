@@ -357,10 +357,12 @@
           "min_power_change": "Minimalna zmiana mocy dla inteligentnego ładowania (W)",
           "api_min_soc": "Minimalny fdSoc API (%) — ⚠️ Wartości poniżej 11 mogą nie działać ze wszystkimi wersjami firmware",
           "polling_interval": "Interwał odpytywania API (sekundy)",
-          "additional_pv_power_variable": "Dodatkowa zmienna mocy fotowoltaicznej"
+          "additional_pv_power_variable": "Dodatkowa zmienna mocy fotowoltaicznej",
+          "scheduler_handback": "Zwolnij falownik w stanie bezczynności"
         },
         "data_description": {
-          "additional_pv_power_variable": "Opcjonalne. Dla systemów sprzężonych po stronie AC, w których produkcja drugiego falownika jest raportowana w osobnej zmiennej FoxESS (np. meterPower2). Jej wartość jest dodawana do odczytu fotowoltaiki. W przeciwnym razie pozostaw puste."
+          "additional_pv_power_variable": "Opcjonalne. Dla systemów sprzężonych po stronie AC, w których produkcja drugiego falownika jest raportowana w osobnej zmiennej FoxESS (np. meterPower2). Jej wartość jest dodawana do odczytu fotowoltaiki. W przeciwnym razie pozostaw puste.",
+          "scheduler_handback": "Gdy żadna inteligentna sesja nie jest uruchomiona: wyłącz harmonogram trybów falownika, ustaw bezpośrednio tryb autokonsumpcji i przywróć minimalny SoC, który skonfigurowałeś. Włącz tę opcję, jeśli sterujesz falownikiem także w inny sposób (aplikacja FoxESS, lokalny Modbus) lub jeśli chcesz minimalny SoC poniżej 10 %, które wymusza harmonogram. Domyślnie wyłączone; inteligentne ładowanie i rozładowanie nadal korzystają z harmonogramu w czasie działania. Obecnie zapamiętano {captured_min_soc} jako Twój własny minimalny SoC (myślnik oznacza, że nic jeszcze nie zostało odczytane) — jest odczytywany raz, gdy falownik jest bezczynny, i jest jedyną wartością kiedykolwiek zapisywaną z powrotem. Aby go zaktualizować, wyłącz tę opcję, zapisz i włącz ją ponownie."
         }
       }
     }

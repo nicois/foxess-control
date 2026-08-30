@@ -61,7 +61,7 @@ module = ["tests.test_init", "tests.test_entity_mode"]
 disable_error_code = ["attr-defined"]
 
 [[tool.mypy.overrides]]
-module = "tests.test_config_flow"
+module = ["tests.test_config_flow", "tests.test_handback_options"]
 # Assigning MagicMock to HA flow methods for testing.
 disable_error_code = ["method-assign"]
 

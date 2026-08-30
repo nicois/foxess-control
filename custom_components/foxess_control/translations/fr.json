@@ -357,10 +357,12 @@
           "min_power_change": "Changement de puissance minimum pour la charge intelligente (W)",
           "api_min_soc": "fdSoc API minimum (%) — ⚠️ Les valeurs inférieures à 11 peuvent ne pas fonctionner avec toutes les versions de firmware",
           "polling_interval": "Intervalle d'interrogation API (secondes)",
-          "additional_pv_power_variable": "Variable de puissance solaire supplémentaire"
+          "additional_pv_power_variable": "Variable de puissance solaire supplémentaire",
+          "scheduler_handback": "Libérer l'onduleur au repos"
         },
         "data_description": {
-          "additional_pv_power_variable": "Optionnel. Pour les systèmes couplés en CA où la production d'un second onduleur est rapportée dans une variable FoxESS distincte (par ex. meterPower2). Sa valeur est ajoutée à la lecture solaire. Laisser vide sinon."
+          "additional_pv_power_variable": "Optionnel. Pour les systèmes couplés en CA où la production d'un second onduleur est rapportée dans une variable FoxESS distincte (par ex. meterPower2). Sa valeur est ajoutée à la lecture solaire. Laisser vide sinon.",
+          "scheduler_handback": "Lorsqu'aucune session intelligente n'est en cours : désactiver le planificateur de mode de l'onduleur, définir directement l'autoconsommation et restaurer le SoC minimum que vous aviez configuré. Activez ceci si vous pilotez aussi l'onduleur autrement (application FoxESS, Modbus local), ou si vous voulez un SoC minimum inférieur aux 10 % imposés par le planificateur. Désactivé par défaut ; la charge et la décharge intelligentes continuent d'utiliser le planificateur pendant leur exécution. Actuellement mémorisé : {captured_min_soc} comme votre propre SoC minimum (un tiret signifie que rien n'a encore été capturé) — il est lu une seule fois, lorsque l'onduleur est au repos, et c'est la seule valeur jamais réécrite. Pour la mettre à jour, désactivez cette option, enregistrez, puis réactivez-la."
         }
       }
     }

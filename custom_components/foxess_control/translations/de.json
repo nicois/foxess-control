@@ -357,10 +357,12 @@
           "min_power_change": "Minimale Leistungsänderung für intelligentes Laden (W)",
           "api_min_soc": "Minimaler API-fdSoc (%) — ⚠️ Werte unter 11 funktionieren möglicherweise nicht mit allen Firmware-Versionen",
           "polling_interval": "API-Abfrageintervall (Sekunden)",
-          "additional_pv_power_variable": "Zusätzliche Solarleistungs-Variable"
+          "additional_pv_power_variable": "Zusätzliche Solarleistungs-Variable",
+          "scheduler_handback": "Wechselrichter im Leerlauf freigeben"
         },
         "data_description": {
-          "additional_pv_power_variable": "Optional. Für AC-gekoppelte Systeme, bei denen die Erzeugung eines zweiten Wechselrichters in einer separaten FoxESS-Variable gemeldet wird (z. B. meterPower2). Ihr Wert wird zum Solarwert addiert. Andernfalls leer lassen."
+          "additional_pv_power_variable": "Optional. Für AC-gekoppelte Systeme, bei denen die Erzeugung eines zweiten Wechselrichters in einer separaten FoxESS-Variable gemeldet wird (z. B. meterPower2). Ihr Wert wird zum Solarwert addiert. Andernfalls leer lassen.",
+          "scheduler_handback": "Wenn keine intelligente Sitzung läuft: den Modus-Planer des Wechselrichters ausschalten, den Eigenverbrauch direkt setzen und den von Ihnen konfigurierten minimalen SoC wiederherstellen. Aktivieren Sie dies, wenn Sie den Wechselrichter auch anders steuern (FoxESS-App, lokales Modbus) oder wenn Sie einen minimalen SoC unter den 10 % möchten, die der Planer erzwingt. Standardmäßig aus; intelligentes Laden und Entladen nutzen den Planer weiterhin, solange sie laufen. Aktuell gemerkt: {captured_min_soc} als Ihr eigener minimaler SoC (ein Gedankenstrich bedeutet, dass noch nichts erfasst wurde) — er wird einmal gelesen, während der Wechselrichter im Leerlauf ist, und ist der einzige Wert, der je zurückgeschrieben wird. Zum Aktualisieren diese Option ausschalten, speichern und wieder einschalten."
         }
       }
     }

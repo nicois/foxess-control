@@ -361,10 +361,12 @@
           "min_power_change": "Minimale vermogenswijziging voor slim laden (W)",
           "api_min_soc": "Minimum API fdSoc (%) — ⚠️ Waarden onder 11 werken mogelijk niet met alle firmwareversies",
           "polling_interval": "API-polling-interval (seconden)",
-          "additional_pv_power_variable": "Aanvullende zonne-energievariabele"
+          "additional_pv_power_variable": "Aanvullende zonne-energievariabele",
+          "scheduler_handback": "Omvormer vrijgeven bij inactiviteit"
         },
         "data_description": {
-          "additional_pv_power_variable": "Optioneel. Voor AC-gekoppelde systemen waarbij de opwekking van een tweede omvormer in een aparte FoxESS-variabele wordt gerapporteerd (bijv. meterPower2). De waarde ervan wordt bij de zonnemeting opgeteld. Laat anders leeg."
+          "additional_pv_power_variable": "Optioneel. Voor AC-gekoppelde systemen waarbij de opwekking van een tweede omvormer in een aparte FoxESS-variabele wordt gerapporteerd (bijv. meterPower2). De waarde ervan wordt bij de zonnemeting opgeteld. Laat anders leeg.",
+          "scheduler_handback": "Wanneer geen slimme sessie actief is: de modusplanner van de omvormer uitschakelen, eigen gebruik direct instellen en de door u geconfigureerde minimale SoC herstellen. Schakel dit in als u de omvormer ook op een andere manier bestuurt (de FoxESS-app, lokale Modbus), of als u een minimale SoC onder de 10 % wilt die de planner oplegt. Standaard uit; slim laden en ontladen blijven de planner gebruiken zolang ze actief zijn. Momenteel onthouden: {captured_min_soc} als uw eigen minimale SoC (een streepje betekent dat er nog niets is vastgelegd) — die wordt één keer gelezen terwijl de omvormer inactief is, en is de enige waarde die ooit wordt teruggeschreven. Om die bij te werken zet u deze optie uit, bewaart u, en zet u die weer aan."
         }
       }
     }
