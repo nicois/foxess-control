@@ -301,16 +301,21 @@ class TestModelStringIsIrrelevant:
         result = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
 
         assert result["environment"]["inverter_model"] == "H3-12.0-M"
-        assert result["environment"]["scheduler_limits"] == {
-            "fd_pwr_max_w": 12000,
-            "work_modes": [
-                "Backup",
-                "Feedin",
-                "ForceCharge",
-                "ForceDischarge",
-                "SelfUse",
-            ],
-        }
+        limits = result["environment"]["scheduler_limits"]
+        # The derived fields stay, for existing consumers.
+        assert limits["fd_pwr_max_w"] == 12000
+        assert limits["work_modes"] == [
+            "Backup",
+            "Feedin",
+            "ForceCharge",
+            "ForceDischarge",
+            "SelfUse",
+        ]
+        # Reporting only the two derived fields hid the declared fdsoc /
+        # minsocongrid ranges, which are the remaining 40257 candidates
+        # once the fdPwr ceiling is respected (issue #17).
+        assert limits["properties"]["fdsoc"]["range"] == {"min": 10.0, "max": 100.0}
+        assert limits["max_group_count"] == 8
 
 
 class TestWorkModeEnumeration:

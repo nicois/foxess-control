@@ -80,6 +80,116 @@ def test_respects_buffer_maxlen() -> None:
     assert buf[0]["exc_str"] == "5"
 
 
+class TestDedupeKey:
+    """``dedupe_key`` collapses repeats of one failure into one entry.
+
+    Opt-in, because most call sites fire once per poll and want every
+    occurrence.  The listener retry path fires every tick against the same
+    failure, so without collapsing a single error class evicts the other 29
+    slots and destroys the diagnostic value of the buffer (issue #17).
+    """
+
+    def test_repeats_collapse_and_count(self) -> None:
+        logger = logging.getLogger("test.roe.dedupe")
+        buf: deque[dict[str, Any]] = deque(maxlen=30)
+        for _ in range(7):
+            record_operational_error(
+                logger,
+                buf,
+                category="adapter_error",
+                attempted="charge tick",
+                exc=ValueError("boom"),
+                context={"errno": 40257},
+                dedupe_key="adapter_error|ValueError|boom|40257",
+            )
+        assert len(buf) == 1
+        assert buf[0]["repeat"] == 7
+        assert buf[0]["last_t"] >= buf[0]["t"]
+        # The first occurrence's payload is what is kept.
+        assert buf[0]["context"] == {"errno": 40257}
+
+    def test_distinct_keys_are_distinct_entries(self) -> None:
+        logger = logging.getLogger("test.roe.dedupe2")
+        buf: deque[dict[str, Any]] = deque(maxlen=30)
+        for key in ("a", "b", "a", "b", "a"):
+            record_operational_error(
+                logger,
+                buf,
+                category="adapter_error",
+                attempted="tick",
+                exc=ValueError(key),
+                dedupe_key=key,
+            )
+        assert [r["exc_str"] for r in buf] == ["a", "b"]
+        assert [r["repeat"] for r in buf] == [3, 2]
+
+    def test_collapsing_ignores_intervening_other_entries(self) -> None:
+        """The buffer is scanned, not just its last element.
+
+        Escalation records (circuit-breaker opening) land between repeats of
+        the underlying failure; keying only on the previous entry would let
+        the failure re-append once per session.
+        """
+        logger = logging.getLogger("test.roe.dedupe3")
+        buf: deque[dict[str, Any]] = deque(maxlen=30)
+        record_operational_error(
+            logger,
+            buf,
+            category="c",
+            attempted="a",
+            exc=ValueError("x"),
+            dedupe_key="k",
+        )
+        record_operational_error(
+            logger, buf, category="other", attempted="a", exc=ValueError("y")
+        )
+        record_operational_error(
+            logger,
+            buf,
+            category="c",
+            attempted="a",
+            exc=ValueError("x"),
+            dedupe_key="k",
+        )
+        assert len(buf) == 2
+        assert buf[0]["repeat"] == 2
+
+    def test_without_a_key_every_occurrence_appends(self) -> None:
+        """Default behaviour is unchanged for the existing call sites."""
+        logger = logging.getLogger("test.roe.dedupe4")
+        buf: deque[dict[str, Any]] = deque(maxlen=30)
+        for _ in range(4):
+            record_operational_error(
+                logger, buf, category="c", attempted="a", exc=ValueError("x")
+            )
+        assert len(buf) == 4
+        assert "repeat" not in buf[0]
+        assert "dedupe_key" not in buf[0]
+
+    def test_every_occurrence_is_still_logged(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Collapsing bounds the *buffer*, not the log.
+
+        Logs are unbounded and rotated by HA; suppressing log lines would
+        hide the retry cadence from anyone who does have the log.
+        """
+        logger = logging.getLogger("test.roe.dedupe5")
+        buf: deque[dict[str, Any]] = deque(maxlen=30)
+        with caplog.at_level(logging.WARNING, logger="test.roe.dedupe5"):
+            for _ in range(3):
+                record_operational_error(
+                    logger,
+                    buf,
+                    category="c",
+                    attempted="a",
+                    exc=ValueError("x"),
+                    dedupe_key="k",
+                )
+        assert len(caplog.records) == 3
+        assert len(buf) == 1
+
+
 def test_buffer_none_logs_without_crashing(caplog: pytest.LogCaptureFixture) -> None:
     logger = logging.getLogger("test.roe.none")
     with caplog.at_level(logging.ERROR, logger="test.roe.none"):
