@@ -196,3 +196,14 @@ class FoxESSControlData(SmartBatteryDomainData):
     # later read may see a session value, and re-reading is exactly how a
     # session floor becomes "the user's floor" permanently.
     captured_min_soc_on_grid: int | None = None
+
+    # Outcome of the most recent scheduler handback, or None if one has
+    # never been attempted: ``{t, acted, reason, steps,
+    # restored_min_soc_on_grid}``.  Set on every attempt *including the
+    # declines* — a user who switched the option on and finds their
+    # inverter still scheduler-controlled needs the reason, and "the option
+    # is on so it must have happened" is exactly the assumption that makes
+    # a silent handback failure worse than no feature (C-020, C-026,
+    # D-059).  A plain dict, like ``last_schedule_reconcile``, so the
+    # diagnostics exporter needs no knowledge of the handback modules.
+    last_handback: dict[str, Any] | None = None

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.util import dt as dt_util
 
+from ._handback_teardown import async_handback_after_teardown
 from ._helpers import (
     SCHEMA_CLEAR_OVERRIDES,
     SCHEMA_FEEDIN,
@@ -188,6 +189,17 @@ def _register_services(hass: HomeAssistant) -> None:
                 await hass.async_add_executor_job(inverter.set_schedule, kept)
             else:
                 await hass.async_add_executor_job(inverter.self_use, min_soc_on_grid)
+
+        # Opt-in scheduler handback (issues #16, #4), after the override is
+        # off and never before it.  This service does NOT go through
+        # ``adapter.remove_override``, so it is a third teardown path — and
+        # the one a user reaches for when they explicitly want the
+        # integration to let go of their inverter.  Handing back everywhere
+        # except here would make the feature look broken precisely when it
+        # is being asked for.  Declines by itself in entity mode.
+        await async_handback_after_teardown(
+            hass, None if _cfg(hass).entity_mode else _get_inverter(hass)
+        )
 
         # Dispatch WS linger as background tasks so the service call returns
         # promptly.  The linger waits up to 30s for a final data push (D-009);

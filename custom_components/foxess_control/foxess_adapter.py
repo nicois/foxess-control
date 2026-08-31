@@ -24,6 +24,7 @@ from homeassistant.helpers.issue_registry import (
 from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_conversion import PowerConverter
 
+from ._handback_teardown import async_handback_after_teardown
 from .const import (
     CONF_CHARGE_POWER_ENTITY,
     CONF_DISCHARGE_POWER_ENTITY,
@@ -672,7 +673,14 @@ class FoxESSCloudAdapter:
         hass: HomeAssistant,
         mode: WorkMode,
     ) -> None:
-        """Remove the override, reverting to self-use."""
+        """Remove the override, reverting to self-use.
+
+        This is the session-teardown choke point for the cloud backend:
+        both ``_remove_charge_override`` and ``_remove_discharge_override``
+        in ``smart_battery/listeners.py`` come through here, and both have
+        already run ``cancel_smart_*`` — so no session is active by the
+        time the group comes off.
+        """
         await hass.async_add_executor_job(
             _remove_mode_from_schedule,
             self._inverter,
@@ -685,6 +693,15 @@ class FoxESSCloudAdapter:
         # Feed-in) made get_current_mode report a non-SelfUse mode.
         _record_commanded_mode(hass, mode, kind=CommandKind.REMOVE)
         self._groups = []
+        # Opt-in scheduler handback (issues #16, #4), and strictly LAST.
+        # The group removal above must have succeeded first: turning the
+        # Mode Scheduler off with a forced group still on the device would
+        # leave the inverter discharging behind a scheduler this
+        # integration can no longer steer.  Outside the removal's await for
+        # the same reason it never raises — the listener reads an exception
+        # here as "the override is still on" and queues a retry, so a
+        # handback failure must not be able to fake one (C-025).
+        await async_handback_after_teardown(hass, self._inverter)
 
     async def set_export_limit_w(
         self,
