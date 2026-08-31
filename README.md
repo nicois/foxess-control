@@ -151,7 +151,7 @@ When entity mode is active:
 
 ## Actions
 
-The integration registers six actions (services) under the `foxess_control` domain. These are intended to be called from automations.
+The integration registers seven actions (services) under the `foxess_control` domain. These are intended to be called from automations.
 
 Most actions accept a `replace_conflicts` parameter. In cloud mode, the inverter's schedule can hold multiple time-windowed override groups (e.g. a `ForceCharge` window and a `ForceDischarge` window). If a new override's time window overlaps with an existing override of a **different** mode, the action aborts by default to prevent conflicts. Setting `replace_conflicts: true` silently removes the overlapping overrides instead. In entity mode (no multi-window schedule), this parameter has no effect.
 
@@ -175,6 +175,32 @@ action: foxess_control.clear_overrides
 action: foxess_control.clear_overrides
 data:
   mode: ForceCharge
+```
+
+### `foxess_control.disable_scheduler`
+
+Releases the inverter from Mode Scheduler control **now**. Turns the Mode Scheduler master switch off and returns the inverter to its own settings: work mode `SelfUse`, plus your own Min SoC on grid if the integration recorded it. With Mode Scheduler off, local Modbus writes take effect again and a Min SoC below the scheduler's 10% floor becomes possible (issues #16, #4).
+
+Cloud mode only, and takes no parameters.
+
+**It does not require the "Release the inverter when idle" option.** That option governs the *automatic* handback after every smart session; calling this action is the request in its own right. What it will never do is invent a Min SoC — only a floor the integration read *before* it first touched that register is ever put back, and if it never captured one, the register is left alone.
+
+It is **not** a second `clear_overrides`: no schedule group is added or removed, and no session is cancelled. Calling it twice is harmless.
+
+It refuses, with the reason shown in the UI, when:
+
+- a `smart_charge` or `smart_discharge` session is running — disabling the scheduler would strand the live override (C-025). Use `clear_overrides` to stop the session first; that hands back too, if the option is on.
+- the schedule contains work modes this integration does not manage, e.g. `Backup` (C-018). The refusal names the mode; remove it via the FoxESS app.
+- the inverter reports no Mode Scheduler support, or support could not be determined.
+- the integration is in entity mode — there is no cloud Mode Scheduler to release, and no API call is made.
+
+A write the *inverter* rejects does not raise (some firmware and regions do not serve these endpoints): those are recorded in the diagnostics download's recent-errors buffer instead, because by then each step has been attempted independently and some may have succeeded.
+
+The next smart session turns Mode Scheduler back on automatically, so sessions are unaffected.
+
+```yaml
+# Hand the inverter back now, e.g. before a period of local Modbus control
+action: foxess_control.disable_scheduler
 ```
 
 ### `foxess_control.feedin`

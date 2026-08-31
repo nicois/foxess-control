@@ -162,6 +162,10 @@
         }
       }
     },
+    "disable_scheduler": {
+      "name": "Zwolnij falownik teraz",
+      "description": "Wyłącza główny przełącznik Harmonogramu trybów (Mode Scheduler) w falowniku i przywraca mu jego własne ustawienia: tryb pracy Autokonsumpcja (Self Use) oraz Twój własny minimalny SoC w trybie sieciowym, jeśli ta integracja go zapisała. Lokalne sterowanie przez Modbus znów działa, a minimalny SoC poniżej 10% staje się możliwy. Grupy harmonogramu pozostają bez zmian — ta akcja nie usuwa nadpisań. Działa niezależnie od tego, czy opcja „Zwalniaj falownik w bezczynności” jest włączona: samo wywołanie tej akcji jest żądaniem. Zostanie odrzucona, z podaniem powodu, w czasie inteligentnej sesji ładowania lub rozładowania, albo gdy harmonogram zawiera tryby pracy, którymi ta integracja nie zarządza. Następna inteligentna sesja ponownie włączy Harmonogram trybów."
+    },
     "feedin": {
       "name": "Oddawanie do sieci",
       "description": "Oddawać nadwyżkę energii słonecznej do sieci przez określony czas, opcjonalnie o określonej godzinie i limicie mocy.",
@@ -368,6 +372,9 @@
     }
   },
   "exceptions": {
+    "handback_refused": {
+      "message": "Falownik nie został zwolniony ze sterowania Harmonogramem trybów: {reason}"
+    },
     "no_integration": {
       "message": "Nie skonfigurowano integracji FoxESS Control."
     },

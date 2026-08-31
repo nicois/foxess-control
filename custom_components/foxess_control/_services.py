@@ -12,15 +12,20 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.util import dt as dt_util
 
-from ._handback_teardown import async_handback_after_teardown
+from ._handback_teardown import (
+    async_handback_after_teardown,
+    async_handback_on_request,
+)
 from ._helpers import (
     SCHEMA_CLEAR_OVERRIDES,
+    SCHEMA_DISABLE_SCHEDULER,
     SCHEMA_FEEDIN,
     SCHEMA_FORCE_CHARGE,
     SCHEMA_FORCE_DISCHARGE,
     SCHEMA_SMART_CHARGE,
     SCHEMA_SMART_DISCHARGE,
     SERVICE_CLEAR_OVERRIDES,
+    SERVICE_DISABLE_SCHEDULER,
     SERVICE_FEEDIN,
     SERVICE_FORCE_CHARGE,
     SERVICE_FORCE_DISCHARGE,
@@ -207,6 +212,25 @@ def _register_services(hass: HomeAssistant) -> None:
         # ReadTimeout for the caller under load.
         for coro in ws_stops:
             hass.async_create_task(coro, name="foxess_stop_ws_clear_overrides")
+
+    async def handle_disable_scheduler(call: ServiceCall) -> None:
+        """Release the inverter from Mode Scheduler control, on request.
+
+        The manual lever issue #16 asked for by name, and the one place in
+        the integration where handback happens **without** the opt-in
+        option: calling the action is the consent.  See
+        ``_handback_teardown.async_handback_on_request`` for the argument,
+        and for why a refusal raises here when the automatic path may not.
+
+        Not a teardown — no schedule group is added or removed, and no
+        session is cancelled.  A user with a live session gets a refusal
+        naming the session rather than a tidy-up they did not ask for; the
+        service for that is ``clear_overrides``, which hands back too.
+        """
+        _LOGGER.info("Releasing the inverter from Mode Scheduler control on request")
+        await async_handback_on_request(
+            hass, None if _cfg(hass).entity_mode else _get_inverter(hass)
+        )
 
     async def handle_force_charge(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
@@ -769,6 +793,12 @@ def _register_services(hass: HomeAssistant) -> None:
         SERVICE_CLEAR_OVERRIDES,
         _api_error_handler(handle_clear_overrides),
         schema=SCHEMA_CLEAR_OVERRIDES,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_DISABLE_SCHEDULER,
+        _api_error_handler(handle_disable_scheduler),
+        schema=SCHEMA_DISABLE_SCHEDULER,
     )
     hass.services.async_register(
         DOMAIN,

@@ -16,6 +16,11 @@ clear_overrides:
             - Backup
             - Feedin
 
+disable_scheduler:
+  name: Release the inverter now
+  description: >-
+    Turn the inverter's Mode Scheduler master switch off and return it to its own settings: work mode Self Use, plus your own Min SoC on grid if this integration recorded it. Local Modbus control works again, and a Min SoC below 10% becomes possible. Schedule groups are left alone — this does not clear overrides. Works whether or not the "Release the inverter when idle" option is on: calling this action is the request. Refuses, and says why, during a smart charge or discharge session, or if the schedule contains work modes this integration does not manage. The next smart session turns Mode Scheduler back on.
+
 feedin:
   name: Feed-in
   description: >-

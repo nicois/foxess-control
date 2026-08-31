@@ -162,6 +162,10 @@
         }
       }
     },
+    "disable_scheduler": {
+      "name": "Omvormer nu vrijgeven",
+      "description": "Zet de hoofdschakelaar van de Modusplanner (Mode Scheduler) van de omvormer uit en geeft hem terug aan zijn eigen instellingen: werkmodus Eigen gebruik (Self Use) en uw eigen minimale SoC op het net, als deze integratie die heeft vastgelegd. Lokale Modbus-besturing werkt weer en een minimale SoC onder 10 % wordt mogelijk. Planningsgroepen blijven ongewijzigd — dit wist geen overrides. Werkt ongeacht of de optie „Omvormer vrijgeven bij inactiviteit” aan staat: deze actie aanroepen is het verzoek. Wordt met opgaaf van reden geweigerd tijdens een slimme laad- of ontlaadsessie, of als de planning werkmodi bevat die deze integratie niet beheert. De volgende slimme sessie zet de Modusplanner automatisch weer aan."
+    },
     "feedin": {
       "name": "Teruglevering",
       "description": "Lever overtollige zonne-energie terug aan het net voor een ingestelde duur, optioneel op een specifiek tijdstip en vermogenslimiet.",
@@ -372,6 +376,9 @@
     }
   },
   "exceptions": {
+    "handback_refused": {
+      "message": "De omvormer is niet vrijgegeven uit de besturing door de Modusplanner: {reason}"
+    },
     "no_integration": {
       "message": "Geen FoxESS Control-integratie geconfigureerd."
     },

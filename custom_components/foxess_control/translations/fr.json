@@ -162,6 +162,10 @@
         }
       }
     },
+    "disable_scheduler": {
+      "name": "Libérer l'onduleur maintenant",
+      "description": "Désactive l'interrupteur principal du Planificateur de modes (Mode Scheduler) de l'onduleur et le rend à ses propres réglages : mode de fonctionnement Autoconsommation (Self Use) et votre propre SoC minimal sur réseau, si cette intégration l'a enregistré. Le contrôle Modbus local fonctionne à nouveau et un SoC minimal inférieur à 10 % devient possible. Les groupes de planification ne sont pas touchés : cette action n'efface pas les dérogations. Fonctionne que l'option « Libérer l'onduleur au repos » soit activée ou non : appeler cette action constitue la demande. Refusée, avec le motif, pendant une session intelligente de charge ou de décharge, ou si la planification contient des modes que cette intégration ne gère pas. La prochaine session intelligente réactive le Planificateur de modes."
+    },
     "feedin": {
       "name": "Injection réseau",
       "description": "Injecter l'excédent solaire dans le réseau pendant une durée définie, éventuellement à une heure et une limite de puissance spécifiques.",
@@ -368,6 +372,9 @@
     }
   },
   "exceptions": {
+    "handback_refused": {
+      "message": "L'onduleur n'a pas été libéré du contrôle du Planificateur de modes : {reason}"
+    },
     "no_integration": {
       "message": "Aucune intégration FoxESS Control configurée."
     },

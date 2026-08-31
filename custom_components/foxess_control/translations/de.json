@@ -162,6 +162,10 @@
         }
       }
     },
+    "disable_scheduler": {
+      "name": "Wechselrichter jetzt freigeben",
+      "description": "Schaltet den Hauptschalter des Modus-Zeitplans (Mode Scheduler) am Wechselrichter aus und gibt ihn an seine eigenen Einstellungen zurück: Betriebsart Eigenverbrauch (Self Use) sowie Ihr eigener Mindest-SoC am Netz, sofern diese Integration ihn erfasst hat. Die lokale Modbus-Steuerung funktioniert wieder, und ein Mindest-SoC unter 10 % wird möglich. Zeitplan-Gruppen bleiben unverändert – Überschreibungen werden dabei nicht gelöscht. Funktioniert unabhängig davon, ob die Option „Wechselrichter im Ruhezustand freigeben“ aktiviert ist: der Aufruf dieser Aktion ist die Anforderung. Wird während einer intelligenten Lade- oder Entladesitzung oder bei Betriebsarten im Zeitplan, die diese Integration nicht verwaltet, mit Begründung abgelehnt. Die nächste intelligente Sitzung schaltet den Modus-Zeitplan automatisch wieder ein."
+    },
     "feedin": {
       "name": "Einspeisung",
       "description": "Überschüssige Solarenergie für eine bestimmte Dauer ins Netz einspeisen, optional zu einer bestimmten Zeit und Leistungsgrenze.",
@@ -368,6 +372,9 @@
     }
   },
   "exceptions": {
+    "handback_refused": {
+      "message": "Der Wechselrichter wurde nicht aus der Steuerung durch den Modus-Zeitplan freigegeben: {reason}"
+    },
     "no_integration": {
       "message": "Keine FoxESS Control Integration konfiguriert."
     },

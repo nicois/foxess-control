@@ -143,10 +143,28 @@ class TestSetupEntry:
 
     @pytest.mark.asyncio
     async def test_async_setup_registers_services(self) -> None:
-        """Services are registered in async_setup (before any entry loads)."""
+        """Services are registered in async_setup (before any entry loads).
+
+        Asserted by *name* rather than by count.  A bare
+        ``call_count == 7`` says "the number changed" when it breaks, which
+        leaves the reader to work out whether a service was added, removed
+        or renamed — and every one of those needs a ``services.yaml`` entry
+        and ten translations to go with it (C-020).  The set says which.
+        """
         hass = MagicMock()
         assert await async_setup(hass, {}) is True
-        assert hass.services.async_register.call_count == 6
+        registered = {
+            call.args[1] for call in hass.services.async_register.call_args_list
+        }
+        assert registered == {
+            "clear_overrides",
+            "disable_scheduler",
+            "feedin",
+            "force_charge",
+            "force_discharge",
+            "smart_charge",
+            "smart_discharge",
+        }
 
     @pytest.mark.asyncio
     async def test_setup_entry_does_not_register_services(self) -> None:

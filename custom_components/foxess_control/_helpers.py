@@ -45,6 +45,7 @@ _LOGGER = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 SERVICE_CLEAR_OVERRIDES = "clear_overrides"
+SERVICE_DISABLE_SCHEDULER = "disable_scheduler"
 SERVICE_FEEDIN = "feedin"
 SERVICE_FORCE_CHARGE = "force_charge"
 SERVICE_FORCE_DISCHARGE = "force_discharge"
@@ -79,6 +80,11 @@ SCHEMA_CLEAR_OVERRIDES = vol.Schema(
         vol.Optional("mode"): vol.In(VALID_MODES),
     }
 )
+
+# No fields, and deliberately strict (no ``extra=vol.ALLOW_EXTRA``): the
+# action takes no parameters, so a call carrying one is a mistake worth
+# telling the user about rather than silently ignoring.
+SCHEMA_DISABLE_SCHEDULER = vol.Schema({})
 
 SCHEMA_FORCE_CHARGE = vol.Schema(
     {

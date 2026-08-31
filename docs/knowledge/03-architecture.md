@@ -68,9 +68,13 @@ accessors consolidated into frozen `IntegrationConfig` dataclass in
 
 ### `_services.py` — Service handler registration
 **Path**: `custom_components/foxess_control/_services.py`
-**Responsibility**: All six HA service handlers (clear_overrides,
-force_charge, force_discharge, feedin, smart_charge, smart_discharge)
-plus error translation decorator and registration function. Force
+**Responsibility**: All seven HA service handlers (clear_overrides,
+disable_scheduler, force_charge, force_discharge, feedin, smart_charge,
+smart_discharge) plus error translation decorator and registration
+function. `disable_scheduler` is the manual scheduler-handback lever
+(issue #16): it delegates to `_handback_teardown.async_handback_on_request`
+rather than writing the master switch itself, so the C-018 / C-025 guards
+are the same code as the automatic teardown path. Force
 operations (`force_charge`, `force_discharge`) delegate to the shared
 `_do_smart_charge` / `_do_smart_discharge` with `full_power=True`
 (D-045), unifying session lifecycle across force and smart operations.

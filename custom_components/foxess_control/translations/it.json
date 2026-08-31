@@ -162,6 +162,10 @@
         }
       }
     },
+    "disable_scheduler": {
+      "name": "Rilascia subito l'inverter",
+      "description": "Disattiva l'interruttore principale del Pianificatore di modalità (Mode Scheduler) dell'inverter e lo restituisce alle sue impostazioni: modalità di funzionamento Autoconsumo (Self Use) e il tuo SoC minimo in rete, se questa integrazione lo ha registrato. Il controllo Modbus locale torna a funzionare e diventa possibile un SoC minimo inferiore al 10 %. I gruppi di pianificazione non vengono modificati: questa azione non cancella le sostituzioni. Funziona indipendentemente dall'opzione «Rilascia l'inverter quando è inattivo»: chiamare questa azione è la richiesta. Viene rifiutata, spiegando il motivo, durante una sessione intelligente di carica o scarica, o se la pianificazione contiene modalità che questa integrazione non gestisce. La sessione intelligente successiva riattiva il Pianificatore di modalità."
+    },
     "feedin": {
       "name": "Immissione in rete",
       "description": "Immettere l'energia solare in eccesso nella rete per una durata prestabilita, opzionalmente a un orario e limite di potenza specifici.",
@@ -368,6 +372,9 @@
     }
   },
   "exceptions": {
+    "handback_refused": {
+      "message": "L'inverter non è stato rilasciato dal controllo del Pianificatore di modalità: {reason}"
+    },
     "no_integration": {
       "message": "Nessuna integrazione FoxESS Control configurata."
     },

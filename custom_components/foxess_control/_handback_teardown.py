@@ -1,8 +1,22 @@
-"""Execute the scheduler-handback plan when a session's override comes off.
+"""Execute the scheduler-handback plan: at teardown, or when asked.
 
 ``handback.plan_handback`` decides; this module does.  It is the only place
 in the integration that turns the Mode Scheduler master switch **off**, and
-it is deliberately the last thing to happen at a session boundary.
+at a session boundary it is deliberately the last thing to happen.
+
+Two entry points, one executor:
+
+* :func:`async_handback_after_teardown` — automatic, gated on the opt-in
+  option, and **never raises** (see below).
+* :func:`async_handback_on_request` — the ``disable_scheduler`` action
+  (issue #16 asked for it by name).  It does **not** consult the option,
+  and it **raises** ``ServiceValidationError`` on a refusal.
+
+Both differences are deliberate and are argued at
+:func:`async_handback_on_request`.  Everything else — every guard, the
+order, the per-step failure handling, the outcome record — is shared, so
+"the action applies the same policy" is a property of there being one
+implementation rather than of two of them agreeing.
 
 **The order is load-bearing.**
 
@@ -17,14 +31,22 @@ P-001 one.  So the group removal is the caller's job and has already
 succeeded by the time anything here runs: every hook calls this *after* its
 own removal, never before, and never in the same try block.
 
-Correspondingly, **nothing here may raise**.  The caller's removal has
-already happened; the teardown paths in ``smart_battery/listeners.py``
-treat an exception out of ``remove_override`` as "the override is still on"
-and queue a retry via ``pending_override_cleanup``.  A handback failure
-that propagated would therefore be reported to the user as a failed
-override removal, which is both wrong and alarming.  C-025 outranks this
-whole feature (P-002 over P-005): the override coming off must never be
-made conditional on the inverter being handed back.
+Correspondingly, **nothing on the teardown path may raise**.  The caller's
+removal has already happened; the teardown paths in
+``smart_battery/listeners.py`` treat an exception out of ``remove_override``
+as "the override is still on" and queue a retry via
+``pending_override_cleanup``.  A handback failure that propagated would
+therefore be reported to the user as a failed override removal, which is
+both wrong and alarming.  C-025 outranks this whole feature (P-002 over
+P-005): the override coming off must never be made conditional on the
+inverter being handed back.
+
+:func:`async_handback_on_request` is the one exception, and only because it
+is not on that path: no override has just come off, nothing is waiting to
+be retried, and a user is holding a service call open.  It raises on a
+refusal for the same reason the teardown must not — whoever is listening
+needs the truth (C-020).  A device that refuses a *write* still does not
+raise, on either path.
 
 Three step failures are independent on purpose.  If the master switch
 write fails, the work mode and the Min SoC restore are still attempted:
@@ -45,6 +67,9 @@ import datetime
 import logging
 from typing import TYPE_CHECKING
 
+from homeassistant.exceptions import ServiceValidationError
+
+from .const import DOMAIN
 from .handback import plan_handback
 
 if TYPE_CHECKING:
@@ -130,16 +155,104 @@ async def async_handback_after_teardown(
 async def _handback(hass: HomeAssistant, inverter: Inverter | None) -> None:
     from ._helpers import _cfg, _dd
 
-    cfg = _cfg(hass)
     dd = _dd(hass)
+    plan = await _decide(hass, dd, inverter, enabled=_cfg(hass).scheduler_handback)
+    if not plan.act or inverter is None:
+        _record_outcome(dd, plan, steps={})
+        _LOGGER.debug("Scheduler handback declined: %s", plan.reason)
+        return
+
+    await _execute(hass, dd, inverter, plan)
+
+
+async def async_handback_on_request(
+    hass: HomeAssistant, inverter: Inverter | None
+) -> None:
+    """Release the inverter now, because the user asked (issue #16).
+
+    Backs the ``foxess_control.disable_scheduler`` action.  Two deliberate
+    differences from :func:`async_handback_after_teardown`, and no others:
+
+    **1. The opt-in option is not consulted.**  ``enabled=True`` is passed
+    to the policy unconditionally, because the service call *is* the
+    consent.  The option exists so that an upgrade does not start writing
+    to hundreds of inverters unasked; it governs the *automatic* behaviour
+    at a session boundary.  Making the action honour it as well would leave
+    the person in issue #16 — who wants their inverter released but not
+    after every session — with an action that refuses until they enable the
+    thing they were avoiding, i.e. with no action at all.
+
+    This is not a licence to invent a Min SoC.  The floor still comes from
+    ``dd.captured_min_soc_on_grid`` and nowhere else, and ``None`` still
+    means restore nothing: capture is ungated (only the *write* half of
+    ``_min_soc_capture`` checks the option), so an install that never opted
+    in already knows the user's own floor and can put exactly that back.
+    P-002 is not something an explicit call can waive.
+
+    **2. A refusal raises.**  The teardown hook must never raise — the
+    listener reads an exception out of ``remove_override`` as "the override
+    is still on" and queues a retry — but here there is a user waiting on a
+    service call, and an action that silently does nothing is worse than no
+    action, because they will conclude their inverter was released (C-020).
+    Every ``act=False`` plan therefore becomes a
+    ``ServiceValidationError`` naming the reason, including the
+    unmanaged-mode refusal, which names the offending mode so "remove it in
+    the FoxESS app" is actionable advice (C-018).
+
+    A **step** failure does not raise, and that asymmetry is the point: a
+    refusal happens before anything is attempted, so "nothing happened,
+    here is why" is the whole truth.  A step failure happens after all
+    three independent steps have been attempted and some may have taken
+    effect, so an exception would misreport a partial handback as a total
+    one.  Those are surfaced where partial truths belong — the outcome
+    record and the recent-errors buffer (C-026, D-059).
+
+    Deliberately **not** a session teardown: no schedule group is added or
+    removed.  ``clear_overrides`` already does that, and a user asking for
+    local control back should not silently lose a group they built.
+    """
+    from ._helpers import _dd
+
+    dd = _dd(hass)
+    plan = await _decide(hass, dd, inverter, enabled=True)
+    if not plan.act or inverter is None:
+        _record_outcome(dd, plan, steps={})
+        _LOGGER.info("Refused to release the inverter: %s", plan.reason)
+        raise _refused(plan.reason)
+
+    # A race with a session that started mid-flight is a refusal too — the
+    # executor has already put the master switch back and abandoned the
+    # rest, so the caller must not be told the inverter was released.
+    refusal = await _execute(hass, dd, inverter, plan)
+    if refusal is not None:
+        raise _refused(refusal)
+
+
+async def _decide(
+    hass: HomeAssistant,
+    dd: FoxESSControlData,
+    inverter: Inverter | None,
+    *,
+    enabled: bool,
+) -> HandbackPlan:
+    """Build the plan, paying for inputs only when they can change it.
+
+    Shared by both entry points, so "the action applies the same guards" is
+    a property of there being one implementation rather than of two of them
+    happening to agree.  *enabled* is the only input that differs: the
+    teardown hook passes the option, the action passes ``True``.
+    """
+    from ._helpers import _cfg
+
+    cfg = _cfg(hass)
 
     # The session snapshot is taken FIRST, before any I/O, so that the
-    # window between it and the first write is exactly the window the
-    # re-checks below cover.  Gathering it late would shrink the window
-    # while making it untestable, which is the worse trade.
+    # window between it and the first write is exactly the window
+    # ``_execute``'s re-checks cover.  Gathering it late would shrink the
+    # window while making it untestable, which is the worse trade.
     session_active = _session_active(dd)
 
-    if not cfg.scheduler_handback or cfg.entity_mode or inverter is None:
+    if not enabled or cfg.entity_mode or inverter is None:
         # Decline without touching the network.  ``plan_handback`` would
         # decline on any of these three (``scheduler_supported=None`` is
         # the "could not determine" decline, which is the honest answer
@@ -149,17 +262,14 @@ async def _handback(hass: HomeAssistant, inverter: Inverter | None) -> None:
         # install issues no new API calls" true rather than aspirational:
         # probing scheduler support on every session boundary of every
         # install that never opted in would be a real cost.
-        plan = plan_handback(
-            enabled=cfg.scheduler_handback,
+        return plan_handback(
+            enabled=enabled,
             entity_mode=cfg.entity_mode,
             session_active=session_active,
             unmanaged_modes=[],
             scheduler_supported=None,
             captured_min_soc_on_grid=None,
         )
-        _record_outcome(dd, plan, steps={})
-        _LOGGER.debug("Scheduler handback declined: %s", plan.reason)
-        return
 
     unmanaged = await _unmanaged_modes(hass, inverter)
     if unmanaged is None:
@@ -169,18 +279,13 @@ async def _handback(hass: HomeAssistant, inverter: Inverter | None) -> None:
         # its own reason rather than squeezed into one of plan_handback's,
         # because "could not find out" and "found out and declined" send a
         # user to look in completely different places (C-020).
-        _record_outcome(
-            dd,
-            _declined(
-                "could not read the inverter schedule, so whether it contains "
-                "work modes this integration does not manage is unknown — the "
-                "inverter was left exactly as it is"
-            ),
-            steps={},
+        return _declined(
+            "could not read the inverter schedule, so whether it contains "
+            "work modes this integration does not manage is unknown — the "
+            "inverter was left exactly as it is"
         )
-        return
 
-    plan = plan_handback(
+    return plan_handback(
         enabled=True,
         entity_mode=False,
         session_active=session_active,
@@ -190,12 +295,23 @@ async def _handback(hass: HomeAssistant, inverter: Inverter | None) -> None:
         ),
         captured_min_soc_on_grid=dd.captured_min_soc_on_grid,
     )
-    if not plan.act:
-        _record_outcome(dd, plan, steps={})
-        _LOGGER.debug("Scheduler handback declined: %s", plan.reason)
-        return
 
-    await _execute(hass, dd, inverter, plan)
+
+def _refused(reason: str) -> ServiceValidationError:
+    """The exception a refused ``disable_scheduler`` call raises.
+
+    The reason is passed both positionally (so logs and tests see it
+    without a translation cache) and as a placeholder (so the HA UI renders
+    the localised wrapper).  ``ServiceValidationError`` rather than
+    ``HomeAssistantError`` because nothing went wrong — the request was
+    valid and the answer is no.
+    """
+    return ServiceValidationError(
+        f"The inverter was not released from Mode Scheduler control: {reason}",
+        translation_domain=DOMAIN,
+        translation_key="handback_refused",
+        translation_placeholders={"reason": reason},
+    )
 
 
 async def _execute(
@@ -203,8 +319,17 @@ async def _execute(
     dd: FoxESSControlData,
     inverter: Inverter,
     plan: HandbackPlan,
-) -> None:
-    """Carry out *plan*, one independently-failing step at a time."""
+) -> str | None:
+    """Carry out *plan*, one independently-failing step at a time.
+
+    Returns ``None`` when the plan was carried out (whether or not its
+    individual steps succeeded — those are reported through the outcome
+    record and the error buffer), or the refusal reason when a race with a
+    starting session made it abandon.  The teardown hook ignores the
+    return; the ``disable_scheduler`` action turns it into the exception the
+    caller sees, because the one thing worse than the action refusing is
+    the action refusing quietly (C-020).
+    """
     steps: dict[str, str] = {}
 
     # --- Race guard, part 1: re-check immediately before the first write.
@@ -219,7 +344,7 @@ async def _execute(
     if _session_active(dd):
         _record_outcome(dd, _declined(_RACE_REASON), steps=steps)
         _LOGGER.info("Scheduler handback abandoned: %s", _RACE_REASON)
-        return
+        return _RACE_REASON
 
     # --- Step 1: the Mode Scheduler master switch.
     if plan.disable_scheduler:
@@ -248,7 +373,7 @@ async def _execute(
             await _reenable_for_session(hass, inverter, steps)
             _record_outcome(dd, _declined(_RACE_REASON), steps=steps)
             _LOGGER.warning("Scheduler handback reverted: %s", _RACE_REASON)
-            return
+            return _RACE_REASON
 
     # --- Step 2: the device's own work-mode setting.
     #
@@ -306,6 +431,7 @@ async def _execute(
             plan.work_mode,
             "left as it was" if floor is None else f"{floor}%",
         )
+    return None
 
 
 _RACE_REASON = (

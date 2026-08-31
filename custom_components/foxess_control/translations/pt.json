@@ -162,6 +162,10 @@
         }
       }
     },
+    "disable_scheduler": {
+      "name": "Libertar o inversor agora",
+      "description": "Desliga o interruptor principal do Programador de modos (Mode Scheduler) do inversor e devolve-o às suas próprias definições: modo de funcionamento Autoconsumo (Self Use) e o seu próprio SoC mínimo na rede, se esta integração o tiver registado. O controlo local por Modbus volta a funcionar e passa a ser possível um SoC mínimo inferior a 10 %. Os grupos do programador ficam intactos — isto não limpa as substituições. Funciona esteja ou não activada a opção «Libertar o inversor quando inactivo»: chamar esta acção é o pedido. É recusada, indicando o motivo, durante uma sessão inteligente de carga ou descarga, ou se o programador contiver modos de funcionamento que esta integração não gere. A sessão inteligente seguinte volta a ligar o Programador de modos."
+    },
     "feedin": {
       "name": "Injeção na rede",
       "description": "Injetar o excedente solar na rede por um período definido, opcionalmente num horário e limite de potência específicos.",
@@ -368,6 +372,9 @@
     }
   },
   "exceptions": {
+    "handback_refused": {
+      "message": "O inversor não foi libertado do controlo do Programador de modos: {reason}"
+    },
     "no_integration": {
       "message": "Nenhuma integração FoxESS Control configurada."
     },
