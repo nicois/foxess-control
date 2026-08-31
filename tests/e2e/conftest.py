@@ -513,18 +513,34 @@ _PAGE_DIAGNOSTICS: WeakKeyDictionary[Any, deque[str]] = WeakKeyDictionary()
 
 
 def attach_page_diagnostics(page: Any) -> deque[str]:
-    """Record console output, page errors and failed requests for ``page``.
+    """Record console output, page errors, failed requests and navigations.
 
     Returns the (bounded) buffer, which ``_capture_failure`` embeds in the
     failure summary and writes alongside the HTML/PNG capture.  Attach once
     per page, immediately after it is created and *before* navigating, so
     load-time failures are captured.
+
+    Navigations are recorded because inferring one is not good enough.  The
+    reproduction of the run-33380962649 form-wait failure showed two
+    in-flight frontend assets aborting with ``net::ERR_ABORTED`` — a strong
+    hint that the document had been replaced mid-load, and no more than a
+    hint.  A navigation that lands between the click and the wait produces
+    a fresh card with no form state and raises no "Execution context was
+    destroyed", so no retry path engages and the wait polls a healthy idle
+    card until its budget expires; that is indistinguishable, in the
+    artefacts, from a click that was simply dropped.  The main frame is
+    marked separately because only a main-frame navigation replaces the
+    card.
     """
     entries: deque[str] = deque(maxlen=_MAX_DIAGNOSTIC_ENTRIES)
 
     def _on_console(message: Any) -> None:
         if message.type in ("error", "warning"):
             entries.append(f"console[{message.type}] {message.text}")
+
+    def _on_navigated(frame: Any) -> None:
+        scope = "main" if frame == page.main_frame else "subframe"
+        entries.append(f"navigated[{scope}] {frame.url}")
 
     page.on("console", _on_console)
     page.on("pageerror", lambda exc: entries.append(f"pageerror {exc}"))
@@ -534,6 +550,7 @@ def attach_page_diagnostics(page: Any) -> deque[str]:
             f"requestfailed {request.url} :: {request.failure}"
         ),
     )
+    page.on("framenavigated", _on_navigated)
     _PAGE_DIAGNOSTICS[page] = entries
     return entries
 
