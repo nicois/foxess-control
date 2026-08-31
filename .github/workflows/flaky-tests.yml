@@ -39,7 +39,21 @@ jobs:
   e2e-tests:
     needs: [gate]
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Half the E2E suite is ~87 tests, which takes 16-30 min on a GitHub
+    # runner.  30 was too tight: on v1.0.22-beta.6 ten of twenty jobs were
+    # cancelled at exactly the limit while every job that finished passed —
+    # a time limit reported as a red workflow, with no test actually failing.
+    #
+    # The earlier per-test selection fix (v1.0.22-beta.5) removed the *variance*
+    # in job size, which was a third of the matrix drawing 166 of 174 tests.
+    # It did not make the jobs fast, and the judgement at the time that they
+    # "were not legitimately slow" was wrong: at a flat 87 tests they run to
+    # 30 min, and the E2E suite has since grown a cold-browser-context class
+    # for the panel-load recovery tests.
+    #
+    # 50 gives headroom over the observed 30 min ceiling without hiding a
+    # genuine hang — a job that reaches 50 min is broken, not merely loaded.
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
