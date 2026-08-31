@@ -102,9 +102,14 @@ async def async_get_config_entry_diagnostics(
     from ._helpers import _cfg
 
     try:
-        _entity_mode = _cfg(hass).entity_mode
+        _config = _cfg(hass)
     except Exception:  # diagnostics must never raise
-        _entity_mode = False
+        _config = None
+    _entity_mode = _config.entity_mode if _config else False
+    # ``None`` rather than False when the config could not be read: setup may
+    # not have got that far, and reporting False would be a confident claim
+    # about a setting nobody looked at (C-020).
+    _handback_enabled = _config.scheduler_handback if _config else None
 
     return async_redact_data(
         {
@@ -124,6 +129,7 @@ async def async_get_config_entry_diagnostics(
             "environment": environment,
             "recent_errors": recent_errors,
             "schedule": _schedule_section(domain_data, _entity_mode, inverter),
+            "handback": _handback_section(domain_data, _handback_enabled, inverter),
         },
         REDACT_KEYS,
     )
@@ -175,6 +181,55 @@ def _schedule_section(
         "reconcile": getattr(domain_data, "last_schedule_reconcile", None),
         "last_write_failure": getattr(inverter, "last_write_failure", None),
         "last_write_ok_at": getattr(inverter, "last_write_ok_at", None),
+    }
+
+
+def _handback_section(
+    domain_data: FoxESSControlData, enabled: bool | None, inverter: Any = None
+) -> dict[str, Any]:
+    """Report everything the scheduler handback remembered and last did.
+
+    Pure export: nothing here is computed, and nothing here does I/O.  The
+    handback is opt-in and off by default, so on almost every install every
+    one of its outcomes is a *decline* — which makes this section the only
+    place a support request can answer "why is my inverter still
+    scheduler-controlled?" for an install where, by design, nothing happened
+    (issues #16, #4; C-020, C-026, D-059).  It is therefore reported
+    unconditionally: ``enabled: false`` is itself the answer, and a section
+    that appeared only once the feature had fired would be missing from every
+    report that needed it.
+
+    ``enabled`` is ``null`` when the config could not be read at all — setup
+    may have failed part-way — because reporting ``false`` would be a claim
+    about a setting nobody looked at.
+
+    ``captured_min_soc_on_grid`` is the user's own floor as read *before* this
+    integration ever wrote to that register, and ``0`` is a real value: issue
+    #4 is precisely a 0 % floor, which the Mode Scheduler itself refuses to
+    accept.  So it is reported verbatim and ``min_soc_capture`` names the two
+    cases separately — a falsy test here would render "captured 0" and "never
+    captured" identically and quietly erase the feature's own use case.
+
+    ``last_handback`` is ``domain_data.last_handback`` verbatim, declines and
+    their reasons included (see ``_handback_teardown._record_outcome``).  A
+    plain dict by contract, so this exporter needs no knowledge of the
+    handback modules.
+
+    ``scheduler_flag`` is the *last known* master-switch state from
+    ``Inverter.scheduler_flag_snapshot``, which never triggers a request —
+    ``null`` when nothing has ever read it, which is deliberately distinct
+    from "read, and it is off".  Diagnostics is downloaded because something
+    is already wrong; fetching it on demand here could hang or rate-limit the
+    one download that would have explained the problem.
+    """
+    captured = getattr(domain_data, "captured_min_soc_on_grid", None)
+    snapshot = getattr(inverter, "scheduler_flag_snapshot", None)
+    return {
+        "enabled": enabled,
+        "captured_min_soc_on_grid": captured,
+        "min_soc_capture": "never captured" if captured is None else "captured",
+        "last_handback": getattr(domain_data, "last_handback", None),
+        "scheduler_flag": snapshot if isinstance(snapshot, dict) else None,
     }
 
 

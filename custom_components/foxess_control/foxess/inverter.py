@@ -84,6 +84,10 @@ class Inverter:
         self._scheduler_max_group_count: int | None = None
         self._warned_work_modes: set[str] = set()
         self._warned_scheduler_enable = False
+        # Last known state of the Mode Scheduler master switch, for the
+        # diagnostics download to report without making a request.  See
+        # :attr:`scheduler_flag_snapshot`.
+        self._scheduler_flag: dict[str, Any] | None = None
         # Observability for errno 40257 (issue #17): the device rejects a
         # schedule write *wholesale* and names no field, so the only way to
         # find the offending parameter is to compare what we sent against
@@ -436,9 +440,53 @@ class Inverter:
                 f"unexpected Mode Scheduler flag response ({result!r}); "
                 "whether it supports Mode Scheduler is unknown"
             )
-        return {
+        flag = {
             "enable": bool(result.get("enable", False)),
             "support": bool(result.get("support", False)),
+        }
+        self._remember_scheduler_flag(flag["enable"], flag["support"], source="read")
+        return flag
+
+    @property
+    def scheduler_flag_snapshot(self) -> dict[str, Any] | None:
+        """Last known Mode Scheduler master-switch state, or ``None``.
+
+        ``{"enable": bool, "support": bool | None, "as_of": iso, "source":
+        "read" | "write"}``.  Never triggers I/O, so it is safe to read from
+        the event loop — specifically from the diagnostics platform, which is
+        downloaded *because* something is already wrong and must not make a
+        call that can hang or rate-limit.
+
+        ``None`` means **nothing has ever observed the switch**, which is
+        deliberately distinct from "observed, and it is off": issue #16 is a
+        user whose inverter stayed scheduler-controlled, and "we never
+        looked" and "we looked and it was off" send triage to opposite
+        places (C-020, P-005).  ``support`` is ``None`` when the switch was
+        only ever *written*, because a successful write says nothing about
+        the ``support`` flag.
+
+        Tracks writes as well as reads, and that is not tidiness.  The
+        handback reads the flag (``probe_scheduler_support``) and *then*
+        turns the switch off, so a snapshot of reads alone would report
+        ``enable: True`` for an inverter this integration had just released
+        — the download contradicting the device it is describing.
+        """
+        return dict(self._scheduler_flag) if self._scheduler_flag is not None else None
+
+    def _remember_scheduler_flag(
+        self, enable: bool, support: bool | None, *, source: str
+    ) -> None:
+        """Record the master-switch state for :attr:`scheduler_flag_snapshot`."""
+        if support is None and self._scheduler_flag is not None:
+            # A write does not re-answer "does this device support Mode
+            # Scheduler?", so an earlier read's answer is kept rather than
+            # downgraded to "unknown".
+            support = self._scheduler_flag.get("support")
+        self._scheduler_flag = {
+            "enable": enable,
+            "support": support,
+            "as_of": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
+            "source": source,
         }
 
     def probe_scheduler_support(self) -> bool | None:
@@ -473,6 +521,10 @@ class Inverter:
             _SCHEDULER_SET_ENDPOINT,
             {"deviceSN": self.sn, "enable": 1 if enable else 0},
         )
+        # Only after the POST returned: recording an intended state the
+        # device rejected would make the diagnostics download assert a
+        # switch position that never happened.
+        self._remember_scheduler_flag(enable, None, source="write")
 
     def _ensure_scheduler_enabled(self) -> None:
         """Turn the master switch on before a schedule write, best-effort.
