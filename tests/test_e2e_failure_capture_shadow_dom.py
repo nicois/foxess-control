@@ -632,6 +632,86 @@ class TestBrowserDiagnosticsLogIsAlwaysWritten:
         )
 
 
+class TestNavigationsAreRecorded:
+    """A navigation on the page under test must be stated, not inferred.
+
+    Reproducing the run-33380962649 failure locally (once in ~1200 replays
+    of the body, under deliberate CPU load) produced a capture whose only
+    unexplained content was two aborted asset loads::
+
+        requestfailed .../static/translations/en-GB-<hash>.json
+            :: net::ERR_ABORTED
+        requestfailed .../frontend_latest/80125.<hash>.js
+            :: net::ERR_ABORTED
+
+    ``net::ERR_ABORTED`` on two in-flight frontend assets *hints* that the
+    document was replaced mid-load, but it does not say so, and the
+    difference decides the diagnosis.  A navigation that lands between the
+    click and the wait gives a brand-new card with no form state and
+    raises no "Execution context was destroyed" — so the retry paths never
+    engage and the wait polls a healthy idle card for its whole budget.
+    That is exactly the failure the capture showed, and
+    ``_set_form_value`` already carries a recovery branch for it ("Form was
+    closed (e.g. by a navigation that completed without triggering a
+    context error)"), so it is a mode this harness has met before.
+
+    Recording navigations turns that inference into a fact for the next
+    occurrence.  This is deliberately a *diagnostic* addition, not a fix:
+    1600 instrumented replays showed the click always landing and always
+    rendering the form, so no branch has yet been shown to need changing.
+    """
+
+    def test_navigations_reach_the_diagnostics_log(
+        self, page: Page, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Both documents in a two-navigation page must be named."""
+        _surface("attach_page_diagnostics")(page)
+        page.goto("data:text/html,<p>MARKER-FIRST-DOC</p>")
+        page.goto("data:text/html,<p>MARKER-SECOND-DOC</p>")
+
+        monkeypatch.setattr(e2e_conftest, "_failure_capture_dir", lambda: tmp_path)
+        e2e_conftest._capture_failure(page, "form-input: wait_for_form")
+        logs = sorted(tmp_path.glob("*.log"))
+        assert logs, "no diagnostics log written"
+        text = logs[-1].read_text()
+
+        assert "MARKER-FIRST-DOC" in text and "MARKER-SECOND-DOC" in text, (
+            "the log must name every document this page navigated to — a "
+            "navigation between the click and the wait is the difference "
+            "between a lost click and a replaced card, and the capture "
+            f"currently reports neither.  Got:\n{text}"
+        )
+        assert "navigat" in text.lower(), (
+            "the entries must say in words that they are navigations, not "
+            f"leave a reader to recognise a bare URL.  Got:\n{text}"
+        )
+
+    def test_a_page_that_never_navigated_claims_no_navigation(
+        self, page: Page, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Negative control: no navigation, no navigation entry.
+
+        Without this the requirement could be met by emitting a navigation
+        line unconditionally, which would assert the very thing the next
+        diagnosis needs to rule out.
+        """
+        _surface("attach_page_diagnostics")(page)
+
+        monkeypatch.setattr(e2e_conftest, "_failure_capture_dir", lambda: tmp_path)
+        e2e_conftest._capture_failure(page, "form-input: wait_for_form")
+        logs = sorted(tmp_path.glob("*.log"))
+        assert logs, "no diagnostics log written"
+        text = logs[-1].read_text()
+
+        navigations = [
+            line for line in text.splitlines() if line.lower().startswith("navigat")
+        ]
+        assert not navigations, (
+            "a page that never navigated must not report a navigation; "
+            f"got {navigations}"
+        )
+
+
 class TestWaitForFormFailureIsSelfExplanatory:
     """The raised message must name the capture it just wrote.
 
