@@ -75,6 +75,15 @@ _HELPER_FUNCTIONS: dict[str, frozenset[str]] = {
             # ``contextlib.suppress`` so a destroyed context can never
             # propagate — the retry layer does not apply.
             "_capture_failure",
+            # Shadow-piercing HTML dump, called only from
+            # ``_capture_failure``.  Deliberately *not* routed through a
+            # retry helper: the capture runs after a failure has already
+            # been decided, so retrying would extend a failing test's
+            # runtime for no diagnostic gain, and re-entering the retry
+            # layer from inside the capture risks recursing back into it.
+            # It handles its own failure by falling back to
+            # ``page.content()``.
+            "capture_html",
         }
     ),
 }

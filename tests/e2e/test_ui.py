@@ -2247,18 +2247,20 @@ class TestFormInputPersistence:
         context.  When that happens, wait for the page to settle, re-open
         the form if one was expected, and retry.
         """
-        from .conftest import _capture_failure
+        from .conftest import capture_and_annotate
 
         for attempt in range(retries + 1):
             try:
                 return page.evaluate(expression)
             except PlaywrightError as exc:
                 if "Execution context was destroyed" not in str(exc):
-                    _capture_failure(page, "form-input: safe_evaluate")
-                    raise
+                    raise capture_and_annotate(
+                        page, "form-input: safe_evaluate", exc
+                    ) from exc
                 if attempt == retries:
-                    _capture_failure(page, "form-input: safe_evaluate")
-                    raise
+                    raise capture_and_annotate(
+                        page, "form-input: safe_evaluate", exc
+                    ) from exc
                 # Page navigated — wait for it to settle, then
                 # re-open the form (navigation resets card state).
                 self._recover_form(page)
@@ -2379,7 +2381,7 @@ class TestFormInputPersistence:
         )
 
     def _wait_for_form(self, page: Page) -> None:
-        from .conftest import _capture_failure
+        from .conftest import capture_and_annotate
 
         for attempt in range(3):
             try:
@@ -2399,12 +2401,20 @@ class TestFormInputPersistence:
                 # and context-destroyed navigations. Capture DOM before any
                 # raise that exits the method so the next occurrence is
                 # diagnosable; control flow / retry count is unchanged.
+                #
+                # capture_and_annotate re-raises the *same exception type*
+                # with the capture summary appended.  Playwright's own text
+                # ("Timeout 10000ms exceeded.") does not even say that
+                # artefacts exist, which is how run 33380962649 reached a
+                # human as an unexplained timeout.
                 if "Execution context was destroyed" not in str(exc):
-                    _capture_failure(page, "form-input: wait_for_form")
-                    raise
+                    raise capture_and_annotate(
+                        page, "form-input: wait_for_form", exc
+                    ) from exc
                 if attempt == 2:
-                    _capture_failure(page, "form-input: wait_for_form")
-                    raise
+                    raise capture_and_annotate(
+                        page, "form-input: wait_for_form", exc
+                    ) from exc
                 # Page navigated — recover card + form
                 self._recover_form(page)
 

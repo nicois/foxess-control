@@ -549,6 +549,228 @@ def _failure_capture_dir() -> Path:
     return d
 
 
+# ---------------------------------------------------------------------------
+# HTML capture that can actually contain a card.
+#
+# ``page.content()`` is ``document.documentElement.outerHTML``, and
+# ``outerHTML`` does not serialise shadow roots.  Every FoxESS card sits
+# four shadow hops inside HA (``home-assistant`` → ``home-assistant-main``
+# → ``ha-panel-lovelace`` → ``hui-*`` → ``foxess-control-card``), so the
+# dump for the run-33380962649 form-wait failure stopped at
+# ``<home-assistant>``: grepping it for ``ha-textfield``, ``form-start`` or
+# ``No active operations`` returned nothing, even though the accompanying
+# screenshot plainly showed all three.  The one question the failing test
+# asked — did the form ever open? — was unanswerable from the artefact.
+#
+# The walk below expands every *open* shadow root inline, delimited by
+# self-describing comments so a reader can tell shadow content from light
+# DOM.  Closed roots are not exposed to script and are necessarily absent.
+#
+# Three properties the walk must keep:
+#   exactly once  Each element is emitted once, in document order.  A
+#                 subtree containing no shadow host is handed to
+#                 ``outerHTML`` verbatim — exact fidelity, and it keeps
+#                 the cost near that of the browser's own serialiser.
+#   bounded       Depth and total size are capped and the cap is *stated*
+#                 in the output.  Unbounded recursion would throw, and
+#                 ``_capture_failure`` suppresses exceptions — so a
+#                 pathological DOM would silently produce no ``.html`` at
+#                 all, strictly worse than the shallow dump it replaces.
+#   cycle-safe    A node already emitted is reported as a cycle rather
+#                 than re-entered.
+# ---------------------------------------------------------------------------
+
+_DEEP_HTML_MAX_DEPTH = 200
+_DEEP_HTML_MAX_CHARS = 3_000_000
+
+_DEEP_HTML_HEADER = (
+    "<!-- FoxESS E2E failure capture.\n"
+    "     Open shadow roots are expanded INLINE, each wrapped in a pair of\n"
+    '     "#shadow-root (open) of TAG" / "/#shadow-root (open) of TAG"\n'
+    "     comments.  Anything outside such a pair is light DOM.  Closed\n"
+    "     shadow roots cannot be read from script and are absent (their\n"
+    "     host element is still shown).  Depth and size caps announce\n"
+    "     themselves in-place if reached. -->\n"
+)
+
+_DEEP_HTML_JS = """() => {
+    const MAX_DEPTH = __MAX_DEPTH__;
+    const MAX_CHARS = __MAX_CHARS__;
+    const out = [];
+    let size = 0;
+    let stopped = false;
+    const seen = new WeakSet();
+
+    function push(s) {
+        if (stopped) return;
+        if (size + s.length > MAX_CHARS) {
+            out.push('\\n<!-- CAPTURE TRUNCATED: ' + MAX_CHARS +
+                     ' character budget exhausted -->\\n');
+            stopped = true;
+            return;
+        }
+        out.push(s);
+        size += s.length;
+    }
+    function escText(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;');
+    }
+    function openTag(el) {
+        let s = '<' + el.localName;
+        for (const a of el.attributes) {
+            s += ' ' + a.name + '="' +
+                 String(a.value).replace(/&/g, '&amp;')
+                                .replace(/"/g, '&quot;')
+                                .replace(/</g, '&lt;') + '"';
+        }
+        return s + '>';
+    }
+    // Every element in `root` that is, or contains, an open shadow host.
+    // Anything outside this set can be emitted with outerHTML unchanged.
+    function hostsWithin(root) {
+        const marked = new Set();
+        for (const el of root.querySelectorAll('*')) {
+            if (!el.shadowRoot) continue;
+            let cur = el;
+            while (cur && cur !== root && !marked.has(cur)) {
+                marked.add(cur);
+                cur = cur.parentNode;
+            }
+        }
+        return marked;
+    }
+    function emitRoot(root, depth) {
+        const marked = hostsWithin(root);
+        for (const child of Array.from(root.childNodes)) {
+            emitNode(child, depth, marked);
+        }
+    }
+    function emitNode(node, depth, marked) {
+        if (stopped) return;
+        if (node.nodeType === 3) { push(escText(node.nodeValue)); return; }
+        if (node.nodeType === 8) {
+            push('<!--' + String(node.nodeValue).replace(/--/g, '- -') + '-->');
+            return;
+        }
+        if (node.nodeType === 10) { push('<!DOCTYPE ' + node.name + '>\\n'); return; }
+        if (node.nodeType !== 1) return;
+        const tag = node.localName;
+        if (seen.has(node)) {
+            push('<!-- CYCLE: ' + tag + ' already serialised -->');
+            return;
+        }
+        seen.add(node);
+        if (depth >= MAX_DEPTH) {
+            push('<!-- DEPTH LIMIT ' + MAX_DEPTH + ' reached at ' + tag + ' -->');
+            return;
+        }
+        if (!node.shadowRoot && !marked.has(node)) { push(node.outerHTML); return; }
+        push(openTag(node));
+        if (node.shadowRoot) {
+            push('\\n<!-- #shadow-root (open) of ' + tag + ' -->\\n');
+            emitRoot(node.shadowRoot, depth + 1);
+            push('\\n<!-- /#shadow-root (open) of ' + tag + ' -->\\n');
+        }
+        for (const child of Array.from(node.childNodes)) {
+            emitNode(child, depth + 1, marked);
+        }
+        push('</' + tag + '>');
+    }
+    try {
+        emitRoot(document, 0);
+    } catch (e) {
+        // Report in-band rather than throwing.  A thrown error would
+        // discard everything emitted so far and send Python down the
+        // shallow-dump fallback, losing both the partial tree and the
+        // reason — and the reason belongs in the artefact the reader is
+        // already looking at, not only in a CI log line.
+        out.push('\\n<!-- SERIALISER ERROR after ' + out.length +
+                 ' fragments: ' + e + ' -->\\n');
+    }
+    return out.join('');
+}""".replace("__MAX_DEPTH__", str(_DEEP_HTML_MAX_DEPTH)).replace(
+    "__MAX_CHARS__", str(_DEEP_HTML_MAX_CHARS)
+)
+
+
+def capture_html(page: Any) -> str:
+    """Document HTML with open shadow roots expanded inline.
+
+    Falls back to ``page.content()`` — the pre-fix behaviour — when the
+    deep walk yields nothing usable, so a broken walk *degrades* the
+    artefact rather than deleting it.  ``_capture_failure`` suppresses
+    exceptions around the write, so without this fallback a transport or
+    context-destroyed error would leave no ``.html`` at all.
+
+    The walk reports its own JS errors in-band (see ``SERIALISER ERROR``
+    above), so reaching the fallback means the *evaluate* failed — a
+    destroyed execution context or a closed page — rather than the
+    serialiser.
+    """
+    deep: Any = None
+    with contextlib.suppress(Exception):
+        deep = page.evaluate(_DEEP_HTML_JS)
+    if isinstance(deep, str) and deep.strip():
+        return _DEEP_HTML_HEADER + deep
+    # Not silent: a permanently-broken deep dump would otherwise look
+    # exactly like the pre-fix shallow one and go unnoticed for months —
+    # which is the failure mode this whole capture change exists to end.
+    _log.warning(
+        "[%s] deep DOM serialisation returned nothing usable — falling "
+        "back to page.content(), which cannot show shadow content, so no "
+        "card will appear in this capture",
+        _worker_id(),
+    )
+    return str(page.content())
+
+
+def _diagnostics_report(page: Any) -> str:
+    """Self-describing browser-diagnostics text for ``page``.
+
+    Always has content, because "no ``.log`` file" is an ambiguous
+    non-signal.  The run-33380962649 capture produced ``.png`` and
+    ``.html`` only, and nothing could distinguish:
+
+    * no recorder was attached (a *harness bug* — the page fixture forgot
+      ``attach_page_diagnostics``, so the browser's account was never
+      recorded), from
+    * a recorder was attached and the browser said nothing (*evidence* —
+      it rules out a console error, an uncaught exception and a lost
+      asset as the cause), from
+    * the write itself failed (a lost artefact).
+
+    The three now read differently, and the first two are stated in words
+    rather than implied by an absence.
+    """
+    attached = page in _PAGE_DIAGNOSTICS
+    entries = page_diagnostics(page)
+    url = "<unknown>"
+    with contextlib.suppress(Exception):
+        url = str(page.url)
+    header = [
+        f"url: {url}",
+        f"recorder: {'attached' if attached else 'NOT ATTACHED'}",
+        f"entries: {len(entries)}",
+    ]
+    if not attached:
+        header.append(
+            "No recorder was attached to this page, so console output, "
+            "uncaught page errors and failed requests were never recorded. "
+            "This is a harness bug, not a product signal: call "
+            "attach_page_diagnostics(page) immediately after creating the "
+            "page and before navigating."
+        )
+    elif not entries:
+        header.append(
+            "Recorder attached and 0 entries recorded: for the whole life of "
+            "this page the browser reported no console error or warning, no "
+            "uncaught page error and no failed request. That is evidence, "
+            "not an absence of it — those three are ruled out as the cause."
+        )
+    return "\n".join([*header, "", *entries]) + "\n"
+
+
 def _slug(text: str) -> str:
     return "".join(c if c.isalnum() else "-" for c in text)[:60].strip("-") or "wait"
 
@@ -566,22 +788,62 @@ def _capture_failure(page: Any, description: str) -> str:
             if info.get("error_text"):
                 parts.append(f"error panel text: {info['error_text']!r}")
     with contextlib.suppress(Exception):
-        base.with_suffix(".html").write_text(page.content())
+        base.with_suffix(".html").write_text(capture_html(page))
         parts.append(f"html: {base.with_suffix('.html').name}")
     with contextlib.suppress(Exception):
         page.screenshot(path=str(base.with_suffix(".png")), full_page=True)
         parts.append(f"png: {base.with_suffix('.png').name}")
-    # Browser-side cause, if a recorder was attached.  The tail goes in the
-    # message (so the CI log alone explains the failure) and the whole
-    # buffer is written next to the HTML/PNG as an artefact.
+    # Browser-side cause.  The log is written *unconditionally* — see
+    # ``_diagnostics_report`` — because an absent file cannot distinguish a
+    # harness bug from the browser having nothing to report.  The tail
+    # still goes in the message, so the CI log alone explains the failure.
+    with contextlib.suppress(Exception):
+        base.with_suffix(".log").write_text(_diagnostics_report(page))
+        parts.append(f"log: {base.with_suffix('.log').name}")
     diagnostics = page_diagnostics(page)
     if diagnostics:
-        with contextlib.suppress(Exception):
-            base.with_suffix(".log").write_text("\n".join(diagnostics))
-            parts.append(f"log: {base.with_suffix('.log').name}")
         tail = " ;; ".join(entry[:200] for entry in diagnostics[-6:])
         parts.append(f"browser: {tail}")
+    else:
+        parts.append("browser: no console errors, page errors or failed requests")
     return " | ".join(parts)
+
+
+def capture_and_annotate(
+    page: Any, description: str, exc: BaseException
+) -> BaseException:
+    """Capture the DOM, then return ``exc`` re-cast carrying the summary.
+
+    ``wait_for_condition`` builds its own message and embeds the summary.
+    The Playwright-native wait sites cannot: they re-raise the library's
+    exception, whose text is a bare ``Page.wait_for_function: Timeout
+    10000ms exceeded.``  That is what the CI log for run 33380962649
+    showed — no capture number, no file names, no element list, no hint
+    that artefacts exist at all.
+
+    The returned exception has the *same type*, so ``except`` clauses and
+    ``pytest.raises`` at the call sites are unaffected.  If the type
+    cannot be reconstructed from a single message argument, the original
+    is returned unchanged — annotation must never replace the failure.
+    """
+    summary = _capture_failure(page, description)
+    annotated: BaseException | None = None
+    with contextlib.suppress(Exception):
+        annotated = type(exc)(f"{exc} {summary}")
+    if annotated is None:
+        # An exception type needing more than a message argument cannot be
+        # rebuilt.  Losing the annotation is acceptable; losing the
+        # failure is not — so the original propagates, and the summary
+        # still reaches the log.
+        _log.warning(
+            "[%s] could not annotate %s with the capture summary: %s",
+            _worker_id(),
+            type(exc).__name__,
+            summary,
+        )
+        return exc
+    annotated.__traceback__ = exc.__traceback__
+    return annotated
 
 
 class E2EConditionTimeout(AssertionError):

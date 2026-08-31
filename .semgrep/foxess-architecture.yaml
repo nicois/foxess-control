@@ -145,6 +145,15 @@ rules:
       - pattern-not-inside: |
           def _capture_failure(...):
             ...
+      # Shadow-piercing HTML dump, called only from ``_capture_failure``.
+      # Deliberately not routed through a retry helper: the capture runs
+      # after a failure has already been decided, so a retry buys no
+      # diagnostic value, and re-entering the retry layer from inside the
+      # capture risks recursing back into it.  Falls back to
+      # ``page.content()`` on any error.
+      - pattern-not-inside: |
+          def capture_html(...):
+            ...
       # Class-scoped retry helpers — same context-destroyed retry
       # contract as the module-level helpers, with form- and
       # screenshot-specific recovery semantics.
