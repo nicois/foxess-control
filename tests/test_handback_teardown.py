@@ -1,8 +1,16 @@
-"""Executing the scheduler handback at session teardown (issues #16, #4).
+"""Executing the scheduler handback, automatically and on request (#16, #4).
 
 This is where the handback feature stops being a decision and starts
 touching the user's inverter, so these tests are about **order** and
 **failure**, not about whether the happy path works.
+
+Two entry points share one executor: the automatic teardown hook, and the
+manual ``foxess_control.disable_scheduler`` action issue #16 asked for by
+name (``TestDisableSchedulerAction`` at the bottom).  They differ in
+exactly two ways, both deliberate and both pinned here — the action does
+not consult the opt-in option (the call *is* the consent), and it *raises*
+on every refusal instead of only recording one.  Everything else, guards
+included, is the same code.
 
 Four properties, in the order they matter:
 
@@ -334,6 +342,43 @@ async def _call_clear_overrides(hass: Any) -> None:
 
     _register_services(hass)
     await hass.services.async_call(DOMAIN, "clear_overrides", {}, blocking=True)
+
+
+async def _call_disable_scheduler(hass: Any) -> None:
+    """Invoke the real ``disable_scheduler`` action, as a user would.
+
+    Through ``hass.services.async_call`` rather than by importing the
+    handler: half the contract of an *action* is that it is registered
+    under the name issue #16 asked for and accepts a call with no data, and
+    calling the function directly would prove neither.
+    """
+    from custom_components.foxess_control import _register_services
+
+    _register_services(hass)
+    await hass.services.async_call(DOMAIN, "disable_scheduler", {}, blocking=True)
+
+
+async def _refused_disable_scheduler(hass: Any) -> str:
+    """Call the action, require it to *refuse*, and return the reason.
+
+    ``ServiceNotFound`` is a **subclass** of ``ServiceValidationError``, so a
+    bare ``pytest.raises(ServiceValidationError)`` around an unregistered
+    service passes for entirely the wrong reason.  That is not hypothetical:
+    on the first RED run of this class, the one refusal test that asserted
+    only the exception type and not its message passed while
+    ``disable_scheduler`` did not exist at all.  Excluding it explicitly
+    means "the action refused" can never be satisfied by "the action is not
+    there", now or after a future rename.
+    """
+    from homeassistant.exceptions import ServiceNotFound, ServiceValidationError
+
+    with pytest.raises(ServiceValidationError) as excinfo:
+        await _call_disable_scheduler(hass)
+    assert not isinstance(excinfo.value, ServiceNotFound), (
+        "foxess_control.disable_scheduler is not registered, so this is HA "
+        "reporting an unknown service rather than the action refusing"
+    )
+    return str(excinfo.value)
 
 
 def _written_groups(sim: SimulatorHandle, mode: WorkMode) -> list[dict[str, Any]]:
@@ -1371,3 +1416,604 @@ class TestClearOverridesHandsBackToo:
         assert state["scheduler_enabled"] is True
         assert state["work_mode_direct"] == "Feedin"
         assert state["min_soc_on_grid"] == 4
+
+
+# ---------------------------------------------------------------------------
+# The manual ``disable_scheduler`` action (issue #16, asked for by name).
+# ---------------------------------------------------------------------------
+
+
+def _write_backup_group(hass: Any, inv: Inverter) -> Any:
+    """Put an unmanaged Backup group on the device (C-018 bait)."""
+    return hass.async_add_executor_job(
+        lambda: inv.set_schedule(
+            [
+                {
+                    "enable": 1,
+                    "startHour": 0,
+                    "startMinute": 0,
+                    "endHour": 6,
+                    "endMinute": 0,
+                    "workMode": WorkMode.BACKUP.value,
+                    "minSocOnGrid": 11,
+                    "fdSoc": 11,
+                    "fdPwr": 3000,
+                }
+            ]
+        )
+    )
+
+
+def _min_soc_writes(client: RecordingClient) -> list[dict[str, Any]]:
+    return [
+        b for b in client.bodies_for(_EP_SETTING_SET) if b.get("key") == "MinSocOnGrid"
+    ]
+
+
+def _assert_switch_untouched(
+    foxess_sim: SimulatorHandle, client: RecordingClient
+) -> None:
+    """The master switch is on, and no attempt was made to turn it off.
+
+    Both halves matter: ``scheduler_enabled is True`` alone would also hold
+    for a device that rejected the write, and a refusal that *tried* is not
+    a refusal.
+    """
+    assert foxess_sim.state()["scheduler_enabled"] is True, (
+        "the Mode Scheduler master switch was turned off despite the action "
+        "having refused"
+    )
+    assert not [
+        b for b in client.bodies_for(_EP_SCHEDULER_SET) if b.get("enable") == 0
+    ], "the action attempted the master-switch write on a path that refuses"
+
+
+class TestDisableSchedulerAction:
+    """``foxess_control.disable_scheduler`` — the manual lever from issue #16.
+
+    Four properties, in the order they matter:
+
+    1. **It applies the same policy, not its own.**  Every guard
+       ``plan_handback`` enforces is enforced here, and by the same code: an
+       implementation that wrote the master switch directly would release
+       the inverter mid-session, or behind a hand-built Backup group, or
+       with a Min SoC it invented.  Each of those has a test below, so
+       bypassing the policy cannot pass.
+
+    2. **The option is not consulted.**  The whole value of a separate
+       action is for the user who does *not* want the automatic behaviour
+       but does want their inverter back now; an action that also required
+       flipping the option would be a redundant duplicate of the teardown
+       hook.  The explicit call is the consent.  Pinned by
+       ``test_it_works_with_the_option_off``.
+
+    3. **A refusal is visible.**  Unlike the teardown hook — which must
+       never raise, because the listener reads an exception as "the override
+       is still on" — this is a service call with a user waiting on it, so
+       every refusal raises ``ServiceValidationError`` and names its reason
+       (C-020).  A service that silently does nothing is a bad service.
+
+    4. **The Min SoC rule does not bend for it.**  Only a *captured* floor
+       is ever put back.  Nothing captured means nothing written — the
+       subject of a shipped defect in this integration (P-002).
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_action_is_registered(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """Issue #16 asked for ``foxess_control.disable_scheduler`` by name."""
+        from custom_components.foxess_control import _register_services
+
+        inv, _client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        _register_services(teardown_hass)
+
+        assert teardown_hass.services.has_service(DOMAIN, "disable_scheduler"), (
+            "no foxess_control.disable_scheduler action is registered — the "
+            "manual lever issue #16 asked for does not exist"
+        )
+
+    @pytest.mark.asyncio
+    async def test_it_releases_the_inverter_on_request(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """Switch off, work mode SelfUse, the captured floor put back.
+
+        The register is moved to 55 after capture, standing in for a session
+        having written a floor into it: without that step the Min SoC
+        assertion would be vacuously true.
+        """
+        _pin_midday(foxess_sim)
+        foxess_sim.set(min_soc_on_grid=7, work_mode_direct="Feedin")
+        inv, _client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        _enable_handback(teardown_hass)
+        await async_setup_min_soc_capture(teardown_hass, inv)
+        assert _dd(teardown_hass).captured_min_soc_on_grid == 7
+        foxess_sim.set(min_soc_on_grid=55)
+
+        await _call_disable_scheduler(teardown_hass)
+
+        _assert_released(foxess_sim)
+        assert foxess_sim.state()["min_soc_on_grid"] == 7, (
+            "the user's own floor was not put back by the action"
+        )
+        record = _last_handback(teardown_hass)
+        assert record["acted"] is True
+        assert record["steps"]["disable_scheduler"] == "ok"
+        assert record["steps"]["work_mode"] == "ok"
+        assert record["steps"]["min_soc_on_grid"] == "ok"
+        assert record["restored_min_soc_on_grid"] == 7
+
+    @pytest.mark.asyncio
+    async def test_it_works_with_the_option_off(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """**The decision this task had to make, pinned.**
+
+        The action deliberately does *not* consult
+        ``scheduler_handback``.  The person in issue #16 wants their
+        inverter released without signing up for it to happen after every
+        session; an action that refused until they flipped the option would
+        be a duplicate of the teardown hook and useless to them.  Calling
+        a service is itself the consent — the option governs the
+        *automatic* behaviour only.
+
+        The fixture ships the option **off**, so this test does not enable
+        it.  If a future change makes the action honour the option, this is
+        the test that must be argued with rather than deleted.
+        """
+        _pin_midday(foxess_sim)
+        foxess_sim.set(min_soc_on_grid=9, work_mode_direct="Backup")
+        inv, _client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        await async_setup_min_soc_capture(teardown_hass, inv)
+        assert _dd(teardown_hass).captured_min_soc_on_grid == 9, (
+            "capture is not gated on the option, so an install that never "
+            "opted in still knows the user's floor"
+        )
+        foxess_sim.set(min_soc_on_grid=44)
+
+        await _call_disable_scheduler(teardown_hass)
+
+        _assert_released(foxess_sim)
+        assert foxess_sim.state()["min_soc_on_grid"] == 9
+        assert _last_handback(teardown_hass)["acted"] is True
+
+    @pytest.mark.asyncio
+    async def test_it_refuses_during_an_active_session_and_says_why(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """C-025: disabling the scheduler mid-session strands the override.
+
+        The group stops driving the inverter while the integration still
+        believes it is discharging — a safety divergence, not untidiness.
+        The caller has to be able to tell, so this raises rather than
+        logging: a service that silently does nothing is a bad service
+        (C-020).
+        """
+        _pin_midday(foxess_sim)
+        inv, client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        _enable_handback(teardown_hass)
+        await _start_discharge_session(teardown_hass, foxess_sim, inv)
+        client.calls.clear()
+
+        message = await _refused_disable_scheduler(teardown_hass)
+
+        assert "session" in message, (
+            f"the refusal does not say a session is why: {message}"
+        )
+        _assert_switch_untouched(foxess_sim, client)
+        assert _written_groups(foxess_sim, WorkMode.FORCE_DISCHARGE), (
+            "the action removed the live session's override group — it must "
+            "refuse outright, not tidy up after a session it did not start"
+        )
+        record = _last_handback(teardown_hass)
+        assert record["acted"] is False
+        assert "session" in record["reason"]
+
+    @pytest.mark.asyncio
+    async def test_a_charge_session_refuses_it_too(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """Either session family counts — the guard is not discharge-only."""
+        _pin_midday(foxess_sim)
+        inv, client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        _dd(teardown_hass).smart_charge_state = _session_state("charge-live")
+        client.calls.clear()
+
+        message = await _refused_disable_scheduler(teardown_hass)
+
+        assert "session" in message
+        _assert_switch_untouched(foxess_sim, client)
+
+    @pytest.mark.asyncio
+    async def test_a_session_starting_mid_flight_is_caught_and_reported(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """The plan-then-act race, through the action rather than the hook.
+
+        ``session_active`` is a snapshot; a smart-charge service call can be
+        served on the event loop between taking it and the first write.  The
+        action shares the executor's re-checks, so it must both leave the
+        switch alone *and* tell the caller — an action that reported success
+        here would have the user believe their inverter was released while
+        it is running a session's group.
+        """
+        _pin_midday(foxess_sim)
+        foxess_sim.set(work_mode_direct="Feedin")
+        inv, client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        _wrap_to_start_session(inv, "probe_scheduler_support", teardown_hass)
+        client.calls.clear()
+
+        message = await _refused_disable_scheduler(teardown_hass)
+
+        assert "session" in message
+        _assert_switch_untouched(foxess_sim, client)
+        assert foxess_sim.state()["work_mode_direct"] == "Feedin", (
+            "the action carried on past the race guard"
+        )
+        assert _last_handback(teardown_hass)["acted"] is False
+
+    @pytest.mark.asyncio
+    async def test_it_refuses_with_an_unmanaged_mode_present_naming_it(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """C-018: a schedule the user built by hand is not ours to release.
+
+        Naming the mode is the actionable half — "remove it in the FoxESS
+        app" is only useful advice if the user is told *what* to remove.
+        """
+        _pin_midday(foxess_sim)
+        inv, client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        _enable_handback(teardown_hass)
+        await _write_backup_group(teardown_hass, inv)
+        client.calls.clear()
+
+        message = await _refused_disable_scheduler(teardown_hass)
+
+        assert WorkMode.BACKUP.value in message, (
+            "the refusal does not name the unmanaged mode, so the user is "
+            f"not told what to remove: {message}"
+        )
+        _assert_switch_untouched(foxess_sim, client)
+        record = _last_handback(teardown_hass)
+        assert record["acted"] is False
+        assert WorkMode.BACKUP.value in record["reason"]
+
+    @pytest.mark.asyncio
+    async def test_nothing_captured_means_the_floor_is_untouched(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """An explicit call is not a licence to invent a floor.
+
+        Choosing a Min SoC is the user's business (P-002).  The action may
+        put back what was captured and nothing else — restoring the
+        configured 11% here, or any other default, is precisely the shipped
+        defect that made an inverter import from the grid to hold a level
+        nobody chose.  The rest of the handback still happens.
+        """
+        _pin_midday(foxess_sim)
+        foxess_sim.set(min_soc_on_grid=42)
+        inv, client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        _enable_handback(teardown_hass)
+        assert _dd(teardown_hass).captured_min_soc_on_grid is None
+
+        await _call_disable_scheduler(teardown_hass)
+
+        assert foxess_sim.state()["min_soc_on_grid"] == 42, (
+            "the Min SoC register was changed although nothing was ever "
+            "captured — the action invented a floor"
+        )
+        assert not _min_soc_writes(client), (
+            "the Min SoC register was written despite nothing having been "
+            f"captured: {_min_soc_writes(client)}"
+        )
+        _assert_released(foxess_sim)
+        record = _last_handback(teardown_hass)
+        assert record["steps"]["min_soc_on_grid"] == "skipped"
+        assert record["restored_min_soc_on_grid"] is None
+
+    @pytest.mark.asyncio
+    async def test_a_captured_zero_floor_is_restored_verbatim(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """Issue #4 through the action: 0% is a value, not an absence."""
+        _pin_midday(foxess_sim)
+        foxess_sim.set(min_soc_on_grid=0)
+        inv, _client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        await async_setup_min_soc_capture(teardown_hass, inv)
+        assert _dd(teardown_hass).captured_min_soc_on_grid == 0
+        foxess_sim.set(min_soc_on_grid=30)
+
+        await _call_disable_scheduler(teardown_hass)
+
+        assert foxess_sim.state()["min_soc_on_grid"] == 0, (
+            "a captured 0% floor was treated as 'nothing captured' — issue "
+            "#4 is precisely about a 0% floor being reachable off-scheduler"
+        )
+        assert _last_handback(teardown_hass)["restored_min_soc_on_grid"] == 0
+
+    @pytest.mark.asyncio
+    async def test_entity_mode_is_a_clean_no_op(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """There is no cloud Mode Scheduler to release in entity mode.
+
+        Zero cloud requests — not merely zero writes — and the caller is
+        told, because an action that appeared to succeed would leave an
+        entity-mode user hunting for a switch that was never touched.
+        """
+        _pin_midday(foxess_sim)
+        foxess_sim.set(min_soc_on_grid=23, work_mode_direct="Feedin")
+        inv, client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        _configure(
+            teardown_hass,
+            **{CONF_WORK_MODE_ENTITY: "select.foxess_work_mode"},
+        )
+        client.calls.clear()
+
+        message = await _refused_disable_scheduler(teardown_hass)
+
+        assert "entity mode" in message
+        assert client.calls == [], (
+            f"entity mode made {len(client.calls)} cloud request(s): {client.paths()}"
+        )
+        state = foxess_sim.state()
+        assert state["scheduler_enabled"] is True
+        assert state["work_mode_direct"] == "Feedin"
+        assert state["min_soc_on_grid"] == 23
+        assert "entity mode" in _last_handback(teardown_hass)["reason"]
+
+    @pytest.mark.asyncio
+    async def test_a_device_without_a_scheduler_refuses_by_name(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """A batteryless micro-inverter has nothing to hand back."""
+        _pin_midday(foxess_sim)
+        foxess_sim.set(scheduler_supported=False)
+        inv, client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        client.calls.clear()
+
+        message = await _refused_disable_scheduler(teardown_hass)
+
+        assert "Mode Scheduler" in message
+        _assert_switch_untouched(foxess_sim, client)
+        assert _last_handback(teardown_hass)["acted"] is False
+
+    @pytest.mark.asyncio
+    async def test_an_unreadable_flag_refuses_as_unknown_not_unsupported(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """ "Could not find out" is not "your hardware has no scheduler".
+
+        A malformed flag reply must not become a confident claim about the
+        user's device — the two send them to look in completely different
+        places (C-020, P-005).
+        """
+        _pin_midday(foxess_sim)
+        foxess_sim.set(scheduler_flag_null=True)
+        inv, client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        client.calls.clear()
+
+        message = await _refused_disable_scheduler(teardown_hass)
+
+        assert "could not determine" in message.lower(), (
+            f"an unreadable flag was not reported as unknown: {message}"
+        )
+        _assert_switch_untouched(foxess_sim, client)
+
+    @pytest.mark.asyncio
+    async def test_a_failed_step_is_recorded_and_does_not_raise(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """A refusal raises; a device that refuses a write does not.
+
+        The distinction is deliberate.  A refusal happens before anything
+        is attempted, so "nothing happened, here is why" is the whole
+        truth.  A step failure happens after the steps have each been
+        attempted independently — some may have taken effect — so an
+        exception would misreport a partial handback as a total one, and
+        would also make the outcome record and the recent-errors buffer
+        (C-026, D-059) the *less* accurate account of the two.  Both write
+        endpoints absent models a real firmware/region difference.
+        """
+        _pin_midday(foxess_sim)
+        foxess_sim.set(
+            min_soc_on_grid=6,
+            scheduler_set_supported=False,
+            setting_set_supported=False,
+        )
+        inv, _client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        await async_setup_min_soc_capture(teardown_hass, inv)
+
+        await _call_disable_scheduler(teardown_hass)
+
+        assert _handback_errors(teardown_hass), (
+            "every step failed and nothing was recorded — the user is left "
+            "believing the action released their inverter (C-026, D-059)"
+        )
+        record = _last_handback(teardown_hass)
+        assert record["steps"]["disable_scheduler"] == "failed"
+        assert record["steps"]["work_mode"] == "failed"
+        assert record["steps"]["min_soc_on_grid"] == "failed"
+        assert record["restored_min_soc_on_grid"] is None, (
+            "the record claims the floor was restored when the write failed"
+        )
+        assert foxess_sim.state()["scheduler_enabled"] is True
+
+    @pytest.mark.asyncio
+    async def test_it_does_not_remove_or_add_schedule_groups(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """The action releases the switch; it is not a second clear_overrides.
+
+        ``clear_overrides`` already exists for tidying the group list, and
+        conflating the two would mean a user asking for local Modbus
+        control back also silently lost a SelfUse group they had built.
+        """
+        _pin_midday(foxess_sim)
+        inv, client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        before = foxess_sim.state()["schedule_groups"]
+        client.calls.clear()
+
+        await _call_disable_scheduler(teardown_hass)
+
+        assert foxess_sim.state()["schedule_groups"] == before, (
+            "the action rewrote the schedule group list"
+        )
+        assert _EP_SCHEDULE_WRITE not in client.paths(), (
+            "the action wrote to the schedule-group endpoint"
+        )
+        _assert_released(foxess_sim)
+
+    @pytest.mark.asyncio
+    async def test_it_can_be_called_twice_in_a_row(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """Idempotent: an already-released inverter is not an error.
+
+        A user who is unsure whether the first call worked will press it
+        again, and an automation may run it on a schedule.
+        """
+        _pin_midday(foxess_sim)
+        foxess_sim.set(min_soc_on_grid=5)
+        inv, _client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        await async_setup_min_soc_capture(teardown_hass, inv)
+
+        await _call_disable_scheduler(teardown_hass)
+        await _call_disable_scheduler(teardown_hass)
+
+        _assert_released(foxess_sim)
+        assert foxess_sim.state()["min_soc_on_grid"] == 5
+        assert _last_handback(teardown_hass)["acted"] is True
+        assert not _handback_errors(teardown_hass)
+
+
+class TestDisableSchedulerIsDescribedToTheUser:
+    """C-020: an action with no name or description is not usable from the UI.
+
+    HA renders the action picker from ``services.yaml`` and its labels from
+    the runtime ``translations/<lang>.json`` — **not** from ``strings.json``,
+    which is the developer/Lokalise source.  A locale missing the entry
+    shows the bare key or falls back to English, which is the exact live
+    failure ``tests/test_runtime_translations_issues.py`` was written for.
+    """
+
+    _LOCALES = (
+        "en",
+        "de",
+        "es",
+        "fr",
+        "it",
+        "ja",
+        "nl",
+        "pl",
+        "pt",
+        "zh-Hans",
+    )
+
+    def test_services_yaml_declares_the_action(self) -> None:
+        import pathlib
+
+        import yaml
+
+        root = pathlib.Path(__file__).resolve().parents[1]
+        path = root / "custom_components" / "foxess_control" / "services.yaml"
+        data = yaml.safe_load(path.read_text())
+        assert "disable_scheduler" in data, (
+            "services.yaml has no disable_scheduler entry, so the action does "
+            "not appear in the HA action picker at all"
+        )
+        entry = data["disable_scheduler"]
+        assert entry.get("name"), "disable_scheduler has no name in services.yaml"
+        assert entry.get("description"), (
+            "disable_scheduler has no description — a lever with safety "
+            "consequences needs one (C-020)"
+        )
+
+    def test_strings_json_declares_the_action(self) -> None:
+        import json
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[1]
+        path = root / "custom_components" / "foxess_control" / "strings.json"
+        services = json.loads(path.read_text()).get("services", {})
+        assert "disable_scheduler" in services, (
+            "strings.json has no services.disable_scheduler block, so the "
+            "action never reaches Lokalise and the locales drift"
+        )
+        assert services["disable_scheduler"].get("name")
+        assert services["disable_scheduler"].get("description")
+
+    @pytest.mark.parametrize("locale", _LOCALES)
+    def test_every_locale_names_and_describes_the_action(self, locale: str) -> None:
+        import json
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[1]
+        path = (
+            root
+            / "custom_components"
+            / "foxess_control"
+            / "translations"
+            / f"{locale}.json"
+        )
+        services = json.loads(path.read_text()).get("services", {})
+        entry = services.get("disable_scheduler")
+        assert entry is not None, (
+            f"locale {locale!r} has no services.disable_scheduler entry — HA "
+            "loads action labels from translations/<lang>.json, so this user "
+            "sees the English fallback or the bare key (C-020)"
+        )
+        for field in ("name", "description"):
+            value = entry.get(field, "")
+            assert isinstance(value, str) and value.strip(), (
+                f"locale {locale!r}: services.disable_scheduler.{field} must "
+                f"be a non-empty string — got {value!r}"
+            )
+
+    @pytest.mark.parametrize("locale", _LOCALES)
+    def test_every_locale_can_render_the_refusal(self, locale: str) -> None:
+        """The refusal is raised with a ``translation_key``, so it needs one.
+
+        Without an ``exceptions`` entry HA renders the bare key in the UI —
+        the 2026-05-18 live failure, in a new place.
+        """
+        import json
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[1]
+        path = (
+            root
+            / "custom_components"
+            / "foxess_control"
+            / "translations"
+            / f"{locale}.json"
+        )
+        exceptions = json.loads(path.read_text()).get("exceptions", {})
+        entry = exceptions.get("handback_refused")
+        assert entry is not None, (
+            f"locale {locale!r} has no exceptions.handback_refused entry — "
+            "the action's refusal renders as the bare translation key"
+        )
+        message = entry.get("message", "")
+        assert isinstance(message, str) and message.strip()
+        assert "{reason}" in message, (
+            f"locale {locale!r}: exceptions.handback_refused.message drops "
+            "the {reason} placeholder, so the user is told the action "
+            "refused but not why (C-020)"
+        )
