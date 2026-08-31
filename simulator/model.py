@@ -280,6 +280,17 @@ class InverterModel:
     setting_work_modes: list[str] = field(
         default_factory=lambda: ["PeakShaving", "Feedin", "Backup", "SelfUse"]
     )
+    # When False, ``/op/v0/device/setting/set`` is not served (HTTP 404) —
+    # the direct-settings counterpart of ``scheduler_set_supported``, and
+    # the same real-world cause: a firmware or region where the write half
+    # of an endpoint pair is absent even though the read half answers.
+    #
+    # Both knobs off together is the device most likely to break a user who
+    # opts into the scheduler handback: every handback step fails while the
+    # schedule write that removes the session's override still succeeds.
+    # That combination is what proves session boundary cleanliness (C-025)
+    # does not depend on the handback working.
+    setting_set_supported: bool = True
 
     def fd_pwr_limit_w(self) -> int:
         """Maximum ``fdPwr`` this device accepts in a schedule group."""
@@ -805,6 +816,7 @@ class InverterModel:
             "scheduler_flag_null": self.scheduler_flag_null,
             "work_mode_direct": self.work_mode_direct,
             "setting_work_modes": list(self.setting_work_modes),
+            "setting_set_supported": self.setting_set_supported,
             "schedule_groups": [g.to_dict() for g in self.schedule_groups],
             "min_soc": self.min_soc,
             "min_soc_on_grid": self.min_soc_on_grid,

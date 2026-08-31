@@ -422,6 +422,140 @@ class TestFeedinPacing:
         )
 
 
+class TestSchedulerHandback:
+    """Opt-in scheduler handback, through a real HA options flow (#16, #4).
+
+    The unit suite drives the same code against the same simulator, but
+    only this can prove the option is actually reachable end to end: that
+    turning it on in the options flow re-captures the user's floor, that a
+    real service-call teardown releases the inverter, and — the regression
+    that would matter most — that the *next* session still takes effect
+    once the Mode Scheduler master switch has been off.
+    """
+
+    def test_handback_releases_the_inverter_and_the_next_session_works(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        if connection_mode != "cloud":
+            pytest.skip("the Mode Scheduler master switch is a cloud concept")
+        assert foxess_sim is not None
+        # A 4% floor: below the Mode Scheduler's declared 10% minimum, so
+        # it is only expressible through the direct settings — issue #4.
+        foxess_sim.set(min_soc_on_grid=4, soc=80, solar_kw=0, load_kw=0.5)
+        # Opting in is the one moment a re-capture is safe: whatever the
+        # register holds now is by definition the user's own value, because
+        # the integration has not been writing to it.
+        ha_e2e.set_options(scheduler_handback=True)
+
+        start, end = _tight_window(30)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        assert foxess_sim.state()["scheduler_enabled"] is True, (
+            "a session must run with the Mode Scheduler on, or its group "
+            "cannot drive the inverter"
+        )
+
+        # Stand in for the defect this integration has already shipped:
+        # while the session owns the device, the persistent floor and the
+        # direct work mode drift away from what the user chose.  Without
+        # this the assertions below would be vacuously true.
+        foxess_sim.set(min_soc_on_grid=55, work_mode_direct="Feedin")
+
+        ha_e2e.call_service("foxess_control", "clear_overrides", {})
+        ha_e2e.wait_for_state("sensor.foxess_smart_operations", "idle", timeout_s=120)
+
+        # ``clear_overrides`` awaits the handback inline and
+        # ``call_service`` blocks, so device state is final here — no sleep
+        # and no polling needed.
+        state = foxess_sim.state()
+        assert state["scheduler_enabled"] is False, (
+            "the Mode Scheduler master switch is still on — the inverter is "
+            "still scheduler-controlled and local Modbus control stays "
+            "blocked (issue #16)"
+        )
+        assert state["work_mode_direct"] == "SelfUse", (
+            f"the inverter's own work mode is {state['work_mode_direct']!r}; "
+            "with the scheduler off this is what it actually does"
+        )
+        assert state["min_soc_on_grid"] == 4, (
+            "the user's own 4% floor was not restored — the inverter will "
+            "import from the grid to hold a level they never chose"
+        )
+
+        # The regression Task 1 built _ensure_scheduler_enabled for: a
+        # session written after the switch went off must still fire.
+        start2, end2 = _tight_window(30)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start2, "end_time": end2, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        assert foxess_sim.state()["scheduler_enabled"] is True, (
+            "the session after a handback wrote its schedule behind a "
+            "disabled master switch: errno 0, nothing surfaced to the user, "
+            "and no discharge"
+        )
+
+    def test_default_install_leaves_the_scheduler_alone(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """The upgrade-safety guarantee, in a real HA with real defaults.
+
+        Nothing is opted into and nothing is configured: exactly what
+        hundreds of existing installs look like the moment they upgrade.
+        A full session and teardown must leave the master switch on, the
+        direct work-mode setting untouched, and the persistent Min SoC
+        register untouched.
+        """
+        if connection_mode != "cloud":
+            pytest.skip("the Mode Scheduler master switch is a cloud concept")
+        assert foxess_sim is not None
+        foxess_sim.set(
+            min_soc_on_grid=17, work_mode_direct="Feedin", soc=80, load_kw=0.5
+        )
+
+        start, end = _tight_window(30)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        ha_e2e.call_service("foxess_control", "clear_overrides", {})
+        ha_e2e.wait_for_state("sensor.foxess_smart_operations", "idle", timeout_s=120)
+
+        state = foxess_sim.state()
+        assert state["scheduler_enabled"] is True
+        assert state["work_mode_direct"] == "Feedin"
+        assert state["min_soc_on_grid"] == 17
+
+
 class TestFaultInjection:
     def test_ws_unit_mismatch_handled(
         self,

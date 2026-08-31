@@ -330,7 +330,14 @@ async def handle_setting_set(request: web.Request) -> web.Response:
     Unlike the scheduler, this reaches the device's own settings, so a
     ``MinSocOnGrid`` below the schedule path's declared floor of 10 is
     accepted here (issue #4).
+
+    Returns HTTP 404 when ``setting_set_supported`` is False, mirroring
+    ``handle_scheduler_set``: a firmware or region that serves the read
+    half of the pair but not the write half.
     """
+    model = _model(request)
+    if not model.setting_set_supported:
+        return web.Response(status=404, text="Not Found")
     if sig_err := _check_signature(request):
         return sig_err
     if rl := _check_rate_limit(request):
@@ -338,7 +345,6 @@ async def handle_setting_set(request: web.Request) -> web.Response:
     if fault := _check_fault(request):
         return fault
     body = await request.json()
-    model = _model(request)
     reason = model.apply_setting(str(body.get("key", "")), str(body.get("value", "")))
     if reason is not None:
         _LOGGER.info("Setting rejected: %s", reason)
