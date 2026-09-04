@@ -215,6 +215,13 @@ def _handback_section(
     plain dict by contract, so this exporter needs no knowledge of the
     handback modules.
 
+    ``scheduler_set_unavailable`` reports whether anything has seen a 404 on
+    the master-switch write endpoint (issue #17): ``true`` means handback can
+    never work on this hardware, which is a different support answer from
+    "handback is broken".  ``null`` when there is no inverter to have learned
+    anything — setup may have failed before one existed — because ``false``
+    there would be a claim about hardware nobody reached.
+
     ``scheduler_flag`` is the *last known* master-switch state from
     ``Inverter.scheduler_flag_snapshot``, which never triggers a request —
     ``null`` when nothing has ever read it, which is deliberately distinct
@@ -230,6 +237,9 @@ def _handback_section(
         "min_soc_capture": "never captured" if captured is None else "captured",
         "last_handback": getattr(domain_data, "last_handback", None),
         "scheduler_flag": snapshot if isinstance(snapshot, dict) else None,
+        "scheduler_set_unavailable": getattr(
+            inverter, "scheduler_set_unavailable", None
+        ),
     }
 
 

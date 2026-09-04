@@ -372,6 +372,10 @@
     "sensor_write_failed": {
       "title": "Sensor {entity_id} failed to update",
       "description": "The sensor `{entity_id}` raised an error while writing its state and is no longer updating:\n\n`{error}`\n\nOther FoxESS sensors continue to update — this is a contained failure, but the named sensor's value may be stale. The issue will clear automatically when the sensor next writes successfully.\n\nIf it persists, consider restarting Home Assistant or reporting the error."
+    },
+    "scheduler_handback_unsupported": {
+      "title": "This inverter cannot release Mode Scheduler control",
+      "description": "Scheduler handback is switched on, but **{inverter}** does not serve `{endpoint}` — the only API call that can turn the Mode Scheduler master switch off. Home Assistant is therefore unable to hand this inverter back to its own settings, and it never will be on this firmware.\n\nNothing else is affected: the Mode Scheduler works, and smart charging and discharging are unchanged.\n\nTurn **Scheduler handback** back off in the integration options to dismiss this. If a firmware update later adds the endpoint, this notice clears by itself."
     }
   }
 }

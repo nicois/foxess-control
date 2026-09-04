@@ -779,13 +779,26 @@ class TestFailureNeverBlocksCleanliness:
     async def test_every_failed_step_is_recorded(
         self, teardown_hass: Any, foxess_sim: SimulatorHandle
     ) -> None:
-        """A silent failure lets the user believe the inverter was released."""
+        """A silent failure lets the user believe the inverter was released.
+
+        The direct-settings endpoint is the one taken away here, not
+        ``scheduler/set``.  Since issue #17 a missing ``scheduler/set`` is
+        *remembered* — the session's own schedule write discovers the 404
+        before the teardown asks — so on this path it produces a decline with
+        a reason and a Repair issue rather than a step failure at every
+        session boundary.  That is strictly the better outcome, and it means
+        a *step* failure on the master switch now only happens on a first
+        attempt that could not have known; ``TestDisableSchedulerAction
+        ::test_a_failed_step_is_recorded_and_does_not_raise`` covers that one,
+        with all three steps failing.
+
+        What this pins is the property the record has to have when a handback
+        is **partially** successful: the switch came off, the two settings
+        writes did not, and the record says exactly that rather than
+        rounding to "released" or to "failed".
+        """
         _pin_midday(foxess_sim)
-        foxess_sim.set(
-            min_soc_on_grid=6,
-            scheduler_set_supported=False,
-            setting_set_supported=False,
-        )
+        foxess_sim.set(min_soc_on_grid=6, setting_set_supported=False)
         inv, _client = _make_inv(foxess_sim)
         _attach(teardown_hass, inv)
         _enable_handback(teardown_hass)
@@ -796,15 +809,18 @@ class TestFailureNeverBlocksCleanliness:
 
         recorded = _handback_errors(teardown_hass)
         assert recorded, (
-            "no operational error was recorded for a handback in which every "
-            "single step failed (C-026, D-059)"
+            "no operational error was recorded for a handback whose settings "
+            "writes both failed (C-026, D-059)"
         )
         record = _last_handback(teardown_hass)
-        assert record["steps"]["disable_scheduler"] == "failed"
+        assert record["steps"]["disable_scheduler"] == "ok"
         assert record["steps"]["work_mode"] == "failed"
         assert record["steps"]["min_soc_on_grid"] == "failed"
-        # And the device is honestly reported as NOT released.
-        assert foxess_sim.state()["scheduler_enabled"] is True
+        assert record["restored_min_soc_on_grid"] is None, (
+            "the record claims the user's floor was put back when the write "
+            "failed — reporting the intent rather than the outcome is the "
+            "one lie this feature cannot afford (P-002)"
+        )
 
     @pytest.mark.asyncio
     async def test_repeated_failures_do_not_flood_the_error_buffer(
@@ -816,9 +832,13 @@ class TestFailureNeverBlocksCleanliness:
         only view of recent trouble.  One failing feature repeating on
         every session boundary would push everything else out, so the
         recording must collapse via ``dedupe_key``.
+
+        Uses the direct-settings endpoint for the same reason as
+        ``test_every_failed_step_is_recorded``: a missing ``scheduler/set``
+        no longer repeats as a step failure at all.
         """
         _pin_midday(foxess_sim)
-        foxess_sim.set(scheduler_set_supported=False, setting_set_supported=False)
+        foxess_sim.set(setting_set_supported=False)
         inv, _client = _make_inv(foxess_sim)
         _attach(teardown_hass, inv)
         _enable_handback(teardown_hass)

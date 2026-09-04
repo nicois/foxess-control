@@ -426,6 +426,10 @@
     "schedule_not_applied": {
       "title": "O inversor não está a aplicar as alterações de agendamento",
       "description": "O FoxESS Control ordenou ao inversor o modo **{commanded}**, mas o inversor continua a reportar o modo **{reported}** muito depois de a alteração dever ter produzido efeito.\n\nNormalmente isto significa que o inversor aceita a escrita do agendamento na API mas não a aplica — frequentemente após uma atualização de firmware do inversor. A carga/descarga inteligente pode não se comportar como configurado (por exemplo, carregando acima do SoC alvo).\n\nO alerta será removido automaticamente assim que o modo reportado pelo inversor corresponder ao que foi ordenado. Se persistir, verifique se existe uma atualização de firmware do inversor ou uma nota de compatibilidade, e pondere reportá-lo com uma transferência de diagnóstico."
+    },
+    "scheduler_handback_unsupported": {
+      "title": "Este inversor não consegue libertar o controlo do Agendador de modos",
+      "description": "A devolução do agendador está ativa, mas **{inverter}** não disponibiliza `{endpoint}` — a única chamada de API capaz de desligar o interruptor principal do Agendador de modos. Por isso o Home Assistant não consegue devolver este inversor às suas próprias definições, e nunca conseguirá com este firmware.\n\nNada mais é afetado: o Agendador de modos funciona, e o carregamento e descarregamento inteligentes mantêm-se.\n\nDesative **Devolução do agendador** nas opções da integração para dispensar este aviso. Se uma atualização de firmware adicionar o endpoint mais tarde, o aviso desaparece sozinho."
     }
   }
 }

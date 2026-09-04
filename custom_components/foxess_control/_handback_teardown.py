@@ -57,6 +57,16 @@ failure is recorded — a handback that fails silently is worse than one that
 never runs, because the user sees the option switched on and believes their
 inverter was released (C-020, C-026, D-059).
 
+Some inverters cannot do this at all, and that is surfaced rather than
+retried forever.  Issue #17 is an H3-12.0-E whose ``scheduler/set`` answers
+HTTP 404 — the one endpoint that turns the master switch off.  Once anything
+has seen that 404 the policy declines with a reason instead of failing a step
+it was never going to win, and :func:`_surface_unsupported` raises a Repair
+issue for a user who has the *option* on, because "you asked for something
+your hardware cannot do" is unusable as a log line and is exactly the shape
+Repairs exist for (C-020, C-026).  None of it touches C-025: the session's
+group still comes off first, on this hardware as on any other.
+
 Brand-specific (the FoxESS Mode Scheduler is a FoxESS concept), so it lives
 here rather than in ``smart_battery/`` (C-021, C-039).
 """
@@ -96,6 +106,18 @@ _SETTING_MIN_SOC_ON_GRID = "MinSocOnGrid"
 _STEP_DISABLE = "disable_scheduler"
 _STEP_WORK_MODE = "work_mode"
 _STEP_MIN_SOC = "min_soc_on_grid"
+
+# The Repair issue raised when the user has opted in on hardware that cannot
+# support the feature (issue #17).  Doubles as the ``translation_key``, so
+# every locale's ``issues.<key>`` entry hangs off this one name.
+_UNSUPPORTED_ISSUE = "scheduler_handback_unsupported"
+
+# The endpoint whose absence makes handback impossible.  Spelled out rather
+# than imported from ``foxess.inverter``'s private constant so the Repair
+# issue quotes the same path the user already has in their log, without this
+# module reaching into another one's internals.  ``tests/test_handback_
+# teardown.py`` asserts the two agree.
+_SCHEDULER_SET_ENDPOINT = "/op/v0/device/scheduler/set"
 
 _OK = "ok"
 _FAILED = "failed"
@@ -246,6 +268,15 @@ async def _decide(
 
     cfg = _cfg(hass)
 
+    # Raise or withdraw the "this inverter cannot do this" notice before
+    # anything else.  Here rather than at either entry point because this is
+    # the one function both of them go through that holds *both* the option
+    # and the inverter, and it must run even on the paths that decline
+    # without touching the network — otherwise turning the option back off
+    # (the notice's own advice) would leave the notice standing.  Costs no
+    # I/O: the inverter's answer is a remembered fact, not a request.
+    _surface_unsupported(hass, option_on=_option_on(hass), inverter=inverter)
+
     # The session snapshot is taken FIRST, before any I/O, so that the
     # window between it and the first write is exactly the window
     # ``_execute``'s re-checks cover.  Gathering it late would shrink the
@@ -268,6 +299,11 @@ async def _decide(
             session_active=session_active,
             unmanaged_modes=[],
             scheduler_supported=None,
+            # Nothing was consulted on this path, so nothing is claimed:
+            # ``scheduler_supported=None`` already declines above it in the
+            # precedence order, and asserting a fact we did not look up
+            # would put the wrong reason in the log.
+            scheduler_set_unavailable=False,
             captured_min_soc_on_grid=None,
         )
 
@@ -293,8 +329,87 @@ async def _decide(
         scheduler_supported=await hass.async_add_executor_job(
             inverter.probe_scheduler_support
         ),
+        # A remembered 404 on the master-switch write (issue #17).  Free —
+        # it is whatever the last attempt learned, most often during this
+        # very session's first schedule write.
+        scheduler_set_unavailable=inverter.scheduler_set_unavailable,
         captured_min_soc_on_grid=dd.captured_min_soc_on_grid,
     )
+
+
+def _option_on(hass: HomeAssistant) -> bool:
+    """Is the *automatic* handback armed for this install?
+
+    Not the same question as the ``enabled`` the policy receives: the
+    ``disable_scheduler`` action passes ``enabled=True`` unconditionally,
+    because the call is the consent.  This is the standing configuration, and
+    it is what the Repair issue is about — a user being silently let down by
+    something they switched on.
+    """
+    from ._helpers import _cfg
+
+    cfg = _cfg(hass)
+    return bool(cfg.scheduler_handback) and not cfg.entity_mode
+
+
+def _surface_unsupported(
+    hass: HomeAssistant, *, option_on: bool, inverter: Inverter | None
+) -> None:
+    """Raise or withdraw the "your inverter cannot do this" Repair issue.
+
+    Issue #17.  A Repair issue rather than a log line or a sensor because
+    this is the one shape Repairs exist for: the user asked for something
+    their hardware cannot do, it will never start working on its own, and
+    there is exactly one useful action — turn the option back off.  A log
+    line would not be seen (C-020) and a diagnostics download is what the
+    reporter had to resort to.
+
+    Gated on the **option**, not on the ``enabled`` argument the policy
+    receives, so the ``disable_scheduler`` action does not leave a standing
+    notice behind: that path already tells the caller synchronously, by
+    raising, and a permanent banner for a one-off request would be nagging.
+    The option, by contrast, means the automatic behaviour is armed and will
+    silently never fire.
+
+    Withdrawn whenever the condition is not currently held — the option is
+    off, there is no inverter, or nothing has seen a 404 since this instance
+    was built.  That includes a fresh reload, which briefly clears the notice
+    until the next session's schedule write re-learns the 404.  That is the
+    honest state and matches how the rest of this feature behaves
+    (``probe_scheduler_support`` and ``scheduler_flag_snapshot`` both report
+    "unknown" rather than replaying a previous process's belief), and it
+    means a firmware fix retires the notice by itself.
+
+    Best-effort throughout: the teardown path must not fail because a Repair
+    issue could not be filed.
+    """
+    try:
+        from homeassistant.helpers.issue_registry import (
+            IssueSeverity,
+            async_create_issue,
+            async_delete_issue,
+        )
+
+        if inverter is None or not (option_on and inverter.scheduler_set_unavailable):
+            async_delete_issue(hass, DOMAIN, _UNSUPPORTED_ISSUE)
+            return
+        async_create_issue(
+            hass,
+            DOMAIN,
+            _UNSUPPORTED_ISSUE,
+            is_fixable=False,
+            severity=IssueSeverity.WARNING,
+            translation_key=_UNSUPPORTED_ISSUE,
+            translation_placeholders={
+                "inverter": inverter.device_type or inverter.sn,
+                "endpoint": _SCHEDULER_SET_ENDPOINT,
+            },
+        )
+    except Exception:  # noqa: BLE001 — surfacing must never break a teardown
+        _LOGGER.debug(
+            "Could not update the scheduler-handback support notice (non-critical)",
+            exc_info=True,
+        )
 
 
 def _refused(reason: str) -> ServiceValidationError:
@@ -360,6 +475,15 @@ async def _execute(
                 "regions do not serve this endpoint at all"
             ),
         )
+
+        # A step failure does not raise (see ``async_handback_on_request``),
+        # which would otherwise leave the very first attempt on an issue-#17
+        # inverter with nothing at all to show the user: no exception, and
+        # no notice until the *next* teardown re-read the flag.  So the
+        # discovery surfaces on the spot.  Only reached when the write
+        # actually failed, so the healthy path pays nothing.
+        if steps[_STEP_DISABLE] == _FAILED:
+            _surface_unsupported(hass, option_on=_option_on(hass), inverter=inverter)
 
         # --- Race guard, part 2: no pre-check can close the window, so it
         # self-heals.  A session that started while the switch was going

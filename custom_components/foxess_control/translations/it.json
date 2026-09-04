@@ -426,6 +426,10 @@
     "schedule_not_applied": {
       "title": "L'inverter non sta applicando le modifiche alla pianificazione",
       "description": "FoxESS Control ha comandato all'inverter la modalità **{commanded}**, ma l'inverter continua a segnalare la modalità **{reported}** ben oltre il momento in cui la modifica avrebbe dovuto avere effetto.\n\nDi solito ciò significa che l'inverter accetta la scrittura della pianificazione a livello di API ma non la applica — spesso dopo un aggiornamento del firmware dell'inverter. La carica/scarica intelligente potrebbe quindi non comportarsi come configurato (ad esempio caricando oltre il SoC obiettivo).\n\nL'avviso si chiuderà automaticamente quando la modalità segnalata dall'inverter corrisponderà a quella comandata. Se il problema persiste, verificare la presenza di un aggiornamento del firmware dell'inverter o di una nota di compatibilità e valutare di segnalarlo allegando un download di diagnostica."
+    },
+    "scheduler_handback_unsupported": {
+      "title": "Questo inverter non può rilasciare il controllo del Pianificatore di modalità",
+      "description": "La restituzione del pianificatore è attiva, ma **{inverter}** non espone `{endpoint}`: l'unica chiamata API in grado di spegnere l'interruttore principale del Pianificatore di modalità. Home Assistant non può quindi restituire questo inverter alle sue impostazioni, e con questo firmware non potrà mai.\n\nNient'altro è coinvolto: il Pianificatore di modalità funziona, e la carica e la scarica intelligenti restano invariate.\n\nDisattiva **Restituzione del pianificatore** nelle opzioni dell'integrazione per rimuovere questo avviso. Se un aggiornamento del firmware aggiungerà l'endpoint, l'avviso sparirà da sé."
     }
   }
 }

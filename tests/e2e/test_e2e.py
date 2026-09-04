@@ -436,9 +436,12 @@ class TestSchedulerHandback:
     why these live here rather than beside the unit tests:
 
     * The ``disable_scheduler`` action exists in the **real service
-      registry**, accepts a call with no data, and turns its refusal into an
-      HTTP error a caller actually sees — none of which is provable by
-      importing the handler.
+      registry**, accepts a call with no data, and delivers its refusal —
+      reason and translation key intact — over the channel the frontend,
+      Developer Tools, scripts and automations actually use.  None of that is
+      provable by importing the handler, and it is how the *reason* was found
+      to be discarded on the REST surface (see
+      ``HAClient.refused_service``).
     * A **Repair issue** reaches the HA issue registry and is listed by the
       ``repairs/list_issues`` WS command, which is the surface a user looks
       at.  A unit test can assert the registry entry; only this proves the
@@ -613,19 +616,30 @@ class TestSchedulerHandback:
         Two halves, in the order a user meets them:
 
         1. During a live session the action must **refuse**, and the refusal
-           must reach the caller.  HA renders a ``ServiceValidationError``
-           as an HTTP error on the service call, so ``call_service`` raising
-           with the reason in its body is exactly what an automation or the
-           Developer Tools panel would see.  A silent no-op here would have
-           the user believe their inverter was released while a
-           ForceDischarge group is still driving it (C-025).
+           must reach the caller *with its reason and translation key*, which
+           is what the frontend, Developer Tools and any script step receive.
+           A silent no-op here would have the user believe their inverter was
+           released while a ForceDischarge group is still driving it (C-025).
         2. Once the session is over, the same call must release it — and put
            back a 0 % floor nobody but the user chose (issue #4).
+
+        The refusal is asserted over the **WebSocket** API — see
+        ``HAClient.refused_service`` for why the REST surface cannot carry a
+        reason at all.
         """
         if connection_mode != "cloud":
             pytest.skip("the Mode Scheduler master switch is a cloud concept")
         assert foxess_sim is not None
         foxess_sim.set(min_soc_on_grid=0, soc=80, solar_kw=0, load_kw=0.5)
+        # The floor was captured at container startup, before this test could
+        # set it, so it is toggled on and straight back off to force the
+        # off → on re-capture — the documented remedy for a floor that has
+        # since changed.  It leaves the option in its shipped state, and it
+        # pins something worth pinning on the way past: a captured **0**
+        # surviving the option going off again, where the crash-recovery
+        # branch reads it back out of storage.
+        ha_e2e.set_options(scheduler_handback=True)
+        ha_e2e.set_options(scheduler_handback=False)
 
         start, end = _tight_window(30)
         ha_e2e.call_service(
@@ -643,11 +657,18 @@ class TestSchedulerHandback:
         # mode; without this the restore assertions below are vacuous.
         foxess_sim.set(min_soc_on_grid=61, work_mode_direct="Feedin")
 
-        with pytest.raises(RuntimeError) as excinfo:
-            ha_e2e.call_service("foxess_control", "disable_scheduler", {})
-        assert "session" in str(excinfo.value), (
+        error = ha_e2e.refused_service("foxess_control", "disable_scheduler")
+        assert error.get("code") == "service_validation_error", (
+            "the refusal did not arrive as a validation error, so the "
+            f"frontend renders it as an unexplained failure: {error}"
+        )
+        assert "session" in error.get("message", ""), (
             "the action refused without saying a live session is why, so the "
-            f"user cannot tell what to do about it: {excinfo.value}"
+            f"user cannot tell what to do about it: {error}"
+        )
+        assert error.get("translation_key") == "handback_refused", (
+            "the refusal carries no translation key, so a non-English user "
+            f"sees the raw English text: {error}"
         )
         mid = foxess_sim.state()
         assert mid["scheduler_enabled"] is True, (
@@ -748,11 +769,10 @@ class TestSchedulerHandback:
             f"named, so the two cannot be connected: {issue}"
         )
 
-        with pytest.raises(RuntimeError) as excinfo:
-            ha_e2e.call_service("foxess_control", "disable_scheduler", {})
-        assert "404" in str(excinfo.value), (
+        error = ha_e2e.refused_service("foxess_control", "disable_scheduler")
+        assert "404" in error.get("message", ""), (
             "the action refused without saying the inverter does not serve "
-            f"the master-switch write: {excinfo.value}"
+            f"the master-switch write: {error}"
         )
 
 

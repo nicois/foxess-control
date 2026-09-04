@@ -463,6 +463,10 @@
     "schedule_not_applied": {
       "title": "Inverter is not applying schedule changes",
       "description": "FoxESS Control commanded the inverter to **{commanded}** mode, but the inverter still reports **{reported}** mode well after the change should have taken effect.\n\nThis usually means the inverter is accepting the schedule write at the API but not applying it — often after an inverter firmware update. Smart charge/discharge may not behave as configured (for example, charging past the target SoC).\n\nThe issue will clear automatically once the inverter's reported mode matches what was commanded. If it persists, check for an inverter firmware update or compatibility note, and consider reporting it with a diagnostics download."
+    },
+    "scheduler_handback_unsupported": {
+      "title": "This inverter cannot release Mode Scheduler control",
+      "description": "Scheduler handback is switched on, but **{inverter}** does not serve `{endpoint}` — the only API call that can turn the Mode Scheduler master switch off. Home Assistant is therefore unable to hand this inverter back to its own settings, and it never will be on this firmware.\n\nNothing else is affected: the Mode Scheduler works, and smart charging and discharging are unchanged.\n\nTurn **Scheduler handback** back off in the integration options to dismiss this. If a firmware update later adds the endpoint, this notice clears by itself."
     }
   }
 }

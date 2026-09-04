@@ -6,6 +6,8 @@ import datetime
 import logging
 from typing import TYPE_CHECKING, Any
 
+import requests
+
 from ..smart_battery.events import SCHEDULE_WRITE, emit_event
 from ..smart_battery.logging import attach_diagnostic_context
 from ..smart_battery.types import MinSocSettings, ScheduleGroup, WorkMode
@@ -84,6 +86,9 @@ class Inverter:
         self._scheduler_max_group_count: int | None = None
         self._warned_work_modes: set[str] = set()
         self._warned_scheduler_enable = False
+        # Whether this device is known *not* to serve the Mode Scheduler
+        # master-switch write.  See :attr:`scheduler_set_unavailable`.
+        self._scheduler_set_unavailable = False
         # Last known state of the Mode Scheduler master switch, for the
         # diagnostics download to report without making a request.  See
         # :attr:`scheduler_flag_snapshot`.
@@ -511,16 +516,71 @@ class Inverter:
             )
             return None
 
+    @property
+    def scheduler_set_unavailable(self) -> bool:
+        """Is this device **known** not to serve the master-switch write?
+
+        Issue #17: an H3-12.0-E answers HTTP 404 on
+        ``/op/v0/device/scheduler/set``.  That endpoint is the only way to
+        turn the Mode Scheduler master switch *off*, so the scheduler
+        handback cannot work on that hardware at all — while smart sessions
+        are completely unaffected, because a schedule write enables the
+        switch implicitly there.
+
+        Deliberately **not** folded into ``support`` or into
+        :meth:`probe_scheduler_support`.  Those answer "does this device have
+        a Mode Scheduler?", and on this hardware the honest answer is *yes*;
+        reporting ``support: false`` would send the owner hunting for a
+        firmware limitation they do not have, which is the mistake
+        :meth:`get_scheduler_flag` was changed to stop making (C-020,
+        P-005).  Two endpoints, two facts, two fields.
+
+        A plain ``bool``, not a tri-state, because "never tried" and "tried
+        and it worked" have the *same* consequence — attempt the write and
+        find out — whereas ``probe_scheduler_support``'s unknown must
+        decline.  There is no third answer worth representing.
+
+        How much is inferred from one response is bounded twice, because
+        over-inferring would permanently disable a working feature:
+
+        * **Only a 404 counts.**  "No such endpoint" is a durable property of
+          a firmware or region; a 500, a timeout or a dropped connection is
+          a bad afternoon at FoxESS and says nothing about whether the
+          endpoint exists.  A device that *serves* the endpoint and rejects
+          the write (errno 40257, which is what ``support: false`` produces)
+          is likewise not recorded here: that refusal already has an honest
+          home in ``support``.
+        * **Nothing is persisted, and a success clears it.**  The memory
+          lives on this instance, so a reload or restart re-tests from
+          scratch, and any later successful write erases it immediately.
+          Since ``_ensure_scheduler_enabled`` attempts the write before
+          *every* schedule write, a transient 404 self-heals at the next
+          session rather than needing a restart.
+        """
+        return self._scheduler_set_unavailable
+
     def set_scheduler_enabled(self, enable: bool) -> None:
         """Turn the Mode Scheduler master switch on or off.
 
         Raises on failure — callers that must not be blocked by it use
-        :meth:`_ensure_scheduler_enabled` instead.
+        :meth:`_ensure_scheduler_enabled` instead.  A 404 is remembered on
+        the way past (see :attr:`scheduler_set_unavailable`) so the handback
+        can decline with a reason instead of re-discovering it at every
+        session boundary.
         """
-        self.client.post(
-            _SCHEDULER_SET_ENDPOINT,
-            {"deviceSN": self.sn, "enable": 1 if enable else 0},
-        )
+        try:
+            self.client.post(
+                _SCHEDULER_SET_ENDPOINT,
+                {"deviceSN": self.sn, "enable": 1 if enable else 0},
+            )
+        except requests.HTTPError as err:
+            if err.response is not None and err.response.status_code == 404:
+                self._scheduler_set_unavailable = True
+            raise
+        # It answered, so whatever a previous 404 implied is no longer true.
+        # A success is the only thing that clears this: see
+        # :attr:`scheduler_set_unavailable`.
+        self._scheduler_set_unavailable = False
         # Only after the POST returned: recording an intended state the
         # device rejected would make the diagnostics download assert a
         # switch position that never happened.

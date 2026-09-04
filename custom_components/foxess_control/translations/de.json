@@ -426,6 +426,10 @@
     "schedule_not_applied": {
       "title": "Wechselrichter übernimmt Zeitplanänderungen nicht",
       "description": "FoxESS Control hat den Wechselrichter in den Modus **{commanded}** geschaltet, aber der Wechselrichter meldet noch immer den Modus **{reported}**, lange nachdem die Änderung wirksam sein sollte.\n\nDies bedeutet in der Regel, dass der Wechselrichter den Zeitplan-Schreibvorgang über die API zwar annimmt, ihn aber nicht anwendet — häufig nach einem Firmware-Update des Wechselrichters. Intelligentes Laden/Entladen verhält sich dann möglicherweise nicht wie konfiguriert (zum Beispiel Laden über den Ziel-SoC hinaus).\n\nDer Hinweis verschwindet automatisch, sobald der vom Wechselrichter gemeldete Modus dem befohlenen Modus entspricht. Besteht das Problem weiterhin, prüfen Sie auf ein Firmware-Update oder einen Kompatibilitätshinweis des Wechselrichters und erwägen Sie, das Problem mit einem Diagnose-Download zu melden."
+    },
+    "scheduler_handback_unsupported": {
+      "title": "Dieser Wechselrichter kann die Modus-Zeitplan-Steuerung nicht freigeben",
+      "description": "Die Rückgabe der Zeitplansteuerung ist aktiviert, aber **{inverter}** stellt `{endpoint}` nicht bereit — den einzigen API-Aufruf, der den Hauptschalter des Modus-Zeitplans ausschalten kann. Home Assistant kann diesen Wechselrichter daher nicht an seine eigenen Einstellungen zurückgeben, und wird es mit dieser Firmware auch nie können.\n\nSonst ist nichts betroffen: der Modus-Zeitplan arbeitet weiter, und intelligentes Laden und Entladen bleiben unverändert.\n\nDeaktivieren Sie **Rückgabe der Zeitplansteuerung** in den Integrationsoptionen, um diesen Hinweis zu entfernen. Falls ein Firmware-Update den Endpunkt später hinzufügt, verschwindet der Hinweis von selbst."
     }
   }
 }

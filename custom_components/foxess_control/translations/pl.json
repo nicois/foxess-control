@@ -426,6 +426,10 @@
     "schedule_not_applied": {
       "title": "Falownik nie stosuje zmian harmonogramu",
       "description": "FoxESS Control nakazał falownikowi tryb **{commanded}**, ale falownik nadal zgłasza tryb **{reported}** długo po tym, jak zmiana powinna była wejść w życie.\n\nZwykle oznacza to, że falownik przyjmuje zapis harmonogramu w API, ale go nie stosuje — często po aktualizacji firmware falownika. Inteligentne ładowanie/rozładowanie może wtedy nie działać zgodnie z konfiguracją (na przykład ładowanie powyżej docelowego SoC).\n\nPowiadomienie zostanie automatycznie usunięte, gdy tryb zgłaszany przez falownik będzie zgodny z nakazanym. Jeśli problem nadal występuje, sprawdź, czy dostępna jest aktualizacja firmware falownika lub informacja o zgodności, i rozważ zgłoszenie problemu wraz z pobranymi danymi diagnostycznymi."
+    },
+    "scheduler_handback_unsupported": {
+      "title": "Ten falownik nie może zwolnić kontroli Harmonogramu trybów",
+      "description": "Zwrot kontroli harmonogramu jest włączony, ale **{inverter}** nie udostępnia `{endpoint}` — jedynego wywołania API, które może wyłączyć przełącznik główny Harmonogramu trybów. Dlatego Home Assistant nie może zwrócić tego falownika jego własnym ustawieniom i przy tym oprogramowaniu nigdy nie będzie mógł.\n\nNic innego nie jest naruszone: Harmonogram trybów działa, a inteligentne ładowanie i rozładowanie pozostają bez zmian.\n\nWyłącz **Zwrot kontroli harmonogramu** w opcjach integracji, aby usunąć to powiadomienie. Jeśli późniejsza aktualizacja oprogramowania doda ten endpoint, powiadomienie zniknie samo."
     }
   }
 }

@@ -490,6 +490,7 @@ class TestIssue4EndToEnd:
             session_active=False,
             unmanaged_modes=[],
             scheduler_supported=True,
+            scheduler_set_unavailable=inv.scheduler_set_unavailable,
             captured_min_soc_on_grid=await load_captured_min_soc(capture_hass),
         )
         assert plan.act is True

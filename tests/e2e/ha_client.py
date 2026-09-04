@@ -283,6 +283,77 @@ class HAClient:
             f"within {timeout_s}s (last: {last})"
         )
 
+    def _ws_command(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Send one authenticated WS command and return its raw reply.
+
+        Returns the whole message, ``success`` flag included, rather than
+        raising on failure — callers that are *testing* a failure need the
+        error payload, not an exception built from it.
+        """
+        import websocket as _ws
+
+        ws_url = self.base_url.replace("http://", "ws://") + "/api/websocket"
+        ws = _ws.create_connection(ws_url, timeout=10)
+        try:
+            msg = json.loads(ws.recv())
+            if msg["type"] != "auth_required":
+                raise RuntimeError(f"Expected auth_required, got {msg['type']}")
+            token = str(self._session.headers["Authorization"]).split(" ", 1)[1]
+            ws.send(json.dumps({"type": "auth", "access_token": token}))
+            msg = json.loads(ws.recv())
+            if msg["type"] != "auth_ok":
+                raise RuntimeError(f"Auth failed: {msg}")
+            ws.send(json.dumps({"id": 1, **payload}))
+            reply: dict[str, Any] = json.loads(ws.recv())
+            return reply
+        finally:
+            ws.close()
+
+    def refused_service(
+        self, domain: str, service: str, data: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Call a service that must **refuse**, and return the error payload.
+
+        Over the **WebSocket** API, deliberately, because that is where a
+        refusal is legible.  ``ServiceValidationError`` carries a message and
+        a translation key, and ``websocket_api`` forwards both
+        (``service_validation_error``, plus ``translation_domain`` /
+        ``translation_key`` / ``translation_placeholders``) — which is what
+        the frontend, Developer Tools, and any script or automation step
+        actually receive.
+
+        The REST surface :meth:`call_service` uses cannot be used for this:
+        ``homeassistant.components.api`` maps only ``vol.Invalid`` and
+        ``ServiceNotFound`` to HTTP 400 and lets every other
+        ``HomeAssistantError`` escape, so aiohttp answers a bare **500
+        "Server got itself in trouble"** with the reason discarded.  That is
+        Home Assistant's behaviour for every integration, not this one's, but
+        it does mean a test asserting on a refusal *reason* has to ask over
+        the channel that carries one.
+
+        Fails loudly if the call *succeeded* — "the action refused" must
+        never be satisfiable by the action having quietly worked.
+        """
+        reply = self._ws_command(
+            {
+                "type": "call_service",
+                "domain": domain,
+                "service": service,
+                **({"service_data": data} if data else {}),
+            }
+        )
+        assert not reply.get("success"), (
+            f"{domain}.{service} was expected to refuse but succeeded: {reply}"
+        )
+        error: dict[str, Any] = reply.get("error", {})
+        assert error.get("code") != "not_found", (
+            f"{domain}.{service} is not registered, so this is Home Assistant "
+            f"reporting an unknown service rather than the action refusing: "
+            f"{error}"
+        )
+        _log.warning("refused_service %s/%s: %s", domain, service, error)
+        return error
+
     def enable_entity(self, entity_id: str) -> None:
         """Enable a disabled-by-default entity via the WS entity registry API."""
         import websocket as _ws

@@ -430,6 +430,10 @@
     "schedule_not_applied": {
       "title": "Omvormer past planningswijzigingen niet toe",
       "description": "FoxESS Control heeft de omvormer naar de modus **{commanded}** gestuurd, maar de omvormer meldt nog steeds de modus **{reported}**, ruim nadat de wijziging van kracht had moeten worden.\n\nDit betekent meestal dat de omvormer de planning wel via de API accepteert, maar niet toepast — vaak na een firmware-update van de omvormer. Slim laden/ontladen gedraagt zich dan mogelijk niet zoals geconfigureerd (bijvoorbeeld laden voorbij de doel-SoC).\n\nHet probleem wordt automatisch gesloten zodra de door de omvormer gemelde modus overeenkomt met de opgedragen modus. Als het probleem aanhoudt, controleer dan op een firmware-update of compatibiliteitsnotitie van de omvormer en overweeg het te melden met een diagnose-download."
+    },
+    "scheduler_handback_unsupported": {
+      "title": "Deze omvormer kan de Modusplanner-besturing niet vrijgeven",
+      "description": "Teruggave van de planner staat aan, maar **{inverter}** biedt `{endpoint}` niet aan — de enige API-aanroep die de hoofdschakelaar van de Modusplanner kan uitzetten. Home Assistant kan deze omvormer daarom niet teruggeven aan zijn eigen instellingen, en zal dat met deze firmware ook nooit kunnen.\n\nVerder is er niets geraakt: de Modusplanner werkt, en slim laden en ontladen blijven ongewijzigd.\n\nZet **Teruggave van de planner** weer uit in de integratie-opties om deze melding te verwijderen. Voegt een latere firmware-update het endpoint toe, dan verdwijnt de melding vanzelf."
     }
   }
 }

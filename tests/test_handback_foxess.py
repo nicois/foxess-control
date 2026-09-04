@@ -301,13 +301,22 @@ class TestEnableFailureIsTolerated:
             inv.self_use(min_soc_on_grid=11)
             inv.self_use(min_soc_on_grid=11)
 
+        relevant = [
+            rec for rec in caplog.records if "Mode Scheduler" in rec.getMessage()
+        ]
         warnings = [
-            rec.getMessage()
-            for rec in caplog.records
-            if rec.levelno >= logging.WARNING and "Mode Scheduler" in rec.getMessage()
+            rec.getMessage() for rec in relevant if rec.levelno >= logging.WARNING
         ]
         assert len(warnings) == 1, (
             f"expected exactly one Mode Scheduler warning, got {warnings}"
+        )
+        # Demoted, not silenced.  Issue #17 is a model family where this
+        # fires on every schedule write for the life of the install, so
+        # "warn once" without a debug trail would leave nothing to correlate
+        # against, and a warning per write would bury the whole log.
+        assert [rec for rec in relevant if rec.levelno == logging.DEBUG], (
+            "the repeat was silenced outright rather than demoted to debug, "
+            "so a second occurrence leaves no trace at all"
         )
 
 

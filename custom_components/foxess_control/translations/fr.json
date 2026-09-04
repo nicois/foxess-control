@@ -426,6 +426,10 @@
     "schedule_not_applied": {
       "title": "L'onduleur n'applique pas les modifications de planification",
       "description": "FoxESS Control a commandé le mode **{commanded}** à l'onduleur, mais l'onduleur signale toujours le mode **{reported}** bien après le moment où la modification aurait dû prendre effet.\n\nCela signifie généralement que l'onduleur accepte l'écriture de la planification au niveau de l'API mais ne l'applique pas — souvent après une mise à jour du firmware de l'onduleur. La charge/décharge intelligente peut alors ne pas se comporter comme configurée (par exemple en chargeant au-delà du SoC cible).\n\nL'avertissement se dissipera automatiquement dès que le mode signalé par l'onduleur correspondra à celui qui a été commandé. Si le problème persiste, vérifiez s'il existe une mise à jour du firmware de l'onduleur ou une note de compatibilité, et envisagez de le signaler avec un téléchargement de diagnostic."
+    },
+    "scheduler_handback_unsupported": {
+      "title": "Cet onduleur ne peut pas rendre le contrôle du Planificateur de modes",
+      "description": "La restitution du planificateur est activée, mais **{inverter}** ne propose pas `{endpoint}` — le seul appel d'API capable de désactiver l'interrupteur principal du Planificateur de modes. Home Assistant ne peut donc pas rendre cet onduleur à ses propres réglages, et ne le pourra jamais avec ce micrologiciel.\n\nRien d'autre n'est touché : le Planificateur de modes fonctionne, et la charge et la décharge intelligentes sont inchangées.\n\nDésactivez **Restitution du planificateur** dans les options de l'intégration pour écarter cet avis. Si une mise à jour du micrologiciel ajoute l'endpoint plus tard, l'avis disparaîtra de lui-même."
     }
   }
 }

@@ -430,6 +430,10 @@
     "schedule_not_applied": {
       "title": "El inversor no está aplicando los cambios de planificación",
       "description": "FoxESS Control ordenó al inversor el modo **{commanded}**, pero el inversor sigue informando del modo **{reported}** mucho después de que el cambio debería haber surtido efecto.\n\nNormalmente esto significa que el inversor acepta la escritura de la planificación en la API pero no la aplica — a menudo tras una actualización de firmware del inversor. La carga/descarga inteligente puede no comportarse como se ha configurado (por ejemplo, cargando por encima del SoC objetivo).\n\nEl aviso se eliminará automáticamente cuando el modo informado por el inversor coincida con el ordenado. Si persiste, compruebe si hay una actualización de firmware del inversor o una nota de compatibilidad, y considere reportarlo con una descarga de diagnóstico."
+    },
+    "scheduler_handback_unsupported": {
+      "title": "Este inversor no puede liberar el control del Programador de modos",
+      "description": "La devolución del control del programador está activada, pero **{inverter}** no ofrece `{endpoint}`: la única llamada de API que puede apagar el interruptor principal del Programador de modos. Por eso Home Assistant no puede devolver este inversor a sus propios ajustes, y nunca podrá con este firmware.\n\nNada más se ve afectado: el Programador de modos funciona, y la carga y descarga inteligentes no cambian.\n\nDesactive **Devolución del control del programador** en las opciones de la integración para descartar este aviso. Si una actualización de firmware añade el endpoint más adelante, el aviso desaparecerá solo."
     }
   }
 }

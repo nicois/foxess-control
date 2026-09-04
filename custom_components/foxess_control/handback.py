@@ -7,6 +7,13 @@ left on blocks the user's local Modbus control) and issue #4 (a Min SoC of
 0% is only reachable outside the scheduler, because the scheduler declares
 ``minsocongrid.range.min = 10`` and rejects less with errno 40257).
 
+Not every inverter can do it.  Issue #17 is an H3-12.0-E whose
+``/op/v0/device/scheduler/set`` answers HTTP 404 — the one endpoint that can
+turn the master switch off — while its Mode Scheduler otherwise works
+normally.  Handback is impossible there, and saying so is this module's job:
+declining silently at every session boundary forever is what left that user
+reading a diagnostics download to find out.
+
 This module is the *decision* only.  It performs no I/O, imports nothing
 from Home Assistant, and returns a value describing what should happen;
 the caller does it.  Splitting it this way is what makes every guard
@@ -59,6 +66,7 @@ def plan_handback(
     session_active: bool,
     unmanaged_modes: list[str],
     scheduler_supported: bool | None,
+    scheduler_set_unavailable: bool,
     captured_min_soc_on_grid: int | None,
 ) -> HandbackPlan:
     """Decide whether to hand the inverter back to its own settings.
@@ -80,6 +88,20 @@ def plan_handback(
     values decline, so the tri-state changes only the reason, never the
     decision.
 
+    *scheduler_set_unavailable* is a **separate fact about a separate
+    endpoint** — issue #17, an H3-12.0-E whose
+    ``/op/v0/device/scheduler/set`` answers HTTP 404.  It is deliberately
+    not a fourth value of *scheduler_supported*: that device's flag
+    endpoint says it *does* have a Mode Scheduler, and its schedule writes
+    enable the switch implicitly, so calling it unsupported would be a
+    confident falsehood about the owner's hardware — the same mistake
+    ``get_scheduler_flag`` was changed to stop making — and would send them
+    looking for a limitation they do not have.  ``None`` would be worse
+    again: it means "the flag read failed and will be retried", which a
+    missing write endpoint is not.  A plain ``bool`` suffices where support
+    needs a tri-state, because "never tried" and "tried and it worked" both
+    mean *attempt it*, so there is no third answer to represent.
+
     **When nothing was captured, nothing is restored.**  A default is
     never substituted, and a captured value is passed through verbatim —
     no clamping to the scheduler's 10% minimum, no rounding.  This
@@ -91,14 +113,15 @@ def plan_handback(
     nothing to restore still happens — it just leaves the floor alone.
 
     Guards are evaluated ``enabled`` → ``entity_mode`` →
-    ``scheduler_supported`` → ``unmanaged_modes`` → ``session_active``:
-    most permanent cause first, so the reason a caller logs names the
-    condition that will still be true tomorrow.  A Backup group needs the
-    user in the FoxESS app; an active session clears itself within hours,
-    and reporting the transient cause over the permanent one would tell a
-    user to wait for something that was never going to happen.  Precedence
-    only ever selects *which* reason is reported — every guard yields
-    ``act=False`` — so no ordering can make the decision less safe.
+    ``scheduler_supported`` → ``scheduler_set_unavailable`` →
+    ``unmanaged_modes`` → ``session_active``: most permanent cause first, so
+    the reason a caller logs names the condition that will still be true
+    tomorrow.  A Backup group needs the user in the FoxESS app; an active
+    session clears itself within hours, and reporting the transient cause
+    over the permanent one would tell a user to wait for something that was
+    never going to happen.  Precedence only ever selects *which* reason is
+    reported — every guard yields ``act=False`` — so no ordering can make
+    the decision less safe.
 
     In order:
 
@@ -107,11 +130,20 @@ def plan_handback(
     2. **Entity mode** — there is no cloud Mode Scheduler to hand back.
     3. **Scheduler unsupported, or unknown** — likewise nothing to hand
        back, but reported as two distinct reasons: what the device said,
-       versus that it could not be established.
-    4. **Unmanaged modes present** — C-018: the schedule contains modes
+       versus that it could not be established.  Both come from the flag
+       read, so both outrank the remembered 404 below: fresh evidence about
+       the device beats a memory of an earlier attempt, and when the fresh
+       evidence already declines, saying so is the more useful of the two.
+    4. **The master switch cannot be written** — issue #17.  The device has
+       a Mode Scheduler and no way to switch it off, so handback is
+       impossible on this hardware.  Ranked above the two guards below
+       because neither of those is anything the user could usefully act on
+       here: deleting a Backup group or waiting for a session to end
+       changes nothing when the endpoint is not there.
+    5. **Unmanaged modes present** — C-018: the schedule contains modes
        this integration does not manage, which the user put there
        deliberately.  Named in the reason so the log is actionable.
-    5. **A session is active** — C-025.  Turning the master switch off
+    6. **A session is active** — C-025.  Turning the master switch off
        mid-session strands the live override: the group stops driving the
        inverter while the integration still believes it is charging or
        discharging.  A safety divergence, not untidiness.
@@ -151,6 +183,19 @@ def plan_handback(
             reason=(
                 "this inverter reports no Mode Scheduler support, "
                 "so there is nothing to hand back"
+            ),
+        )
+
+    if scheduler_set_unavailable:
+        return HandbackPlan(
+            act=False,
+            reason=(
+                "this inverter does not serve the Mode Scheduler master "
+                "switch write (HTTP 404), so the switch cannot be turned "
+                "off and handback is not possible on this hardware — the "
+                "Mode Scheduler itself works and smart charging and "
+                "discharging are unaffected, so the only thing worth "
+                "changing is the scheduler handback option"
             ),
         )
 
