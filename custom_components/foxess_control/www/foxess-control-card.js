@@ -755,13 +755,21 @@ class FoxESSControlCard extends HTMLElement {
     });
   }
 
-  /** Stop acknowledging, optionally leaving a notice, and re-render. */
+  /**
+   * Stop acknowledging, optionally leaving a notice, and re-render.
+   *
+   * When a notice is left behind, `_cancelWatch` is *kept* so the same
+   * session-news check that releases a pending cancel also retires the
+   * notice.  Otherwise "tap Cancel to retry" would survive the session
+   * ending and be read on an idle card that no longer has a Cancel button —
+   * advice that cannot be followed, about a session already over.
+   */
   _clearCancelPending(noticeKey) {
     this._cancelPending = false;
-    this._cancelWatch = null;
     clearTimeout(this._cancelAckTimer);
     this._cancelAckTimer = null;
     this._cancelNotice = noticeKey || null;
+    if (!noticeKey) this._cancelWatch = null;
     this._render();
   }
 
@@ -1032,12 +1040,15 @@ class FoxESSControlCard extends HTMLElement {
 
     const st = this._staleState();
 
-    // A pending cancel is answered by *any* news about the session, so
-    // release the acknowledgement as soon as the fingerprint moves.  This
-    // runs before the render below, so the card never paints "cancelling"
-    // over a session that has already changed underneath it.
+    // A cancel is answered by *any* news about the session, so release both
+    // the acknowledgement and any failure notice as soon as the fingerprint
+    // moves.  This runs before the render below, so the card never paints
+    // "cancelling" — or "tap Cancel to retry" — over a session that has
+    // already changed underneath it.  The fingerprint deliberately covers
+    // only the active flags and phases, so ordinary polling (every 300 s on
+    // REST, far more often on WebSocket) leaves a notice up long enough to
+    // be read.
     if (
-      this._cancelPending &&
       this._cancelWatch !== null &&
       this._sessionFingerprint() !== this._cancelWatch
     ) {

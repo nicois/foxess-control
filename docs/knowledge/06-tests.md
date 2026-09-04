@@ -423,6 +423,51 @@ is where `_getDataSource` reads from — a stub without them silently
 falls back to the default threshold and the WS boundary case cannot be
 exercised.
 
+## Control Card Staleness and Cancel Acknowledgement (C-020)
+
+**Constraints**: C-020, C-029, C-031
+**Source**: `tests/test_control_card_stale.py` (40 tests, 2026-09-04),
+`tests/e2e/test_ui.py::TestControlCardStaleness` (3 tests),
+harness `tests/card_dom.py`
+
+The staleness treatment above shipped on the *overview* card only. The
+control card — which owns Cancel, Charge and Discharge — got nothing,
+which is the worse half: a stale overview shows misleading numbers, a
+stale control card invites the user to act on them. Reported in
+production on 1.0.22-beta.5 as "cancel is broken", when the cancel had
+in fact worked twice and the browser had stopped receiving updates.
+
+Covered behaviour:
+
+- **Disconnected** (`hass.connected === false`): banner naming the
+  *connection*, readings dimmed and desaturated, and Charge, Discharge
+  and Cancel all disabled with the reason stated. A service call cannot
+  be delivered over a dead WebSocket, so an enabled button is a lie.
+- **Connected but stale data**: banner naming the *data*, readings
+  dimmed, controls deliberately left **enabled** — the user may be
+  cancelling because they can see something is wrong, and HA acts on
+  server-side truth rather than on this browser's snapshot.
+- **Per-source thresholds** with the boundary either side, from the
+  shared `foxess-stale.js` table (WS 60 s, REST/Modbus 900 s).
+- **Cancel acknowledgement**: appears on the confirming click, clears on
+  the first genuine session news, bounded at 15 s so it cannot stick,
+  surfaces a rejected `callService` in words, and its failure notice does
+  not outlive the session it was about.
+- **Shared-module deployment**: every sibling module a card imports must
+  exist and be registered as a static path but *not* as a Lovelace
+  resource. A sibling import that 404s takes the whole card down.
+
+Cards are loaded as ES **modules over a routed origin** rather than
+injected with `add_script_tag(path=...)`. That is how HA serves them
+(`res_type: "module"`) and the only form in which a shared sibling import
+resolves; `tests/test_overview_card_stale.py` and
+`tests/test_card_entity_resolution.py` moved to the same harness.
+
+Visual assertions use *effective* opacity and filter — multiplied up to
+the shadow root — because opacity does not inherit and an ancestor's
+filter does not appear in a descendant's computed style, so an element's
+own values cannot reveal that a parent rule is dimming it.
+
 ## PV-Only Energy vs Inverter Output Energy (C-041)
 
 **Constraints**: C-020, C-028, C-033, C-041
@@ -732,6 +777,9 @@ to Jekyll 3.10 — `{% raw %}` is the only reliable escape.)
 | `TestControlCard::test_safety_floor_row_is_expandable_and_shows_peak` | UX #6 refinement: click-to-expand explainer + peak-value interpolation | C-020, D-051 |
 | `TestControlCard::test_discharge_deferred_reason_renders_when_attribute_present` | UX #4: reason text in .detail-value-wrap (discharge) | C-020, D-051 |
 | `TestControlCard::test_charge_deferred_reason_renders_when_attribute_present` | UX #4: reason text in .detail-value-wrap (charge) | C-020, D-051 |
+| `TestControlCardStaleness::test_healthy_card_is_completely_normal` | Live connection + fresh data: no banner, opacity 1, every control usable | C-020 |
+| `TestControlCardStaleness::test_disconnected_frontend_freezes_the_controls_and_says_so` | `connected: false` dims the readings, names the connection, disables all controls — and reconnecting restores everything | C-020 |
+| `TestControlCardStaleness::test_cancel_acknowledges_and_ends_the_session` | Confirming click acknowledges immediately; the cancel still ends a real session and the card returns to idle | C-020 |
 | `TestTaperCard::test_card_renders` | UX #5: taper card present on dashboard | C-020, D-051 |
 | `TestTaperCard::test_empty_state_when_no_profile` | UX #5: empty-state text when no observations | C-020, D-051 |
 | `TestTaperCard::test_bars_render_with_seeded_profile` | UX #5: bar widths proportional to ratio, low-conf marker | C-014, C-020, D-051 |
