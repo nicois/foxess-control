@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -356,6 +356,349 @@ class TestMapWsToCoordinator:
         # balance (kW): 0.183 + 0.607 - 0 - 0.809 = -0.019 → slight export
         assert data["gridConsumptionPower"] == 0.0
         assert data["feedinPower"] == pytest.approx(0.019)
+
+
+# ---------------------------------------------------------------------------
+# AC-coupled additional generation via the WS ``aux`` node (issue #18)
+# ---------------------------------------------------------------------------
+
+
+class TestAuxAdditionalGeneration:
+    """The WS ``aux`` node carries AC-coupled generation.
+
+    Same quantity as ``meterPower2`` over REST and "Gen Load" in the
+    native FoxESS app: a second inverter's output, measured on an
+    auxiliary meter channel, which never appears in the FoxESS
+    ``solar``/``pvPower`` reading because it is not wired into the
+    FoxESS PV strings.
+
+    Opt-in only.  ``aux`` is folded in solely for users who configured
+    ``additional_pv_power_variable``; on a DC-coupled system ``aux`` may
+    carry something else entirely, so an unconfigured user must see
+    byte-identical behaviour.
+
+    Units follow C-004: the WS sends watts as strings unless the power
+    object's ``unit`` field says ``kW``.
+    """
+
+    # julianjwong's readings from issue #18, one moment in time:
+    #   native PV strings   0 W      (nothing on the FoxESS DC inputs)
+    #   house load          1.80 kW
+    #   AC-coupled Gen Load 3.32 kW
+    #   battery             100%, 0 W
+    #   native FoxESS app   EXPORTING 1.52 kW   (3.32 - 1.80 = 1.52)
+    @staticmethod
+    def _julian_msg(aux: object | None = None) -> dict[str, Any]:
+        node: dict[str, Any] = {
+            "solar": {"power": {"value": "0", "unit": "W"}},
+            "load": {"power": {"value": "1800", "unit": "W"}},
+            "bat": {"power": {"value": "0", "unit": "W"}, "soc": 100, "charge": 0},
+            "grid": {"power": {"value": "1520", "unit": "W"}, "gridStatus": 2},
+        }
+        if aux is not None:
+            node["aux"] = aux
+        return {"errno": 0, "result": {"node": node, "timeDiff": 5}}
+
+    # -- opt-in gate ------------------------------------------------------
+
+    def test_aux_ignored_when_not_configured(self) -> None:
+        """Unconfigured: an ``aux`` node must change nothing at all.
+
+        Asserts full dict equality against the same frame with no ``aux``
+        node, so any leaked term or marker key fails the test.
+        """
+        with_aux = map_ws_to_coordinator(
+            self._julian_msg({"power": {"value": "3320", "unit": "W"}})
+        )
+        baseline = map_ws_to_coordinator(self._julian_msg())
+        assert with_aux == baseline
+        assert with_aux["pvPower"] == 0.0
+        assert "_additional_pv_kw" not in with_aux
+
+    def test_aux_added_to_pvpower_when_configured(self) -> None:
+        msg = self._julian_msg({"power": {"value": "3320", "unit": "W"}})
+        data = map_ws_to_coordinator(msg, additional_pv_enabled=True)
+        assert data["pvPower"] == pytest.approx(3.32)
+
+    # -- units (C-004) ----------------------------------------------------
+
+    def test_aux_watts_string_divided_by_1000(self) -> None:
+        """C-004: watts as a string, no ``unit`` field → divide by 1000."""
+        msg = self._julian_msg({"power": {"value": "3320"}})
+        data = map_ws_to_coordinator(msg, additional_pv_enabled=True)
+        assert data["pvPower"] == pytest.approx(3.32)
+        assert data["_additional_pv_kw"] == pytest.approx(3.32)
+
+    def test_aux_explicit_watts_unit_divided_by_1000(self) -> None:
+        msg = self._julian_msg({"power": {"value": "3320", "unit": "W"}})
+        data = map_ws_to_coordinator(msg, additional_pv_enabled=True)
+        assert data["_additional_pv_kw"] == pytest.approx(3.32)
+
+    def test_aux_kw_unit_used_as_is(self) -> None:
+        """C-004: ``unit`` of kW means the value is already kW."""
+        msg = self._julian_msg({"power": {"value": "3.32", "unit": "kW"}})
+        data = map_ws_to_coordinator(msg, additional_pv_enabled=True)
+        assert data["pvPower"] == pytest.approx(3.32)
+        assert data["_additional_pv_kw"] == pytest.approx(3.32)
+
+    def test_aux_numeric_not_string(self) -> None:
+        """Value may arrive as a JSON number rather than a string."""
+        msg = self._julian_msg({"power": {"value": 3320, "unit": "W"}})
+        data = map_ws_to_coordinator(msg, additional_pv_enabled=True)
+        assert data["pvPower"] == pytest.approx(3.32)
+
+    # -- live value preferred, REST value as fallback ---------------------
+
+    def test_aux_absent_falls_back_to_rest_value(self) -> None:
+        """No ``aux`` in the frame → keep the REST-derived term, not zero.
+
+        Dropping it would leave the C-006 balance blind to AC-coupled
+        generation and make the sign inference worse, not better.
+        """
+        data = map_ws_to_coordinator(
+            self._julian_msg(),
+            additional_pv_enabled=True,
+            additional_pv_fallback_kw=3.32,
+        )
+        assert data["pvPower"] == pytest.approx(3.32)
+        assert data["_additional_pv_kw"] == pytest.approx(3.32)
+
+    def test_live_aux_preferred_over_stale_rest_value(self) -> None:
+        """A live ``aux`` reading wins over the up-to-5-minute-old REST one."""
+        msg = self._julian_msg({"power": {"value": "3320", "unit": "W"}})
+        data = map_ws_to_coordinator(
+            msg, additional_pv_enabled=True, additional_pv_fallback_kw=0.5
+        )
+        assert data["pvPower"] == pytest.approx(3.32)
+        assert data["_additional_pv_kw"] == pytest.approx(3.32)
+
+    def test_live_zero_aux_beats_stale_nonzero(self) -> None:
+        """A live 0 W reading is authoritative — do not re-add a stale value.
+
+        Sunset case: the AC-coupled inverter has stopped, but the last
+        REST poll still holds 3.32 kW.  The live zero must win.
+        """
+        msg = self._julian_msg({"power": {"value": "0", "unit": "W"}})
+        data = map_ws_to_coordinator(
+            msg, additional_pv_enabled=True, additional_pv_fallback_kw=3.32
+        )
+        assert data["pvPower"] == 0.0
+        assert data["_additional_pv_kw"] == 0.0
+
+    def test_aux_non_numeric_falls_back(self) -> None:
+        msg = self._julian_msg({"power": {"value": "N/A", "unit": "W"}})
+        data = map_ws_to_coordinator(
+            msg, additional_pv_enabled=True, additional_pv_fallback_kw=3.32
+        )
+        assert data["pvPower"] == pytest.approx(3.32)
+
+    def test_aux_placeholder_dashes_falls_back(self) -> None:
+        """The cloud sends ``"--"`` for a channel with no reading.
+
+        Must fall back to the REST value rather than contributing zero
+        and flipping the balance back into the issue-#18 failure mode.
+        """
+        msg = self._julian_msg({"power": {"value": "--", "unit": "W"}})
+        data = map_ws_to_coordinator(
+            msg, additional_pv_enabled=True, additional_pv_fallback_kw=3.32
+        )
+        assert data["pvPower"] == pytest.approx(3.32)
+        assert data["feedinPower"] == pytest.approx(1.52)
+
+    def test_aux_empty_node_falls_back(self) -> None:
+        data = map_ws_to_coordinator(
+            self._julian_msg({}),
+            additional_pv_enabled=True,
+            additional_pv_fallback_kw=3.32,
+        )
+        assert data["pvPower"] == pytest.approx(3.32)
+
+    def test_aux_as_bare_power_object(self) -> None:
+        """Tolerate ``aux`` being the power object itself, not a node.
+
+        Every other observed node nests the reading under ``power``
+        (``solar``, ``load``, ``grid``, ``bat``, ``device``), so that is
+        the primary shape; this guards the other plausible one rather
+        than silently dropping the term.
+        """
+        msg = self._julian_msg({"value": "3320", "unit": "W"})
+        data = map_ws_to_coordinator(msg, additional_pv_enabled=True)
+        assert data["pvPower"] == pytest.approx(3.32)
+
+    def test_no_pvpower_in_frame_means_no_term(self) -> None:
+        """Without a WS solar reading there is nothing to add the term to."""
+        msg = {
+            "errno": 0,
+            "result": {
+                "node": {
+                    "grid": {"power": {"value": "1520"}, "gridStatus": 2},
+                    "aux": {"power": {"value": "3320"}},
+                },
+                "timeDiff": 5,
+            },
+        }
+        data = map_ws_to_coordinator(msg, additional_pv_enabled=True)
+        assert "pvPower" not in data
+        assert "_additional_pv_kw" not in data
+
+    # -- the reported symptom: grid direction (C-006) ---------------------
+
+    def test_grid_direction_is_export_with_live_aux(self) -> None:
+        """Issue #18 at the mapper: julianjwong's frame must read export.
+
+        Balance with the AC-coupled term visible (kW):
+        1.80 load + 0 charge - 0 discharge - 3.32 solar = -1.52 → export,
+        and |−1.52| matches the 1.52 kW grid reading exactly, so the
+        balance is judged reliable and gridStatus is not needed.
+        """
+        msg = self._julian_msg({"power": {"value": "3320", "unit": "W"}})
+        data = map_ws_to_coordinator(msg, additional_pv_enabled=True)
+        assert data["feedinPower"] == pytest.approx(1.52)
+        assert data["gridConsumptionPower"] == 0.0
+
+    def test_export_sign_also_correct_from_rest_fallback(self) -> None:
+        """The balance must see the term even when it comes from REST.
+
+        Before the fix the coordinator added the REST term *after*
+        ``map_ws_to_coordinator`` had already decided the sign, so the
+        balance never saw it at all — stale or not.
+        """
+        data = map_ws_to_coordinator(
+            self._julian_msg(),
+            additional_pv_enabled=True,
+            additional_pv_fallback_kw=3.32,
+        )
+        assert data["feedinPower"] == pytest.approx(1.52)
+        assert data["gridConsumptionPower"] == 0.0
+
+    def test_without_the_term_the_balance_gets_the_sign_wrong(self) -> None:
+        """Documents *why* issue #18 happens, and pins the blame on the input.
+
+        With no AC-coupled term available at all, the C-006 balance
+        predicts import of 1.80 kW.  The actual grid reading is 1.52 kW,
+        a ratio of only 1.18 — comfortably inside the 3x reliability
+        window — so the ``gridStatus`` fallback (which says export) is
+        never consulted and the site is reported as importing.
+
+        This must stay true after the fix: the correction has to come
+        from feeding the balance the AC-coupled term, not from enabling
+        a flag.
+        """
+        data = map_ws_to_coordinator(self._julian_msg(), additional_pv_enabled=True)
+        assert data["gridConsumptionPower"] == pytest.approx(1.52)
+        assert data["feedinPower"] == 0.0
+
+    def test_zero_term_changes_no_power_value(self) -> None:
+        """Enabled but with nothing to add: every power value is unchanged.
+
+        A DC-coupled frame carries no ``aux`` node (the real capture in
+        ``test_real_world_sample`` has keys solar/grid/bat/load/device/
+        charger/heatpump), so opting in on such a system — or before the
+        first REST poll has produced a fallback — must leave the numbers
+        exactly as they were.  Only the bookkeeping marker differs.
+        """
+        msg = self._julian_msg()
+        baseline = map_ws_to_coordinator(msg)
+        enabled = map_ws_to_coordinator(
+            msg, additional_pv_enabled=True, additional_pv_fallback_kw=0.0
+        )
+        assert enabled.pop("_additional_pv_kw") == 0.0
+        assert enabled == baseline
+
+
+class TestAuxWiredThroughListenLoop:
+    """The live ``aux`` term must reach the coordinator, not just the mapper."""
+
+    @staticmethod
+    def _ws_msg(aux_w: str | None = "3320") -> aiohttp.WSMessage:
+        import json
+
+        node: dict[str, Any] = {
+            "solar": {"power": {"value": "0", "unit": "W"}},
+            "load": {"power": {"value": "1800", "unit": "W"}},
+            "bat": {"power": {"value": "0", "unit": "W"}, "soc": 100, "charge": 0},
+            "grid": {"power": {"value": "1520", "unit": "W"}, "gridStatus": 2},
+        }
+        if aux_w is not None:
+            node["aux"] = {"power": {"value": aux_w, "unit": "W"}}
+        return aiohttp.WSMessage(
+            type=aiohttp.WSMsgType.TEXT,
+            data=json.dumps({"errno": 0, "result": {"node": node, "timeDiff": 5}}),
+            extra=None,
+        )
+
+    async def _run_one_frame(
+        self,
+        msg: aiohttp.WSMessage,
+        additional_pv: Any = None,
+    ) -> dict[str, Any]:
+        on_data = AsyncMock()
+        web_session = AsyncMock()
+        web_session.async_ensure_token = AsyncMock(return_value="tok")
+        ws = FoxESSRealtimeWS(
+            "plant1",
+            web_session,
+            on_data,
+            MagicMock(),
+            additional_pv=additional_pv,
+        )
+        mock_ws = AsyncMock()
+        mock_ws.receive = AsyncMock(
+            side_effect=[
+                msg,
+                aiohttp.WSMessage(type=aiohttp.WSMsgType.CLOSED, data=None, extra=None),
+            ]
+        )
+        mock_ws.closed = True
+        ws._ws = mock_ws
+        ws._connected = True
+        ws._stop_event.clear()
+
+        with patch.object(ws, "_try_reconnect", new_callable=AsyncMock) as reconnect:
+
+            async def _fail_reconnect() -> None:
+                ws._connected = False
+
+            reconnect.side_effect = _fail_reconnect
+            await ws._listen_loop()
+
+        assert on_data.call_count == 1
+        forwarded: dict[str, Any] = on_data.call_args.args[0]
+        return forwarded
+
+    @pytest.mark.asyncio
+    async def test_configured_provider_feeds_live_aux_through(self) -> None:
+        forwarded = await self._run_one_frame(
+            self._ws_msg(), additional_pv=lambda: (True, 0.0)
+        )
+        assert forwarded["pvPower"] == pytest.approx(3.32)
+        assert forwarded["feedinPower"] == pytest.approx(1.52)
+        assert forwarded["gridConsumptionPower"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_no_provider_leaves_frame_untouched(self) -> None:
+        """Default construction (e.g. the config-flow probe) opts out."""
+        forwarded = await self._run_one_frame(self._ws_msg())
+        assert forwarded["pvPower"] == 0.0
+        assert "_additional_pv_kw" not in forwarded
+
+    @pytest.mark.asyncio
+    async def test_provider_fallback_used_when_frame_has_no_aux(self) -> None:
+        forwarded = await self._run_one_frame(
+            self._ws_msg(aux_w=None), additional_pv=lambda: (True, 3.32)
+        )
+        assert forwarded["pvPower"] == pytest.approx(3.32)
+        assert forwarded["feedinPower"] == pytest.approx(1.52)
+
+    @pytest.mark.asyncio
+    async def test_provider_failure_does_not_break_the_stream(self) -> None:
+        """A raising provider must degrade to "not configured", not drop frames."""
+
+        def _boom() -> tuple[bool, float]:
+            raise RuntimeError("config unavailable during startup")
+
+        forwarded = await self._run_one_frame(self._ws_msg(), additional_pv=_boom)
+        assert forwarded["pvPower"] == 0.0
 
 
 # ---------------------------------------------------------------------------
