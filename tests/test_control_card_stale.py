@@ -141,6 +141,27 @@ window.__fxPush = function(opts) {
   return window.__fxProbe();
 };
 
+/* Opacity does not inherit, and `filter` on an ancestor does not appear in
+ * a descendant's computed style — so reading an element's own computed
+ * values cannot tell whether it is being dimmed by a rule on its parent.
+ * Walking up to the shadow root and combining what we find is what the eye
+ * actually sees, and it is the difference between catching
+ * `ha-card.stale .content {opacity:.55}` and catching
+ * `ha-card.stale {opacity:.55}`. */
+window.__fxEffective = function(el) {
+  if (!el) return null;
+  let opacity = 1;
+  const filters = [];
+  let node = el;
+  while (node && node.nodeType === 1) {
+    const cs = getComputedStyle(node);
+    opacity *= parseFloat(cs.opacity);
+    if (cs.filter && cs.filter !== "none") filters.push(cs.filter);
+    node = node.parentElement;
+  }
+  return {opacity: opacity, filter: filters.join(" ") || "none"};
+};
+
 window.__fxProbe = function() {
   const r = window.__fxCard.shadowRoot;
   const card = r.querySelector("ha-card");
@@ -149,24 +170,25 @@ window.__fxProbe = function() {
   const content = r.querySelector(".content");
   const badge = r.querySelector(".data-source");
   const notice = r.querySelector(".action-notice");
-  const cs = (el) => (el ? getComputedStyle(el) : null);
-  const hs = cs(header);
-  const ct = cs(content);
-  const bn = cs(banner);
+  const bn = window.__fxEffective(banner);
+  const hs = window.__fxEffective(header);
+  const ct = window.__fxEffective(content);
   return {
     stale: card ? card.classList.contains("stale") : null,
     cardClass: card ? (card.getAttribute("class") || "") : null,
     bannerText: banner ? banner.textContent.trim() : null,
-    bannerOpacity: bn ? bn.opacity : null,
+    bannerOpacity: bn ? String(bn.opacity) : null,
     bannerFilter: bn ? bn.filter : null,
-    headerOpacity: hs ? hs.opacity : null,
+    headerOpacity: hs ? String(hs.opacity) : null,
     headerFilter: hs ? hs.filter : null,
-    contentOpacity: ct ? ct.opacity : null,
+    contentOpacity: ct ? String(ct.opacity) : null,
     contentFilter: ct ? ct.filter : null,
     badgeClass: badge ? badge.className : null,
     badgeText: badge ? badge.textContent.trim() : null,
     noticeText: notice ? notice.textContent.trim() : null,
     noticeClass: notice ? notice.className : null,
+    cancelPending: window.__fxCard._cancelPending === true,
+    cancelAckTimerArmed: !!window.__fxCard._cancelAckTimer,
     buttons: Array.from(r.querySelectorAll(".action-btn")).map((b) => ({
       action: b.dataset.action || "",
       text: b.textContent.trim(),
@@ -375,14 +397,21 @@ class TestStaleTreatmentIsVisuallyObvious:
 
     def test_banner_itself_stays_at_full_strength(self, page: Page) -> None:
         """Dimming the explanation along with the readings would defeat
-        the point — the banner is the one thing that *is* current."""
+        the point — the banner is the one thing that *is* current.
+
+        Asserted on *effective* opacity and filter (see ``__fxEffective``),
+        because dimming the whole ``ha-card`` would leave the banner's own
+        computed values untouched at 1 and ``none`` while the user sees it
+        greyed out along with everything else.
+        """
         r = _mount(page, connected=False, age_seconds=45 * 60, active=True)
         assert r["bannerOpacity"] is not None, "no banner rendered"
         assert float(r["bannerOpacity"]) == 1.0, (
-            f"the banner must not be dimmed, opacity={r['bannerOpacity']}"
+            f"the banner must not be dimmed, effective opacity={r['bannerOpacity']}"
         )
         assert r["bannerFilter"] in (None, "none"), (
-            f"the banner must not be desaturated, filter={r['bannerFilter']!r}"
+            f"the banner must not be desaturated, effective filter="
+            f"{r['bannerFilter']!r}"
         )
 
 
@@ -642,12 +671,39 @@ class TestCancelAcknowledgement:
         )
 
     def test_acknowledgement_clears_when_the_session_ends(self, page: Page) -> None:
-        _mount(page, connected=True, source="api", age_seconds=30, active=True)
+        """The pending state must be *released*, not merely painted over.
+
+        An earlier version of this test only checked that the Cancel button
+        was gone — which it is anyway once the session ends, because the
+        action row switches to Charge/Discharge. It therefore passed against
+        an implementation whose pending state never cleared, leaving a live
+        give-up timer that would later drop a "nothing came back" notice on
+        a card that had long since gone idle. So assert the release itself,
+        and then that no late notice arrives.
+        """
+        _mount(
+            page,
+            connected=True,
+            source="api",
+            age_seconds=30,
+            active=True,
+            ack_timeout_ms=200,
+        )
         pending = _confirm_cancel(page)
         assert _button(pending, "cancel") is not None
+        assert pending["cancelPending"] is True
+        assert pending["cancelAckTimerArmed"] is True
 
         # HA pushes the state the cancel produced: session over.
         r = _push(page, connected=True, source="api", age_seconds=5, active=False)
+        assert r["cancelPending"] is False, (
+            "the pending cancel must be released once the session ends, not "
+            "left running behind an action row that happens to look right"
+        )
+        assert r["cancelAckTimerArmed"] is False, (
+            "releasing the pending cancel must also disarm its give-up timer, "
+            "or it will fire over an idle card later"
+        )
         assert _button(r, "cancel") is None, (
             "with the session ended the cancel button must be gone, not stuck "
             f"acknowledging: {r['buttons']!r}"
@@ -658,6 +714,16 @@ class TestCancelAcknowledgement:
             assert btn["disabled"] is False
         assert r["noticeText"] is None, (
             f"a completed cancel must leave no notice behind, got {r['noticeText']!r}"
+        )
+
+        # Past the (test-shortened) bound, nothing must surface. Asserting a
+        # negative needs a wait; 200 ms is the whole bound here, not the 15 s
+        # production one.
+        page.wait_for_timeout(400)
+        late = _probe(page)
+        assert late["noticeText"] is None, (
+            "a cancel that succeeded must not raise a late give-up notice, "
+            f"got {late['noticeText']!r}"
         )
 
     def test_acknowledgement_clears_when_the_phase_changes(self, page: Page) -> None:
