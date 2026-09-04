@@ -734,6 +734,12 @@ An ApexCharts variant is covered as a user template in
 >     - url: /foxess_control/foxess-taper-card.js
 >       type: module
 > ```
+>
+> That list is complete — do **not** add `foxess-stale.js`. It is a helper
+> module the control and overview cards import for their staleness
+> indication, not a card; the integration already serves it, and registering
+> it as a resource makes Home Assistant try to load a card that does not
+> exist and log an error on every dashboard.
 
 ## Supported languages
 
