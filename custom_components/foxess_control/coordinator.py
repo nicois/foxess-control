@@ -103,9 +103,10 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._ws_feedin_power_kw: float = 0.0
         # Last REST-polled value of the optional additional PV variable
         # (AC-coupled second inverter, e.g. meterPower2), in kW. Held so the
-        # WS inject path will be able to reflect total solar between polls
-        # (consumed by that path in a later task). 0.0 when the feature is
-        # unconfigured or the variable is missing.
+        # WS path can reflect total solar between polls: it is handed to
+        # map_ws_to_coordinator as the fallback for frames whose `aux` node
+        # is absent or unreadable. 0.0 when the feature is unconfigured or
+        # the variable is missing.
         self._additional_pv_kw: float = 0.0
         # Consecutive polls the configured additional PV variable has been
         # absent from the API response. After _ADDITIONAL_PV_MISSING_LIMIT
@@ -163,6 +164,15 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if last is None:
             return False
         return (now_monotonic - last) < self._WS_FRESH_INJECT_WINDOW_S
+
+    @property
+    def additional_pv_kw(self) -> float:
+        """Last REST-polled AC-coupled generation term, in kW.
+
+        The WS path's fallback for frames that carry no readable ``aux``
+        node.  0.0 when the feature is unconfigured.
+        """
+        return self._additional_pv_kw
 
     @property
     def _bms_fetch_interval(self) -> float:
@@ -628,10 +638,20 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # AC-coupled additional solar: add the last REST-polled external PV
         # term to the WS solar reading so streaming frames also reflect total
         # generation. _additional_pv_kw is 0.0 when unconfigured or before the
-        # first REST poll, so this is a no-op for everyone else. Done before
-        # the change-detection short-circuit and any grid-direction use of
-        # pvPower below.
-        if self._additional_pv_kw and "pvPower" in ws_data:
+        # first REST poll, so this is a no-op for everyone else.
+        #
+        # Skipped when the frame is marked: map_ws_to_coordinator has then
+        # already folded the term in (from the live `aux` node, or from this
+        # same REST value passed to it as the fallback) and adding it again
+        # would double-count.  The mapper is the preferred place for it —
+        # only there can the term reach the C-006 grid-direction balance,
+        # which runs before this method ever sees the frame (issue #18).
+        # This branch remains for callers that map frames without the
+        # opt-in wired through.
+        if "_additional_pv_kw" in ws_data:
+            ws_data = dict(ws_data)
+            del ws_data["_additional_pv_kw"]
+        elif self._additional_pv_kw and "pvPower" in ws_data:
             ws_data = dict(ws_data)
             ws_data["pvPower"] = (
                 float(ws_data.get("pvPower") or 0.0) + self._additional_pv_kw

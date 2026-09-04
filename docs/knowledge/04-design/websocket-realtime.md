@@ -428,6 +428,79 @@ never learns that `pvPower` may include an external term.
   running on `pvPower` alone rather than break the integration.
 **Traces**: C-035, C-021, C-039, C-020, C-026; D-010 (grid-direction
 balance the external term improves).
+**Superseded in part by D-063**: the "WS `wsmaitian` schema does not
+carry the extra variable" premise above is **wrong** — it does, as the
+`aux` node — and the REST-hold's placement made it useless to the
+grid-direction balance. See D-063.
+
+### D-063: Read the AC-coupled term from the WS `aux` node, before the balance
+**Decision**: When `additional_pv_power_variable` is set,
+`map_ws_to_coordinator` reads the frame's `aux` node, converts it per
+C-004, and folds it into `pvPower` **before** the grid-direction
+balance runs. The live value is preferred; the coordinator's last
+REST-polled value (D-061's hold) is passed in as the fallback for
+frames with no readable `aux`, and the mapper reports the applied term
+back as `_additional_pv_kw` so the coordinator does not add it a second
+time. Off unless the user configured the feature.
+**Context**: D-061 asserted the `wsmaitian` schema does not carry the
+extra variable and therefore held the REST value across WS frames. Both
+halves of that turned out to be wrong in a way that produced GH issue
+#18. The schema *does* carry it, as `aux`. And the REST-hold was
+applied in `inject_realtime_data`, which runs **after**
+`map_ws_to_coordinator` has already split `grid.power` into
+consumption/feed-in — so the balance never saw the term at all,
+however fresh it was. D-061's claimed "side benefit for the D-010
+balance" was therefore never realised. On an AC-coupled site the
+balance ran with solar = 0 against real generation of 3.32 kW: it
+predicted 1.80 kW of import against an actual 1.52 kW grid reading, a
+ratio of 1.18 that sits inside D-010's 3x reliability window, so the
+`gridStatus` fallback that would have said *export* was never
+consulted. Feed-in was reported as consumption for the whole session.
+**Rationale**: The sign is decided in exactly one place, so the term
+has to arrive before that decision or it cannot affect it. Passing the
+opt-in through to the mapper as two plain parameters keeps the mapper a
+pure function and keeps the brand layer's config knowledge out of it —
+the WS client resolves `(enabled, fallback_kw)` per frame via a
+callable supplied by the brand layer, the same pattern as
+`should_reconnect`. Preferring live over held also fixes a smaller
+error D-061 had no answer for: a stale non-zero term kept being
+re-added after the AC-coupled inverter stopped at dusk, so a live `0`
+is now authoritative. Keeping the REST value as the *fallback* rather
+than dropping the term matters because a frame without `aux` would
+otherwise return the balance to the exact failure mode above.
+**Opt-in**: `aux` is folded in only for users who configured the
+feature. The configured name is a *REST* variable while the WS name is
+fixed, so the setting acts purely as the gate. On a DC-coupled system
+the meaning of `aux` is not established — every frame captured from
+one omits the node entirely — so applying it unconditionally would risk
+corrupting `pvPower` for the majority of installations to fix a
+minority's bug.
+**Evidence for the shape**: `node["aux"]["power"]["value"]` with a
+sibling `unit`, matching every other node. Attested by the issue #18
+reporter and independently by `albuslee/foxess-ws-bridge`, a separate
+integration parsing the same endpoint, which exposes it as "Aux Power".
+No frame from an AC-coupled plant was available to capture directly,
+so a bare power object is also accepted rather than silently dropping
+the term, and an unreadable value (including the cloud's `"--"`
+placeholder) falls back to the REST value.
+**Priority served**: P-005 (Operational transparency)
+**Trades against**: none
+**Classification**: bug fix
+**Boundary**: brand-layer only; `smart_battery/` still reads `pvPower`
+unchanged (C-021/C-039 preserved).
+**Alternatives considered**:
+- Remove the derived direction logic and trust `gridStatus`, as the
+  issue reporter did in their private patch: rejected — that is D-010,
+  which exists because `gridStatus` is not always reliable. The defect
+  here was the input the balance was fed.
+- Recompute the direction in the coordinator after adding the term:
+  rejected — duplicates the C-006 balance in a second place, which is
+  how UI/listener phase divergence starts (C-038's lesson).
+- Have the mapper own the term entirely and delete D-061's coordinator
+  hold: rejected for now — the hold still serves REST-only installs
+  (`api` WS mode) and callers that map frames without the opt-in wired
+  through.
+**Traces**: C-004, C-006, C-021, C-035, C-039; D-010, D-061.
 
 ## Key Behaviours
 

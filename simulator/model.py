@@ -119,7 +119,21 @@ class InverterModel:
     # verbatim from ``get_real_time_response`` so a coordinator
     # configured with an "alternate solar source" variable can sum it
     # into pvPower.  Defaults to 0.0 so existing tests are unaffected.
+    #
+    # Physically this generation is on the AC bus, produced by a second
+    # inverter that the FoxESS unit does not control.  ``tick`` therefore
+    # counts it alongside ``solar_kw`` when deciding battery and grid
+    # flows: it displaces house load and exports its excess exactly as
+    # DC-coupled PV would.  With the default 0.0 every branch reduces to
+    # the DC-only arithmetic, so no existing behaviour changes.
     meter_power2_kw: float = 0.0
+
+    # Whether the wsmaitian frame carries an ``aux`` node.  Plants with
+    # no auxiliary meter channel omit it entirely — the real captured
+    # frame in tests/test_realtime_ws.py has node keys solar/grid/bat/
+    # load/device/charger/heatpump and no ``aux`` — so this is off by
+    # default and opted into by AC-coupled scenarios.
+    ws_emit_aux: bool = False
 
     # Fuzzing: add noise to readings to prevent test overfitting
     fuzzing: bool = True
@@ -539,12 +553,21 @@ class InverterModel:
         charge_taper = self._charge_taper_factor() * self._temp_charge_taper_factor()
         discharge_taper = self._discharge_taper_factor()
 
+        # Total on-site generation: the FoxESS PV strings plus any
+        # AC-coupled inverter on the second meter channel.  Both displace
+        # house load and export their excess, so the flow arithmetic below
+        # uses this rather than ``solar_kw``.  Equal to ``solar_kw``
+        # whenever ``meter_power2_kw`` is 0 (every DC-coupled scenario).
+        # PV-only figures (``pvPower``, ``PVEnergyTotal``) keep using
+        # ``solar_kw`` — C-041.
+        gen_kw = self.solar_kw + self.meter_power2_kw
+
         if mode == "ForceCharge":
             target_charge_kw = (
                 (group.fdPwr / 1000.0) if group else (self.max_power_w / 1000.0)
             )
-            solar_to_load = min(self.solar_kw, self.load_kw)
-            solar_to_bat = self.solar_kw - solar_to_load
+            solar_to_load = min(gen_kw, self.load_kw)
+            solar_to_bat = gen_kw - solar_to_load
             grid_to_load = self.load_kw - solar_to_load
             max_accept = min(target_charge_kw, self.max_power_w / 1000.0) * charge_taper
             self.bat_charge_kw = min(solar_to_bat + max_accept, max_accept)
@@ -557,7 +580,7 @@ class InverterModel:
             )
             effective = min(target_discharge_kw, self.max_power_w / 1000.0)
             self.bat_discharge_kw = effective * discharge_taper
-            net_export = self.bat_discharge_kw + self.solar_kw - self.load_kw
+            net_export = self.bat_discharge_kw + gen_kw - self.load_kw
             if net_export > 0:
                 self.grid_export_kw = net_export
             else:
@@ -567,16 +590,16 @@ class InverterModel:
             target_kw = (group.fdPwr / 1000.0) if group else (self.max_power_w / 1000.0)
             effective = min(target_kw, self.max_power_w / 1000.0)
             self.bat_discharge_kw = effective * discharge_taper
-            net = self.bat_discharge_kw + self.solar_kw - self.load_kw
+            net = self.bat_discharge_kw + gen_kw - self.load_kw
             if net > 0:
                 self.grid_export_kw = net
             else:
                 self.grid_import_kw = -net
 
         else:  # SelfUse
-            solar_to_load = min(self.solar_kw, self.load_kw)
+            solar_to_load = min(gen_kw, self.load_kw)
             remaining_load = self.load_kw - solar_to_load
-            excess_solar = self.solar_kw - solar_to_load
+            excess_solar = gen_kw - solar_to_load
 
             if excess_solar > 0:
                 max_accept = min(excess_solar, self.max_power_w / 1000.0) * charge_taper
@@ -596,20 +619,20 @@ class InverterModel:
         # Clamp charge at fdSoc (inverter stops charging when target reached)
         if group and mode == "ForceCharge" and self.soc >= group.fdSoc:
             self.bat_charge_kw = 0.0
-            self.grid_import_kw = max(0, self.load_kw - self.solar_kw)
-            self.grid_export_kw = max(0, self.solar_kw - self.load_kw)
+            self.grid_import_kw = max(0, self.load_kw - gen_kw)
+            self.grid_export_kw = max(0, gen_kw - self.load_kw)
 
         # Clamp discharge at fdSoc (inverter stops discharging at target floor)
         if group and mode in ("ForceDischarge", "Feedin") and self.soc <= group.fdSoc:
             self.bat_discharge_kw = 0.0
-            self.grid_import_kw = max(0, self.load_kw - self.solar_kw)
-            self.grid_export_kw = max(0, self.solar_kw - self.load_kw)
+            self.grid_import_kw = max(0, self.load_kw - gen_kw)
+            self.grid_export_kw = max(0, gen_kw - self.load_kw)
 
         # Clamp discharge at min_soc
         if self.soc <= self.min_soc and self.bat_discharge_kw > 0:
             self.bat_discharge_kw = 0.0
-            self.grid_import_kw = max(0, self.load_kw - self.solar_kw)
-            self.grid_export_kw = max(0, self.solar_kw - self.load_kw)
+            self.grid_import_kw = max(0, self.load_kw - gen_kw)
+            self.grid_export_kw = max(0, gen_kw - self.load_kw)
 
         # Clamp charge at 100%
         if self.soc >= 100.0 and self.bat_charge_kw > 0:
@@ -749,18 +772,22 @@ class InverterModel:
         load = self._fuzz(self.load_kw)
         grid = self._fuzz(self.grid_import_kw + self.grid_export_kw)
 
+        aux = self._fuzz(self.meter_power2_kw)
+
         if self.ws_unit == "kW":
             bat_val = f"{bat_power:.3f}"
             solar_val = f"{solar:.3f}"
             load_val = f"{load:.3f}"
             grid_val = f"{grid:.3f}"
+            aux_val = f"{aux:.3f}"
         else:
             bat_val = str(int(bat_power * 1000))
             solar_val = str(int(solar * 1000))
             load_val = str(int(load * 1000))
             grid_val = str(int(grid * 1000))
+            aux_val = str(int(aux * 1000))
 
-        return {
+        msg: dict[str, Any] = {
             "errno": 0,
             "msg": "success",
             "result": {
@@ -788,6 +815,14 @@ class InverterModel:
                 },
             },
         }
+        if self.ws_emit_aux:
+            # AC-coupled generation.  Same quantity as the REST
+            # ``meterPower2`` variable and the native app's "Gen Load",
+            # nested under ``power`` like every other node.
+            msg["result"]["node"]["aux"] = {
+                "power": {"value": aux_val, "unit": self.ws_unit},
+            }
+        return msg
 
     def to_dict(self) -> dict[str, Any]:
         """Full state dump for backchannel."""

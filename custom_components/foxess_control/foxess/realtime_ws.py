@@ -100,7 +100,40 @@ def _is_plausible(candidate: dict[str, Any], reference: dict[str, Any] | None) -
     return True
 
 
-def map_ws_to_coordinator(ws_msg: dict[str, Any]) -> dict[str, Any]:
+def _parse_aux_power(node: dict[str, Any]) -> float | None:
+    """Read the ``aux`` node's power in kW, or ``None`` if unreadable.
+
+    ``aux`` is the wsmaitian counterpart of the REST ``meterPower2``
+    variable (the native app's "Gen Load"): generation from a second,
+    AC-coupled inverter measured on an auxiliary meter channel.  It
+    never appears in the FoxESS ``solar`` reading because it is not
+    wired into the FoxESS PV strings.
+
+    Every other observed node nests its reading under ``power``
+    (``solar``, ``load``, ``grid``, ``bat``, ``device``), so that is the
+    primary shape.  A bare power object is also accepted rather than
+    silently dropping the term, since the node is absent from every
+    frame we have captured (DC-coupled plants do not emit it) and its
+    exact shape is therefore attested only by user report.
+
+    Units follow C-004 via the shared helpers: watts unless the power
+    object's ``unit`` field says ``kW``.
+    """
+    aux = node.get("aux")
+    if not isinstance(aux, dict):
+        return None
+    nested = aux.get("power")
+    if isinstance(nested, dict):
+        return _to_kw(_parse_power(nested))
+    return _to_kw(_parse_power(aux))
+
+
+def map_ws_to_coordinator(
+    ws_msg: dict[str, Any],
+    *,
+    additional_pv_enabled: bool = False,
+    additional_pv_fallback_kw: float = 0.0,
+) -> dict[str, Any]:
     """Map a WebSocket message to coordinator variable names.
 
     The WebSocket normally sends power values in **watts** (as strings)
@@ -109,6 +142,25 @@ def map_ws_to_coordinator(ws_msg: dict[str, Any]) -> dict[str, Any]:
     value is already in kW; anything else (``"W"``, absent) means watts
     and is divided by 1000.  This handles mixed units within a single
     message.
+
+    ``additional_pv_enabled`` opts in to the AC-coupled generation term
+    (the ``aux`` node) for users who configured
+    ``additional_pv_power_variable``.  It must stay **off** by default:
+    on a DC-coupled system ``aux`` may carry something else entirely, so
+    an unconfigured user's mapped output has to be byte-identical
+    whether or not the frame has an ``aux`` node.
+
+    When enabled the term is folded into ``pvPower`` **before** the
+    grid-direction balance below, which is the whole point: the balance
+    is what decides import vs export (C-006), and on an AC-coupled site
+    it cannot get the sign right while it believes generation is zero
+    (issue #18).  ``additional_pv_fallback_kw`` is the coordinator's
+    last REST-polled value, used when a frame carries no readable
+    ``aux`` — keeping a stale term beats dropping it, because dropping
+    it puts the balance straight back into the failure mode.
+
+    The applied term is reported back as ``_additional_pv_kw`` so the
+    coordinator knows not to add its own copy on top.
     """
     node = ws_msg.get("result", {}).get("node", {})
     if not node:
@@ -134,6 +186,17 @@ def map_ws_to_coordinator(ws_msg: dict[str, Any]) -> dict[str, Any]:
     solar_kw = _to_kw(_parse_power(node.get("solar", {}).get("power")))
     if solar_kw is not None:
         data["pvPower"] = solar_kw
+
+    # AC-coupled generation (opt-in).  Prefer the live ``aux`` reading;
+    # fall back to the coordinator's last REST-polled value.  A live 0 is
+    # authoritative and must win over a stale non-zero (sunset case), so
+    # the marker is set whenever the term is applied at all — including
+    # when it is zero.
+    if additional_pv_enabled and "pvPower" in data:
+        aux_kw = _parse_aux_power(node)
+        extra_kw = aux_kw if aux_kw is not None else additional_pv_fallback_kw
+        data["pvPower"] = data["pvPower"] + extra_kw
+        data["_additional_pv_kw"] = extra_kw
 
     # House load
     load_kw = _to_kw(_parse_power(node.get("load", {}).get("power")))
@@ -226,11 +289,20 @@ class FoxESSRealtimeWS:
         on_disconnect: Callable[[], None],
         ws_url: str | None = None,
         should_reconnect: Callable[[], bool] | None = None,
+        additional_pv: Callable[[], tuple[bool, float]] | None = None,
     ) -> None:
         self._plant_id = plant_id
         self._web_session = web_session
         self._on_data = on_data
         self._on_disconnect = on_disconnect
+        # AC-coupled generation opt-in, resolved per frame so a config
+        # change and each fresh REST poll take effect immediately.
+        # Returns ``(enabled, rest_fallback_kw)``.  Wired by the brand
+        # layer to ``additional_pv_power_variable`` plus the
+        # coordinator's last polled value; ``None`` means "not
+        # configured", which is also what a raising provider degrades to
+        # (the config-flow probe constructs this client without one).
+        self._additional_pv = additional_pv
         # The single reconciliation predicate: "should the live WS
         # connection exist right now?".  Wired by the brand layer to
         # ``_should_start_realtime_ws(hass)`` — the SAME gate the start
@@ -403,6 +475,22 @@ class FoxESSRealtimeWS:
         self._pending = mapped
         return None
 
+    def _resolve_additional_pv(self) -> tuple[bool, float]:
+        """Resolve the AC-coupled opt-in for the frame about to be mapped.
+
+        Degrades to "not configured" if no provider was supplied or the
+        provider raises (e.g. domain data not ready during startup) — a
+        data-enrichment lookup must never cost us the frame.
+        """
+        if self._additional_pv is None:
+            return (False, 0.0)
+        try:
+            enabled, fallback_kw = self._additional_pv()
+            return (bool(enabled), float(fallback_kw))
+        except Exception:
+            _LOGGER.debug("Additional-PV provider failed", exc_info=True)
+            return (False, 0.0)
+
     async def _listen_loop(self) -> None:
         """Receive messages, reconnect on failure."""
         while not self._stop_event.is_set():
@@ -479,7 +567,12 @@ class FoxESSRealtimeWS:
                         break
                 continue
 
-            mapped = map_ws_to_coordinator(data)
+            enabled, fallback_kw = self._resolve_additional_pv()
+            mapped = map_ws_to_coordinator(
+                data,
+                additional_pv_enabled=enabled,
+                additional_pv_fallback_kw=fallback_kw,
+            )
             if mapped:
                 accepted = self._process_mapped_frame(mapped)
                 if accepted is None:

@@ -383,6 +383,8 @@ this commonly carries a separate inverter's generation; the integration
 can be configured (cloud-mode option `additional_pv_power_variable`) to
 add it to `pvPower` so the control algorithm sees true total generation.
 Sign depends on CT orientation; the integration adds it raw (no clamp).
+The real-time WebSocket carries the same quantity as the `aux` node —
+see §4 "The real-time WebSocket".
 
 **Cumulative energy counters** (kWh, lifetime, monotonic
 `total_increasing` — take the delta between two readings for an
@@ -637,9 +639,45 @@ the next hour) the client must:
   enclosure temperature, not BMS cells, and diverges by up to 10 °C
   in winter).
 
-The real-time WebSocket at `/dew/v0/wsmaitian` is not documented in
-this reference; see `docs/coarse-pacing-rules.md` for cadence rules
-and the live-trace harness for sample messages.
+### The real-time WebSocket `/dew/v0/wsmaitian`
+
+Undocumented by FoxESS. Connect to
+`wss://www.foxesscloud.com/dew/v0/wsmaitian?plantId=<id>&token=<webToken>&platform=web&lang=en`
+using a **web session token** (`/basic/v0/user/login`) — the Open API
+key is rejected. Send the literal string `getdata` after connecting;
+the server then pushes a JSON frame roughly every 5 seconds. See
+`docs/control/coarse-pacing-rules.md` for cadence rules.
+
+Frames are shaped `{"errno": 0, "result": {"timeDiff": <s>, "node":
+{...}}}`. `result.timeDiff` is seconds since the inverter last
+reported; discard frames above 30 s (`C-005`), as the first frame after
+connect is routinely 30–200 s stale.
+
+Each entry of `node` is an object whose reading is nested under
+`power` as `{"value": "<number>", "unit": "W"|"kW"}`. **Values are
+strings, in watts, unless `unit` says `kW`** — units can differ per
+field within one frame, so check `unit` on every object rather than
+assuming (`C-004`).
+
+| `node` key | Carries |
+|---|---|
+| `solar.power` | FoxESS PV strings only — the DC inputs. Maps to `pvPower`. |
+| `bat.power` | Battery power, magnitude only; direction is `bat.charge` (`1` = charging). Also `bat.soc` (int %), `bat.batteryId`, `bat.multipleBatterySoc[].batSn`. |
+| `load.power` | House load. Also `load.normalLoad` / `load.backupLoad`. |
+| `grid.power` | Grid power, **magnitude only**. Direction comes from the power balance (`C-006`), with `grid.gridStatus` (`3` = importing, `2` = exporting) as the fallback. |
+| `aux.power` | **AC-coupled generation** — a second inverter's output on the auxiliary meter channel. Same physical quantity as the REST `meterPower2` variable and the native app's "Gen Load". Absent on plants with no auxiliary channel. |
+| `device.power` | Inverter device power. |
+| `charger`, `heatpump` | `{"display": false}` when the accessory is absent. |
+
+`aux` is why the grid-direction balance needs care on AC-coupled
+sites: that generation never appears in `solar.power`, so a balance
+computed from `solar` alone believes the site is generating nothing
+and infers *import* while the site is exporting (issue #18). The
+integration folds `aux` into `pvPower` before running the balance, but
+only for users who set `additional_pv_power_variable` — on a
+DC-coupled system the meaning of `aux` is not established, so the term
+is opt-in. The cloud may send `"--"` as a placeholder value for a
+channel with no reading.
 
 ---
 

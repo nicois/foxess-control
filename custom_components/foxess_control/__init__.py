@@ -1191,6 +1191,18 @@ async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
         # returns True so a stale/dropped WS still reconnects (D-008/D-009).
         return _should_start_realtime_ws(hass)
 
+    def _additional_pv() -> tuple[bool, float]:
+        # AC-coupled generation opt-in, re-read per frame so a config
+        # change and each fresh REST poll take effect immediately.
+        # The configured name (usually `meterPower2`) is the *REST*
+        # variable; the WS carries the same quantity as the `aux` node,
+        # so the configured value acts purely as the on/off gate.  The
+        # coordinator's last polled value is the fallback for frames
+        # with no readable `aux` (issue #18).
+        if not _cfg(hass).additional_pv_power_variable:
+            return (False, 0.0)
+        return (True, coordinator.additional_pv_kw)
+
     ws = FoxESSRealtimeWS(
         plant_id,
         web_session,
@@ -1198,6 +1210,7 @@ async def _maybe_start_realtime_ws(hass: HomeAssistant) -> None:
         on_disconnect,
         ws_url=_ws_url,
         should_reconnect=_should_reconnect,
+        additional_pv=_additional_pv,
     )
     try:
         await ws.async_connect()
