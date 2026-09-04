@@ -771,6 +771,48 @@ class TestCancelAcknowledgement:
             f"after a failure the user must be able to retry, got {cancel!r}"
         )
 
+    def test_a_failure_notice_does_not_outlive_the_session(self, page: Page) -> None:
+        """A notice that sticks forever is the same class of bug as a
+        "cancelling..." that sticks forever.
+
+        The failure notice says "tap Cancel to retry". If it survives the
+        session ending, the user is left reading that instruction on an idle
+        card whose Cancel button no longer exists — advice that cannot be
+        followed, about a session that is already over.
+
+        It must survive *ordinary* polling though: the card is re-rendered
+        every time HA pushes state, which on a REST install is every 300 s
+        and far more often on WebSocket, and a notice the user never gets to
+        read is no better than no notice at all. So it clears on genuine
+        session news, not on any render.
+        """
+        _mount(
+            page,
+            connected=True,
+            source="api",
+            age_seconds=30,
+            active=True,
+            service_mode="reject",
+        )
+        _confirm_cancel(page)
+        shown = _wait_for_notice(page)
+        assert shown["noticeText"]
+
+        # Ordinary state churn: same session, fresher data. The notice stays.
+        still = _push(page, connected=True, source="api", age_seconds=5, active=True)
+        assert still["noticeText"], (
+            "a routine state push must not wipe the failure notice before the "
+            "user has read it"
+        )
+
+        # Real news: the session is over. The notice goes with it.
+        after = _push(page, connected=True, source="api", age_seconds=5, active=False)
+        assert after["noticeText"] is None, (
+            "the failure notice must not outlive the session it was about — it "
+            "tells the user to tap a Cancel button that no longer exists, got "
+            f"{after['noticeText']!r}"
+        )
+
     def test_acknowledgement_does_not_stick_when_nothing_happens(
         self, page: Page
     ) -> None:
