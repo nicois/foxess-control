@@ -431,6 +431,18 @@ class TestSchedulerHandback:
     real service-call teardown releases the inverter, and — the regression
     that would matter most — that the *next* session still takes effect
     once the Mode Scheduler master switch has been off.
+
+    Two things only a containerised HA can establish (C-029), and they are
+    why these live here rather than beside the unit tests:
+
+    * The ``disable_scheduler`` action exists in the **real service
+      registry**, accepts a call with no data, and turns its refusal into an
+      HTTP error a caller actually sees — none of which is provable by
+      importing the handler.
+    * A **Repair issue** reaches the HA issue registry and is listed by the
+      ``repairs/list_issues`` WS command, which is the surface a user looks
+      at.  A unit test can assert the registry entry; only this proves the
+      whole path from a 404 on the wire to something visible in the UI.
     """
 
     def test_handback_releases_the_inverter_and_the_next_session_works(
@@ -442,9 +454,12 @@ class TestSchedulerHandback:
         if connection_mode != "cloud":
             pytest.skip("the Mode Scheduler master switch is a cloud concept")
         assert foxess_sim is not None
-        # A 4% floor: below the Mode Scheduler's declared 10% minimum, so
-        # it is only expressible through the direct settings — issue #4.
-        foxess_sim.set(min_soc_on_grid=4, soc=80, solar_kw=0, load_kw=0.5)
+        # A 0% floor: issue #4 exactly.  Below the Mode Scheduler's declared
+        # 10% minimum, so it is only expressible through the direct
+        # settings — *and* falsy, so any truthiness test on the capture or
+        # restore path renders it identically to "nothing captured" and
+        # quietly deletes the feature's own use case.
+        foxess_sim.set(min_soc_on_grid=0, soc=80, solar_kw=0, load_kw=0.5)
         # Opting in is the one moment a re-capture is safe: whatever the
         # register holds now is by definition the user's own value, because
         # the integration has not been writing to it.
@@ -489,9 +504,19 @@ class TestSchedulerHandback:
             f"the inverter's own work mode is {state['work_mode_direct']!r}; "
             "with the scheduler off this is what it actually does"
         )
-        assert state["min_soc_on_grid"] == 4, (
-            "the user's own 4% floor was not restored — the inverter will "
-            "import from the grid to hold a level they never chose"
+        assert state["min_soc_on_grid"] == 0, (
+            "the user's own 0% floor was not restored — the inverter will "
+            "import from the grid to hold a level they never chose (issue #4)"
+        )
+        assert not [
+            g
+            for g in state["schedule_groups"]
+            if g["workMode"] in ("ForceDischarge", "ForceCharge", "Feedin")
+        ], (
+            "a managed override group survived the teardown; the inverter is "
+            "still carrying a session's group behind a Mode Scheduler this "
+            "integration just switched off, and can no longer steer it "
+            "(C-025, P-001)"
         )
 
         # The regression Task 1 built _ensure_scheduler_enabled for: a
@@ -526,7 +551,10 @@ class TestSchedulerHandback:
         hundreds of existing installs look like the moment they upgrade.
         A full session and teardown must leave the master switch on, the
         direct work-mode setting untouched, and the persistent Min SoC
-        register untouched.
+        register untouched — and must not so much as *attempt* the writes.
+        Asserting only on the resulting values would be satisfied by a
+        teardown that wrote the same numbers back, so the attempt counters
+        the simulator keeps are what make this a statement about traffic.
         """
         if connection_mode != "cloud":
             pytest.skip("the Mode Scheduler master switch is a cloud concept")
@@ -547,6 +575,10 @@ class TestSchedulerHandback:
             timeout_s=120,
             fatal_states=FATAL_FOR_ACTIVE,
         )
+        # Zeroed *after* the session has started, so the session's own
+        # traffic is excluded and only the teardown is measured.
+        foxess_sim.set(scheduler_disable_attempts=0, setting_set_attempts=0)
+
         ha_e2e.call_service("foxess_control", "clear_overrides", {})
         ha_e2e.wait_for_state("sensor.foxess_smart_operations", "idle", timeout_s=120)
 
@@ -554,6 +586,174 @@ class TestSchedulerHandback:
         assert state["scheduler_enabled"] is True
         assert state["work_mode_direct"] == "Feedin"
         assert state["min_soc_on_grid"] == 17
+        assert state["scheduler_disable_attempts"] == 0, (
+            "a default install tried to turn the Mode Scheduler master "
+            "switch off at teardown — hundreds of existing installs must "
+            "behave exactly as they did before the upgrade"
+        )
+        assert state["setting_set_attempts"] == 0, (
+            "a default install wrote to the inverter's own settings at "
+            "teardown; the option is off, so this feature must not touch "
+            "the device at all"
+        )
+
+    def test_the_disable_scheduler_action_refuses_mid_session_then_releases(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """The manual lever from issue #16, over the real service registry.
+
+        Deliberately run with the option **off** — the shipped default —
+        because the whole point of a separate action is the user who wants
+        their inverter released now without signing up for it after every
+        session.  Calling the action is the consent.
+
+        Two halves, in the order a user meets them:
+
+        1. During a live session the action must **refuse**, and the refusal
+           must reach the caller.  HA renders a ``ServiceValidationError``
+           as an HTTP error on the service call, so ``call_service`` raising
+           with the reason in its body is exactly what an automation or the
+           Developer Tools panel would see.  A silent no-op here would have
+           the user believe their inverter was released while a
+           ForceDischarge group is still driving it (C-025).
+        2. Once the session is over, the same call must release it — and put
+           back a 0 % floor nobody but the user chose (issue #4).
+        """
+        if connection_mode != "cloud":
+            pytest.skip("the Mode Scheduler master switch is a cloud concept")
+        assert foxess_sim is not None
+        foxess_sim.set(min_soc_on_grid=0, soc=80, solar_kw=0, load_kw=0.5)
+
+        start, end = _tight_window(30)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        # Stand in for the session having moved the register and the direct
+        # mode; without this the restore assertions below are vacuous.
+        foxess_sim.set(min_soc_on_grid=61, work_mode_direct="Feedin")
+
+        with pytest.raises(RuntimeError) as excinfo:
+            ha_e2e.call_service("foxess_control", "disable_scheduler", {})
+        assert "session" in str(excinfo.value), (
+            "the action refused without saying a live session is why, so the "
+            f"user cannot tell what to do about it: {excinfo.value}"
+        )
+        mid = foxess_sim.state()
+        assert mid["scheduler_enabled"] is True, (
+            "the action turned the master switch off mid-session, stranding "
+            "the live override: the group stops driving the inverter while "
+            "the integration still believes it is discharging (C-025)"
+        )
+        assert [
+            g for g in mid["schedule_groups"] if g["workMode"] == "ForceDischarge"
+        ], "the action removed a live session's override group"
+
+        ha_e2e.call_service("foxess_control", "clear_overrides", {})
+        ha_e2e.wait_for_state("sensor.foxess_smart_operations", "idle", timeout_s=120)
+        # The option is off, so the teardown handback declined: the switch is
+        # still on and there is something left for the action to do.
+        assert foxess_sim.state()["scheduler_enabled"] is True
+
+        ha_e2e.call_service("foxess_control", "disable_scheduler", {})
+
+        state = foxess_sim.state()
+        assert state["scheduler_enabled"] is False, (
+            "the action did not release the inverter, so issue #16's manual "
+            "lever does nothing"
+        )
+        assert state["work_mode_direct"] == "SelfUse"
+        assert state["min_soc_on_grid"] == 0, (
+            "the action did not put the user's own 0% floor back (issue #4)"
+        )
+
+    def test_an_inverter_that_cannot_switch_the_scheduler_off_says_so(
+        self,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """Issue #17, end to end: ``scheduler/set`` answers HTTP 404.
+
+        Reported on an H3-12.0-E running 1.0.22-beta.6.  That endpoint is the
+        only way to turn the master switch *off*, so handback can never work
+        on that hardware — and before this the user could opt in, watch
+        nothing happen forever, and find the explanation only by downloading
+        a diagnostics file.
+
+        Three things must hold, and the first outranks the other two:
+
+        1. **The session's override still comes off** (C-025).  A device
+           that cannot be handed back must not become a device that keeps
+           force-discharging.
+        2. **A Repair issue appears**, through the real issue registry, so
+           the user is told in the UI rather than in a log (C-020, C-026).
+        3. **The action refuses and says why**, instead of appearing to work.
+        """
+        if connection_mode != "cloud":
+            pytest.skip("the Mode Scheduler master switch is a cloud concept")
+        assert foxess_sim is not None
+        foxess_sim.set(min_soc_on_grid=8, soc=80, solar_kw=0, load_kw=0.5)
+        # Enabling the option reloads the entry, which rebuilds the Inverter
+        # — so the endpoint must be taken away *after* the reload, or the
+        # fresh instance would start out having learned nothing.
+        ha_e2e.set_options(scheduler_handback=True)
+        foxess_sim.set(scheduler_set_supported=False)
+
+        start, end = _tight_window(30)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        ha_e2e.call_service("foxess_control", "clear_overrides", {})
+        ha_e2e.wait_for_state("sensor.foxess_smart_operations", "idle", timeout_s=120)
+
+        state = foxess_sim.state()
+        assert not [
+            g
+            for g in state["schedule_groups"]
+            if g["workMode"] in ("ForceDischarge", "ForceCharge", "Feedin")
+        ], (
+            "the session's override group survived on an inverter whose "
+            "master-switch endpoint 404s — C-025 must not depend on the "
+            "handback working"
+        )
+        assert state["scheduler_enabled"] is True, (
+            "the switch reads as off on a device that cannot serve the "
+            "write; the simulator and the integration disagree"
+        )
+
+        issue = ha_e2e.wait_for_repair_issue(
+            "foxess_control", "scheduler_handback_unsupported", timeout_s=60
+        )
+        assert issue.get("translation_placeholders", {}).get("endpoint"), (
+            "the Repair issue does not name the endpoint the user's own log "
+            f"named, so the two cannot be connected: {issue}"
+        )
+
+        with pytest.raises(RuntimeError) as excinfo:
+            ha_e2e.call_service("foxess_control", "disable_scheduler", {})
+        assert "404" in str(excinfo.value), (
+            "the action refused without saying the inverter does not serve "
+            f"the master-switch write: {excinfo.value}"
+        )
 
 
 class TestFaultInjection:

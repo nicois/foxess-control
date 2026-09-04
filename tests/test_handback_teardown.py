@@ -116,6 +116,15 @@ _CONFIGURED_MIN_SOC = 11
 # section will read, so they are pinned here rather than left to drift.
 _ERROR_CATEGORY = "scheduler_handback"
 
+# The per-step keys of the outcome record, and the Repair issue id issue #17
+# surfaces.  Spelled out rather than imported from ``_handback_teardown`` for
+# the same reason as the endpoints above: a Repair issue id is a *user-facing*
+# identifier tied to a ``translations/<lang>.json`` entry, so a test that
+# imported the constant would keep passing through a rename that orphaned
+# every locale's text.
+_STEP_DISABLE = "disable_scheduler"
+_HANDBACK_UNSUPPORTED_ISSUE = "scheduler_handback_unsupported"
+
 # Every key the last-outcome record must carry, and no others.  Spelled out
 # rather than derived, because the whole value of the record is that Task 8's
 # diagnostics section can rely on its shape: a record missing a key is one
@@ -1901,6 +1910,353 @@ class TestDisableSchedulerAction:
         assert foxess_sim.state()["min_soc_on_grid"] == 5
         assert _last_handback(teardown_hass)["acted"] is True
         assert not _handback_errors(teardown_hass)
+
+
+class TestTheMasterSwitchWriteEndpointIsMissing:
+    """Issue #17: an H3-12.0-E whose ``scheduler/set`` answers HTTP 404.
+
+    Reported against 1.0.22-beta.6::
+
+        Could not turn the Mode Scheduler master switch on via
+          /op/v0/device/scheduler/set on inverter H3-12.0-E;
+          writing the schedule anyway.
+        requests.exceptions.HTTPError: 404 Client Error: Not Found
+
+    That endpoint is the only way to turn the switch **off**, so handback
+    cannot work on that hardware at all.  Before this, a user could enable
+    the option, watch nothing happen at every session boundary forever, and
+    find the explanation only by downloading a diagnostics file and reading
+    ``last_handback`` — which is the definition of the failure C-020 exists
+    to prevent.
+
+    Three things have to be true:
+
+    1. **C-025 is unaffected.**  The session's override group still comes
+       off.  Session boundary cleanliness outranks this whole feature, and
+       a device that cannot be handed back must not become a device that
+       keeps force-discharging.
+    2. **The user is told, in the UI.**  A Repair issue, because "you asked
+       for something your inverter cannot do" is exactly what Repairs are
+       for — persistent, visible without log inspection, and dismissible by
+       the one action that does help (turning the option back off).  It is
+       raised only when the *option* is on: the action reports synchronously
+       and does not need a standing notice.
+    3. **It self-heals.**  Nothing is persisted, and the notice is
+       withdrawn the moment a master-switch write succeeds, so a transient
+       404 or a firmware fix does not leave a permanent scar.
+    """
+
+    @staticmethod
+    def _issues(hass: Any) -> set[str]:
+        from homeassistant.helpers import issue_registry as ir
+
+        return {
+            issue_id
+            for (domain, issue_id) in ir.async_get(hass).issues
+            if domain == DOMAIN
+        }
+
+    def _assert_told(self, hass: Any) -> None:
+        assert _HANDBACK_UNSUPPORTED_ISSUE in self._issues(hass), (
+            "no Repair issue was raised, so a user who switched the option "
+            "on is left watching nothing happen at every session boundary "
+            "with only a diagnostics download to explain it (C-020, C-026)"
+        )
+
+    def _assert_not_told(self, hass: Any) -> None:
+        assert _HANDBACK_UNSUPPORTED_ISSUE not in self._issues(hass), (
+            "a Repair issue about unsupported hardware is standing when it "
+            "should not be"
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_session_group_still_comes_off(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """C-025 outranks handback entirely (P-002 over P-005)."""
+        _pin_midday(foxess_sim)
+        foxess_sim.set(scheduler_set_supported=False)
+        inv, _client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        _enable_handback(teardown_hass)
+        adapter = await _start_discharge_session(teardown_hass, foxess_sim, inv)
+
+        await _teardown_discharge(teardown_hass, adapter)
+
+        _assert_no_managed_override(foxess_sim)
+        assert foxess_sim.state()["scheduler_enabled"] is True, (
+            "the master switch reads as off on a device that cannot serve "
+            "the write — the simulator or the client is lying"
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_teardown_declines_and_names_the_missing_endpoint(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """The session's own schedule write is what discovers it.
+
+        ``_ensure_scheduler_enabled`` attempts the master-switch write before
+        every schedule write, so by the time the teardown asks, the answer
+        is already known — and the decline can say what is wrong instead of
+        silently failing a step it was never going to win.
+        """
+        _pin_midday(foxess_sim)
+        foxess_sim.set(scheduler_set_supported=False)
+        inv, _client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        _enable_handback(teardown_hass)
+        adapter = await _start_discharge_session(teardown_hass, foxess_sim, inv)
+
+        await _teardown_discharge(teardown_hass, adapter)
+
+        record = _last_handback(teardown_hass)
+        assert record["acted"] is False
+        assert "404" in record["reason"], (
+            f"the decline does not say what the inverter did: {record['reason']}"
+        )
+        assert "master switch" in record["reason"].lower()
+        assert record["steps"] == {}, (
+            "steps were attempted despite the plan having declined, so the "
+            f"decline is decorative: {record['steps']}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_repair_issue_tells_the_user(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """The whole point of Part A: the UI says so, not just the log."""
+        _pin_midday(foxess_sim)
+        foxess_sim.set(scheduler_set_supported=False)
+        inv, _client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        _enable_handback(teardown_hass)
+        adapter = await _start_discharge_session(teardown_hass, foxess_sim, inv)
+
+        await _teardown_discharge(teardown_hass, adapter)
+
+        self._assert_told(teardown_hass)
+
+    @pytest.mark.asyncio
+    async def test_the_repair_issue_names_the_inverter_and_the_endpoint(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """A notice a user cannot act on is noise.
+
+        The model tells them it is about *their* inverter and the endpoint
+        ties the notice to the warning already in their log.
+        """
+        from homeassistant.helpers import issue_registry as ir
+
+        from custom_components.foxess_control.foxess.inverter import (
+            _SCHEDULER_SET_ENDPOINT,
+        )
+
+        _pin_midday(foxess_sim)
+        foxess_sim.set(scheduler_set_supported=False, device_type="H3-12.0-E")
+        inv, _client = _make_inv(foxess_sim)
+        assert inv.max_power_w  # warm the device-detail cache, so the type is known
+        _attach(teardown_hass, inv)
+        _enable_handback(teardown_hass)
+        adapter = await _start_discharge_session(teardown_hass, foxess_sim, inv)
+
+        await _teardown_discharge(teardown_hass, adapter)
+
+        issue = ir.async_get(teardown_hass).async_get_issue(
+            DOMAIN, _HANDBACK_UNSUPPORTED_ISSUE
+        )
+        assert issue is not None
+        placeholders = issue.translation_placeholders or {}
+        assert placeholders.get("inverter") == "H3-12.0-E", (
+            f"the notice does not name the inverter: {placeholders}"
+        )
+        assert placeholders.get("endpoint") == _SCHEDULER_SET_ENDPOINT, (
+            "the notice does not name the endpoint the user's own log named, "
+            f"so the two cannot be connected: {placeholders}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_option_off_raises_no_repair_issue(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """A notice about a feature nobody switched on is pure noise.
+
+        Hundreds of installs run the shipped default.  None of them asked
+        for handback, so none of them may be told their inverter cannot do
+        it — and the option-off path must still make no API call at all.
+        """
+        _pin_midday(foxess_sim)
+        foxess_sim.set(scheduler_set_supported=False)
+        inv, client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        adapter = await _start_discharge_session(teardown_hass, foxess_sim, inv)
+        client.calls.clear()
+
+        await _teardown_discharge(teardown_hass, adapter)
+
+        self._assert_not_told(teardown_hass)
+        assert _EP_SCHEDULER_FLAG not in client.paths(), (
+            "a default install probed Mode Scheduler support anyway"
+        )
+
+    @pytest.mark.asyncio
+    async def test_turning_the_option_off_withdraws_the_notice(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """The notice's only remedy must actually retire it.
+
+        It says "turn the option off"; a notice that then stayed would be
+        telling the user their fix did not work.
+        """
+        _pin_midday(foxess_sim)
+        foxess_sim.set(scheduler_set_supported=False)
+        inv, _client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        _enable_handback(teardown_hass)
+        adapter = await _start_discharge_session(teardown_hass, foxess_sim, inv)
+        await _teardown_discharge(teardown_hass, adapter)
+        self._assert_told(teardown_hass)
+
+        _configure(teardown_hass)  # handback back off
+        adapter = await _start_discharge_session(teardown_hass, foxess_sim, inv)
+        await _teardown_discharge(teardown_hass, adapter)
+
+        self._assert_not_told(teardown_hass)
+
+    @pytest.mark.asyncio
+    async def test_the_notice_is_withdrawn_when_the_endpoint_answers(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """Self-healing: a transient 404 must not scar the install."""
+        _pin_midday(foxess_sim)
+        foxess_sim.set(scheduler_set_supported=False)
+        inv, _client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        _enable_handback(teardown_hass)
+        adapter = await _start_discharge_session(teardown_hass, foxess_sim, inv)
+        await _teardown_discharge(teardown_hass, adapter)
+        self._assert_told(teardown_hass)
+
+        foxess_sim.set(scheduler_set_supported=True)
+        adapter = await _start_discharge_session(teardown_hass, foxess_sim, inv)
+        await _teardown_discharge(teardown_hass, adapter)
+
+        self._assert_not_told(teardown_hass)
+        _assert_released(foxess_sim)
+
+    @pytest.mark.asyncio
+    async def test_the_action_refuses_once_it_is_known_and_says_why(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """``disable_scheduler`` must refuse, not appear to work.
+
+        The refusal reaches the user as a service error — the surface that
+        matters for someone holding a service call open (C-020).
+        """
+        _pin_midday(foxess_sim)
+        foxess_sim.set(scheduler_set_supported=False)
+        inv, client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        # The first attempt is what discovers the 404: it fails a step
+        # rather than refusing, because until something has tried, "this
+        # firmware has no such endpoint" is not a fact anyone holds.
+        await _call_disable_scheduler(teardown_hass)
+        client.calls.clear()
+
+        message = await _refused_disable_scheduler(teardown_hass)
+
+        assert "404" in message, (
+            f"the refusal does not say what the inverter did: {message}"
+        )
+        assert "master switch" in message.lower()
+        _assert_switch_untouched(foxess_sim, client)
+
+    @pytest.mark.asyncio
+    async def test_the_very_first_action_call_still_tells_the_user(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """The silent case from the report, closed.
+
+        A step failure deliberately does **not** raise (see
+        ``test_a_failed_step_is_recorded_and_does_not_raise``: some steps
+        may have taken effect, so an exception would misreport a partial
+        handback as a total one).  That leaves the very first call on an H3
+        with nothing to show the user unless the discovery itself surfaces
+        — so it does, on the spot, rather than waiting for a second call.
+        """
+        _pin_midday(foxess_sim)
+        foxess_sim.set(scheduler_set_supported=False)
+        inv, _client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        _enable_handback(teardown_hass)
+        assert inv.scheduler_set_unavailable is False, "nothing has tried yet"
+
+        await _call_disable_scheduler(teardown_hass)
+
+        self._assert_told(teardown_hass)
+        record = _last_handback(teardown_hass)
+        assert record["steps"]["disable_scheduler"] == "failed"
+        assert _errors_with_dedupe_key(
+            teardown_hass, f"{_ERROR_CATEGORY}:{_STEP_DISABLE}"
+        ), "the failed master-switch write left no operational-error record"
+
+    @pytest.mark.asyncio
+    async def test_the_users_own_floor_still_comes_back(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """P-002 does not depend on the master switch being writable.
+
+        The first attempt cannot know the switch is unwritable, and the
+        three steps fail independently on purpose: putting the user's own
+        floor back is worth doing whether or not the scheduler could be
+        released.  An inverter holding a session floor imports from the
+        grid to maintain it.
+        """
+        _pin_midday(foxess_sim)
+        foxess_sim.set(scheduler_set_supported=False, min_soc_on_grid=3)
+        inv, _client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        _enable_handback(teardown_hass)
+        await async_setup_min_soc_capture(teardown_hass, inv)
+        assert _dd(teardown_hass).captured_min_soc_on_grid == 3
+        foxess_sim.set(min_soc_on_grid=51)
+
+        await _call_disable_scheduler(teardown_hass)
+
+        assert foxess_sim.state()["min_soc_on_grid"] == 3, (
+            "the user's own floor was abandoned because the master-switch "
+            "write failed — the steps are supposed to be independent"
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_device_without_a_scheduler_is_still_reported_as_such(
+        self, teardown_hass: Any, foxess_sim: SimulatorHandle
+    ) -> None:
+        """The two facts must not be conflated.
+
+        A device reporting ``support: false`` *serves* the endpoint and
+        rejects the write with errno 40257, so nothing here may relabel it
+        as "this firmware has no such endpoint" — and it gets no Repair
+        issue, because the existing ``scheduler_supported`` reason already
+        covers it and two notices for one cause is worse than one.
+        """
+        _pin_midday(foxess_sim)
+        foxess_sim.set(scheduler_supported=False)
+        inv, client = _make_inv(foxess_sim)
+        _attach(teardown_hass, inv)
+        _enable_handback(teardown_hass)
+        client.calls.clear()
+
+        # No priming call: this refuses on the *first* attempt, because the
+        # flag read answers the question outright.  Nothing ever attempts
+        # the master-switch write, so nothing can misattribute its failure.
+        message = await _refused_disable_scheduler(teardown_hass)
+
+        assert "reports no Mode Scheduler support" in message, (
+            f"a device with no scheduler was reported as a missing endpoint: {message}"
+        )
+        assert "404" not in message
+        assert inv.scheduler_set_unavailable is False
+        self._assert_not_told(teardown_hass)
 
 
 class TestDisableSchedulerIsDescribedToTheUser:

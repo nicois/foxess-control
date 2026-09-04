@@ -231,8 +231,17 @@ async def handle_scheduler_set(request: web.Request) -> web.Response:
     Returns HTTP 404 when ``scheduler_set_supported`` is False (firmware /
     region without the endpoint) and errno 40257 when the device declares
     no scheduler support at all, so callers exercise both failure paths.
+
+    A request asking for ``enable: 0`` is counted **before** any of those
+    checks: the counter records that the caller asked, which is what an E2E
+    test needs to assert a default install never even tries (the resulting
+    switch position alone cannot distinguish "did not ask" from "asked and
+    was refused").
     """
     model = _model(request)
+    body = await request.json()
+    if not body.get("enable", 0):
+        model.scheduler_disable_attempts += 1
     if not model.scheduler_set_supported:
         return web.Response(status=404, text="Not Found")
     if sig_err := _check_signature(request):
@@ -245,7 +254,6 @@ async def handle_scheduler_set(request: web.Request) -> web.Response:
         return _api_response(
             None, errno=40257, msg="Parameters do not meet expectations"
         )
-    body = await request.json()
     model.scheduler_enabled = bool(body.get("enable", 0))
     _LOGGER.info("Mode Scheduler master switch: %s", model.scheduler_enabled)
     model.tick(0)
@@ -334,8 +342,13 @@ async def handle_setting_set(request: web.Request) -> web.Response:
     Returns HTTP 404 when ``setting_set_supported`` is False, mirroring
     ``handle_scheduler_set``: a firmware or region that serves the read
     half of the pair but not the write half.
+
+    Counted before any check, for the same reason as
+    ``handle_scheduler_set``: a test asserting a default install writes
+    nothing needs to see the attempt, not just its outcome.
     """
     model = _model(request)
+    model.setting_set_attempts += 1
     if not model.setting_set_supported:
         return web.Response(status=404, text="Not Found")
     if sig_err := _check_signature(request):

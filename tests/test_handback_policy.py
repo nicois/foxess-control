@@ -21,6 +21,11 @@ working install:
 * **Unmanaged modes present** — C-018.  The user put that Backup group
   there deliberately; we do not touch a schedule we do not own.
 * **Scheduler unsupported** — nothing to hand back.
+* **The master switch cannot be written** — issue #17: an H3-12.0-E whose
+  ``/op/v0/device/scheduler/set`` answers HTTP 404.  The device *has* a Mode
+  Scheduler; there is simply no way to turn it off, so handback is
+  impossible on that hardware and must say so rather than declining
+  silently at every session boundary forever.
 
 And the single most important behaviour, which is why
 ``restore_min_soc_on_grid`` is ``int | None`` rather than ``int``: when
@@ -50,6 +55,7 @@ _ACTS = {
     "session_active": False,
     "unmanaged_modes": [],
     "scheduler_supported": True,
+    "scheduler_set_unavailable": False,
     "captured_min_soc_on_grid": 20,
 }
 
@@ -238,16 +244,97 @@ class TestSchedulerSupportUnknown:
         )
 
 
+class TestSchedulerSetUnavailable:
+    """Issue #17: the device has a Mode Scheduler, but no way to switch it off.
+
+    Reported on an **H3-12.0-E** running 1.0.22-beta.6::
+
+        Could not turn the Mode Scheduler master switch on via
+          /op/v0/device/scheduler/set on inverter H3-12.0-E;
+          writing the schedule anyway.
+        requests.exceptions.HTTPError: 404 Client Error: Not Found
+
+    That endpoint is the *only* way to turn the switch **off**, so handback
+    cannot work on that hardware at all.  Sessions are unaffected — the same
+    user separately observed Mode Scheduler being enabled implicitly by a
+    schedule write — which is exactly why this is a **separate input** from
+    ``scheduler_supported`` rather than a fourth value of it:
+
+    * ``scheduler_supported`` answers "does this device have a Mode
+      Scheduler?", from ``/op/v1/device/scheduler/get/flag``.  On the H3 the
+      honest answer is **yes**.
+    * ``scheduler_set_unavailable`` answers "can its master switch be
+      written?", from a 404 on ``/op/v0/device/scheduler/set``.
+
+    Folding the second into ``scheduler_supported=False`` would make the
+    integration state a falsehood about the user's hardware — precisely the
+    mistake ``get_scheduler_flag`` was changed to stop making (C-020,
+    P-005) — and would send them hunting for a scheduler they demonstrably
+    have.  Folding it into ``None`` would be worse still: ``None`` already
+    means "the flag read failed and will be retried", and a missing write
+    endpoint is neither a read nor transient.
+
+    The decision is the same either way (decline, touch nothing), so
+    widening the signature cannot make handback less safe; only the reason
+    changes, and the reason is the whole point.
+    """
+
+    def test_does_not_act(self) -> None:
+        assert _plan(scheduler_set_unavailable=True).act is False
+
+    def test_touches_nothing(self) -> None:
+        plan = _plan(scheduler_set_unavailable=True)
+        assert plan.disable_scheduler is False
+        assert plan.work_mode is None
+        assert plan.restore_min_soc_on_grid is None
+
+    def test_declines_even_though_the_scheduler_is_supported(self) -> None:
+        # The H3 case exactly: the flag says the device HAS a Mode
+        # Scheduler, and the write endpoint still 404s.  An implementation
+        # that only consulted ``scheduler_supported`` would act here, fail
+        # the master-switch write, and leave the user's inverter
+        # scheduler-controlled while reporting a handback.
+        plan = _plan(scheduler_supported=True, scheduler_set_unavailable=True)
+        assert plan.act is False
+
+    def test_reason_says_the_switch_cannot_be_turned_off(self) -> None:
+        reason = _plan(scheduler_set_unavailable=True).reason.lower()
+        assert "master switch" in reason, (
+            f"the reason does not name the master switch: {reason}"
+        )
+        assert "404" in reason, (
+            f"the reason does not say what the inverter actually did: {reason}"
+        )
+
+    def test_reason_does_not_claim_the_hardware_lacks_a_scheduler(self) -> None:
+        # The lie worth guarding against: this device HAS a Mode Scheduler.
+        reason = _plan(scheduler_set_unavailable=True).reason.lower()
+        assert "reports no mode scheduler support" not in reason
+        assert "could not determine" not in reason
+
+    def test_it_reads_differently_from_every_other_scheduler_reason(self) -> None:
+        # Three distinct facts, three distinct reasons: "no scheduler",
+        # "could not find out", "scheduler present but not switchable".
+        # Two of them sharing a reason would send triage to the wrong place.
+        reasons = {
+            _plan(scheduler_supported=False).reason,
+            _plan(scheduler_supported=None).reason,
+            _plan(scheduler_set_unavailable=True).reason,
+        }
+        assert len(reasons) == 3, f"reasons collapsed onto each other: {reasons}"
+
+
 class TestGuardPrecedence:
     """Pin the reason attribution so it cannot drift.
 
     Precedence runs from most permanent to most transient:
     ``enabled`` → ``entity_mode`` → ``scheduler_supported`` →
-    ``unmanaged_modes`` → ``session_active``.  The reason a caller logs
-    should name the condition that will still be true tomorrow, not the
-    one that clears itself in an hour.  Precedence only ever selects
-    *which* reason is reported — every guard yields ``act=False``, so no
-    ordering can make the decision less safe.
+    ``scheduler_set_unavailable`` → ``unmanaged_modes`` →
+    ``session_active``.  The reason a caller logs should name the condition
+    that will still be true tomorrow, not the one that clears itself in an
+    hour.  Precedence only ever selects *which* reason is reported — every
+    guard yields ``act=False``, so no ordering can make the decision less
+    safe.
     """
 
     def test_disabled_beats_session_active(self) -> None:
@@ -290,6 +377,54 @@ class TestGuardPrecedence:
         assert "could not determine" in reason.lower()
         assert "Backup" not in reason
 
+    def test_unsupported_beats_an_unavailable_switch_write(self) -> None:
+        # A device with no Mode Scheduler at all also has no working
+        # master-switch endpoint (the simulator models exactly that: it
+        # answers errno 40257 there).  The absence of the scheduler is the
+        # cause; the unwritable switch is the symptom, and reporting a
+        # symptom over its cause sends the user to the wrong place.
+        reason = _plan(
+            scheduler_supported=False, scheduler_set_unavailable=True
+        ).reason.lower()
+        assert "reports no mode scheduler support" in reason
+        assert "404" not in reason
+
+    def test_unknown_support_beats_an_unavailable_switch_write(self) -> None:
+        # Fresh evidence about the device outranks a memory of an earlier
+        # attempt: a flag read that just failed says less is known now than
+        # a 404 recorded some time ago implied.
+        reason = _plan(
+            scheduler_supported=None, scheduler_set_unavailable=True
+        ).reason.lower()
+        assert "could not determine" in reason
+        assert "404" not in reason
+
+    def test_an_unavailable_switch_write_beats_unmanaged_modes(self) -> None:
+        # A Backup group the user can delete in the FoxESS app is not the
+        # thing standing in their way; an endpoint their firmware does not
+        # serve is, and telling them to delete the group would waste their
+        # time on a fix that cannot work.
+        reason = _plan(
+            scheduler_set_unavailable=True, unmanaged_modes=["Backup (00:00-06:00)"]
+        ).reason
+        assert "404" in reason
+        assert "Backup" not in reason
+
+    def test_an_unavailable_switch_write_beats_session_active(self) -> None:
+        reason = _plan(scheduler_set_unavailable=True, session_active=True).reason
+        assert "404" in reason
+        assert "session" not in reason.lower()
+
+    def test_disabled_beats_an_unavailable_switch_write(self) -> None:
+        reason = _plan(enabled=False, scheduler_set_unavailable=True).reason.lower()
+        assert "enabl" in reason
+        assert "404" not in reason
+
+    def test_entity_mode_beats_an_unavailable_switch_write(self) -> None:
+        reason = _plan(entity_mode=True, scheduler_set_unavailable=True).reason.lower()
+        assert "entity mode" in reason
+        assert "404" not in reason
+
     def test_unmanaged_modes_beat_session_active(self) -> None:
         # A Backup group blocks handback permanently and needs the user in
         # the FoxESS app; the session ends on its own.  Report the former.
@@ -330,6 +465,7 @@ class TestNoDeclinedPlanCarriesActions:
             {"unmanaged_modes": ["Backup (00:00-06:00)"]},
             {"scheduler_supported": False},
             {"scheduler_supported": None},
+            {"scheduler_set_unavailable": True},
         ],
     )
     def test_declined_plan_is_inert(self, override: dict[str, object]) -> None:

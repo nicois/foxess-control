@@ -306,6 +306,19 @@ class InverterModel:
     # does not depend on the handback working.
     setting_set_supported: bool = True
 
+    # --- Write-attempt counters (test observability) -----------------------
+    # An E2E test has no side channel onto the integration's HTTP traffic the
+    # way a unit test does (``RecordingClient``), so "the option being off
+    # issues no write" would otherwise only be assertable as "the values did
+    # not change" — which a teardown that wrote the same numbers back would
+    # satisfy.  These count the *attempt*, incremented before the 404 /
+    # signature / fault checks, so an inverter that rejects the write is
+    # still recorded as having been asked.
+    #
+    # Zero them mid-test via ``/sim/set`` to measure one phase in isolation.
+    scheduler_disable_attempts: int = 0
+    setting_set_attempts: int = 0
+
     def fd_pwr_limit_w(self) -> int:
         """Maximum ``fdPwr`` this device accepts in a schedule group."""
         return self.max_power_w if self.fd_pwr_max_w is None else self.fd_pwr_max_w
@@ -852,6 +865,8 @@ class InverterModel:
             "work_mode_direct": self.work_mode_direct,
             "setting_work_modes": list(self.setting_work_modes),
             "setting_set_supported": self.setting_set_supported,
+            "scheduler_disable_attempts": self.scheduler_disable_attempts,
+            "setting_set_attempts": self.setting_set_attempts,
             "schedule_groups": [g.to_dict() for g in self.schedule_groups],
             "min_soc": self.min_soc,
             "min_soc_on_grid": self.min_soc_on_grid,

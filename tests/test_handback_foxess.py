@@ -48,8 +48,12 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import requests
 
-from custom_components.foxess_control.foxess.client import FoxESSClient
+from custom_components.foxess_control.foxess.client import (
+    FoxESSApiError,
+    FoxESSClient,
+)
 from custom_components.foxess_control.foxess.inverter import Inverter, WorkMode
 
 if TYPE_CHECKING:
@@ -442,6 +446,163 @@ class TestSchedulerSupportIsHonestAboutFailure:
         assert after["scheduler_enabled"] == before["scheduler_enabled"]
         assert after["schedule_groups"] == before["schedule_groups"]
         assert after["work_mode_direct"] == before["work_mode_direct"]
+
+
+class TestTheMasterSwitchWriteEndpointIsRemembered:
+    """Issue #17: an inverter whose ``scheduler/set`` answers HTTP 404.
+
+    Reported on an **H3-12.0-E** running 1.0.22-beta.6.  That endpoint is
+    the only way to turn the Mode Scheduler master switch *off*, so handback
+    cannot work on that hardware — and until the integration remembers the
+    fact, it re-discovers it at every single session boundary and declines
+    without ever being able to say why.
+
+    Two properties bound how much is inferred from one response, because
+    over-inferring would permanently disable a working feature:
+
+    1. **Only a 404 counts.**  "This endpoint does not exist" is a durable
+       property of a firmware/region; a 500, a timeout or a dropped
+       connection is a bad afternoon at FoxESS and says nothing at all
+       about whether the endpoint is there.
+    2. **Nothing is persisted, and a success clears it.**  The memory lives
+       on the ``Inverter`` instance, so a reload or a restart re-tests from
+       scratch, and any later master-switch write that succeeds erases it
+       immediately.  ``_ensure_scheduler_enabled`` attempts the write on
+       *every* schedule write, so a transient 404 self-heals at the next
+       session rather than needing a restart.
+    """
+
+    def test_a_fresh_inverter_makes_no_claim(self, foxess_sim: SimulatorHandle) -> None:
+        """Nothing has been tried, so nothing is asserted."""
+        inv = _make_inv(foxess_sim)
+
+        assert inv.scheduler_set_unavailable is False, (
+            "an inverter that has never attempted the write claims the "
+            "endpoint is missing — that would decline handback on every "
+            "install until something proved otherwise"
+        )
+
+    def test_a_404_on_the_write_is_remembered(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        foxess_sim.set(scheduler_set_supported=False)
+        inv = _make_inv(foxess_sim)
+
+        with pytest.raises(requests.HTTPError, match="404"):
+            inv.set_scheduler_enabled(False)
+
+        assert inv.scheduler_set_unavailable is True, (
+            "the 404 was forgotten, so the handback will re-discover it at "
+            "every session boundary and never be able to explain itself"
+        )
+
+    def test_a_schedule_write_discovers_it(self, foxess_sim: SimulatorHandle) -> None:
+        """No dedicated probe needed: every session write already asks.
+
+        ``_ensure_scheduler_enabled`` runs before every schedule write, so by
+        the time a session's teardown reaches the handback the answer is
+        already known — without costing a single extra request.
+        """
+        _pin_midday(foxess_sim)
+        foxess_sim.set(scheduler_set_supported=False)
+        inv = _make_inv(foxess_sim)
+
+        inv.force_discharge(min_soc=20, power=3000)
+
+        assert foxess_sim.state()["work_mode"] == "ForceDischarge", (
+            "the session write itself failed, so this test is not about "
+            "what it claims to be about"
+        )
+        assert inv.scheduler_set_unavailable is True
+
+    def test_a_transient_server_error_is_not_remembered(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        """A 500 must not permanently disable the feature.
+
+        The fault is injected for exactly the number of requests the client
+        spends on the master-switch write (its transient retries plus the
+        attempt that gives up), so nothing else meets a broken simulator.
+        """
+        inv = _make_inv(foxess_sim)
+        assert inv.max_power_w == 10500  # warm the detail/properties caches
+
+        foxess_sim.fault("api_500", count=FoxESSClient.TRANSIENT_RETRIES + 1)
+        with pytest.raises(requests.HTTPError, match="500"):
+            inv.set_scheduler_enabled(False)
+
+        assert inv.scheduler_set_unavailable is False, (
+            "a transient 500 was recorded as 'this firmware has no such "
+            "endpoint', which would decline handback for the rest of the "
+            "session even though the endpoint is there"
+        )
+
+    def test_a_rejection_by_the_device_is_not_remembered(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        """errno 40257 is the device refusing, not the endpoint missing.
+
+        A device reporting ``support: false`` serves the endpoint and
+        rejects the write.  That is already reported honestly by
+        ``scheduler_supported``, and recording it here as well would
+        attribute the refusal to the wrong cause.
+        """
+        foxess_sim.set(scheduler_supported=False)
+        inv = _make_inv(foxess_sim)
+
+        with pytest.raises(FoxESSApiError, match="40257"):
+            inv.set_scheduler_enabled(False)
+
+        assert inv.scheduler_set_unavailable is False
+
+    def test_a_later_success_clears_it(self, foxess_sim: SimulatorHandle) -> None:
+        """Self-healing: one 404 does not disable the feature for good."""
+        foxess_sim.set(scheduler_set_supported=False)
+        inv = _make_inv(foxess_sim)
+        with pytest.raises(requests.HTTPError, match="404"):
+            inv.set_scheduler_enabled(False)
+        assert inv.scheduler_set_unavailable is True
+
+        foxess_sim.set(scheduler_set_supported=True)
+        inv.set_scheduler_enabled(False)
+
+        assert inv.scheduler_set_unavailable is False, (
+            "the endpoint answered, and the integration still believes it is missing"
+        )
+        assert foxess_sim.state()["scheduler_enabled"] is False
+
+    def test_a_transient_error_does_not_erase_what_was_learned(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        """Only a *success* is evidence the endpoint is there."""
+        foxess_sim.set(scheduler_set_supported=False)
+        inv = _make_inv(foxess_sim)
+        with pytest.raises(requests.HTTPError, match="404"):
+            inv.set_scheduler_enabled(False)
+
+        foxess_sim.set(scheduler_set_supported=True)
+        foxess_sim.fault("api_500", count=FoxESSClient.TRANSIENT_RETRIES + 1)
+        with pytest.raises(requests.HTTPError, match="500"):
+            inv.set_scheduler_enabled(False)
+
+        assert inv.scheduler_set_unavailable is True
+
+    def test_the_flag_snapshot_still_reports_no_switch_write(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        """A rejected write must not be recorded as a switch position.
+
+        Pre-existing behaviour, re-pinned here because the 404 bookkeeping
+        sits in the same method: a diagnostics download that asserted the
+        switch was off after a 404 would contradict the device it describes.
+        """
+        foxess_sim.set(scheduler_set_supported=False)
+        inv = _make_inv(foxess_sim)
+
+        with pytest.raises(requests.HTTPError, match="404"):
+            inv.set_scheduler_enabled(False)
+
+        assert inv.scheduler_flag_snapshot is None
 
 
 class TestThroughCloudAdapter:

@@ -213,6 +213,7 @@ _HANDBACK_KEYS = {
     "min_soc_capture",
     "last_handback",
     "scheduler_flag",
+    "scheduler_set_unavailable",
 }
 
 # A declined outcome record, in the shape ``_handback_teardown._record_outcome``
@@ -380,6 +381,14 @@ class TestHandbackSection:
                 "redaction candidate — it must not be there at all"
             )
 
+    def test_it_is_reported_as_unknown_with_no_inverter(self) -> None:
+        """Setup may have failed before an inverter existed.
+
+        ``false`` there would be a claim about hardware nobody reached.
+        """
+        section = _handback(_dd_with(handback=True))
+        assert section["scheduler_set_unavailable"] is None
+
     def test_never_raises_when_domain_data_is_missing(self) -> None:
         hass = MagicMock()
         hass.data = {}
@@ -476,6 +485,43 @@ class TestHandbackSectionMakesNoRequest:
         assert flag["enable"] is True
         assert flag["support"] is True
         assert flag["as_of"], "no timestamp — a stale reading looks current"
+
+    def test_the_missing_switch_endpoint_is_reported(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        """Issue #17: "handback can never work on this hardware", in writing.
+
+        The Repair issue tells the user; the download has to tell whoever
+        reads their support request, and it must do so without asking the
+        cloud — a 404 is exactly the sort of thing being investigated when
+        someone downloads diagnostics.
+        """
+        import requests
+
+        foxess_sim.set(scheduler_set_supported=False)
+        inv, client = self._inverter(foxess_sim)
+        with pytest.raises(requests.HTTPError):
+            inv.set_scheduler_enabled(False)
+        client.calls.clear()
+
+        section = _handback(_dd_with(handback=True), inverter=inv)
+
+        assert client.paths() == [], "reporting the cached 404 made a request"
+        assert section["scheduler_set_unavailable"] is True, (
+            "the download does not say the master-switch write endpoint is "
+            "absent, so a support request cannot tell 'handback is "
+            "impossible on this model' from 'handback is broken'"
+        )
+
+    def test_no_claim_is_made_before_anything_has_tried(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        """A fresh inverter has learned nothing, and says so."""
+        inv, _client = self._inverter(foxess_sim)
+
+        section = _handback(_dd_with(handback=True), inverter=inv)
+
+        assert section["scheduler_set_unavailable"] is False
 
     def test_the_scheduler_flag_follows_the_handback_turning_it_off(
         self, foxess_sim: SimulatorHandle
