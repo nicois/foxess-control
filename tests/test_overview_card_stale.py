@@ -25,19 +25,22 @@ These tests drive the real card in a real Chromium DOM — the element is
 registered by the shipped JS, fed a stub ``hass``, and inspected through
 its shadow root — so they fail if the card's *behaviour* is wrong rather
 than merely if its source text changed.
+
+The card is loaded as an ES module over a routed origin (see
+``tests/card_dom.py``), which is how Home Assistant serves it and the only
+form in which its shared ``foxess-stale.js`` sibling import resolves.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from .card_dom import load_card, serve_cards
+
 if TYPE_CHECKING:
     from playwright.sync_api import Page
-
-_CARD_JS = Path("custom_components/foxess_control/www/foxess-overview-card.js")
 
 # Poll cadences the integration actually runs at, so the thresholds under
 # test are anchored to reality rather than to a number someone liked:
@@ -97,8 +100,8 @@ def _mount(
     page: Page, *, connected: bool, source: str = "api", age_seconds: int = 10
 ) -> dict[str, Any]:
     """Render the real card with a stub hass and report what it produced."""
-    page.set_content("<html><body></body></html>")
-    page.add_script_tag(path=str(_CARD_JS))
+    errors = serve_cards(page)
+    load_card(page, "foxess-overview-card.js", "foxess-overview-card", errors=errors)
     result: dict[str, Any] = page.evaluate(
         _MOUNT,
         {"connected": connected, "source": source, "ageSeconds": age_seconds},

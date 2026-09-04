@@ -1969,6 +1969,287 @@ class TestControlCard:
 
 
 # ---------------------------------------------------------------------------
+# Control-card staleness + cancel acknowledgement
+#
+# Production report (1.0.22-beta.5): a user cancelled a charge session, the
+# cancel worked twice and the session stayed idle for 45 minutes, but their
+# browser had stopped receiving updates and the card had no staleness
+# indication at all — so they concluded cancel was broken.  Boundary
+# conditions and per-source thresholds are covered without wall-clock
+# waiting in ``tests/test_control_card_stale.py``; what needs real HA is
+# that the *healthy* path is untouched and that cancel works end to end.
+# ---------------------------------------------------------------------------
+
+
+# Locate the control card through HA's nested shadow roots.
+_FIND_CONTROL_CARD = """
+function findCard(root) {
+    const card = root.querySelector('foxess-control-card');
+    if (card) return card;
+    for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) {
+            const f = findCard(el.shadowRoot);
+            if (f) return f;
+        }
+    }
+    return null;
+}
+"""
+
+# Report the card's staleness treatment and action-button state.  Reads
+# *computed* style, so it fails if the CSS stops actually dimming anything.
+_CONTROL_CARD_PROBE_BODY = (
+    _FIND_CONTROL_CARD
+    + """
+const card = findCard(document);
+if (!card || !card.shadowRoot) return null;
+const r = card.shadowRoot;
+const haCard = r.querySelector('ha-card');
+const banner = r.querySelector('.stale-banner');
+const content = r.querySelector('.content');
+const notice = r.querySelector('.action-notice');
+const socEl = r.querySelector('.soc-text');
+const out = {
+    stale: haCard ? haCard.classList.contains('stale') : null,
+    banner: banner ? banner.textContent.trim() : null,
+    contentOpacity: content ? getComputedStyle(content).opacity : null,
+    contentFilter: content ? getComputedStyle(content).filter : null,
+    notice: notice ? notice.textContent.trim() : null,
+    soc: socEl ? socEl.textContent.trim() : null,
+    buttons: Array.from(r.querySelectorAll('.action-btn')).map((b) => ({
+        action: b.dataset.action || '',
+        text: b.textContent.trim(),
+        disabled: b.disabled === true || b.hasAttribute('disabled'),
+    })),
+};
+"""
+)
+
+
+def _control_probe_expr(gate: str = "true") -> str:
+    """A page function returning the control-card probe, or ``null`` until
+    *gate* (a JS expression over ``out``) holds.
+
+    The nullable form is what ``wait_for_condition`` needs: it polls until
+    the predicate returns something truthy, so the gate expresses *what we
+    are waiting for* while the returned probe is what we then assert on.
+    """
+    return "() => {" + _CONTROL_CARD_PROBE_BODY + f"return ({gate}) ? out : null;\n}}"
+
+
+def _probe_control_card(page: Page) -> dict[str, Any]:
+    raw = _safe_evaluate(page, _control_probe_expr())
+    assert isinstance(raw, dict), f"control card not found in the DOM, got {raw!r}"
+    return dict(raw)
+
+
+def _button_state(probe: dict[str, Any], action: str) -> dict[str, Any] | None:
+    for b in probe.get("buttons") or []:
+        if b.get("action") == action:
+            return dict(b)
+    return None
+
+
+class TestControlCardStaleness:
+    """C-020: the user must be able to tell a frozen card from a live one."""
+
+    def test_healthy_card_is_completely_normal(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """The regression guard that matters most: with a live connection
+        and fresh data, nothing about the card changes — no banner, no
+        dimming, and every control usable.
+        """
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=70, load_kw=0.5)
+        _robust_reload(page, settle_ms=3000)
+        assert _find_card(page, "foxess-control-card")
+
+        probe = _probe_control_card(page)
+        assert probe["banner"] is None, (
+            f"a healthy card must show no stale banner, got {probe['banner']!r}"
+        )
+        assert probe["stale"] is False, (
+            f"a healthy card must not be marked stale: {probe!r}"
+        )
+        assert float(probe["contentOpacity"]) == 1.0, (
+            f"healthy readings must be at full strength, got {probe!r}"
+        )
+        assert probe["contentFilter"] in (None, "none"), (
+            f"healthy readings must not be desaturated, got {probe!r}"
+        )
+        assert probe["buttons"], "no action buttons rendered"
+        for btn in probe["buttons"]:
+            assert btn["disabled"] is False, (
+                f"a healthy card must leave its controls usable, got {btn!r}"
+            )
+
+    def test_disconnected_frontend_freezes_the_controls_and_says_so(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """The production scenario, inside real HA.
+
+        ``connected: false`` is pushed through the card's own ``hass``
+        setter — the same property HA sets when the frontend loses its
+        WebSocket — rather than by taking the browser context offline,
+        which is session-scoped here and would poison sibling tests
+        (C-031).  Everything else is the real card with real HA state.
+        """
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=70, load_kw=0.5)
+        _robust_reload(page, settle_ms=3000)
+        assert _find_card(page, "foxess-control-card")
+
+        _safe_evaluate(
+            page,
+            "() => {"
+            + _FIND_CONTROL_CARD
+            + """
+            const card = findCard(document);
+            if (card && card._hass) {
+                card.hass = {...card._hass, connected: false};
+            }
+            }""",
+        )
+
+        probe = wait_for_condition(
+            page,
+            _control_probe_expr("out.banner"),
+            timeout_ms=10000,
+            description="control card stale banner after disconnect",
+        )
+        assert "connect" in str(probe["banner"]).lower(), (
+            "the banner must name the connection, not the inverter data, "
+            f"got {probe['banner']!r}"
+        )
+        assert float(probe["contentOpacity"]) < 0.8, (
+            f"a frozen card must be visibly dimmed, got {probe!r}"
+        )
+        assert probe["contentFilter"] not in (None, "none"), (
+            f"a frozen card must be desaturated, got {probe!r}"
+        )
+        assert probe["buttons"], "no action buttons rendered"
+        for btn in probe["buttons"]:
+            assert btn["disabled"] is True, (
+                f"a control that cannot reach HA must not look clickable, got {btn!r}"
+            )
+
+        # Not sticky: reconnecting must restore the card completely.
+        _safe_evaluate(
+            page,
+            "() => {"
+            + _FIND_CONTROL_CARD
+            + """
+            const card = findCard(document);
+            if (card && card._hass) {
+                card.hass = {...card._hass, connected: true};
+            }
+            }""",
+        )
+        recovered = _probe_control_card(page)
+        assert recovered["banner"] is None, (
+            f"reconnecting must clear the banner, got {recovered['banner']!r}"
+        )
+        for btn in recovered["buttons"]:
+            assert btn["disabled"] is False, (
+                f"reconnecting must re-enable the controls, got {btn!r}"
+            )
+        assert recovered["soc"], "the card lost its readings on reconnect"
+
+    def test_cancel_acknowledges_and_ends_the_session(
+        self,
+        page: Page,
+        ha_e2e: HAClient,
+        foxess_sim: SimulatorHandle | None,
+        connection_mode: str,
+    ) -> None:
+        """Cancel still works end to end, and now says so immediately.
+
+        The reported user could not tell "my click didn't register" from
+        "it worked and the session is ending", because the confirming
+        click fired the service and re-rendered from unchanged state.
+        """
+        set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=80, load_kw=0.5)
+        start, end = _tight_window(20)
+        ha_e2e.call_service(
+            "foxess_control",
+            "smart_discharge",
+            {"start_time": start, "end_time": end, "min_soc": 30},
+        )
+        ha_e2e.wait_for_state(
+            "sensor.foxess_smart_operations",
+            "discharging",
+            timeout_s=120,
+            fatal_states=FATAL_FOR_ACTIVE,
+        )
+        _robust_reload(page, settle_ms=3000)
+        assert _find_card(page, "foxess-control-card")
+
+        before = _probe_control_card(page)
+        cancel = _button_state(before, "cancel")
+        assert cancel is not None, f"no cancel button during a session: {before!r}"
+        assert cancel["disabled"] is False
+
+        # Both clicks in one evaluate: the confirm window is 3 s, and a
+        # round trip per click would race it under CI load.
+        acked = _safe_evaluate(
+            page,
+            "() => {"
+            + _FIND_CONTROL_CARD
+            + """
+            const card = findCard(document);
+            if (!card || !card.shadowRoot) return {no_card: true};
+            const sel = '.action-btn[data-action="cancel"]';
+            const first = card.shadowRoot.querySelector(sel);
+            if (!first) return {no_button: true};
+            first.click();
+            const second = card.shadowRoot.querySelector(sel);
+            if (second) second.click();
+            const after = card.shadowRoot.querySelector(sel);
+            return {
+                label: after ? after.textContent.trim() : null,
+                disabled: after
+                    ? (after.disabled === true || after.hasAttribute('disabled'))
+                    : null,
+            };
+            }""",
+        )
+        result: dict[str, Any] = dict(acked) if isinstance(acked, dict) else {}
+        assert not result.get("no_card"), "control card vanished mid-cancel"
+        assert not result.get("no_button"), "cancel button vanished mid-cancel"
+        assert result["disabled"] is True, (
+            "the confirming click must acknowledge itself immediately — an "
+            f"in-flight cancel must not stay clickable, got {result!r}"
+        )
+
+        # The cancel really cancelled.
+        ha_e2e.wait_for_state("sensor.foxess_smart_operations", "idle", timeout_s=120)
+
+        idle = wait_for_condition(
+            page,
+            _control_probe_expr("out.buttons.some((b) => b.action === 'charge')"),
+            timeout_ms=30000,
+            description="control card returns to idle after cancel",
+        )
+        assert _button_state(idle, "cancel") is None, (
+            f"the session ended, so Cancel must be gone: {idle['buttons']!r}"
+        )
+        assert idle["notice"] is None, (
+            f"a completed cancel must leave no notice behind, got {idle['notice']!r}"
+        )
+        for action in ("charge", "discharge"):
+            btn = _button_state(idle, action)
+            assert btn is not None, f"idle card must offer {action}: {idle!r}"
+            assert btn["disabled"] is False, f"idle {action} disabled: {btn!r}"
+
+
+# ---------------------------------------------------------------------------
 # Taper card (UX #5)
 # ---------------------------------------------------------------------------
 

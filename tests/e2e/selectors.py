@@ -36,6 +36,12 @@ class ControlCard:
     # Action buttons
     ACTION_BTN_CHARGE = f"{ROOT} >>> .action-btn[data-action='charge']"
     ACTION_BTN_DISCHARGE = f"{ROOT} >>> .action-btn[data-action='discharge']"
+    ACTION_BTN_CANCEL = f"{ROOT} >>> .action-btn[data-action='cancel']"
+    ACTION_NOTICE = f"{ROOT} >>> .action-notice"
+
+    # Staleness treatment (shared with the overview card via foxess-stale.js)
+    STALE_BANNER = f"{ROOT} >>> .stale-banner"
+    DATA_SOURCE_STALE = f"{ROOT} >>> .data-source.stale"
 
     # Form inputs (visible after clicking charge/discharge)
     FORM_OVERLAY = f"{ROOT} >>> .form-overlay"

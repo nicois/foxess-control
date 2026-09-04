@@ -22,8 +22,10 @@ Test strategy
 Drive the actual browser DOM — these bugs live in the card's
 shadow-DOM rendering path.  We start chromium via
 ``pytest-playwright``'s default ``page`` fixture (no HA container
-needed), inject the card JS with ``add_script_tag``, and assign a
-synthetic ``hass`` that mimics a DE-locale install:
+needed), load the shipped card JS as an ES module over a routed
+origin (``tests/card_dom.py``, matching HA's ``res_type: "module"``
+registration), and assign a synthetic ``hass`` that mimics a
+DE-locale install:
 
 * ``hass.states`` only contains
   ``sensor.foxess_intelligente_steuerung`` with
@@ -63,22 +65,17 @@ is running, and must inspect the HA entity registry to diagnose.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
+from .card_dom import WWW_DIR, load_card, serve_cards
+
 if TYPE_CHECKING:
     from playwright.sync_api import Page
 
-_WWW_DIR = (
-    Path(__file__).resolve().parent.parent
-    / "custom_components"
-    / "foxess_control"
-    / "www"
-)
-_CONTROL_CARD_JS = _WWW_DIR / "foxess-control-card.js"
-_TAPER_CARD_JS = _WWW_DIR / "foxess-taper-card.js"
+_CONTROL_CARD = ("foxess-control-card.js", "foxess-control-card")
+_TAPER_CARD = ("foxess-taper-card.js", "foxess-taper-card")
 
 
 # Synthetic DE-locale hass stub with an active charge session under
@@ -125,15 +122,18 @@ window.makeHassDE = function(entityMap, stateOverride) {
 """
 
 
-def _inject_card(page: Page, card_js_path: Path) -> None:
-    """Serve a blank page and inject the card JS + hass stub."""
-    page.set_content(
-        "<!doctype html><html><head><meta charset='utf-8'></head>"
-        "<body><div id='root'></div></body></html>",
-        wait_until="load",
-    )
+def _inject_card(page: Page, card: tuple[str, str]) -> None:
+    """Serve the shipped ``www/`` tree and load the card as a module.
+
+    Loading as a module (rather than injecting the file as a classic
+    script) matches how HA registers these cards — ``res_type: "module"``
+    — and is required for cards that import a shared sibling module such
+    as ``foxess-stale.js``.
+    """
+    filename, tag = card
+    errors = serve_cards(page)
     page.add_script_tag(content=_HASS_STUB_JS)
-    page.add_script_tag(content=card_js_path.read_text(encoding="utf-8"))
+    load_card(page, filename, tag, errors=errors)
 
 
 def _shadow_text(page: Page, selector: str) -> str:
@@ -164,7 +164,7 @@ class TestControlCardEntityResolution:
         ``_entityMap`` and render the scheduled-charge section —
         *not* the "Keine aktiven Vorgänge" idle panel.
         """
-        _inject_card(page, _CONTROL_CARD_JS)
+        _inject_card(page, _CONTROL_CARD)
         page.evaluate(
             """async () => {
                 const entityMap = {
@@ -193,7 +193,7 @@ class TestControlCardEntityResolution:
         in the YAML takes precedence over ``_entityMap``.  Covers the
         neighbourhood case opposite to the main bug.
         """
-        _inject_card(page, _CONTROL_CARD_JS)
+        _inject_card(page, _CONTROL_CARD)
         result = page.evaluate(
             """async () => {
                 // User configures a custom entity (perhaps a template sensor).
@@ -259,7 +259,7 @@ class TestControlCardEntityResolution:
         version predates the WS command or whose registry is
         transiently unavailable.
         """
-        _inject_card(page, _CONTROL_CARD_JS)
+        _inject_card(page, _CONTROL_CARD)
         result = page.evaluate(
             """async () => {
                 const hass = {
@@ -309,7 +309,7 @@ class TestTaperCardEntityResolution:
         absent); a working resolver renders the synthetic 95% charge
         bin under the "Laden" section title.
         """
-        _inject_card(page, _TAPER_CARD_JS)
+        _inject_card(page, _TAPER_CARD)
         result = page.evaluate(
             """async () => {
                 const entityMap = {
@@ -347,7 +347,7 @@ class TestTaperCardEntityResolution:
         """Backwards-compatibility: an explicit ``entity`` in the YAML
         config takes precedence over the entity_map.
         """
-        _inject_card(page, _TAPER_CARD_JS)
+        _inject_card(page, _TAPER_CARD)
         result = page.evaluate(
             """async () => {
                 const hass = {
@@ -425,7 +425,7 @@ def test_control_card_does_not_read_config_operations_entity_directly() -> None:
     hydration, which is fine.  We restrict the check to
     ``FoxESSControlCard`` — the runtime class.
     """
-    src = _CONTROL_CARD_JS.read_text(encoding="utf-8")
+    src = (WWW_DIR / _CONTROL_CARD[0]).read_text(encoding="utf-8")
     # Slice out the editor class — anything before
     # `class FoxESSControlCardEditor` is the runtime card.
     editor_idx = src.find("class FoxESSControlCardEditor")
@@ -448,7 +448,7 @@ def test_control_card_does_not_read_config_operations_entity_directly() -> None:
 
 def test_taper_card_does_not_read_config_entity_directly() -> None:
     """Source-level regression guard for the taper card."""
-    src = _TAPER_CARD_JS.read_text(encoding="utf-8")
+    src = (WWW_DIR / _TAPER_CARD[0]).read_text(encoding="utf-8")
     bad_lines = [
         (lineno, line)
         for lineno, line in enumerate(src.splitlines(), 1)
