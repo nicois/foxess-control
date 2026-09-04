@@ -853,6 +853,14 @@ _CARD_URLS = [
     f"/{DOMAIN}/foxess-taper-card.js",
 ]
 
+# Modules the cards import but which define no custom element, so they are
+# *served* but never registered as Lovelace resources — HA would try to load
+# them as cards.  The importing card propagates its own ``?v=`` query, so
+# these are cache-busted along with it despite having no resource entry.
+_SUPPORT_URLS = [
+    f"/{DOMAIN}/foxess-stale.js",
+]
+
 
 async def _register_card_frontend(hass: HomeAssistant) -> None:
     """Serve the custom Lovelace card JS files and register them as resources."""
@@ -863,7 +871,7 @@ async def _register_card_frontend(hass: HomeAssistant) -> None:
 
     card_dir = Path(__file__).parent
     static_paths = []
-    for card_url in _CARD_URLS:
+    for card_url in _CARD_URLS + _SUPPORT_URLS:
         filename = card_url.rsplit("/", 1)[-1]
         card_path = card_dir / "www" / filename
         static_paths.append(

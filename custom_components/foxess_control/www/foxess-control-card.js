@@ -11,7 +11,32 @@
  *   # soc_entity: sensor.foxess_battery_soc
  */
 
-const CARD_VERSION = "1.5.2";
+const CARD_VERSION = "1.6.0";
+
+// Freshness logic shared with foxess-overview-card.js, so the two cards
+// cannot drift apart on what "stale" means.  Imported dynamically with this
+// module's own `?v=` query propagated: HA serves these files with a
+// one-month Cache-Control, so a query-less sibling would stay pinned in
+// browser caches after an upgrade while the card around it was refetched.
+const _FX_CACHE_QUERY = new URL(import.meta.url).search;
+const {
+  STALE_AFTER: _STALE_AFTER,
+  ageSeconds: _ageSeconds,
+  formatAge: _formatAge,
+  isStaleAge: _isStaleAge,
+  staleReason: _staleReason,
+  STALE_BANNER_CSS: _STALE_BANNER_CSS,
+  staleDimCss: _staleDimCss,
+} = await import(
+  new URL("./foxess-stale.js" + _FX_CACHE_QUERY, import.meta.url).href
+);
+
+// How long the card waits for a cancel to visibly take effect before it
+// stops saying "cancelling" and tells the user nothing came back.  Bounded
+// on purpose: a card stuck on "cancelling…" forever would be a new bug, not
+// a fix for the old one.  Instances expose this as `_cancelAckTimeoutMs` so
+// tests can shorten it.
+const CANCEL_ACK_TIMEOUT_MS = 15000;
 
 // -- i18n --------------------------------------------------------------------
 
@@ -65,6 +90,12 @@ const TRANSLATIONS = {
     btn_confirm_cancel: "Confirm cancel?",
     btn_charge: "Charge",
     btn_discharge: "Discharge",
+    btn_cancelling: "Cancelling…",
+    stale_disconnected: "No connection to Home Assistant — readings {age} old",
+    stale_data: "Inverter data stale — last update {age} ago",
+    stale_controls_disabled: "Controls unavailable until the connection is back",
+    cancel_failed: "Cancel did not reach Home Assistant — tap Cancel to retry",
+    cancel_unconfirmed: "Cancel sent, but nothing has come back yet — check the integration",
   },
   de: {
     title: "FoxESS Steuerung",
@@ -115,6 +146,12 @@ const TRANSLATIONS = {
     btn_confirm_cancel: "Abbrechen bestätigen?",
     btn_charge: "Laden",
     btn_discharge: "Entladen",
+    btn_cancelling: "Wird abgebrochen…",
+    stale_disconnected: "Keine Verbindung zu Home Assistant — Werte {age} alt",
+    stale_data: "Wechselrichterdaten veraltet — letzte Aktualisierung vor {age}",
+    stale_controls_disabled: "Bedienelemente gesperrt, bis die Verbindung wieder besteht",
+    cancel_failed: "Abbruch hat Home Assistant nicht erreicht — zum Wiederholen auf Abbrechen tippen",
+    cancel_unconfirmed: "Abbruch gesendet, aber noch keine Rückmeldung — Integration prüfen",
   },
   fr: {
     title: "FoxESS Contrôle",
@@ -165,6 +202,12 @@ const TRANSLATIONS = {
     btn_confirm_cancel: "Confirmer l'annulation ?",
     btn_charge: "Charger",
     btn_discharge: "Décharger",
+    btn_cancelling: "Annulation…",
+    stale_disconnected: "Aucune connexion à Home Assistant — données vieilles de {age}",
+    stale_data: "Données de l’onduleur obsolètes — dernière mise à jour il y a {age}",
+    stale_controls_disabled: "Commandes indisponibles jusqu’au retour de la connexion",
+    cancel_failed: "L’annulation n’a pas atteint Home Assistant — appuyez sur Annuler pour réessayer",
+    cancel_unconfirmed: "Annulation envoyée, mais aucune réponse pour l’instant — vérifiez l’intégration",
   },
   nl: {
     title: "FoxESS Besturing",
@@ -215,6 +258,12 @@ const TRANSLATIONS = {
     btn_confirm_cancel: "Annulering bevestigen?",
     btn_charge: "Laden",
     btn_discharge: "Ontladen",
+    btn_cancelling: "Annuleren…",
+    stale_disconnected: "Geen verbinding met Home Assistant — waarden {age} oud",
+    stale_data: "Omvormergegevens verouderd — laatste update {age} geleden",
+    stale_controls_disabled: "Bediening niet beschikbaar tot de verbinding terug is",
+    cancel_failed: "Annulering bereikte Home Assistant niet — tik op Annuleren om opnieuw te proberen",
+    cancel_unconfirmed: "Annulering verzonden, maar nog geen reactie — controleer de integratie",
   },
   es: {
     title: "FoxESS Control",
@@ -265,6 +314,12 @@ const TRANSLATIONS = {
     btn_confirm_cancel: "¿Confirmar cancelación?",
     btn_charge: "Cargar",
     btn_discharge: "Descargar",
+    btn_cancelling: "Cancelando…",
+    stale_disconnected: "Sin conexión con Home Assistant — datos de hace {age}",
+    stale_data: "Datos del inversor obsoletos — última actualización hace {age}",
+    stale_controls_disabled: "Controles no disponibles hasta que vuelva la conexión",
+    cancel_failed: "La cancelación no llegó a Home Assistant — pulsa Cancelar para reintentar",
+    cancel_unconfirmed: "Cancelación enviada, pero aún sin respuesta — comprueba la integración",
   },
   it: {
     title: "FoxESS Controllo",
@@ -315,6 +370,12 @@ const TRANSLATIONS = {
     btn_confirm_cancel: "Confermare annullamento?",
     btn_charge: "Carica",
     btn_discharge: "Scarica",
+    btn_cancelling: "Annullamento…",
+    stale_disconnected: "Nessuna connessione a Home Assistant — dati vecchi di {age}",
+    stale_data: "Dati dell’inverter obsoleti — ultimo aggiornamento {age} fa",
+    stale_controls_disabled: "Comandi non disponibili fino al ritorno della connessione",
+    cancel_failed: "L’annullamento non ha raggiunto Home Assistant — tocca Annulla per riprovare",
+    cancel_unconfirmed: "Annullamento inviato, ma nessuna risposta finora — controlla l’integrazione",
   },
   pl: {
     title: "FoxESS Sterowanie",
@@ -365,6 +426,12 @@ const TRANSLATIONS = {
     btn_confirm_cancel: "Potwierdzić anulowanie?",
     btn_charge: "Ładuj",
     btn_discharge: "Rozładuj",
+    btn_cancelling: "Anulowanie…",
+    stale_disconnected: "Brak połączenia z Home Assistant — dane starsze o {age}",
+    stale_data: "Dane falownika przestarzałe — ostatnia aktualizacja {age} temu",
+    stale_controls_disabled: "Sterowanie niedostępne do przywrócenia połączenia",
+    cancel_failed: "Anulowanie nie dotarło do Home Assistant — naciśnij Anuluj, aby ponowić",
+    cancel_unconfirmed: "Anulowanie wysłane, ale brak odpowiedzi — sprawdź integrację",
   },
   pt: {
     title: "FoxESS Controlo",
@@ -415,6 +482,12 @@ const TRANSLATIONS = {
     btn_confirm_cancel: "Confirmar cancelamento?",
     btn_charge: "Carregar",
     btn_discharge: "Descarregar",
+    btn_cancelling: "A cancelar…",
+    stale_disconnected: "Sem ligação ao Home Assistant — dados com {age}",
+    stale_data: "Dados do inversor desatualizados — última atualização há {age}",
+    stale_controls_disabled: "Controlos indisponíveis até a ligação regressar",
+    cancel_failed: "O cancelamento não chegou ao Home Assistant — toque em Cancelar para tentar de novo",
+    cancel_unconfirmed: "Cancelamento enviado, mas sem resposta ainda — verifique a integração",
   },
   "zh-hans": {
     title: "FoxESS 控制",
@@ -465,6 +538,12 @@ const TRANSLATIONS = {
     btn_confirm_cancel: "确认取消？",
     btn_charge: "充电",
     btn_discharge: "放电",
+    btn_cancelling: "正在取消…",
+    stale_disconnected: "无法连接 Home Assistant — 数据为 {age}前",
+    stale_data: "逆变器数据过时 — 最后更新于 {age}前",
+    stale_controls_disabled: "连接恢复前无法操作",
+    cancel_failed: "取消未送达 Home Assistant — 请再次点击取消重试",
+    cancel_unconfirmed: "已发送取消，但尚无响应 — 请检查集成",
   },
   ja: {
     title: "FoxESS コントロール",
@@ -515,6 +594,12 @@ const TRANSLATIONS = {
     btn_confirm_cancel: "キャンセルしますか？",
     btn_charge: "充電",
     btn_discharge: "放電",
+    btn_cancelling: "キャンセル中…",
+    stale_disconnected: "Home Assistant に接続できません — {age}前の値",
+    stale_data: "インバーターのデータが古い — 最終更新 {age}前",
+    stale_controls_disabled: "接続が回復するまで操作できません",
+    cancel_failed: "キャンセルが Home Assistant に届きませんでした — もう一度キャンセルを押してください",
+    cancel_unconfirmed: "キャンセルを送信しましたが応答がありません — 統合を確認してください",
   },
 };
 
@@ -534,6 +619,16 @@ class FoxESSControlCard extends HTMLElement {
     this._expandedTips = new Set();
     this._cancelConfirm = false;
     this._cancelTimer = null;
+    // Cancel acknowledgement state.  `_cancelPending` is the transient
+    // "in flight" signal, `_cancelWatch` the session fingerprint it is
+    // waiting to see change, `_cancelNotice` a translation key naming a
+    // failure the user must be told about, and `_cancelAckTimer` the bound
+    // that stops the whole thing sticking.
+    this._cancelPending = false;
+    this._cancelWatch = null;
+    this._cancelNotice = null;
+    this._cancelAckTimer = null;
+    this._cancelAckTimeoutMs = CANCEL_ACK_TIMEOUT_MS;
     this._formValues = { start: "", end: "", soc: "" };
     this.shadowRoot.addEventListener("input", (e) => {
       const input = e.target;
@@ -565,6 +660,11 @@ class FoxESSControlCard extends HTMLElement {
 
   _handleAction(action) {
     if (!this._hass || !action) return;
+    // A disconnected frontend cannot deliver a service call at all, so
+    // acting on one would leave the user believing they had.  The buttons
+    // are rendered disabled in this state; this is the second line of
+    // defence for anything that reaches the handler another way.
+    if (this._staleState().reason === "connection") return;
     if (action === "cancel") {
       if (!this._cancelConfirm) {
         this._cancelConfirm = true;
@@ -578,8 +678,7 @@ class FoxESSControlCard extends HTMLElement {
       }
       this._cancelConfirm = false;
       clearTimeout(this._cancelTimer);
-      this._hass.callService("foxess_control", "clear_overrides", {});
-      this._render();
+      this._startCancel();
       return;
     }
     if (action === "charge" || action === "discharge") {
@@ -595,6 +694,75 @@ class FoxESSControlCard extends HTMLElement {
       this._formValues = { start: "", end: "", soc: "" };
       this._render();
     }
+  }
+
+  // -- Cancel acknowledgement ------------------------------------------------
+
+  /**
+   * A cheap signature of the session the card is currently showing.
+   *
+   * Used to decide when a pending cancel has been answered: the point is
+   * not that the session *ended* specifically, but that HA has sent news of
+   * any kind about it.  Continuing to say "cancelling" over a state the
+   * card has already re-rendered would be its own small lie.
+   */
+  _sessionFingerprint() {
+    const a = this._attr(this._resolve("operations_entity"));
+    return [
+      a.charge_active === true,
+      a.discharge_active === true,
+      a.charge_phase || "",
+      a.discharge_phase || "",
+    ].join("|");
+  }
+
+  /**
+   * Fire clear_overrides and acknowledge it on screen.
+   *
+   * Before this, the confirming click fired the service and re-rendered
+   * from unchanged state — so nothing at all changed until HA pushed new
+   * state, and the user could not tell a click that had not registered
+   * from one that had. `callService` returns a promise, so a real signal is
+   * available for both outcomes.
+   */
+  _startCancel() {
+    this._cancelPending = true;
+    this._cancelNotice = null;
+    this._cancelWatch = this._sessionFingerprint();
+    this._render();
+
+    // Bound the acknowledgement.  If the call never settles and no state
+    // ever arrives, say so rather than spinning forever.
+    clearTimeout(this._cancelAckTimer);
+    this._cancelAckTimer = setTimeout(() => {
+      this._cancelAckTimer = null;
+      if (!this._cancelPending) return;
+      this._clearCancelPending("cancel_unconfirmed");
+    }, this._cancelAckTimeoutMs);
+
+    let result;
+    try {
+      result = this._hass.callService("foxess_control", "clear_overrides", {});
+    } catch (e) {
+      // A synchronous throw is still a failure the user must see.
+      console.warn("FoxESS Control: cancel failed", e);
+      this._clearCancelPending("cancel_failed");
+      return;
+    }
+    Promise.resolve(result).catch((e) => {
+      console.warn("FoxESS Control: cancel rejected", e);
+      if (this._cancelPending) this._clearCancelPending("cancel_failed");
+    });
+  }
+
+  /** Stop acknowledging, optionally leaving a notice, and re-render. */
+  _clearCancelPending(noticeKey) {
+    this._cancelPending = false;
+    this._cancelWatch = null;
+    clearTimeout(this._cancelAckTimer);
+    this._cancelAckTimer = null;
+    this._cancelNotice = noticeKey || null;
+    this._render();
   }
 
   _submitForm() {
@@ -726,8 +894,10 @@ class FoxESSControlCard extends HTMLElement {
     if (!source) return "";
     const labels = { ws: "WS", api: "API", modbus: "Modbus" };
     const label = labels[source] || source;
-    const staleThreshold = 30;
-    const isStale = typeof ageSeconds === "number" && ageSeconds > staleThreshold;
+    // Threshold comes from the shared table, per source.  This used to be a
+    // flat 30 s against a 300 s poll interval, so a healthy REST install
+    // rendered the stale badge for ~90% of every interval.
+    const isStale = _isStaleAge(source, ageSeconds);
     const ageLabel = typeof ageSeconds === "number" ? this._formatAge(ageSeconds) : "";
     const cls = isStale ? "data-source stale" : "data-source";
     const title = ageLabel ? `Data: ${label} (${ageLabel} ago)` : `Data: ${label}`;
@@ -736,11 +906,50 @@ class FoxESSControlCard extends HTMLElement {
   }
 
   _formatAge(seconds) {
-    if (seconds < 60) return `${seconds}s`;
-    const m = Math.floor(seconds / 60);
-    if (m < 60) return `${m}m`;
-    const h = Math.floor(m / 60);
-    return `${h}h${m % 60}m`;
+    return _formatAge(seconds);
+  }
+
+  /**
+   * Whether this card's view is live, and if not, why.
+   *
+   * `reason` is "connection" (this browser is not receiving updates — every
+   * reading is frozen and no service call can be delivered), "data" (the
+   * connection is fine but the inverter or cloud API has gone quiet), or
+   * null.  The two need opposite responses from the user, so the card must
+   * not conflate them.
+   */
+  _staleState() {
+    const dataSource = this._getDataSource();
+    const freshnessId = this._getFreshnessEntityId();
+    const freshnessEntity = freshnessId && this._entity(freshnessId);
+    const lastUpdate =
+      freshnessEntity &&
+      freshnessEntity.attributes &&
+      freshnessEntity.attributes.last_update;
+    const age = _ageSeconds(lastUpdate);
+    const connected = !this._hass || this._hass.connected !== false;
+    return {
+      dataSource,
+      age,
+      connected,
+      reason: _staleReason({ connected, dataSource, age }),
+    };
+  }
+
+  _staleBanner(st) {
+    if (!st.reason) return "";
+    const ageText = typeof st.age === "number" ? this._formatAge(st.age) : "";
+    const message = this._t(
+      st.reason === "connection" ? "stale_disconnected" : "stale_data",
+    ).replace("{age}", ageText);
+    // While disconnected the controls are unavailable, so the banner has to
+    // say why — a greyed-out button with no explanation is its own C-020
+    // failure.
+    const extra =
+      st.reason === "connection"
+        ? ` <span class="stale-extra">${this._t("stale_controls_disabled")}</span>`
+        : "";
+    return `<div class="stale-banner"><span class="stale-icon">&#9888;</span>${message}${extra}</div>`;
   }
 
   _formatPower(watts) {
@@ -821,6 +1030,24 @@ class FoxESSControlCard extends HTMLElement {
       if (fc && fc.value) this._formValues.soc = fc.value;
     }
 
+    const st = this._staleState();
+
+    // A pending cancel is answered by *any* news about the session, so
+    // release the acknowledgement as soon as the fingerprint moves.  This
+    // runs before the render below, so the card never paints "cancelling"
+    // over a session that has already changed underneath it.
+    if (
+      this._cancelPending &&
+      this._cancelWatch !== null &&
+      this._sessionFingerprint() !== this._cancelWatch
+    ) {
+      this._cancelPending = false;
+      this._cancelWatch = null;
+      clearTimeout(this._cancelAckTimer);
+      this._cancelAckTimer = null;
+      this._cancelNotice = null;
+    }
+
     const ops = this._resolve("operations_entity");
     const a = this._attr(ops);
     const soc = a.charge_current_soc ?? a.discharge_current_soc ?? this._getSoc();
@@ -829,22 +1056,15 @@ class FoxESSControlCard extends HTMLElement {
 
     const isActive = chargeActive || dischargeActive;
 
-    const headerHtml = this._renderHeader(soc);
+    const headerHtml = this._renderHeader(soc, st);
     const contentHtml = `
       ${chargeActive ? this._renderCharge(a) : ""}
       ${dischargeActive ? this._renderDischarge(a) : ""}
       ${!isActive ? this._renderIdle() : ""}
       ${this._renderProgress(a)}
     `;
-    const showCancel = this._config.show_cancel !== false;
-    const actionHtml = isActive
-      ? (showCancel
-          ? `<button class="action-btn cancel${this._cancelConfirm ? " confirming" : ""}" data-action="cancel">
-               ${this._cancelConfirm ? this._t("btn_confirm_cancel") : this._t("btn_cancel")}
-             </button>`
-          : "")
-      : `<button class="action-btn" data-action="charge">${this._t("btn_charge")}</button>
-         <button class="action-btn" data-action="discharge">${this._t("btn_discharge")}</button>`;
+    const actionHtml = this._renderActions(isActive, st);
+    const bannerHtml = this._staleBanner(st);
 
     const sr = this.shadowRoot;
     const existing = sr.querySelector("ha-card");
@@ -855,18 +1075,73 @@ class FoxESSControlCard extends HTMLElement {
       if (header) header.outerHTML = headerHtml;
       if (content) content.innerHTML = contentHtml;
       if (actionRow) actionRow.innerHTML = actionHtml;
+      // The partial path must keep the staleness treatment in step too: a
+      // card with a form open is exactly when the user is about to act, so
+      // it is the worst moment to hide that the view is frozen.
+      existing.classList.toggle("stale", st.reason !== null);
+      const oldBanner = existing.querySelector(".stale-banner");
+      if (bannerHtml) {
+        if (oldBanner) oldBanner.outerHTML = bannerHtml;
+        else existing.insertAdjacentHTML("afterbegin", bannerHtml);
+      } else if (oldBanner) {
+        oldBanner.remove();
+      }
       return;
     }
 
     sr.innerHTML = `
       <style>${FoxESSControlCard._styles()}</style>
-      <ha-card>
+      <ha-card class="${st.reason ? "stale" : ""}">
+        ${bannerHtml}
         ${headerHtml}
         <div class="content">${contentHtml}</div>
         ${this._showForm ? this._renderForm() : ""}
         <div class="action-row">${actionHtml}</div>
       </ha-card>
     `;
+  }
+
+  /**
+   * The action row: Cancel during a session, Charge/Discharge when idle.
+   *
+   * Disabled only when the frontend is disconnected. Stale *data* leaves
+   * every control usable on purpose — the user may well be cancelling
+   * *because* they can see something is wrong, the service call still
+   * reaches HA, and HA acts on server-side truth rather than on this
+   * browser's snapshot. Taking away the one action that fixes the situation
+   * would be worse than the staleness that prompted it.
+   */
+  _renderActions(isActive, st) {
+    const frozen = st.reason === "connection";
+    const attrs = frozen
+      ? ` disabled title="${this._t("stale_controls_disabled")}"`
+      : "";
+    const notice = this._cancelNotice
+      ? `<div class="action-notice">${this._t(this._cancelNotice)}</div>`
+      : "";
+    if (!isActive) {
+      return `${notice}
+         <button class="action-btn" data-action="charge"${attrs}>${this._t("btn_charge")}</button>
+         <button class="action-btn" data-action="discharge"${attrs}>${this._t("btn_discharge")}</button>`;
+    }
+    if (this._config.show_cancel === false) return notice;
+    // An in-flight cancel is disabled regardless of connection state, so a
+    // second click cannot fire a second clear_overrides.
+    const pending = this._cancelPending;
+    const label = pending
+      ? this._t("btn_cancelling")
+      : this._cancelConfirm
+        ? this._t("btn_confirm_cancel")
+        : this._t("btn_cancel");
+    const cls =
+      "action-btn cancel" +
+      (this._cancelConfirm && !pending ? " confirming" : "") +
+      (pending ? " pending" : "");
+    const disabled = pending ? " disabled" : attrs;
+    return `${notice}
+        <button class="${cls}" data-action="cancel"${disabled}>
+               ${label}
+             </button>`;
   }
 
   _renderForm() {
@@ -903,7 +1178,7 @@ class FoxESSControlCard extends HTMLElement {
       : null;
   }
 
-  _renderHeader(soc) {
+  _renderHeader(soc, staleState) {
     const socVal = soc != null ? Math.round(soc) : null;
     const socPct = socVal != null ? Math.max(0, Math.min(100, socVal)) : 0;
 
@@ -912,16 +1187,12 @@ class FoxESSControlCard extends HTMLElement {
     if (socPct <= 15) barColor = "var(--error-color, #f44336)";
     else if (socPct <= 30) barColor = "var(--warning-color, #ff9800)";
 
-    const dataSource = this._getDataSource();
-    const freshnessId = this._getFreshnessEntityId();
-    const freshnessEntity = freshnessId && this._entity(freshnessId);
-    const lastUpdate = freshnessEntity && freshnessEntity.attributes && freshnessEntity.attributes.last_update;
-    const ageSeconds = lastUpdate ? Math.max(0, Math.round((Date.now() - new Date(lastUpdate).getTime()) / 1000)) : null;
+    const st = staleState || this._staleState();
 
     return `
       <div class="header">
         <div class="header-left">
-          <div class="title">${this._t("title")}${this._dataSourceBadge(dataSource, ageSeconds)}</div>
+          <div class="title">${this._t("title")}${this._dataSourceBadge(st.dataSource, st.age)}</div>
         </div>
         <div class="header-right">
           <div class="soc-group">
@@ -1416,6 +1687,19 @@ class FoxESSControlCard extends HTMLElement {
         background: rgba(var(--rgb-warning-color, 255, 152, 0), 0.15);
         color: var(--primary-text-color);
       }
+
+      /* Stale treatment.  Banner and CSS both come from foxess-stale.js so
+         this card and the overview card look and behave alike.  The banner
+         stays at full strength while the readings behind it are dimmed and
+         desaturated — the banner is the one thing on a stale card that *is*
+         current. */
+      ${_STALE_BANNER_CSS}
+      .stale-extra {
+        font-weight: 500;
+        opacity: 0.85;
+      }
+      ${_staleDimCss("ha-card.stale .header, ha-card.stale .content, ha-card.stale .form-overlay")}
+
       .header-right {
         display: flex;
         align-items: center;
@@ -1701,8 +1985,18 @@ class FoxESSControlCard extends HTMLElement {
       /* Action buttons */
       .action-row {
         display: flex;
+        flex-wrap: wrap;
         gap: 8px;
         padding: 8px 16px 12px;
+      }
+      /* Cancel feedback: takes a full row above the buttons so it reads as a
+         statement about the last action rather than a label on a control. */
+      .action-notice {
+        flex: 1 1 100%;
+        font-size: 12px;
+        line-height: 1.35;
+        font-weight: 500;
+        color: var(--error-color, #f44336);
       }
       .action-btn {
         flex: 1;
@@ -1727,6 +2021,18 @@ class FoxESSControlCard extends HTMLElement {
         background: var(--error-color, #f44336);
         color: #fff;
         border-color: var(--error-color, #f44336);
+      }
+      /* Unavailable: either disconnected, or a cancel already in flight.
+         Must be unmistakably not-a-button, or it is the same lie as before. */
+      .action-btn[disabled] {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+      .action-btn[disabled]:hover {
+        background: var(--card-background-color, #fff);
+      }
+      .action-btn.pending {
+        font-style: italic;
       }
 
       /* Inline form */

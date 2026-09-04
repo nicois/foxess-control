@@ -16,7 +16,22 @@
  *   # etc.
  */
 
-const OVERVIEW_VERSION = "2.8.0";
+const OVERVIEW_VERSION = "2.9.0";
+
+// Freshness logic shared with foxess-control-card.js — see foxess-stale.js
+// for why it is a shared module and why the import is dynamic (this
+// module's own `?v=` query is propagated so HA's month-long Cache-Control
+// cannot pin a stale copy after an upgrade).
+const _FX_CACHE_QUERY = new URL(import.meta.url).search;
+const {
+  ageSeconds: _ageSeconds,
+  formatAge: _formatAge,
+  staleReason: _staleReason,
+  STALE_BANNER_CSS: _STALE_BANNER_CSS,
+  staleDimCss: _staleDimCss,
+} = await import(
+  new URL("./foxess-stale.js" + _FX_CACHE_QUERY, import.meta.url).href
+);
 
 // -- i18n --------------------------------------------------------------------
 
@@ -153,6 +168,8 @@ const _OV_TRANSLATIONS = {
     discharging: "放电中",
     not_found: "未找到",
     not_discovered: "未发现",
+    stale_disconnected: "无法连接 Home Assistant — 数据为 {age}前",
+    stale_data: "逆变器数据过时 — 最后更新于 {age}前",
   },
   ja: {
     title: "FoxESS 概要",
@@ -178,16 +195,6 @@ function _ovGetStrings(lang) {
 }
 
 // Config key → role name returned by the foxess_control/entity_map WS command.
-// How long data may go unrefreshed before the card calls itself stale,
-// per data source, in seconds.  Anchored to the actual cadence each source
-// runs at: the REST poll is DEFAULT_POLLING_INTERVAL (300 s), so three
-// missed polls is a real fault; the WebSocket pushes every ~5 s, so a
-// minute of silence already is.  The previous flat 30 s threshold marked a
-// perfectly healthy REST install stale for ~90% of every interval, which
-// trained users to ignore the indicator entirely.
-const _STALE_AFTER = { ws: 60, api: 900, modbus: 900 };
-const _STALE_AFTER_DEFAULT = 900;
-
 const _ROLE_MAP = {
   solar_entity:             "solar_power",
   house_entity:             "house_load",
@@ -363,11 +370,7 @@ class FoxESSOverviewCard extends HTMLElement {
   }
 
   _formatAge(seconds) {
-    if (seconds < 60) return `${seconds}s`;
-    const m = Math.floor(seconds / 60);
-    if (m < 60) return `${m}m`;
-    const h = Math.floor(m / 60);
-    return `${h}h${m % 60}m`;
+    return _formatAge(seconds);
   }
 
   _renderBox(box, eid, dataSource) {
@@ -467,21 +470,14 @@ class FoxESSOverviewCard extends HTMLElement {
     const freshnessId = eid.data_freshness_entity;
     const freshnessEntity = freshnessId && this._hass.states[freshnessId];
     const lastUpdate = freshnessEntity && freshnessEntity.attributes && freshnessEntity.attributes.last_update;
-    const ageSeconds = lastUpdate ? Math.max(0, Math.round((Date.now() - new Date(lastUpdate).getTime()) / 1000)) : null;
+    const ageSeconds = _ageSeconds(lastUpdate);
 
-    // Distinguish "this browser is not receiving updates" from "the data
-    // really is old".  The age above is computed client-side against
-    // Date.now(), so a disconnected frontend makes it grow without bound
-    // while every reading on the card is frozen — reporting that as data
-    // staleness sends the user to check the inverter when the problem is
-    // their browser.  hass.connected is the only thing that tells them
-    // apart.  Production report 2026-08-27: the card showed "API · 45m"
-    // for 45 minutes while the integration polled successfully every 5
-    // minutes and its server-side age never exceeded 300 s.
+    // "This browser is not receiving updates" and "the data really is old"
+    // need opposite responses from the user; see foxess-stale.js for why
+    // they are easy to confuse and why hass.connected is what separates
+    // them.  Shared with the control card so the two cannot disagree.
     const connected = !this._hass || this._hass.connected !== false;
-    const staleAfter = _STALE_AFTER[dataSource] || _STALE_AFTER_DEFAULT;
-    const dataStale = typeof ageSeconds === "number" && ageSeconds > staleAfter;
-    const staleReason = !connected ? "connection" : (dataStale ? "data" : null);
+    const staleReason = _staleReason({ connected, dataSource, age: ageSeconds });
     const ageText = typeof ageSeconds === "number" ? this._formatAge(ageSeconds) : "";
     const staleBanner = staleReason
       ? `<div class="stale-banner"><span class="stale-icon">&#9888;</span>${
@@ -687,30 +683,11 @@ class FoxESSOverviewCard extends HTMLElement {
         color: var(--primary-text-color);
       }
 
-      /* Stale treatment.  The banner stays at full strength while the
-         readings behind it are dimmed and desaturated, so the card cannot
-         be mistaken for live at a glance.  Theme variables only, so it
-         reads correctly in both light and dark themes. */
-      .stale-banner {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 6px 12px;
-        font-size: 12px;
-        font-weight: 600;
-        line-height: 1.3;
-        color: var(--primary-text-color);
-        background: rgba(var(--rgb-warning-color, 255, 152, 0), 0.28);
-        border-bottom: 2px solid var(--warning-color, #ffa600);
-      }
-      .stale-icon {
-        font-size: 13px;
-      }
-      ha-card.stale .header,
-      ha-card.stale .flow-grid {
-        opacity: 0.55;
-        filter: grayscale(1);
-      }
+      /* Stale treatment.  Shared with the control card via foxess-stale.js:
+         banner at full strength, readings dimmed and desaturated, theme
+         variables only so it reads correctly in light and dark. */
+      ${_STALE_BANNER_CSS}
+      ${_staleDimCss("ha-card.stale .header, ha-card.stale .flow-grid")}
 
       .flow-grid {
         display: grid;

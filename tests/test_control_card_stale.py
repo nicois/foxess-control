@@ -45,11 +45,12 @@ staleness logic is a shared sibling module imported by both cards.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from .card_dom import load_card, serve_cards
+from .card_dom import WWW_DIR, load_card, serve_cards
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -782,3 +783,66 @@ class TestCancelAcknowledgement:
         assert len(r["serviceCalls"]) == 2, (
             f"retry must reach HA again, got {r['serviceCalls']!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# 5. The shared module must actually be reachable in production
+# ---------------------------------------------------------------------------
+
+# `import("./foo.js")` or `from "./foo.js"` inside a card, ignoring any query.
+_SIBLING_IMPORT_RE = re.compile(r"""["'`]\./(?P<name>[\w-]+\.js)""")
+
+
+class TestSharedModulesAreServed:
+    """Sharing logic between cards has one failure mode, and it is total.
+
+    A card whose sibling import 404s never reaches
+    ``customElements.define``, so the user gets "Custom element doesn't
+    exist" instead of a card. Every module a card imports must therefore be
+    registered as a static path — and must *not* be registered as a Lovelace
+    resource, since HA would try to load it as a card.
+    """
+
+    def test_every_sibling_import_is_registered_as_a_static_path(self) -> None:
+        from custom_components.foxess_control import _CARD_URLS, _SUPPORT_URLS
+
+        served = {url.rsplit("/", 1)[-1] for url in _CARD_URLS + _SUPPORT_URLS}
+        missing: dict[str, set[str]] = {}
+        for card in sorted(WWW_DIR.glob("*.js")):
+            imported = {
+                m.group("name")
+                for m in _SIBLING_IMPORT_RE.finditer(card.read_text(encoding="utf-8"))
+            }
+            gap = {name for name in imported if name not in served}
+            if gap:
+                missing[card.name] = gap
+        assert not missing, (
+            "these sibling modules are imported but never served — the "
+            "importing card will fail to define its element:\n"
+            + "\n".join(f"  {c}: {sorted(g)}" for c, g in missing.items())
+        )
+
+    def test_every_sibling_import_exists_on_disk(self) -> None:
+        missing: dict[str, set[str]] = {}
+        for card in sorted(WWW_DIR.glob("*.js")):
+            gap = {
+                m.group("name")
+                for m in _SIBLING_IMPORT_RE.finditer(card.read_text(encoding="utf-8"))
+                if not (WWW_DIR / m.group("name")).is_file()
+            }
+            if gap:
+                missing[card.name] = gap
+        assert not missing, f"sibling imports with no file: {missing!r}"
+
+    def test_support_modules_are_not_lovelace_resources(self) -> None:
+        """``_SUPPORT_URLS`` define no custom element; registering one as a
+        resource would make HA log a card-load failure on every dashboard."""
+        from custom_components.foxess_control import _CARD_URLS, _SUPPORT_URLS
+
+        overlap = set(_CARD_URLS) & set(_SUPPORT_URLS)
+        assert not overlap, f"support modules registered as cards: {overlap!r}"
+        for url in _SUPPORT_URLS:
+            src = (WWW_DIR / url.rsplit("/", 1)[-1]).read_text(encoding="utf-8")
+            assert "customElements.define" not in src, (
+                f"{url} defines a custom element, so it belongs in _CARD_URLS"
+            )

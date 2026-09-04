@@ -18,6 +18,11 @@ import pytest
 _CARD_FILES = [
     "custom_components/foxess_control/www/foxess-control-card.js",
     "custom_components/foxess_control/www/foxess-taper-card.js",
+    # Added when the staleness banner was shared with the control card: the
+    # overview card had shipped ``stale_disconnected`` / ``stale_data`` in
+    # nine of ten locales since 1.0.22-beta.5, and nothing caught it because
+    # this list did not cover it.
+    "custom_components/foxess_control/www/foxess-overview-card.js",
 ]
 
 
