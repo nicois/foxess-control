@@ -14,6 +14,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, POLLED_VARIABLES
+from .foxess_adapter import _ENTITY_MODE_MAP
 from .smart_battery.coordinator import EntityCoordinator as _EntityCoordinator
 from .smart_battery.coordinator import get_coordinator_soc as _get_coordinator_soc
 from .smart_battery.logging import record_operational_error
@@ -769,6 +770,15 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.hass.async_create_task(_do_fetch(), name="foxess_bms_temp_fetch")
 
 
+# foxess_modbus reports work mode as its human-readable select option
+# (e.g. "Self Use"), not the WorkMode enum's cloud-API-style value
+# (e.g. "SelfUse"). Reverse the write-direction map so reads normalize
+# back to the enum values the rest of the integration expects.
+_ENTITY_OPTION_TO_WORK_MODE: dict[str, str] = {
+    option: mode.value for mode, option in _ENTITY_MODE_MAP.items()
+}
+
+
 class FoxESSEntityCoordinator(_EntityCoordinator):
     """Read inverter state from external HA entities (foxess_modbus interop).
 
@@ -788,3 +798,10 @@ class FoxESSEntityCoordinator(_EntityCoordinator):
             entity_map=entity_map,
             update_interval_seconds=update_interval_seconds,
         )
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        data = await super()._async_update_data()
+        raw_mode = data.get("_work_mode")
+        if raw_mode is not None:
+            data["_work_mode"] = _ENTITY_OPTION_TO_WORK_MODE.get(raw_mode, raw_mode)
+        return data
