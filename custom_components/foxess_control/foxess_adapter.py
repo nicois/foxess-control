@@ -61,6 +61,7 @@ _MANAGED_WORK_MODES = frozenset(
         WorkMode.SELF_USE.value,
         WorkMode.FORCE_CHARGE.value,
         WorkMode.FORCE_DISCHARGE.value,
+        WorkMode.BACKUP.value,
         WorkMode.FEEDIN.value,
     }
 )

@@ -17,6 +17,7 @@ from ._handback_teardown import (
     async_handback_on_request,
 )
 from ._helpers import (
+    SCHEMA_BACKUP,
     SCHEMA_CLEAR_OVERRIDES,
     SCHEMA_DISABLE_SCHEDULER,
     SCHEMA_FEEDIN,
@@ -24,6 +25,7 @@ from ._helpers import (
     SCHEMA_FORCE_DISCHARGE,
     SCHEMA_SMART_CHARGE,
     SCHEMA_SMART_DISCHARGE,
+    SERVICE_BACKUP,
     SERVICE_CLEAR_OVERRIDES,
     SERVICE_DISABLE_SCHEDULER,
     SERVICE_FEEDIN,
@@ -279,6 +281,54 @@ def _register_services(hass: HomeAssistant) -> None:
             full_power=True,
         )
 
+    async def handle_backup(call: ServiceCall) -> None:
+        """Put the inverter into Backup mode for a timed window."""
+        duration: datetime.timedelta = call.data["duration"]
+        start_time: datetime.time | None = call.data.get("start_time")
+        force: bool = call.data.get("replace_conflicts", False)
+
+        start, end = _resolve_start_end(duration, start_time)
+
+        _LOGGER.info(
+            "Backup %02d:%02d - %02d:%02d",
+            start.hour,
+            start.minute,
+            end.hour,
+            end.minute,
+        )
+
+        if _cfg(hass).entity_mode:
+            await _apply_mode_via_entities(
+                hass,
+                WorkMode.BACKUP,
+            )
+        else:
+            inverter = _get_inverter(hass)
+            min_soc_on_grid = _cfg(hass).min_soc_on_grid
+            api_min_soc = _cfg(hass).api_min_soc
+
+            group = _build_override_group(
+                start,
+                end,
+                WorkMode.BACKUP,
+                inverter,
+                min_soc_on_grid,
+                fd_soc=api_min_soc,
+                api_min_soc=api_min_soc,
+            )
+
+            groups = await hass.async_add_executor_job(
+                _merge_with_existing,
+                inverter,
+                group,
+                WorkMode.BACKUP,
+                force,
+            )
+
+            await hass.async_add_executor_job(
+            inverter.set_schedule,
+            groups,
+            )
     async def handle_feedin(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
         power: int | None = call.data.get("power")
@@ -800,6 +850,12 @@ def _register_services(hass: HomeAssistant) -> None:
         _api_error_handler(handle_clear_overrides),
         schema=SCHEMA_CLEAR_OVERRIDES,
     )
+    hass.services.async_register(
+            DOMAIN,
+            SERVICE_BACKUP,
+            _api_error_handler(handle_backup),
+            schema=SCHEMA_BACKUP,
+        )
     hass.services.async_register(
         DOMAIN,
         SERVICE_DISABLE_SCHEDULER,
