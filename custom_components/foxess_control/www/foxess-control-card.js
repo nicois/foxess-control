@@ -9,11 +9,19 @@
  *   # Optional overrides (auto-discovered by default):
  *   # operations_entity: sensor.foxess_smart_operations
  *   # soc_entity: sensor.foxess_battery_soc
+ *   # quick_durations: [1, 2]            # "Start now" buttons, in hours
+ *   # default_charge_target: 100         # pre-filled charge target (%)
+ *   # default_discharge_min_soc: 10      # pre-filled discharge floor (%)
+ *   # replace_conflicts: false           # pass replace_conflicts to the actions
  */
 
-const CARD_VERSION = "1.5.2";
+const CARD_VERSION = "1.6.0";
 
 // -- i18n --------------------------------------------------------------------
+//
+// New keys introduced in 1.6.0 (btn_start, start_now, or_schedule, hour_one,
+// hours_n, quick_hint, label_start, label_end, err_*, past_midnight, btn_back)
+// exist in English only; other languages fall back to English via _t().
 
 const TRANSLATIONS = {
   en: {
@@ -65,6 +73,21 @@ const TRANSLATIONS = {
     btn_confirm_cancel: "Confirm cancel?",
     btn_charge: "Charge",
     btn_discharge: "Discharge",
+    // 1.6.0 — guided start flow (English only; other languages fall back)
+    btn_start: "Start",
+    btn_back: "Back",
+    start_now: "Start now",
+    or_schedule: "Or schedule",
+    hour_one: "1 hour",
+    hours_n: "{0} hours",
+    quick_hint: "Full power until the time is up or the battery limit is reached.",
+    label_start: "Start",
+    label_end: "End",
+    past_midnight: "Would run past midnight",
+    err_times: "Set a start and end time.",
+    err_order: "End must be after start, on the same day.",
+    err_max: "The window can be at most 4 hours.",
+    err_soc: "Enter a battery level from {0} to 100%.",
   },
   de: {
     title: "FoxESS Steuerung",
@@ -525,6 +548,17 @@ function _getStrings(lang) {
   return TRANSLATIONS[lc] || TRANSLATIONS[lc.split("-")[0]] || TRANSLATIONS.en;
 }
 
+const _pad2 = (n) => String(n).padStart(2, "0");
+const _hm = (d) => `${_pad2(d.getHours())}:${_pad2(d.getMinutes())}`;
+const _toMin = (t) => {
+  const [h, m] = String(t).split(":").map(Number);
+  return h * 60 + m;
+};
+const _esc = (s) =>
+  String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+
 class FoxESSControlCard extends HTMLElement {
   constructor() {
     super();
@@ -534,6 +568,9 @@ class FoxESSControlCard extends HTMLElement {
     this._expandedTips = new Set();
     this._cancelConfirm = false;
     this._cancelTimer = null;
+    this._showForm = null;
+    this._busy = false;
+    this._formError = "";
     this._formValues = { start: "", end: "", soc: "" };
     this.shadowRoot.addEventListener("input", (e) => {
       const input = e.target;
@@ -558,12 +595,12 @@ class FoxESSControlCard extends HTMLElement {
         }
         return;
       }
-      const btn = e.target.closest(".action-btn");
-      if (btn) this._handleAction(btn.dataset.action);
+      const btn = e.target.closest(".action-btn, .form-back");
+      if (btn && !btn.disabled) this._handleAction(btn.dataset.action, btn);
     });
   }
 
-  _handleAction(action) {
+  _handleAction(action, btn) {
     if (!this._hass || !action) return;
     if (action === "cancel") {
       if (!this._cancelConfirm) {
@@ -583,38 +620,129 @@ class FoxESSControlCard extends HTMLElement {
       return;
     }
     if (action === "charge" || action === "discharge") {
-      this._showForm = action;
-      this._formValues = { start: "", end: "", soc: "" };
-      this._render();
+      this._openForm(action);
+      return;
+    }
+    if (action === "quick") {
+      this._quickStart(Number(btn && btn.dataset.hours));
+      return;
     }
     if (action === "submit-form") {
       this._submitForm();
+      return;
     }
     if (action === "close-form") {
+      if (this._busy) return;
       this._showForm = null;
+      this._formError = "";
       this._formValues = { start: "", end: "", soc: "" };
       this._render();
     }
   }
 
-  _submitForm() {
-    if (!this._hass || !this._showForm) return;
+  // -- Guided start flow -----------------------------------------------------
+
+  _openForm(mode) {
+    const now = new Date();
+    const end = new Date(now.getTime() + 2 * 3600 * 1000);
+    const endStr = end.getDate() !== now.getDate() ? "23:59" : _hm(end);
+    const cfg = this._config || {};
+    const socDefault =
+      mode === "charge"
+        ? (cfg.default_charge_target != null ? cfg.default_charge_target : 100)
+        : (cfg.default_discharge_min_soc != null ? cfg.default_discharge_min_soc : 10);
+    this._showForm = mode;
+    this._formError = "";
+    this._formValues = { start: _hm(now), end: endStr, soc: String(socDefault) };
+    this._render();
+  }
+
+  _readForm() {
     const root = this.shadowRoot;
     const fv = this._formValues;
-    const start = root.getElementById("form-start")?.value || fv.start;
-    const end = root.getElementById("form-end")?.value || fv.end;
-    const soc = root.getElementById("form-soc")?.value || fv.soc;
-    if (!start || !end || !soc) return;
-    const service =
-      this._showForm === "charge" ? "smart_charge" : "smart_discharge";
-    const data =
-      this._showForm === "charge"
-        ? { start_time: start, end_time: end, target_soc: parseInt(soc, 10) }
-        : { start_time: start, end_time: end, min_soc: parseInt(soc, 10) };
-    this._hass.callService("foxess_control", service, data);
-    this._showForm = null;
-    this._formValues = { start: "", end: "", soc: "" };
+    return {
+      start: (root.getElementById("form-start") || {}).value || fv.start,
+      end: (root.getElementById("form-end") || {}).value || fv.end,
+      soc: (root.getElementById("form-soc") || {}).value || fv.soc,
+    };
+  }
+
+  _validateForm(start, end, socRaw) {
+    const isCharge = this._showForm === "charge";
+    const socMin = isCharge ? 5 : 0;
+    const soc = parseInt(socRaw, 10);
+    if (!start || !end) return this._t("err_times");
+    if (_toMin(end) <= _toMin(start)) return this._t("err_order");
+    if (_toMin(end) - _toMin(start) > 240) return this._t("err_max");
+    if (!Number.isFinite(soc) || soc < socMin || soc > 100) {
+      return this._t("err_soc").replace("{0}", socMin);
+    }
+    return "";
+  }
+
+  _submitForm() {
+    if (!this._hass || !this._showForm || this._busy) return;
+    const { start, end, soc } = this._readForm();
+    const err = this._validateForm(start, end, soc);
+    if (err) {
+      this._setFormError(err);
+      return;
+    }
+    const socNum = parseInt(soc, 10);
+    if (this._showForm === "charge") {
+      this._runService("smart_charge", {
+        start_time: start,
+        end_time: end,
+        target_soc: socNum,
+      });
+    } else {
+      this._runService("smart_discharge", {
+        start_time: start,
+        end_time: end,
+        min_soc: socNum,
+      });
+    }
+  }
+
+  _quickStart(hours) {
+    if (!this._hass || !this._showForm || this._busy) return;
+    if (!Number.isFinite(hours) || hours <= 0) return;
+    const service = this._showForm === "charge" ? "force_charge" : "force_discharge";
+    this._runService(service, { duration: `${_pad2(hours)}:00:00` });
+  }
+
+  async _runService(service, data) {
+    if (this._config.replace_conflicts) data.replace_conflicts = true;
+    this._setBusy(true);
+    this._setFormError("");
+    try {
+      await this._hass.callService("foxess_control", service, data);
+      this._showForm = null;
+      this._formValues = { start: "", end: "", soc: "" };
+    } catch (err) {
+      this._setFormError((err && err.message) || String(err));
+    } finally {
+      this._setBusy(false);
+    }
     this._render();
+  }
+
+  _setBusy(busy) {
+    this._busy = busy;
+    const root = this.shadowRoot;
+    root.querySelectorAll(".form-overlay button, .form-overlay input").forEach((el) => {
+      if (busy) el.disabled = true;
+      else if (el.dataset.tooLate !== "1") el.disabled = false;
+    });
+  }
+
+  _setFormError(msg) {
+    this._formError = msg || "";
+    const el = this.shadowRoot.getElementById("form-error");
+    if (el) {
+      el.textContent = this._formError;
+      el.hidden = !this._formError;
+    }
   }
 
   // -- Lovelace lifecycle ----------------------------------------------------
@@ -829,32 +957,44 @@ class FoxESSControlCard extends HTMLElement {
 
     const isActive = chargeActive || dischargeActive;
 
+    // A running session supersedes the start form.
+    if (isActive && this._showForm && !this._busy) {
+      this._showForm = null;
+      this._formError = "";
+    }
+    const formOpen = !!this._showForm && !isActive;
+
     const headerHtml = this._renderHeader(soc);
     const contentHtml = `
       ${chargeActive ? this._renderCharge(a) : ""}
       ${dischargeActive ? this._renderDischarge(a) : ""}
-      ${!isActive ? this._renderIdle() : ""}
+      ${!isActive && !formOpen ? this._renderIdle() : ""}
       ${this._renderProgress(a)}
     `;
     const showCancel = this._config.show_cancel !== false;
-    const actionHtml = isActive
-      ? (showCancel
-          ? `<button class="action-btn cancel${this._cancelConfirm ? " confirming" : ""}" data-action="cancel">
-               ${this._cancelConfirm ? this._t("btn_confirm_cancel") : this._t("btn_cancel")}
-             </button>`
-          : "")
-      : `<button class="action-btn" data-action="charge">${this._t("btn_charge")}</button>
+    let actionHtml = "";
+    if (isActive) {
+      actionHtml = showCancel
+        ? `<button class="action-btn cancel${this._cancelConfirm ? " confirming" : ""}" data-action="cancel">
+             ${this._cancelConfirm ? this._t("btn_confirm_cancel") : this._t("btn_cancel")}
+           </button>`
+        : "";
+    } else if (!formOpen) {
+      // Idle: just the two entry points.  Once one is picked, the form
+      // takes over and these are hidden (no doubled-up buttons).
+      actionHtml = `<button class="action-btn" data-action="charge">${this._t("btn_charge")}</button>
          <button class="action-btn" data-action="discharge">${this._t("btn_discharge")}</button>`;
+    }
 
     const sr = this.shadowRoot;
     const existing = sr.querySelector("ha-card");
-    if (existing && existing.querySelector(".form-overlay")) {
+    if (formOpen && existing && existing.querySelector(".form-overlay")) {
+      // Form already on screen: refresh header/content only so typing
+      // and focus are never interrupted by incoming state updates.
       const header = existing.querySelector(".header");
       const content = existing.querySelector(".content");
-      const actionRow = existing.querySelector(".action-row");
       if (header) header.outerHTML = headerHtml;
       if (content) content.innerHTML = contentHtml;
-      if (actionRow) actionRow.innerHTML = actionHtml;
       return;
     }
 
@@ -863,34 +1003,69 @@ class FoxESSControlCard extends HTMLElement {
       <ha-card>
         ${headerHtml}
         <div class="content">${contentHtml}</div>
-        ${this._showForm ? this._renderForm() : ""}
-        <div class="action-row">${actionHtml}</div>
+        ${formOpen ? this._renderForm() : ""}
+        ${actionHtml ? `<div class="action-row">${actionHtml}</div>` : ""}
       </ha-card>
     `;
   }
 
   _renderForm() {
-    const isCharge = this._showForm === "charge";
+    const mode = this._showForm;
+    const isCharge = mode === "charge";
     const socLabel = isCharge ? this._t("target") : this._t("min_soc");
     const fv = this._formValues;
-    const socDefault = fv.soc || (isCharge ? 100 : 10);
+    const socDefault = fv.soc !== "" && fv.soc != null ? fv.soc : (isCharge ? 100 : 10);
+    const socMin = isCharge ? 5 : 0;
+
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const cfgDur = this._config.quick_durations;
+    const durations = Array.isArray(cfgDur) && cfgDur.length ? cfgDur : [1, 2];
+    const quick = durations
+      .map((h) => {
+        const late = nowMin + h * 60 >= 1440;
+        const label = h === 1 ? this._t("hour_one") : this._t("hours_n").replace("{0}", h);
+        const extra = late
+          ? ` disabled data-too-late="1" title="${_esc(this._t("past_midnight"))}"`
+          : "";
+        return `<button class="action-btn quick" data-action="quick" data-hours="${h}"${extra}>${_esc(label)}</button>`;
+      })
+      .join("");
+
     return `
-      <div class="form-overlay">
-        <div class="form-row">
-          <label>Start</label>
-          <input type="time" id="form-start" value="${fv.start || ""}">
+      <div class="form-overlay" data-mode="${mode}">
+        <div class="form-head">
+          <button class="form-back" data-action="close-form" aria-label="${_esc(this._t("btn_back"))}">&#8592;</button>
+          <span class="form-title">${isCharge ? this._t("btn_charge") : this._t("btn_discharge")}</span>
         </div>
-        <div class="form-row">
-          <label>End</label>
-          <input type="time" id="form-end" value="${fv.end || ""}">
+
+        <div class="form-group">
+          <div class="form-group-title">${this._t("start_now")}</div>
+          <div class="quick-row">${quick}</div>
+          <div class="form-hint">${this._t("quick_hint")}</div>
         </div>
-        <div class="form-row">
-          <label>${socLabel} (%)</label>
-          <input type="number" id="form-soc" min="0" max="100" value="${socDefault}">
+
+        <div class="form-group">
+          <div class="form-group-title">${this._t("or_schedule")}</div>
+          <div class="form-row">
+            <label for="form-start">${this._t("label_start")}</label>
+            <input type="time" id="form-start" value="${_esc(fv.start)}">
+          </div>
+          <div class="form-row">
+            <label for="form-end">${this._t("label_end")}</label>
+            <input type="time" id="form-end" value="${_esc(fv.end)}">
+          </div>
+          <div class="form-row">
+            <label for="form-soc">${socLabel} (%)</label>
+            <input type="number" id="form-soc" inputmode="numeric" min="${socMin}" max="100" value="${_esc(socDefault)}">
+          </div>
         </div>
+
+        <div class="form-error" id="form-error" role="alert"${this._formError ? "" : " hidden"}>${_esc(this._formError)}</div>
+
         <div class="form-buttons">
-          <button class="action-btn" data-action="submit-form">${isCharge ? this._t("btn_charge") : this._t("btn_discharge")}</button>
-          <button class="action-btn cancel" data-action="close-form">${this._t("btn_cancel")}</button>
+          <button class="action-btn primary" data-action="submit-form">${this._t("btn_start")}</button>
+          <button class="action-btn" data-action="close-form">${this._t("btn_cancel")}</button>
         </div>
       </div>
     `;
@@ -1136,7 +1311,6 @@ class FoxESSControlCard extends HTMLElement {
                    14.17l7.59-7.59L19 8l-9 9z"/>
         </svg>
         <div class="idle-text">${this._t("no_active")}</div>
-        <div class="idle-sub">${this._t("idle_hint")}</div>
       </div>
     `;
   }
@@ -1436,6 +1610,9 @@ class FoxESSControlCard extends HTMLElement {
       .content {
         padding: 0 16px 16px;
       }
+      .content:empty {
+        padding: 0;
+      }
 
       /* Sections (charge / discharge) */
       .section {
@@ -1501,6 +1678,9 @@ class FoxESSControlCard extends HTMLElement {
       @keyframes pulse-discharge {
         0%, 100% { box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.4); }
         50% { box-shadow: 0 0 0 6px rgba(255, 152, 0, 0); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .dot-active, .dot-active.dot-discharge { animation: none; }
       }
 
       /* Badge (remaining time) */
@@ -1680,7 +1860,7 @@ class FoxESSControlCard extends HTMLElement {
       /* Idle state */
       .idle {
         text-align: center;
-        padding: 24px 16px;
+        padding: 24px 16px 12px;
       }
       .idle-icon {
         opacity: 0.3;
@@ -1692,11 +1872,6 @@ class FoxESSControlCard extends HTMLElement {
         color: var(--primary-text-color);
         opacity: 0.7;
       }
-      .idle-sub {
-        font-size: 12px;
-        color: var(--secondary-text-color);
-        margin-top: 4px;
-      }
 
       /* Action buttons */
       .action-row {
@@ -1706,18 +1881,30 @@ class FoxESSControlCard extends HTMLElement {
       }
       .action-btn {
         flex: 1;
+        min-height: 44px;
         padding: 8px 12px;
         border: 1px solid var(--divider-color, #e0e0e0);
         border-radius: 8px;
         background: var(--card-background-color, #fff);
         color: var(--primary-text-color);
-        font-size: 13px;
+        font-size: 14px;
         font-weight: 500;
         cursor: pointer;
         transition: background 0.2s, border-color 0.2s;
       }
       .action-btn:hover {
         background: var(--secondary-background-color, #f5f5f5);
+      }
+      .action-btn:focus-visible,
+      .form-back:focus-visible,
+      .form-row input:focus-visible {
+        outline: 2px solid var(--primary-color);
+        outline-offset: 2px;
+      }
+      .action-btn:disabled,
+      .form-back:disabled {
+        opacity: 0.45;
+        cursor: default;
       }
       .action-btn.cancel {
         border-color: var(--error-color, #f44336);
@@ -1729,35 +1916,105 @@ class FoxESSControlCard extends HTMLElement {
         border-color: var(--error-color, #f44336);
       }
 
-      /* Inline form */
+      /* Guided start form */
       .form-overlay {
-        padding: 8px 16px;
-        border-top: 1px solid var(--divider-color, #e0e0e0);
+        --fc-accent: var(--primary-color);
+        padding: 4px 16px 16px;
+        border-top: 2px solid var(--fc-accent);
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .form-overlay[data-mode="charge"] { --fc-accent: var(--fc-charge); }
+      .form-overlay[data-mode="discharge"] { --fc-accent: var(--fc-discharge); }
+      .form-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding-top: 8px;
+      }
+      .form-back {
+        width: 40px;
+        height: 40px;
+        margin-left: -8px;
+        border: none;
+        border-radius: 50%;
+        background: transparent;
+        color: var(--primary-text-color);
+        font-size: 20px;
+        line-height: 1;
+        cursor: pointer;
+      }
+      .form-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--fc-accent);
+      }
+      .form-group-title {
+        font-size: 12px;
+        color: var(--secondary-text-color);
+        margin-bottom: 8px;
+      }
+      .quick-row {
+        display: flex;
+        gap: 8px;
+      }
+      .action-btn.quick {
+        border-color: var(--fc-accent);
+      }
+      .form-hint {
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        margin-top: 6px;
       }
       .form-row {
         display: flex;
         align-items: center;
         gap: 8px;
-        margin-bottom: 6px;
+        margin-bottom: 8px;
+      }
+      .form-row:last-child {
+        margin-bottom: 0;
       }
       .form-row label {
-        font-size: 12px;
-        min-width: 60px;
+        font-size: 13px;
+        min-width: 84px;
         color: var(--secondary-text-color);
       }
       .form-row input {
         flex: 1;
-        padding: 6px 8px;
+        min-width: 0;
+        min-height: 44px;
+        box-sizing: border-box;
+        padding: 6px 10px;
         border: 1px solid var(--divider-color, #e0e0e0);
-        border-radius: 4px;
-        font-size: 13px;
+        border-radius: 8px;
+        font-size: 16px;
         background: var(--card-background-color, #fff);
         color: var(--primary-text-color);
+        color-scheme: light dark;
+      }
+      .form-error {
+        font-size: 13px;
+        color: var(--error-color, #f44336);
+      }
+      .form-error[hidden] {
+        display: none;
       }
       .form-buttons {
         display: flex;
         gap: 8px;
-        margin-top: 8px;
+      }
+      .action-btn.primary {
+        background: var(--fc-accent);
+        border-color: var(--fc-accent);
+        color: #fff;
+        font-weight: 600;
+        text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+      }
+      .action-btn.primary:hover {
+        background: var(--fc-accent);
+        filter: brightness(1.08);
       }
     `;
   }
