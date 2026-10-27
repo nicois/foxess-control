@@ -1011,7 +1011,9 @@ class TestGridDirectionWithAcCoupledAux:
     charger term and the direction tracker then see the combined balance."""
 
     @staticmethod
-    def _msg(*, aux: float, charger: float, grid: float, status: object):
+    def _msg(
+        *, aux: float, charger: float, grid: float, status: object
+    ) -> dict[str, object]:
         msg = _ev_msg(
             solar=1.0,
             load=0.5,
