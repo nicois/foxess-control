@@ -185,7 +185,9 @@ charge/discharge scenarios through containerised HA + simulator
 | `TestMapWsToCoordinator::test_grid_exporting_from_balance` | Export direction from balance | C-006 |
 | `TestMapWsToCoordinator::test_grid_fallback_to_gridstatus` | Fallback when data missing | C-006 |
 | `TestMapWsToCoordinator::test_grid_balance_unreliable_unmeasured_generation` | Balance diverges from grid (external gen) → gridStatus fallback | C-006 |
-| `TestMapWsToCoordinator::test_grid_balance_unreliable_importing` | Balance diverges from grid (importing) → gridStatus fallback | C-006 |
+| `TestMapWsToCoordinator::test_grid_balance_unreliable_importing` | Balance diverges from grid (importing) → gridStatus fallback (cold start) | C-006 |
+| `TestGridDirectionEvCharger::*` | Live 2026-10-27 EV samples: charger node, signed `gridToHidden`, 48x divergence, export sample | C-006 |
+| `TestGridDirectionTracker::*` | Variable 4-8 kW unmeasured load, ~3x ratio, hold, learned gridStatus, GH #3 | C-006 |
 | `TestStaleness::test_stale_messages_skipped` | timeDiff > 30 filtered | C-005 |
 | `TestIsPlausible::*` (11 tests) | >10x divergence filter | C-004 |
 | `TestWsPlausibilityFilter::*` (3 tests) | Plausibility in WS listen loop | C-004 |

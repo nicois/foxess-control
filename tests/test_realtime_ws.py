@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 from custom_components.foxess_control.foxess.realtime_ws import (
     FoxESSRealtimeWS,
+    GridDirectionTracker,
     _is_plausible,
     map_ws_to_coordinator,
 )
@@ -699,6 +700,359 @@ class TestAuxWiredThroughListenLoop:
 
         forwarded = await self._run_one_frame(self._ws_msg(), additional_pv=_boom)
         assert forwarded["pvPower"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Grid direction with an unmeasured / separately-reported EV charger
+# (live capture 2026-10-27, EV on the house side of the inverter, gridStatus
+# reads 2 for IMPORT on this firmware but 2 means EXPORT in GH issue #3)
+# ---------------------------------------------------------------------------
+
+
+def _ev_msg(
+    *,
+    solar: float,
+    load: float,
+    bat_charge: float,
+    grid: float,
+    charger: float | None = 0.0,
+    grid_status: object = 2,
+    grid_flag: object = 1,
+    device: float | None = None,
+) -> dict[str, object]:
+    """Build a WS frame shaped like the live capture (all values in kW)."""
+
+    def p(kw: float) -> dict[str, str]:
+        return {"value": f"{kw}", "unit": "kW"}
+
+    grid_node: dict[str, object] = {"power": p(grid), "gridStatus": grid_status}
+    if grid_flag is not None:
+        grid_node["gridToHidden"] = grid_flag
+    node: dict[str, object] = {
+        "solar": {"power": p(solar)},
+        "grid": grid_node,
+        "bat": {
+            "power": p(bat_charge),
+            "soc": 50,
+            "charge": 1,
+            "batteryId": "00000000-0000-0000-0000-000000000000",
+            "multipleBatterySoc": [{"soc": 50, "charge": 1, "batSn": "SN-PLACEHOLDER"}],
+        },
+        "load": {"power": p(load)},
+        "homeLoad": {"power": p(load)},
+        "heatpump": {"display": False, "power": {"value": "--", "unit": "kW"}},
+        "aux": {"display": False, "power": {"value": "--", "unit": "kW"}},
+    }
+    if charger is not None:
+        node["charger"] = {"power": p(charger), "state": 0, "chargerToHidden": 1}
+    if device is not None:
+        node["device"] = {"power": p(device)}
+    return {"errno": 0, "result": {"node": node, "timeDiff": 5}}
+
+
+# (label, solar, load, charger, bat_charge, device, grid) — verbatim from the log
+_LIVE_IMPORT_SAMPLES = [
+    ("ev_inside_load", 7.76, 2.99, 0.0, 8.51, -0.744, 3.73),
+    ("switchover_charger_2.6_load_4.7", 7.71, 4.72, 2.60, 8.52, -0.811, 8.13),
+    ("settled_ev_6.9", 7.73, 0.464, 6.90, 8.52, -0.787, 8.15),
+    ("settled_ratio_6.5x", 7.69, 0.386, 6.90, 8.52, -0.822, 8.11),
+    ("solar_dip", 2.71, 0.309, 6.90, 7.69, -4.98, 12.2),
+    ("solar_recovers", 7.26, 0.454, 6.90, 8.52, -1.26, 8.61),
+]
+
+
+class TestGridDirectionEvCharger:
+    @pytest.mark.parametrize(
+        ("label", "solar", "load", "charger", "bat", "device", "grid"),
+        _LIVE_IMPORT_SAMPLES,
+        ids=[s[0] for s in _LIVE_IMPORT_SAMPLES],
+    )
+    def test_live_import_samples_never_report_export(
+        self,
+        label: str,
+        solar: float,
+        load: float,
+        charger: float,
+        bat: float,
+        device: float,
+        grid: float,
+    ) -> None:
+        msg = _ev_msg(
+            solar=solar,
+            load=load,
+            charger=charger,
+            bat_charge=bat,
+            device=device,
+            grid=grid,
+        )
+        data = map_ws_to_coordinator(msg)
+        assert data["gridConsumptionPower"] == pytest.approx(grid)
+        assert data["feedinPower"] == 0.0
+
+    def test_signed_flag_beats_wrong_gridstatus(self) -> None:
+        """11:07:56 — balance without EV is 6.5x off; gridStatus=2 is import here."""
+        msg = _ev_msg(solar=7.73, load=0.464, charger=None, bat_charge=8.52, grid=8.15)
+        data = map_ws_to_coordinator(msg)
+        assert data["gridConsumptionPower"] == pytest.approx(8.15)
+        assert data["feedinPower"] == 0.0
+
+    def test_live_export_sample_still_exports(self) -> None:
+        """11:01:01 — before Force Charge: gridStatus=1, gridToHidden=-1."""
+        msg = _ev_msg(
+            solar=7.67,
+            load=0.476,
+            charger=0.0,
+            bat_charge=2.19,
+            grid=5.01,
+            grid_status=1,
+            grid_flag=-1,
+            device=5.48,
+        )
+        data = map_ws_to_coordinator(msg)
+        assert data["gridConsumptionPower"] == 0.0
+        assert data["feedinPower"] == pytest.approx(5.01)
+
+    def test_flag_accepts_string_values(self) -> None:
+        msg = _ev_msg(
+            solar=1.0, load=0.5, bat_charge=0.0, grid=5.0, charger=0.0, grid_flag="1"
+        )
+        assert map_ws_to_coordinator(msg)["gridConsumptionPower"] == pytest.approx(5.0)
+        msg = _ev_msg(
+            solar=9.0, load=0.5, bat_charge=0.0, grid=5.0, charger=0.0, grid_flag="-1"
+        )
+        assert map_ws_to_coordinator(msg)["feedinPower"] == pytest.approx(5.0)
+
+    def test_foxess_app_48x_divergence(self) -> None:
+        """App sample: solar 8.82, home 0.455, charge 8.51, EV 6.9, grid 7.05.
+
+        Balance without the EV predicts 0.15 kW vs 7.05 actual (48x).  No
+        signed flag in the frame: the charger node must close the balance.
+        """
+        msg = _ev_msg(
+            solar=8.82,
+            load=0.455,
+            charger=6.9,
+            bat_charge=8.51,
+            grid=7.05,
+            grid_flag=None,
+        )
+        data = map_ws_to_coordinator(msg)
+        assert data["gridConsumptionPower"] == pytest.approx(7.05)
+        assert data["feedinPower"] == 0.0
+
+    def test_charger_node_does_not_change_reported_house_load(self) -> None:
+        msg = _ev_msg(solar=7.73, load=0.464, charger=6.9, bat_charge=8.52, grid=8.15)
+        data = map_ws_to_coordinator(msg)
+        assert data["loadsPower"] == pytest.approx(0.464)
+
+    def test_charger_placeholder_values_ignored(self) -> None:
+        """display=False nodes carry '--' — must not break the balance."""
+        msg = _ev_msg(
+            solar=2.0, load=1.0, charger=None, bat_charge=0.0, grid=1.0, grid_flag=None
+        )
+        msg["result"]["node"]["charger"] = {  # type: ignore[index]
+            "display": False,
+            "power": {"value": "--", "unit": "kW"},
+        }
+        data = map_ws_to_coordinator(msg)
+        assert data["feedinPower"] == pytest.approx(1.0)  # 1.0 - 2.0 → export
+        assert data["gridConsumptionPower"] == 0.0
+
+
+class TestGridDirectionTracker:
+    """Direction must survive unmeasured load/generation (no flag in frame)."""
+
+    @staticmethod
+    def _bare(
+        *, solar: float, load: float, bat: float, grid: float, status: object
+    ) -> dict[str, object]:
+        return _ev_msg(
+            solar=solar,
+            load=load,
+            charger=None,
+            bat_charge=bat,
+            grid=grid,
+            grid_status=status,
+            grid_flag=None,
+        )
+
+    @pytest.mark.parametrize("ev_kw", [4.0, 5.0, 6.0, 7.0, 8.0])
+    def test_variable_unmeasured_load_holds_import(self, ev_kw: float) -> None:
+        """5-min averages 11:15: solar 7.7, load 2.7, charge 8.5, real grid 10.3.
+
+        The EV is invisible (no charger node, no flag).  Whatever the
+        4-8 kW EV draw is, the ratio to the balance hovers around the 3x
+        cutoff — direction must stay import.
+        """
+        tracker = GridDirectionTracker()
+        # A trustworthy frame first (balance matches): learns import / status 2.
+        first = map_ws_to_coordinator(
+            self._bare(solar=2.0, load=1.0, bat=8.5, grid=7.5, status=2), tracker
+        )
+        assert first["gridConsumptionPower"] == pytest.approx(7.5)
+        grid = 3.5 + ev_kw  # balance (3.5) + unmeasured EV
+        data = map_ws_to_coordinator(
+            self._bare(solar=7.7, load=2.7, bat=8.5, grid=grid, status=2), tracker
+        )
+        assert data["gridConsumptionPower"] == pytest.approx(grid)
+        assert data["feedinPower"] == 0.0
+
+    def test_ratio_hovering_around_3x_does_not_flip(self) -> None:
+        tracker = GridDirectionTracker()
+        map_ws_to_coordinator(
+            self._bare(solar=2.0, load=1.0, bat=8.5, grid=7.5, status=2), tracker
+        )
+        # predicted 3.5 vs actual 10.3 (2.9x), 11.1 vs 3.3 (3.4x), 8.9 vs 4.8
+        for solar, load, bat, grid in [
+            (7.7, 2.7, 8.5, 10.3),
+            (5.2, 0.9, 7.6, 11.1),
+            (4.4, 0.7, 8.5, 8.9),
+            (7.7, 2.7, 8.5, 11.8),
+            (7.7, 2.7, 8.5, 10.4),
+        ]:
+            data = map_ws_to_coordinator(
+                self._bare(solar=solar, load=load, bat=bat, grid=grid, status=2),
+                tracker,
+            )
+            assert data["gridConsumptionPower"] == pytest.approx(grid)
+            assert data["feedinPower"] == 0.0
+
+    def test_48x_divergence_holds_previous_direction(self) -> None:
+        tracker = GridDirectionTracker()
+        map_ws_to_coordinator(
+            self._bare(solar=2.0, load=1.0, bat=8.5, grid=7.5, status=2), tracker
+        )
+        data = map_ws_to_coordinator(
+            self._bare(solar=8.82, load=0.455, bat=8.51, grid=7.05, status=2), tracker
+        )
+        assert data["gridConsumptionPower"] == pytest.approx(7.05)
+        assert data["feedinPower"] == 0.0
+
+    def test_unknown_gridstatus_holds_previous_direction(self) -> None:
+        tracker = GridDirectionTracker()
+        map_ws_to_coordinator(
+            self._bare(solar=2.0, load=1.0, bat=8.5, grid=7.5, status=2), tracker
+        )
+        data = map_ws_to_coordinator(
+            self._bare(solar=7.7, load=0.5, bat=8.5, grid=8.0, status=99), tracker
+        )
+        assert data["gridConsumptionPower"] == pytest.approx(8.0)
+
+    def test_gridstatus_meaning_is_learned_per_firmware(self) -> None:
+        """Same gridStatus=2 means export on the issue #3 firmware."""
+        tracker = GridDirectionTracker()
+        # Reliable export frame teaches status 2 == export.
+        map_ws_to_coordinator(
+            self._bare(solar=5.0, load=1.0, bat=0.0, grid=4.0, status=2), tracker
+        )
+        # Then an import frame with unmeasured load: status 2 -> export would
+        # be wrong only if learned wrongly; here the learned meaning is used.
+        data = map_ws_to_coordinator(
+            self._bare(solar=0.0, load=0.28, bat=0.005, grid=1.31, status=2), tracker
+        )
+        assert data["gridConsumptionPower"] == 0.0
+        assert data["feedinPower"] == pytest.approx(1.31)
+
+    def test_issue_3_hold_after_export(self) -> None:
+        """GH #3: unmeasured generation; status 99 must not flip direction."""
+        tracker = GridDirectionTracker()
+        map_ws_to_coordinator(
+            self._bare(solar=5.0, load=1.0, bat=0.0, grid=4.0, status=1), tracker
+        )
+        data = map_ws_to_coordinator(
+            self._bare(solar=0.0, load=0.28, bat=0.005, grid=1.31, status=99),
+            tracker,
+        )
+        assert data["gridConsumptionPower"] == 0.0
+        assert data["feedinPower"] == pytest.approx(1.31)
+
+    def test_ambiguous_gridstatus_is_not_trusted(self) -> None:
+        tracker = GridDirectionTracker()
+        map_ws_to_coordinator(
+            self._bare(solar=5.0, load=1.0, bat=0.0, grid=4.0, status=2), tracker
+        )  # status 2 -> export
+        map_ws_to_coordinator(
+            self._bare(solar=1.0, load=5.0, bat=0.0, grid=4.0, status=2), tracker
+        )  # status 2 -> import (now ambiguous; last direction = import)
+        data = map_ws_to_coordinator(
+            self._bare(solar=7.7, load=0.5, bat=8.5, grid=8.0, status=2), tracker
+        )
+        assert data["gridConsumptionPower"] == pytest.approx(8.0)  # held import
+
+    def test_near_zero_grid_does_not_overwrite_direction(self) -> None:
+        tracker = GridDirectionTracker()
+        map_ws_to_coordinator(
+            self._bare(solar=2.0, load=1.0, bat=8.5, grid=7.5, status=2), tracker
+        )
+        map_ws_to_coordinator(
+            self._bare(solar=3.0, load=1.0, bat=2.0, grid=0.01, status=2), tracker
+        )
+        data = map_ws_to_coordinator(
+            self._bare(solar=7.7, load=0.5, bat=8.5, grid=8.0, status=99), tracker
+        )
+        assert data["gridConsumptionPower"] == pytest.approx(8.0)
+
+    def test_signed_flag_wins_over_reliable_balance_disagreement(self) -> None:
+        """Flag is the primary signal: a stale balance cannot override it."""
+        msg = _ev_msg(
+            solar=0.0, load=1.0, charger=0.0, bat_charge=0.0, grid=1.0, grid_flag=-1
+        )
+        data = map_ws_to_coordinator(msg, GridDirectionTracker())
+        assert data["feedinPower"] == pytest.approx(1.0)
+
+    def test_no_tracker_cold_start_keeps_legacy_gridstatus_fallback(self) -> None:
+        msg = self._bare(solar=5.0, load=0.2, bat=0.0, grid=0.8, status="3")
+        data = map_ws_to_coordinator(msg)
+        assert data["gridConsumptionPower"] == pytest.approx(0.8)
+
+
+class TestGridDirectionWithAcCoupledAux:
+    """The opt-in ``aux`` generation term is folded into pvPower first; the
+    charger term and the direction tracker then see the combined balance."""
+
+    @staticmethod
+    def _msg(*, aux: float, charger: float, grid: float, status: object):
+        msg = _ev_msg(
+            solar=1.0,
+            load=0.5,
+            charger=charger,
+            bat_charge=0.0,
+            grid=grid,
+            grid_status=status,
+            grid_flag=None,
+        )
+        msg["result"]["node"]["aux"] = {  # type: ignore[index]
+            "display": True,
+            "power": {"value": f"{aux}", "unit": "kW"},
+        }
+        return msg
+
+    def test_aux_makes_balance_reliable_for_export(self) -> None:
+        """solar 1 + aux 6 vs load 0.5: export 6.5; gridStatus '3' must not win."""
+        msg = self._msg(aux=6.0, charger=0.0, grid=6.5, status="3")
+        data = map_ws_to_coordinator(msg, additional_pv_enabled=True)
+        assert data["pvPower"] == pytest.approx(7.0)
+        assert data["feedinPower"] == pytest.approx(6.5)
+        assert data["gridConsumptionPower"] == 0.0
+
+    def test_aux_and_charger_together_import(self) -> None:
+        """balance = 0.5 + 6.9 - (1 + 4) = 2.4 import; neither term double counts."""
+        msg = self._msg(aux=4.0, charger=6.9, grid=2.4, status=1)
+        data = map_ws_to_coordinator(msg, additional_pv_enabled=True)
+        assert data["gridConsumptionPower"] == pytest.approx(2.4)
+        assert data["feedinPower"] == 0.0
+
+    def test_aux_ignored_when_not_enabled_direction_still_held(self) -> None:
+        """Not configured: aux is not generation; tracker still holds direction."""
+        tracker = GridDirectionTracker()
+        map_ws_to_coordinator(
+            self._msg(aux=0.0, charger=0.0, grid=1.5, status=2), tracker
+        )  # balance 0.5-1.0 = -0.5 vs 1.5 (3x) -> cold start; export by status!=3
+        data = map_ws_to_coordinator(
+            self._msg(aux=4.0, charger=0.0, grid=6.0, status=2), tracker
+        )
+        assert data["pvPower"] == pytest.approx(1.0)  # aux not added
+        assert data["feedinPower"] == pytest.approx(6.0)
 
 
 # ---------------------------------------------------------------------------

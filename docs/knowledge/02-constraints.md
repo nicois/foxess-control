@@ -294,26 +294,34 @@ grid/battery/solar power immediately after WS connects.
 **Traces**: D-008;
 `tests/test_realtime_ws.py::TestStaleness::test_stale_messages_skipped`
 
-### C-006: Grid direction derived from power balance
+### C-006: Grid direction never depends on the power balance matching
 **Priority enforced**: P-005 (operational transparency) — wrong grid
 direction is the most visible possible data-integrity failure
-**Statement**: Grid import/export direction is computed as
-`net = load + bat_charge - bat_discharge - solar`. Positive = importing,
-negative = exporting. The `gridStatus` field is used as fallback when:
-(a) solar or load data is missing, or (b) the balance-predicted magnitude
-diverges >3× from the actual grid reading (indicating unmeasured external
-generation or load not visible to FoxESS).
-**Rationale**: The `gridStatus` field from the WebSocket is unreliable
-(meaning varies by firmware version), but the power balance is also
-unreliable when FoxESS does not see all generation sources (e.g. a
-separate grid-tied solar inverter on the same meter).
+**Statement**: `grid.power` is an unsigned magnitude; direction comes from
+`GridDirectionTracker`, strongest signal first: (1) the signed
+`grid.gridToHidden` flow flag (+1 import, -1 export); (2) the power balance
+`net = load + charger + bat_charge - bat_discharge - solar` (positive =
+import), only when its magnitude is within 3x of the measured grid power;
+(3) the direction `gridStatus` meant the last time a trusted signal was
+seen; (4) the previous direction; (5) cold start only: `gridStatus == "3"`
+means import. A large unmeasured load (EV) or generation source must never
+flip the direction. `gridStatus` is never assumed to mean the same thing on
+two firmwares.
+**Rationale**: `gridStatus` meaning varies by firmware (2 = import on the
+2026-10-27 EV capture, 2 = export in GH issue #3, 3 = export in the
+real-world sample test), and the balance fails whenever FoxESS does not see
+every source (AC-coupled inverter; EV charger reported in its own `charger`
+node). `gridToHidden` is consistent across all captured firmwares.
 **Violation consequence**: Import shown as export or vice versa on
-dashboard; feed-in energy integration goes wrong.
+dashboard; HA energy-flow Home node collapses to 0 W; feed-in energy
+integration goes wrong.
 **Traces**: D-010;
 `tests/test_realtime_ws.py::TestMapWsToCoordinator::test_grid_importing_from_balance`,
 `tests/test_realtime_ws.py::TestMapWsToCoordinator::test_grid_exporting_from_balance`,
 `tests/test_realtime_ws.py::TestMapWsToCoordinator::test_grid_balance_unreliable_unmeasured_generation`,
-`tests/test_realtime_ws.py::TestMapWsToCoordinator::test_grid_balance_unreliable_importing`
+`tests/test_realtime_ws.py::TestMapWsToCoordinator::test_grid_balance_unreliable_importing`,
+`tests/test_realtime_ws.py::TestGridDirectionEvCharger`,
+`tests/test_realtime_ws.py::TestGridDirectionTracker`
 
 ### C-007: REST poll resets WebSocket integration state
 **Priority enforced**: P-003 (energy target) — the feed-in target is
