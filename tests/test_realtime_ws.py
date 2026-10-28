@@ -859,6 +859,62 @@ class TestGridDirectionEvCharger:
         assert data["gridConsumptionPower"] == 0.0
 
 
+def _charger_placeholder(msg: dict[str, object]) -> dict[str, object]:
+    """Replace the charger node by what the WS sends while it has no reading."""
+    msg["result"]["node"]["charger"] = {  # type: ignore[index]
+        "power": {"value": "--", "unit": "kW"},
+        "display": True,
+        "state": 0,
+        "chargerToHidden": 1,
+    }
+    return msg
+
+
+class TestGridDirectionChargerPlaceholder:
+    """Live capture 2026-10-28 (Force Charge, EV at 32 A)."""
+
+    def test_ev_inside_load_charger_placeholder(self) -> None:
+        """charger.power '--' (EV still counted in load): 5.15+8.50-2.03=11.62."""
+        msg = _charger_placeholder(
+            _ev_msg(solar=2.03, load=5.15, bat_charge=8.50, grid=11.6, charger=None)
+        )
+        data = map_ws_to_coordinator(msg)
+        assert data["gridConsumptionPower"] == pytest.approx(11.6)
+        assert data["feedinPower"] == 0.0
+
+    def test_settled_ev_in_charger_node(self) -> None:
+        """EV split out: 0.905+6.14+6.90-1.75=12.195 vs grid 12.2."""
+        msg = _ev_msg(solar=1.75, load=0.905, bat_charge=6.14, grid=12.2, charger=6.90)
+        data = map_ws_to_coordinator(msg)
+        assert data["gridConsumptionPower"] == pytest.approx(12.2)
+        assert data["feedinPower"] == 0.0
+
+    @pytest.mark.parametrize("grid_status", [2, 3])
+    def test_no_flag_and_placeholder_decided_by_balance(self, grid_status: int) -> None:
+        """No gridToHidden, charger '--' (= 0): the balance must decide.
+
+        gridStatus is deliberately 2 (import on this firmware) and 3 (what the
+        legacy fallback treated as export) — neither may influence the result.
+        """
+        msg = _charger_placeholder(
+            _ev_msg(
+                solar=2.03,
+                load=5.15,
+                bat_charge=8.50,
+                grid=11.6,
+                charger=None,
+                grid_status=grid_status,
+                grid_flag=None,
+            )
+        )
+        tracker = GridDirectionTracker()
+        data = map_ws_to_coordinator(msg, tracker)
+        assert data["gridConsumptionPower"] == pytest.approx(11.6)
+        assert data["feedinPower"] == 0.0
+        # the decision came from the balance, not from the status code
+        assert tracker._status_meaning == {str(grid_status): True}
+
+
 class TestGridDirectionTracker:
     """Direction must survive unmeasured load/generation (no flag in frame)."""
 
