@@ -797,10 +797,12 @@ class FoxESSDataFreshnessSensor(CoordinatorEntity[FoxESSDataCoordinator], Sensor
     _attr_has_entity_name = True
     _attr_icon = "mdi:clock-check-outline"
     # ENUM device-class + options for the automation-editor dropdown
-    # (C-020).  The three values come from coordinator.py /
-    # smart_battery/coordinator.py — the only writers of _data_source.
+    # (C-020).  The values come from coordinator.py, foxess/local_client.py
+    # ("local", the foxess-local gateway) and smart_battery/coordinator.py —
+    # the only writers of _data_source.  A value missing here makes HA reject
+    # the state outright, so every writer's value must be listed.
     _attr_device_class = SensorDeviceClass.ENUM
-    _attr_options = ["ws", "api", "modbus"]
+    _attr_options = ["ws", "api", "modbus", "local"]
 
     def __init__(
         self,

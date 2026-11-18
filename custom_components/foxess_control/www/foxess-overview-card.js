@@ -360,7 +360,7 @@ class FoxESSOverviewCard extends HTMLElement {
 
   _dataSourceBadge(source, ageSeconds, isStale) {
     if (!source) return "";
-    const labels = { ws: "WS", api: "API", modbus: "Modbus" };
+    const labels = { ws: "WS", api: "API", modbus: "Modbus", local: "Local" };
     const label = labels[source] || source;
     const ageLabel = typeof ageSeconds === "number" ? this._formatAge(ageSeconds) : "";
     const cls = isStale ? "data-source stale" : "data-source";

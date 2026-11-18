@@ -900,7 +900,7 @@ class FoxESSControlCard extends HTMLElement {
 
   _dataSourceBadge(source, ageSeconds) {
     if (!source) return "";
-    const labels = { ws: "WS", api: "API", modbus: "Modbus" };
+    const labels = { ws: "WS", api: "API", modbus: "Modbus", local: "Local" };
     const label = labels[source] || source;
     // Threshold comes from the shared table, per source.  This used to be a
     // flat 30 s against a 300 s poll interval, so a healthy REST install

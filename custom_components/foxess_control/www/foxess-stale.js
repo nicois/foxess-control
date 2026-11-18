@@ -32,8 +32,13 @@
  * ~90% of every interval, which trains users to ignore the indicator
  * entirely — that is why the production report's "API - 45m" did not stand
  * out from the "API - 2m" the same card showed the rest of the time.
+ *
+ * The local gateway ("local") streams every ~5 s like the WebSocket, but
+ * when its event stream is down only the 60 s /state poll
+ * (DEFAULT_LOCAL_POLLING_INTERVAL) refreshes it, so three missed polls:
+ * 180 s.
  */
-export const STALE_AFTER = { ws: 60, api: 900, modbus: 900 };
+export const STALE_AFTER = { ws: 60, api: 900, modbus: 900, local: 180 };
 export const STALE_AFTER_DEFAULT = 900;
 
 /** Seconds since `lastUpdate`, or null if there is no usable timestamp. */
