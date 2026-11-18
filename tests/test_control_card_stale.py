@@ -62,8 +62,11 @@ _REST_INTERVAL = 300
 _WS_INTERVAL = 5
 
 # Per-source staleness thresholds the card is required to use, mirroring
-# the overview card: three missed REST polls, one minute of WS silence.
-_STALE_AFTER = {"ws": 60, "api": 900, "modbus": 900}
+# the overview card: three missed REST polls, one minute of WS silence,
+# and for the local gateway three missed 60 s /state polls (its 5 s event
+# stream normally keeps it far fresher; the poll is what remains when the
+# stream is down).
+_STALE_AFTER = {"ws": 60, "api": 900, "modbus": 900, "local": 180}
 _STALE_AFTER_DEFAULT = 900
 
 _HARNESS_JS = r"""
@@ -585,7 +588,7 @@ class TestConnectedButStaleData:
 class TestThresholdsMatchEachSourceCadence:
     """Stale must mean stale — not "a poll interval has elapsed"."""
 
-    @pytest.mark.parametrize("source", ["ws", "api", "modbus"])
+    @pytest.mark.parametrize("source", ["ws", "api", "modbus", "local"])
     def test_boundary_either_side(self, page: Page, source: str) -> None:
         limit = _STALE_AFTER[source]
         fresh = _mount(page, connected=True, source=source, age_seconds=limit)

@@ -2918,16 +2918,17 @@ class TestWorkModeSensorOptionsCoverage:
 
 
 class TestDataFreshnessSensorOptionsCoverage:
-    """`FoxESSDataFreshnessSensor` must declare ENUM options for ws/api/modbus.
+    """`FoxESSDataFreshnessSensor` must declare ENUM options for every source.
 
-    The sensor reports the data source ("ws", "api", or "modbus") — these
-    are the only three values the coordinator ever writes (see
-    coordinator.py and smart_battery/coordinator.py).  Declaring them as
+    The sensor reports the data source ("ws", "api", "modbus", or "local"
+    for the foxess-local gateway) — the only values the coordinators ever
+    write (see coordinator.py, foxess/local_client.py and
+    smart_battery/coordinator.py).  Declaring them as
     ENUM options lets HA's automation editor offer a dropdown when the
     user authors a state-trigger / state-condition (C-020).
     """
 
-    EXPECTED_OPTIONS = {"ws", "api", "modbus"}
+    EXPECTED_OPTIONS = {"ws", "api", "modbus", "local"}
 
     def test_class_attributes(self) -> None:
         """Class-attribute contract: device_class=ENUM, options={ws,api,modbus}.
