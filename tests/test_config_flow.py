@@ -458,22 +458,21 @@ class TestConfigFlowRouting:
         flow.async_show_menu = MagicMock(return_value={"type": "menu"})
         result = await flow.async_step_user(None)
         assert result["type"] == "menu"
-        # cloud + entity options offered
+        # cloud + local gateway + entity options offered
         _, kwargs = flow.async_show_menu.call_args
-        assert set(kwargs["menu_options"]) == {"cloud", "entity"}
+        assert kwargs["menu_options"] == ["cloud", "local", "entity"]
 
     @pytest.mark.asyncio
-    async def test_user_step_goes_straight_to_cloud_when_no_modbus(self) -> None:
+    async def test_user_step_offers_cloud_and_local_without_modbus(self) -> None:
+        """Without foxess_modbus the flow used to jump straight to the cloud
+        form; a menu is now needed so the local gateway is reachable."""
         flow = FoxessControlConfigFlow()
         flow.hass = _make_hass_modbus(False)
-        flow.async_show_form = MagicMock(
-            return_value={"type": "form", "step_id": "cloud"}
-        )
+        flow.async_show_menu = MagicMock(return_value={"type": "menu"})
         result = await flow.async_step_user(None)
-        # No menu; the cloud (api-key) form is shown directly.
-        assert result["type"] == "form"
-        _, kwargs = flow.async_show_form.call_args
-        assert kwargs["step_id"] == "cloud"
+        assert result["type"] == "menu"
+        _, kwargs = flow.async_show_menu.call_args
+        assert kwargs["menu_options"] == ["cloud", "local"]
 
 
 class TestConfigFlowEntityBranch:
