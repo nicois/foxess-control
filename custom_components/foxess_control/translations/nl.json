@@ -420,6 +420,9 @@
     },
     "schedule_conflict": {
       "message": "Nieuw {new_mode}-tijdvenster botst met een bestaande {existing_mode}-overschrijving ({time_range})."
+    },
+    "local_control_unavailable": {
+      "message": "Aansturing is nog niet beschikbaar via de lokale gateway; deze backend levert voorlopig alleen sensoren. Gebruik de FoxESS Cloud- of foxess_modbus-backend voor slim laden, ontladen en geforceerde modi."
     }
   },
   "issues": {

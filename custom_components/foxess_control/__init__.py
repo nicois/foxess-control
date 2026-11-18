@@ -128,8 +128,12 @@ from ._schedule_reconcile import (
     reconcile_schedule as reconcile_schedule,
 )
 from .const import (
+    BACKEND_LOCAL,
     CONF_API_KEY,
+    CONF_BACKEND,
     CONF_DEVICE_SERIAL,
+    CONF_LOCAL_TOKEN,
+    CONF_LOCAL_URL,
     CONF_MIN_POWER_CHANGE,
     CONF_POLLING_INTERVAL,
     CONF_SCHEDULER_HANDBACK,
@@ -140,6 +144,7 @@ from .const import (
     CONF_WS_MODE,
     DEFAULT_API_MIN_SOC,
     DEFAULT_ENTITY_POLLING_INTERVAL,
+    DEFAULT_LOCAL_POLLING_INTERVAL,
     DEFAULT_MIN_POWER_CHANGE,
     DEFAULT_MIN_SOC_ON_GRID,
     DEFAULT_POLLING_INTERVAL,
@@ -153,6 +158,7 @@ from .const import (
 from .coordinator import (
     FoxESSDataCoordinator,
     FoxESSEntityCoordinator,
+    FoxESSLocalCoordinator,
     get_coordinator_soc,  # noqa: F401 — re-exported for tests
 )
 from .foxess import FoxESSClient, FoxESSRealtimeWS, FoxESSWebSession, Inverter, WorkMode
@@ -1432,8 +1438,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     sim_url = os.environ.get("FOXESS_SIMULATOR_URL")
 
+    local_mode = entry.data.get(CONF_BACKEND) == BACKEND_LOCAL
+
     inverter: Inverter | None = None
-    if api_key:
+    if local_mode:
+        # Local backend (foxess-local gateway): no cloud Inverter. Phase 1 is
+        # read-only — control services refuse in _get_inverter.
+        pass
+    elif api_key:
         client = FoxESSClient(api_key, base_url=sim_url)
         inverter = Inverter(client, entry.data[CONF_DEVICE_SERIAL])
         try:
@@ -1448,9 +1460,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     # Choose coordinator and polling interval
-    default_poll = (
-        DEFAULT_ENTITY_POLLING_INTERVAL if entity_mode else DEFAULT_POLLING_INTERVAL
-    )
+    if local_mode:
+        default_poll = DEFAULT_LOCAL_POLLING_INTERVAL
+    elif entity_mode:
+        default_poll = DEFAULT_ENTITY_POLLING_INTERVAL
+    else:
+        default_poll = DEFAULT_POLLING_INTERVAL
     polling_interval = int(entry.options.get(CONF_POLLING_INTERVAL, default_poll))
 
     if entity_map:
@@ -1462,13 +1477,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "Entity mode active: reading from %d mapped entities",
             len(entity_map),
         )
-        coordinator: FoxESSDataCoordinator | FoxESSEntityCoordinator = (
-            FoxESSEntityCoordinator(hass, entity_map, polling_interval)
+        coordinator: (
+            FoxESSDataCoordinator | FoxESSEntityCoordinator | FoxESSLocalCoordinator
+        ) = FoxESSEntityCoordinator(hass, entity_map, polling_interval)
+    elif local_mode:
+        from .foxess.local_client import FoxESSLocalClient
+
+        coordinator = FoxESSLocalCoordinator(
+            hass,
+            FoxESSLocalClient(
+                async_get_clientsession(hass),
+                entry.data[CONF_LOCAL_URL],
+                entry.data.get(CONF_LOCAL_TOKEN) or None,
+            ),
+            polling_interval,
         )
     else:
         assert inverter is not None
         coordinator = FoxESSDataCoordinator(hass, inverter, polling_interval)
     await coordinator.async_config_entry_first_refresh()
+    if isinstance(coordinator, FoxESSLocalCoordinator):
+        # The gateway's event stream runs for the life of the entry (it is
+        # local and cheap — no session gating like the cloud WebSocket). An
+        # entry background task is cancelled by HA on unload (C-025).
+        entry.async_create_background_task(
+            hass,
+            coordinator.async_run_stream(),
+            name="foxess_local_event_stream",
+        )
 
     entry_data = FoxESSEntryData(coordinator=coordinator, inverter=inverter)
     dd.entries[entry.entry_id] = entry_data

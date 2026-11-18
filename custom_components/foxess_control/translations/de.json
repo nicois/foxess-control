@@ -416,6 +416,9 @@
     },
     "schedule_conflict": {
       "message": "Neues {new_mode}-Zeitfenster steht in Konflikt mit einer bestehenden {existing_mode}-Übersteuerung ({time_range})."
+    },
+    "local_control_unavailable": {
+      "message": "Die Steuerung ist mit dem lokalen Gateway noch nicht verfügbar; dieses Backend liefert derzeit nur Sensoren. Für intelligentes Laden, Entladen und Übersteuerungen das FoxESS-Cloud- oder foxess_modbus-Backend verwenden."
     }
   },
   "issues": {

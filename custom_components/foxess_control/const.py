@@ -124,6 +124,10 @@ BACKEND_LOCAL = "local"
 CONF_LOCAL_URL = "local_url"
 CONF_LOCAL_TOKEN = "local_token"
 DEFAULT_LOCAL_URL = "http://foxess.local:18080"
+# /state refresh for the local backend. Live power/SoC arrive on the event
+# stream every ~5 s; the poll refreshes temperatures, work mode and the
+# schedule, and backs the stream when it is down. A LAN request, so cheap.
+DEFAULT_LOCAL_POLLING_INTERVAL = 60
 CONF_WEB_USERNAME = "web_username"
 CONF_WEB_PASSWORD = "web_password"
 CONF_WS_ALL_SESSIONS = "ws_all_sessions"  # legacy boolean; kept for migration

@@ -416,6 +416,9 @@
     },
     "schedule_conflict": {
       "message": "Nowe okno {new_mode} koliduje z istniejącym nadpisaniem {existing_mode} ({time_range})."
+    },
+    "local_control_unavailable": {
+      "message": "Sterowanie nie jest jeszcze dostępne przez bramę lokalną; ten backend udostępnia na razie tylko czujniki. Do inteligentnego ładowania, rozładowania i trybów wymuszonych użyj backendu FoxESS Cloud lub foxess_modbus."
     }
   },
   "issues": {

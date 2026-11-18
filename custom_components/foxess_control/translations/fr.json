@@ -416,6 +416,9 @@
     },
     "schedule_conflict": {
       "message": "La nouvelle fenêtre {new_mode} entre en conflit avec un forçage {existing_mode} existant ({time_range})."
+    },
+    "local_control_unavailable": {
+      "message": "Le contrôle n'est pas encore disponible avec la passerelle locale ; ce backend ne fournit pour l'instant que des capteurs. Utilisez le backend FoxESS Cloud ou foxess_modbus pour la charge et la décharge intelligentes et les forçages."
     }
   },
   "issues": {

@@ -13,7 +13,7 @@ import voluptuous as vol
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
-from .const import DOMAIN
+from .const import BACKEND_LOCAL, CONF_BACKEND, DOMAIN
 from .coordinator import get_coordinator_soc
 from .foxess import Inverter, WorkMode
 from .foxess_adapter import FoxESSEntityAdapter
@@ -181,10 +181,25 @@ def _first_entry_id(hass: HomeAssistant) -> str:
 
 
 def _get_inverter(hass: HomeAssistant) -> Inverter:
-    """Get the first configured Inverter instance."""
+    """Get the first configured Inverter instance.
+
+    The local backend (foxess-local gateway) has no cloud ``Inverter`` and,
+    in its first, read-only phase, no control path either. Every control
+    service reaches the inverter through here, so this is where they are
+    refused — with an explanation instead of an AttributeError (C-020).
+    """
     entry_id = _first_entry_id(hass)
-    inv: Inverter = _dd(hass).entries[entry_id].inverter
-    return inv
+    inv: Inverter | None = _dd(hass).entries[entry_id].inverter
+    if inv is None:
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry is not None and entry.data.get(CONF_BACKEND) == BACKEND_LOCAL:
+            raise ServiceValidationError(
+                "Control is not yet available on the local gateway backend; "
+                "sensors only",
+                translation_domain=DOMAIN,
+                translation_key="local_control_unavailable",
+            )
+    return inv  # type: ignore[return-value]
 
 
 def _get_first_entry(hass: HomeAssistant) -> ConfigEntry:

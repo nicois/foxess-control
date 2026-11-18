@@ -343,6 +343,9 @@
     "no_api_key": {
       "message": "No API key configured and entity mode is not active. Provide a FoxESS Cloud API key or configure foxess_modbus entities."
     },
+    "local_control_unavailable": {
+      "message": "Control is not available on the local gateway backend yet; this backend currently provides sensors only. Use the FoxESS Cloud or foxess_modbus backend for smart charge, smart discharge and overrides."
+    },
     "api_error": {
       "message": "FoxESS API error: {error}"
     },

@@ -416,6 +416,9 @@
     },
     "schedule_conflict": {
       "message": "La nuova finestra {new_mode} è in conflitto con una forzatura {existing_mode} esistente ({time_range})."
+    },
+    "local_control_unavailable": {
+      "message": "Il controllo non è ancora disponibile con il gateway locale; per ora questo backend fornisce solo sensori. Usa il backend FoxESS Cloud o foxess_modbus per carica e scarica intelligenti e le modalità forzate."
     }
   },
   "issues": {

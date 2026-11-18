@@ -453,6 +453,9 @@
     },
     "schedule_conflict": {
       "message": "New {new_mode} window conflicts with an existing {existing_mode} override ({time_range})."
+    },
+    "local_control_unavailable": {
+      "message": "Control is not available on the local gateway backend yet; this backend currently provides sensors only. Use the FoxESS Cloud or foxess_modbus backend for smart charge, smart discharge and overrides."
     }
   },
   "issues": {

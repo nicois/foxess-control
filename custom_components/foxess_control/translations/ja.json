@@ -420,6 +420,9 @@
     },
     "schedule_conflict": {
       "message": "新しい {new_mode} の時間帯が、既存の {existing_mode} オーバーライド ({time_range}) と競合しています。"
+    },
+    "local_control_unavailable": {
+      "message": "ローカルゲートウェイではまだ制御を利用できません。現在このバックエンドはセンサーのみを提供します。スマート充電・放電や強制モードには FoxESS Cloud または foxess_modbus バックエンドを使用してください。"
     }
   },
   "issues": {

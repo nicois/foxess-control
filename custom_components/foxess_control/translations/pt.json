@@ -416,6 +416,9 @@
     },
     "schedule_conflict": {
       "message": "A nova janela {new_mode} conflitua com uma substituição {existing_mode} existente ({time_range})."
+    },
+    "local_control_unavailable": {
+      "message": "O controlo ainda não está disponível com o gateway local; por agora este backend fornece apenas sensores. Use o backend FoxESS Cloud ou foxess_modbus para carregamento e descarga inteligentes e modos forçados."
     }
   },
   "issues": {

@@ -420,6 +420,9 @@
     },
     "schedule_conflict": {
       "message": "新的 {new_mode} 时段与已存在的 {existing_mode} 覆盖（{time_range}）冲突。"
+    },
+    "local_control_unavailable": {
+      "message": "本地网关后端暂不支持控制；目前仅提供传感器。如需智能充电、智能放电和强制模式，请使用 FoxESS Cloud 或 foxess_modbus 后端。"
     }
   },
   "issues": {

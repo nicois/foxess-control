@@ -420,6 +420,9 @@
     },
     "schedule_conflict": {
       "message": "La nueva ventana {new_mode} entra en conflicto con una anulación {existing_mode} existente ({time_range})."
+    },
+    "local_control_unavailable": {
+      "message": "El control aún no está disponible con el gateway local; este backend solo ofrece sensores por ahora. Usa el backend de FoxESS Cloud o foxess_modbus para la carga y descarga inteligentes y los modos forzados."
     }
   },
   "issues": {
