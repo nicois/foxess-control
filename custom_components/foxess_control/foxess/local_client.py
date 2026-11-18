@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -308,7 +308,7 @@ class FoxESSLocalClient:
 
     async def iter_events(
         self, last_event_id: int | None = None
-    ) -> AsyncIterator[tuple[int | None, str, Any]]:
+    ) -> AsyncGenerator[tuple[int | None, str, Any]]:
         """Yield SSE events until the stream ends or fails.
 
         The caller owns reconnection; :class:`LocalGatewayError` is raised

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import logging
 import time
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
     from .foxess.inverter import Inverter
+    from .foxess.local_client import FoxESSLocalClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -820,3 +822,139 @@ class FoxESSEntityCoordinator(_EntityCoordinator):
             entity_map=entity_map,
             update_interval_seconds=update_interval_seconds,
         )
+
+
+class FoxESSLocalCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+    """Read inverter state from a foxess-local gateway (local backend).
+
+    Two feeds, one dataset:
+
+    * ``GET /state`` on the coordinator's poll interval seeds and refreshes
+      the *full* snapshot — temperatures, work mode, counters, liveness.
+    * :meth:`async_run_stream` consumes ``GET /events`` and overlays the
+      ~5 s ``snapshot`` power/SoC frames between polls, applies ``config``
+      events' full state, and surfaces ``connection`` transitions.
+
+    Overlays update ``self.data`` in place and notify listeners directly
+    instead of ``async_set_updated_data`` — the same reason as the cloud
+    WebSocket path (``inject_realtime_data``): that helper reschedules the
+    refresh timer, so 5 s frames would starve the ``/state`` poll.
+
+    The stream is local and cheap, so unlike the cloud WebSocket it is not
+    gated on session state: it runs for the life of the entry.
+
+    Liveness is the gateway's own ``online`` flag (server-computed, never
+    recomputed from timestamps — clock skew), plus a client-side heartbeat:
+    a stream silent for longer than ``stream_idle_timeout_s`` is treated as
+    offline and reconnected, since a half-open TCP connection would
+    otherwise freeze the last values on screen (C-020).
+    """
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: FoxESSLocalClient,
+        update_interval_seconds: int,
+        *,
+        stream_idle_timeout_s: float = 20.0,
+        reconnect_delay_s: float = 5.0,
+        max_reconnect_delay_s: float = 60.0,
+    ) -> None:
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=DOMAIN,
+            update_interval=datetime.timedelta(seconds=update_interval_seconds),
+        )
+        self.client = client
+        self.stream_connected = False
+        self.last_stream_error: str | None = None
+        self._last_event_id: int | None = None
+        self._stream_idle_timeout_s = stream_idle_timeout_s
+        self._reconnect_delay_s = reconnect_delay_s
+        self._max_reconnect_delay_s = max_reconnect_delay_s
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        from .foxess.local_client import LocalGatewayError, map_state
+
+        try:
+            state = await self.client.get_state()
+        except LocalGatewayError as err:
+            raise UpdateFailed(f"Local gateway [{err.code}]: {err}") from err
+        return map_state(state)
+
+    def _overlay(self, values: dict[str, Any]) -> None:
+        if self.data is None:
+            return
+        merged = dict(self.data)
+        merged.update(values)
+        self.data = merged
+        self.async_update_listeners()
+
+    def _set_stream_state(self, connected: bool, error: str | None) -> None:
+        changed = (connected, error) != (self.stream_connected, self.last_stream_error)
+        self.stream_connected = connected
+        self.last_stream_error = error
+        if changed:
+            self.async_update_listeners()
+
+    def _handle_event(self, name: str, payload: Any) -> None:
+        from .foxess.local_client import map_snapshot_event, map_state
+
+        if not isinstance(payload, dict):
+            return
+        if name == "snapshot":
+            self._overlay(map_snapshot_event(payload))
+        elif name == "config" and isinstance(payload.get("state"), dict):
+            self._overlay(map_state(payload["state"]))
+        elif name == "connection":
+            self._overlay({"_gateway_online": payload.get("state") == "online"})
+        elif name in ("resync", "gap"):
+            # Events were lost: the next /state read is authoritative.
+            self.hass.async_create_task(self.async_request_refresh())
+
+    async def async_run_stream(self) -> None:
+        """Consume the event stream forever, reconnecting with backoff.
+
+        Never raises (except cancellation): failures are recorded in
+        :attr:`last_stream_error` for diagnostics and the ``/state`` poll
+        keeps the data current meanwhile.
+        """
+        from .foxess.local_client import LocalGatewayError
+
+        delay = self._reconnect_delay_s
+        while True:
+            events = self.client.iter_events(self._last_event_id)
+            try:
+                while True:
+                    try:
+                        event_id, name, payload = await asyncio.wait_for(
+                            anext(events), self._stream_idle_timeout_s
+                        )
+                    except StopAsyncIteration:
+                        self._set_stream_state(False, "event stream ended")
+                        break
+                    except TimeoutError:
+                        _LOGGER.warning(
+                            "Local gateway event stream silent for %.0fs; "
+                            "treating the inverter as offline and reconnecting",
+                            self._stream_idle_timeout_s,
+                        )
+                        self._set_stream_state(False, "event stream went silent")
+                        self._overlay({"_gateway_online": False})
+                        break
+                    if event_id is not None:
+                        self._last_event_id = event_id
+                    self._set_stream_state(True, None)
+                    delay = self._reconnect_delay_s
+                    self._handle_event(name, payload)
+            except LocalGatewayError as err:
+                _LOGGER.warning("Local gateway event stream failed: %s", err)
+                self._set_stream_state(False, f"{err.code}: {err}")
+            except asyncio.CancelledError:
+                self._set_stream_state(False, None)
+                raise
+            finally:
+                await events.aclose()
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, self._max_reconnect_delay_s)
