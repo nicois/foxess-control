@@ -1,0 +1,191 @@
+{
+  "ts": "2026-11-19T00:15:48.068984364+11:00",
+  "as_of": "2026-11-19T00:15:44.46109029+11:00",
+  "online": true,
+  "power": {
+    "pv_w": 0,
+    "grid_w": -17,
+    "load_w": 348,
+    "ac_port_w": 300,
+    "battery_w": -552,
+    "eps_w": 204
+  },
+  "battery": {
+    "soc_pct": 68,
+    "state": "discharging",
+    "stored_energy_wh": 28519,
+    "capacity_wh": 41940,
+    "pack_voltage_v": 531.32,
+    "bms_charge_limit_a": 35
+  },
+  "work_mode": "feed-in",
+  "active_mode": {
+    "mode": "self-use",
+    "source": "schedule",
+    "group": 3,
+    "start": "00:00",
+    "end": "23:59"
+  },
+  "eps_mode": "ups",
+  "meter_compensation_w": -51,
+  "limits": {
+    "import_w": 12500,
+    "export_w": 5000,
+    "import_current_a": 56,
+    "export_current_a": 40,
+    "load_limit_w": 10000,
+    "generation_limit_w": 7000,
+    "max_charge_current_a": 45,
+    "max_discharge_current_a": 45,
+    "power_limit_pct": 100
+  },
+  "schedule": {
+    "enabled": true,
+    "groups": [
+      {
+        "index": 1,
+        "enabled": true,
+        "start": "11:02",
+        "end": "13:58",
+        "work_mode": "force-charge",
+        "max_soc_pct": 100,
+        "min_soc_on_grid_pct": 10,
+        "fd_soc_pct": 81,
+        "fd_pwr_w": 10500,
+        "after_cutoff": "self-use",
+        "import_limit_w": 35000,
+        "export_limit_w": 100000,
+        "pv": true
+      },
+      {
+        "index": 2,
+        "enabled": true,
+        "start": "17:50",
+        "end": "20:00",
+        "work_mode": "force-discharge",
+        "max_soc_pct": 100,
+        "min_soc_on_grid_pct": 10,
+        "fd_soc_pct": 50,
+        "fd_pwr_w": 10076,
+        "after_cutoff": "self-use",
+        "import_limit_w": 100000,
+        "export_limit_w": 10000,
+        "pv": false
+      },
+      {
+        "index": 3,
+        "enabled": true,
+        "start": "00:00",
+        "end": "23:59",
+        "work_mode": "self-use",
+        "max_soc_pct": 100,
+        "min_soc_on_grid_pct": 11,
+        "fd_soc_pct": 10,
+        "fd_pwr_w": 0,
+        "default": true,
+        "import_limit_w": 100000,
+        "export_limit_w": 100000,
+        "pv": true
+      },
+      {
+        "index": 4,
+        "enabled": false,
+        "start": "00:00",
+        "end": "00:00",
+        "work_mode": "self-use",
+        "max_soc_pct": 100,
+        "min_soc_on_grid_pct": 10,
+        "fd_soc_pct": 10,
+        "fd_pwr_w": 0
+      },
+      {
+        "index": 5,
+        "enabled": false,
+        "start": "00:00",
+        "end": "00:00",
+        "work_mode": "self-use",
+        "max_soc_pct": 100,
+        "min_soc_on_grid_pct": 10,
+        "fd_soc_pct": 10,
+        "fd_pwr_w": 0
+      },
+      {
+        "index": 6,
+        "enabled": false,
+        "start": "00:00",
+        "end": "00:00",
+        "work_mode": "self-use",
+        "max_soc_pct": 100,
+        "min_soc_on_grid_pct": 10,
+        "fd_soc_pct": 10,
+        "fd_pwr_w": 0
+      },
+      {
+        "index": 7,
+        "enabled": false,
+        "start": "00:00",
+        "end": "00:00",
+        "work_mode": "self-use",
+        "max_soc_pct": 100,
+        "min_soc_on_grid_pct": 10,
+        "fd_soc_pct": 10,
+        "fd_pwr_w": 0
+      },
+      {
+        "index": 8,
+        "enabled": false,
+        "start": "00:00",
+        "end": "00:00",
+        "work_mode": "self-use",
+        "max_soc_pct": 100,
+        "min_soc_on_grid_pct": 10,
+        "fd_soc_pct": 10,
+        "fd_pwr_w": 0
+      }
+    ]
+  },
+  "forward_mode": "telemetry_only",
+  "identity": {
+    "sn": "TESTSN0000000001",
+    "model": "KH10",
+    "firmware": {
+      "master": "1.73",
+      "slave": "1.03",
+      "manager": "1.71"
+    },
+    "verified_profile": "kh10-fw1.73",
+    "compatibility": {
+      "battery_currents": "exact",
+      "current_limits": "exact",
+      "eps_mode": "exact",
+      "live_values": "exact",
+      "meter_compensation": "exact",
+      "port_limits": "exact",
+      "power_limit": "exact",
+      "power_limits": "exact",
+      "schedule": "exact",
+      "settings_read": "exact",
+      "work_mode": "exact"
+    },
+    "writes": {
+      "battery_currents": "verified",
+      "current_limits": "verified",
+      "eps_mode": "verified",
+      "meter_compensation": "verified",
+      "port_limits": "verified",
+      "power_limit": "verified",
+      "power_limits": "verified",
+      "schedule": "verified",
+      "work_mode": "verified"
+    }
+  },
+  "inverter_state": "on-grid",
+  "grid_connected": true,
+  "temperatures": {
+    "battery_c": 27.5,
+    "inverter_c": 26.1,
+    "ambient_c": 33.3,
+    "cell_min_c": 20,
+    "cell_max_c": 24.8
+  }
+}
