@@ -296,7 +296,8 @@
         "description": "¿Cómo está conectado su inversor?",
         "menu_options": {
           "cloud": "FoxESS Cloud (clave API)",
-          "entity": "Usar mi inversor foxess_modbus (no se necesita clave API)"
+          "entity": "Usar mi inversor foxess_modbus (no se necesita clave API)",
+          "local": "Gateway local (foxess-local, sin nube)"
         }
       },
       "cloud": {
@@ -343,6 +344,14 @@
           "web_username": "Web Username",
           "web_password": "Web Password (or MD5 hash)"
         }
+      },
+      "local": {
+        "title": "FoxESS Control — gateway local",
+        "description": "Conéctate a un gateway foxess-local de tu red. Deja el token vacío si el gateway permite acceso público de solo lectura. Se recomienda un token con el rol standard para que la carga y descarga inteligentes puedan usarlo cuando el control local esté disponible.",
+        "data": {
+          "local_url": "URL del gateway",
+          "local_token": "Token de acceso"
+        }
       }
     },
     "abort": {
@@ -352,7 +361,10 @@
       "cannot_connect": "No se puede conectar a la API FoxESS Cloud. Verifique su conexión de red.",
       "invalid_auth": "Autenticación fallida. Verifique su clave API y número de serie del dispositivo.",
       "web_auth_failed": "Web portal login failed. Check your username and password.",
-      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable."
+      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable.",
+      "local_cannot_connect": "No se puede conectar con el gateway foxess-local. Comprueba la URL y que el gateway esté en marcha.",
+      "local_invalid_auth": "El gateway rechazó el token. Compruébalo y que su rol sea al menos read-only.",
+      "inverter_not_identified": "El gateway aún no ha identificado el inversor. Espera a que el gateway muestre el inversor en línea e inténtalo de nuevo."
     }
   },
   "options": {

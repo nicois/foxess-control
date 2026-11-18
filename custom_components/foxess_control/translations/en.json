@@ -305,7 +305,8 @@
         "description": "How is your inverter connected?",
         "menu_options": {
           "cloud": "FoxESS Cloud (API key)",
-          "entity": "Use my foxess_modbus inverter (no API key needed)"
+          "entity": "Use my foxess_modbus inverter (no API key needed)",
+          "local": "Local gateway (foxess-local, no cloud)"
         }
       },
       "cloud": {
@@ -352,6 +353,14 @@
           "web_username": "Web Username",
           "web_password": "Web Password (or MD5 hash)"
         }
+      },
+      "local": {
+        "title": "FoxESS Control — local gateway",
+        "description": "Connect to a foxess-local gateway on your network. Leave the token blank if the gateway allows public read-only access. A token with the standard role is recommended so smart charge and discharge can use it once local control is available.",
+        "data": {
+          "local_url": "Gateway URL",
+          "local_token": "Access token"
+        }
       }
     },
     "abort": {
@@ -361,7 +370,10 @@
       "cannot_connect": "Cannot connect to FoxESS Cloud API. Check your network connection.",
       "invalid_auth": "Authentication failed. Check your API key and device serial number.",
       "web_auth_failed": "Web portal login failed. Check your username and password.",
-      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable."
+      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable.",
+      "local_cannot_connect": "Cannot reach the foxess-local gateway. Check the URL and that the gateway is running.",
+      "local_invalid_auth": "The gateway refused the token. Check it, and that its role is at least read-only.",
+      "inverter_not_identified": "The gateway has not identified the inverter yet. Wait until the gateway shows the inverter online, then try again."
     }
   },
   "options": {

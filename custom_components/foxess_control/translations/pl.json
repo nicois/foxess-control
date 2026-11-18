@@ -292,7 +292,8 @@
         "description": "W jaki sposób podłączony jest Twój falownik?",
         "menu_options": {
           "cloud": "FoxESS Cloud (klucz API)",
-          "entity": "Użyj mojego falownika foxess_modbus (klucz API nie jest wymagany)"
+          "entity": "Użyj mojego falownika foxess_modbus (klucz API nie jest wymagany)",
+          "local": "Brama lokalna (foxess-local, bez chmury)"
         }
       },
       "cloud": {
@@ -339,6 +340,14 @@
           "web_username": "Web Username",
           "web_password": "Web Password (or MD5 hash)"
         }
+      },
+      "local": {
+        "title": "FoxESS Control — brama lokalna",
+        "description": "Połącz się z bramą foxess-local w swojej sieci. Pozostaw token pusty, jeśli brama zezwala na publiczny dostęp tylko do odczytu. Zalecany jest token z rolą standard, aby inteligentne ładowanie i rozładowanie mogły z niego korzystać, gdy sterowanie lokalne będzie dostępne.",
+        "data": {
+          "local_url": "Adres URL bramy",
+          "local_token": "Token dostępu"
+        }
       }
     },
     "abort": {
@@ -348,7 +357,10 @@
       "cannot_connect": "Nie można połączyć się z API FoxESS Cloud. Sprawdź połączenie sieciowe.",
       "invalid_auth": "Uwierzytelnianie nie powiodło się. Sprawdź klucz API i numer seryjny urządzenia.",
       "web_auth_failed": "Web portal login failed. Check your username and password.",
-      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable."
+      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable.",
+      "local_cannot_connect": "Nie można połączyć się z bramą foxess-local. Sprawdź adres URL i czy brama działa.",
+      "local_invalid_auth": "Brama odrzuciła token. Sprawdź go oraz czy jego rola to co najmniej read-only.",
+      "inverter_not_identified": "Brama nie rozpoznała jeszcze falownika. Poczekaj, aż brama pokaże falownik jako online, i spróbuj ponownie."
     }
   },
   "options": {

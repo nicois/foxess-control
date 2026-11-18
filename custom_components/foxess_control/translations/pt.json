@@ -292,7 +292,8 @@
         "description": "Como está ligado o seu inversor?",
         "menu_options": {
           "cloud": "FoxESS Cloud (chave API)",
-          "entity": "Usar o meu inversor foxess_modbus (não é necessária chave API)"
+          "entity": "Usar o meu inversor foxess_modbus (não é necessária chave API)",
+          "local": "Gateway local (foxess-local, sem nuvem)"
         }
       },
       "cloud": {
@@ -339,6 +340,14 @@
           "web_username": "Web Username",
           "web_password": "Web Password (or MD5 hash)"
         }
+      },
+      "local": {
+        "title": "FoxESS Control — gateway local",
+        "description": "Ligue-se a um gateway foxess-local na sua rede. Deixe o token em branco se o gateway permitir acesso público só de leitura. Recomenda-se um token com a função standard, para que o carregamento e a descarga inteligentes o possam usar quando o controlo local estiver disponível.",
+        "data": {
+          "local_url": "URL do gateway",
+          "local_token": "Token de acesso"
+        }
       }
     },
     "abort": {
@@ -348,7 +357,10 @@
       "cannot_connect": "Não é possível ligar à API FoxESS Cloud. Verifique a sua ligação de rede.",
       "invalid_auth": "Autenticação falhou. Verifique a chave API e o número de série do dispositivo.",
       "web_auth_failed": "Web portal login failed. Check your username and password.",
-      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable."
+      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable.",
+      "local_cannot_connect": "Não é possível contactar o gateway foxess-local. Verifique o URL e se o gateway está em execução.",
+      "local_invalid_auth": "O gateway recusou o token. Verifique-o e se a sua função é pelo menos read-only.",
+      "inverter_not_identified": "O gateway ainda não identificou o inversor. Aguarde até o gateway mostrar o inversor online e tente novamente."
     }
   },
   "options": {

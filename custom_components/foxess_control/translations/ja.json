@@ -296,7 +296,8 @@
         "description": "インバーターはどのように接続されていますか？",
         "menu_options": {
           "cloud": "FoxESS Cloud（API キー）",
-          "entity": "foxess_modbus インバーターを使用する（API キー不要）"
+          "entity": "foxess_modbus インバーターを使用する（API キー不要）",
+          "local": "ローカルゲートウェイ（foxess-local、クラウド不要）"
         }
       },
       "cloud": {
@@ -343,6 +344,14 @@
           "web_username": "Web Username",
           "web_password": "Web Password (or MD5 hash)"
         }
+      },
+      "local": {
+        "title": "FoxESS Control — ローカルゲートウェイ",
+        "description": "ネットワーク上の foxess-local ゲートウェイに接続します。ゲートウェイが公開の読み取り専用アクセスを許可している場合、トークンは空欄のままにしてください。ローカル制御が利用可能になったときにスマート充電・放電で使えるよう、standard ロールのトークンを推奨します。",
+        "data": {
+          "local_url": "ゲートウェイ URL",
+          "local_token": "アクセストークン"
+        }
       }
     },
     "abort": {
@@ -352,7 +361,10 @@
       "cannot_connect": "FoxESS Cloud API に接続できません。ネットワーク接続を確認してください。",
       "invalid_auth": "認証に失敗しました。API キーとデバイスシリアル番号を確認してください。",
       "web_auth_failed": "Web portal login failed. Check your username and password.",
-      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable."
+      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable.",
+      "local_cannot_connect": "foxess-local ゲートウェイに接続できません。URL とゲートウェイが動作していることを確認してください。",
+      "local_invalid_auth": "ゲートウェイがトークンを拒否しました。トークンと、そのロールが read-only 以上であることを確認してください。",
+      "inverter_not_identified": "ゲートウェイはまだインバーターを識別していません。ゲートウェイでインバーターがオンラインと表示されるまで待ってから、もう一度お試しください。"
     }
   },
   "options": {

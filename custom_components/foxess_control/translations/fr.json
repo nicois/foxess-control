@@ -292,7 +292,8 @@
         "description": "Comment votre onduleur est-il connecté ?",
         "menu_options": {
           "cloud": "FoxESS Cloud (clé API)",
-          "entity": "Utiliser mon onduleur foxess_modbus (aucune clé API requise)"
+          "entity": "Utiliser mon onduleur foxess_modbus (aucune clé API requise)",
+          "local": "Passerelle locale (foxess-local, sans cloud)"
         }
       },
       "cloud": {
@@ -339,6 +340,14 @@
           "web_username": "Web Username",
           "web_password": "Web Password (or MD5 hash)"
         }
+      },
+      "local": {
+        "title": "FoxESS Control — passerelle locale",
+        "description": "Connectez-vous à une passerelle foxess-local de votre réseau. Laissez le jeton vide si la passerelle autorise l'accès public en lecture seule. Un jeton avec le rôle standard est recommandé pour que la charge et la décharge intelligentes puissent l'utiliser dès que le contrôle local sera disponible.",
+        "data": {
+          "local_url": "URL de la passerelle",
+          "local_token": "Jeton d'accès"
+        }
       }
     },
     "abort": {
@@ -348,7 +357,10 @@
       "cannot_connect": "Impossible de se connecter à l'API FoxESS Cloud. Vérifiez votre connexion réseau.",
       "invalid_auth": "Échec de l'authentification. Vérifiez votre clé API et le numéro de série de l'appareil.",
       "web_auth_failed": "Web portal login failed. Check your username and password.",
-      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable."
+      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable.",
+      "local_cannot_connect": "Impossible de joindre la passerelle foxess-local. Vérifiez l'URL et que la passerelle fonctionne.",
+      "local_invalid_auth": "La passerelle a refusé le jeton. Vérifiez-le, ainsi que son rôle (au moins read-only).",
+      "inverter_not_identified": "La passerelle n'a pas encore identifié l'onduleur. Attendez qu'elle affiche l'onduleur en ligne, puis réessayez."
     }
   },
   "options": {

@@ -296,7 +296,8 @@
         "description": "Hoe is uw omvormer aangesloten?",
         "menu_options": {
           "cloud": "FoxESS Cloud (API-sleutel)",
-          "entity": "Mijn foxess_modbus-omvormer gebruiken (geen API-sleutel nodig)"
+          "entity": "Mijn foxess_modbus-omvormer gebruiken (geen API-sleutel nodig)",
+          "local": "Lokale gateway (foxess-local, geen cloud)"
         }
       },
       "cloud": {
@@ -343,6 +344,14 @@
           "web_username": "Web Username",
           "web_password": "Web Password (or MD5 hash)"
         }
+      },
+      "local": {
+        "title": "FoxESS Control — lokale gateway",
+        "description": "Maak verbinding met een foxess-local-gateway in je netwerk. Laat het token leeg als de gateway openbare alleen-lezen-toegang toestaat. Een token met de rol standard wordt aanbevolen, zodat slim laden en ontladen het kunnen gebruiken zodra lokale aansturing beschikbaar is.",
+        "data": {
+          "local_url": "Gateway-URL",
+          "local_token": "Toegangstoken"
+        }
       }
     },
     "abort": {
@@ -352,7 +361,10 @@
       "cannot_connect": "Kan geen verbinding maken met de FoxESS Cloud API. Controleer uw netwerkverbinding.",
       "invalid_auth": "Authenticatie mislukt. Controleer uw API-sleutel en serienummer.",
       "web_auth_failed": "Web portal login failed. Check your username and password.",
-      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable."
+      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable.",
+      "local_cannot_connect": "Kan de foxess-local-gateway niet bereiken. Controleer de URL en of de gateway draait.",
+      "local_invalid_auth": "De gateway heeft het token geweigerd. Controleer het, en of de rol minstens read-only is.",
+      "inverter_not_identified": "De gateway heeft de omvormer nog niet herkend. Wacht tot de gateway de omvormer online toont en probeer het opnieuw."
     }
   },
   "options": {

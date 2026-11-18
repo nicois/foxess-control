@@ -115,6 +115,15 @@ CONF_API_KEY = "api_key"
 CONF_DEVICE_SERIAL = "device_serial"
 
 # Web portal credentials (optional, for WebSocket real-time data)
+# Backend selection (entry.data). Absent on entries created before the local
+# backend existed: those are cloud (api_key) or entity mode (options).
+CONF_BACKEND = "backend"
+BACKEND_CLOUD = "cloud"
+BACKEND_LOCAL = "local"
+# foxess-local gateway connection (entry.data, local backend only).
+CONF_LOCAL_URL = "local_url"
+CONF_LOCAL_TOKEN = "local_token"
+DEFAULT_LOCAL_URL = "http://foxess.local:18080"
 CONF_WEB_USERNAME = "web_username"
 CONF_WEB_PASSWORD = "web_password"
 CONF_WS_ALL_SESSIONS = "ws_all_sessions"  # legacy boolean; kept for migration

@@ -14,6 +14,7 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     SelectOptionDict,
     SelectSelector,
@@ -22,10 +23,13 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    BACKEND_LOCAL,
     CONF_ADDITIONAL_PV_POWER_VARIABLE,
     CONF_API_KEY,
+    CONF_BACKEND,
     CONF_BAT_CHARGE_POWER_ENTITY,
     CONF_BAT_DISCHARGE_POWER_ENTITY,
+    CONF_BATTERY_CAPACITY_KWH,
     CONF_CHARGE_POWER_ENTITY,
     CONF_DEVICE_SERIAL,
     CONF_DISCHARGE_POWER_ENTITY,
@@ -34,6 +38,8 @@ from .const import (
     CONF_FEEDIN_POWER_ENTITY,
     CONF_GRID_CONSUMPTION_POWER_ENTITY,
     CONF_LOADS_POWER_ENTITY,
+    CONF_LOCAL_TOKEN,
+    CONF_LOCAL_URL,
     CONF_MIN_SOC_ENTITY,
     CONF_PV_POWER_ENTITY,
     CONF_SCHEDULER_HANDBACK,
@@ -43,6 +49,7 @@ from .const import (
     CONF_WORK_MODE_ENTITY,
     CONF_WS_ALL_SESSIONS,
     CONF_WS_MODE,
+    DEFAULT_LOCAL_URL,
     DEFAULT_SCHEDULER_HANDBACK,
     DOMAIN,
     WS_MODE_ALWAYS,
@@ -51,6 +58,7 @@ from .const import (
 )
 from .foxess import FoxESSClient, FoxESSRealtimeWS, FoxESSWebSession, Inverter
 from .foxess.client import FoxESSApiError
+from .foxess.local_client import FoxESSLocalClient, LocalGatewayError
 from .foxess.web_session import FoxESSWebAuthError, ensure_password_hash
 from .smart_battery.config_flow_base import (
     ENTITY_KEYS,
@@ -193,20 +201,76 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Entry point: route on foxess_modbus presence.
+        """Entry point: choose how the inverter is reached.
 
-        When a ``foxess_modbus`` config entry exists, offer a cloud/entity
-        menu; otherwise go straight to the cloud API-key step (today's
-        behaviour). HA routes a menu selection of ``"cloud"`` to
-        ``async_step_cloud`` and ``"entity"`` to ``async_step_entity`` by the
-        step-name convention (data_entry_flow handles ``next_step_id``).
+        Cloud (API key) and a foxess-local gateway are always offered;
+        entity mode only when a ``foxess_modbus`` config entry exists. HA
+        routes a menu selection to ``async_step_<option>`` by convention.
         """
+        options = ["cloud", "local"]
         if self.hass.config_entries.async_entries("foxess_modbus"):
-            return self.async_show_menu(
-                step_id="user",
-                menu_options=["cloud", "entity"],
-            )
-        return await self.async_step_cloud()
+            options.append("entity")
+        return self.async_show_menu(step_id="user", menu_options=options)
+
+    async def async_step_local(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Local backend: a foxess-local gateway URL and bearer token.
+
+        Validated by reading ``GET /state``. The inverter's serial (from the
+        gateway's identity) is the unique id, as in cloud mode, so the same
+        inverter cannot be added twice through different backends. The
+        gateway's usable battery capacity pre-fills the option discharge
+        pacing needs.
+        """
+        errors: dict[str, str] = {}
+        url = DEFAULT_LOCAL_URL
+        if user_input is not None:
+            url = str(user_input.get(CONF_LOCAL_URL, "")).strip().rstrip("/")
+            token = str(user_input.get(CONF_LOCAL_TOKEN, "") or "").strip()
+            token = token.removeprefix("Bearer ").strip()
+            client = FoxESSLocalClient(async_get_clientsession(self.hass), url, token)
+            state: dict[str, Any] = {}
+            try:
+                state = await client.get_state()
+            except LocalGatewayError as err:
+                _LOGGER.warning("foxess-local gateway check failed: %s", err)
+                if err.code in ("unauthorized", "insufficient_role"):
+                    errors["base"] = "local_invalid_auth"
+                else:
+                    errors["base"] = "local_cannot_connect"
+            serial = str((state.get("identity") or {}).get("sn") or "")
+            if not errors and not serial:
+                errors["base"] = "inverter_not_identified"
+            if not errors:
+                await self.async_set_unique_id(serial)
+                self._abort_if_unique_id_configured()
+                options: dict[str, Any] = {}
+                capacity_wh = (state.get("battery") or {}).get("capacity_wh")
+                if isinstance(capacity_wh, (int, float)) and capacity_wh > 0:
+                    options[CONF_BATTERY_CAPACITY_KWH] = capacity_wh / 1000.0
+                model = (state.get("identity") or {}).get("model") or "FoxESS"
+                return self.async_create_entry(
+                    title=f"{model} {serial} (local)",
+                    data={
+                        CONF_BACKEND: BACKEND_LOCAL,
+                        CONF_LOCAL_URL: url,
+                        CONF_LOCAL_TOKEN: token,
+                        CONF_DEVICE_SERIAL: serial,
+                    },
+                    options=options,
+                )
+
+        return self.async_show_form(
+            step_id="local",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_LOCAL_URL, default=url): str,
+                    vol.Optional(CONF_LOCAL_TOKEN, default=""): str,
+                }
+            ),
+            errors=errors,
+        )
 
     async def async_step_cloud(
         self, user_input: dict[str, Any] | None = None

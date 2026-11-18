@@ -292,7 +292,8 @@
         "description": "Come è collegato il tuo inverter?",
         "menu_options": {
           "cloud": "FoxESS Cloud (chiave API)",
-          "entity": "Usa il mio inverter foxess_modbus (nessuna chiave API necessaria)"
+          "entity": "Usa il mio inverter foxess_modbus (nessuna chiave API necessaria)",
+          "local": "Gateway locale (foxess-local, senza cloud)"
         }
       },
       "cloud": {
@@ -339,6 +340,14 @@
           "web_username": "Web Username",
           "web_password": "Web Password (or MD5 hash)"
         }
+      },
+      "local": {
+        "title": "FoxESS Control — gateway locale",
+        "description": "Collegati a un gateway foxess-local nella tua rete. Lascia vuoto il token se il gateway consente l'accesso pubblico in sola lettura. Si consiglia un token con ruolo standard, così la carica e la scarica intelligenti potranno usarlo quando il controllo locale sarà disponibile.",
+        "data": {
+          "local_url": "URL del gateway",
+          "local_token": "Token di accesso"
+        }
       }
     },
     "abort": {
@@ -348,7 +357,10 @@
       "cannot_connect": "Impossibile connettersi all'API FoxESS Cloud. Verificare la connessione di rete.",
       "invalid_auth": "Autenticazione fallita. Verificare la chiave API e il numero di serie del dispositivo.",
       "web_auth_failed": "Web portal login failed. Check your username and password.",
-      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable."
+      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable.",
+      "local_cannot_connect": "Impossibile raggiungere il gateway foxess-local. Controlla l'URL e che il gateway sia in funzione.",
+      "local_invalid_auth": "Il gateway ha rifiutato il token. Controllalo e verifica che il suo ruolo sia almeno read-only.",
+      "inverter_not_identified": "Il gateway non ha ancora identificato l'inverter. Attendi che il gateway mostri l'inverter online, poi riprova."
     }
   },
   "options": {

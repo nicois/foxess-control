@@ -296,7 +296,8 @@
         "description": "您的逆变器是如何连接的？",
         "menu_options": {
           "cloud": "FoxESS Cloud（API 密钥）",
-          "entity": "使用我的 foxess_modbus 逆变器（无需 API 密钥）"
+          "entity": "使用我的 foxess_modbus 逆变器（无需 API 密钥）",
+          "local": "本地网关（foxess-local，无需云端）"
         }
       },
       "cloud": {
@@ -343,6 +344,14 @@
           "web_username": "Web Username",
           "web_password": "Web Password (or MD5 hash)"
         }
+      },
+      "local": {
+        "title": "FoxESS Control — 本地网关",
+        "description": "连接到你网络中的 foxess-local 网关。如果网关允许公开只读访问，令牌可留空。建议使用 standard 角色的令牌，以便本地控制推出后智能充电和放电可以使用它。",
+        "data": {
+          "local_url": "网关 URL",
+          "local_token": "访问令牌"
+        }
       }
     },
     "abort": {
@@ -352,7 +361,10 @@
       "cannot_connect": "无法连接到 FoxESS Cloud API。请检查您的网络连接。",
       "invalid_auth": "认证失败。请检查您的 API 密钥和设备序列号。",
       "web_auth_failed": "Web portal login failed. Check your username and password.",
-      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable."
+      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable.",
+      "local_cannot_connect": "无法连接 foxess-local 网关。请检查 URL，并确认网关正在运行。",
+      "local_invalid_auth": "网关拒绝了该令牌。请检查令牌，以及其角色至少为 read-only。",
+      "inverter_not_identified": "网关尚未识别逆变器。请等待网关显示逆变器在线后再试。"
     }
   },
   "options": {

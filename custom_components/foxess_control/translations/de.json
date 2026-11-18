@@ -292,7 +292,8 @@
         "description": "Wie ist Ihr Wechselrichter angeschlossen?",
         "menu_options": {
           "cloud": "FoxESS Cloud (API-Schlüssel)",
-          "entity": "Meinen foxess_modbus-Wechselrichter verwenden (kein API-Schlüssel erforderlich)"
+          "entity": "Meinen foxess_modbus-Wechselrichter verwenden (kein API-Schlüssel erforderlich)",
+          "local": "Lokales Gateway (foxess-local, ohne Cloud)"
         }
       },
       "cloud": {
@@ -339,6 +340,14 @@
           "web_username": "Web Username",
           "web_password": "Web Password (or MD5 hash)"
         }
+      },
+      "local": {
+        "title": "FoxESS Control — lokales Gateway",
+        "description": "Verbinde dich mit einem foxess-local-Gateway in deinem Netzwerk. Lass das Token leer, wenn das Gateway öffentlichen Lesezugriff erlaubt. Ein Token mit der Rolle „standard“ wird empfohlen, damit intelligentes Laden und Entladen es nutzen können, sobald die lokale Steuerung verfügbar ist.",
+        "data": {
+          "local_url": "Gateway-URL",
+          "local_token": "Zugriffstoken"
+        }
       }
     },
     "abort": {
@@ -348,7 +357,10 @@
       "cannot_connect": "Verbindung zur FoxESS Cloud API nicht möglich. Überprüfen Sie Ihre Netzwerkverbindung.",
       "invalid_auth": "Authentifizierung fehlgeschlagen. Überprüfen Sie Ihren API-Schlüssel und die Geräte-Seriennummer.",
       "web_auth_failed": "Web portal login failed. Check your username and password.",
-      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable."
+      "ws_connect_failed": "Could not establish a WebSocket connection. Login succeeded but the real-time stream is unavailable.",
+      "local_cannot_connect": "Das foxess-local-Gateway ist nicht erreichbar. Prüfe die URL und ob das Gateway läuft.",
+      "local_invalid_auth": "Das Gateway hat das Token abgelehnt. Prüfe es und ob seine Rolle mindestens „read-only“ ist.",
+      "inverter_not_identified": "Das Gateway hat den Wechselrichter noch nicht erkannt. Warte, bis das Gateway den Wechselrichter als online anzeigt, und versuche es erneut."
     }
   },
   "options": {
