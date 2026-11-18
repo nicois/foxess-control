@@ -233,6 +233,44 @@ class TestMapSnapshotEvent:
         assert "_work_mode" not in data
 
 
+class TestMapSnapshotEnergy:
+    """Snapshots carry ``energy`` once the counters have been read, so the
+    feed-in counter the discharge target paces from stays 5 s fresh."""
+
+    def test_snapshot_energy_maps_to_cloud_counters(self) -> None:
+        event = {
+            "ts": "2026-11-19T00:11:00+11:00",
+            "power": {
+                "pv_w": 0,
+                "grid_w": 0,
+                "load_w": 0,
+                "ac_port_w": 0,
+                "battery_w": 0,
+            },
+            "soc_pct": 50,
+            "battery_state": "idle",
+            "energy": {"grid_export_kwh": 2484.8, "pv_kwh": None},
+        }
+        data = map_snapshot_event(event)
+        assert data["feedin"] == pytest.approx(2484.8)
+        assert "PVEnergyTotal" not in data
+
+    def test_snapshot_before_first_counter_read_has_no_counters(self) -> None:
+        event = {
+            "ts": "2026-11-19T00:11:00+11:00",
+            "power": {
+                "pv_w": 0,
+                "grid_w": 0,
+                "load_w": 0,
+                "ac_port_w": 0,
+                "battery_w": 0,
+            },
+            "soc_pct": 50,
+            "battery_state": "idle",
+        }
+        assert "feedin" not in map_snapshot_event(event)
+
+
 class TestSSEParser:
     def test_single_event(self) -> None:
         parser = SSEParser()

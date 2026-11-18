@@ -80,21 +80,46 @@ async def test_offline_inverter_is_reported(sim: SimulatorHandle) -> None:
 
 
 @pytest.mark.asyncio
-async def test_energy_counters_when_the_gateway_provides_them(
+async def test_energy_counters_and_write_budget_are_served(
     sim: SimulatorHandle,
 ) -> None:
-    sim.set(local_gateway_energy=True, feedin_total_kwh=12.5)
+    """Both are required State fields since the gateway implemented
+    docs/api/foxess-local-gateway-requirements.md."""
+    sim.set(feedin_total_kwh=12.5)
     async with aiohttp.ClientSession() as session:
         state = await FoxESSLocalClient(session, sim.url).get_state()
     assert state["energy"]["grid_export_kwh"] == pytest.approx(12.5)
+    assert state["energy"]["sources"]["grid_export_kwh"] == "register"
     assert map_state(state)["feedin"] == pytest.approx(12.5)
+    budget = state["write_budget"]["schedule"]
+    assert budget == {
+        "limit": 10,
+        "remaining": 10,
+        "window_s": 3600,
+        "next_free_at": None,
+    }
 
 
 @pytest.mark.asyncio
-async def test_todays_gateway_has_no_energy_counters(sim: SimulatorHandle) -> None:
+async def test_counters_are_null_before_their_first_read(
+    sim: SimulatorHandle,
+) -> None:
+    sim.set(local_gateway_energy=False)
     async with aiohttp.ClientSession() as session:
         state = await FoxESSLocalClient(session, sim.url).get_state()
-    assert "energy" not in state
+    assert state["energy"]["grid_export_kwh"] is None
+    assert "feedin" not in map_state(state)
+
+
+@pytest.mark.asyncio
+async def test_snapshot_events_carry_the_counters(sim: SimulatorHandle) -> None:
+    sim.set(feedin_total_kwh=7.0)
+    async with aiohttp.ClientSession() as session:
+        events = FoxESSLocalClient(session, sim.url).iter_events()
+        _, name, payload = await anext(events)
+        await events.aclose()
+    assert name == "snapshot"
+    assert payload["energy"]["grid_export_kwh"] == pytest.approx(7.0)
 
 
 @pytest.mark.asyncio
