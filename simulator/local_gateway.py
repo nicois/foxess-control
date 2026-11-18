@@ -234,6 +234,8 @@ async def handle_config(request: web.Request) -> web.Response:
             "version": "v0.1.1-sim",
             "public_access": _model(request).local_gateway_token is None,
             "time_zone": "UTC (UTC)",
+            "time_zone_name": "UTC",
+            "forward_mode": "telemetry_only",
             "utc_offset_s": 0,
             "inverter_clock_offset_s": 0,
         }

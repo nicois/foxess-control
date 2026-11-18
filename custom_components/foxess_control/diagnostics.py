@@ -20,6 +20,10 @@ REDACT_KEYS = {
     "web_username",
     "device_serial",
     "token",
+    # Local backend: the gateway bearer token (entry.data) and the inverter
+    # serial in the gateway's identity block.
+    "local_token",
+    "sn",
     "batSn",
     "battery_compound_id",
 }
@@ -94,7 +98,7 @@ async def async_get_config_entry_diagnostics(
         "max_power_w": max_power_w,
         "scheduler_limits": _scheduler_limits(inverter),
         "data_source": (
-            coordinator_data.get("data_source") if coordinator_data else None
+            coordinator_data.get("_data_source") if coordinator_data else None
         ),
     }
     recent_errors = list(getattr(domain_data, "recent_errors", []))
@@ -130,9 +134,67 @@ async def async_get_config_entry_diagnostics(
             "recent_errors": recent_errors,
             "schedule": _schedule_section(domain_data, _entity_mode, inverter),
             "handback": _handback_section(domain_data, _handback_enabled, inverter),
+            "local_gateway": await _local_gateway_section(hass, coordinator),
         },
         REDACT_KEYS,
     )
+
+
+async def _local_gateway_section(
+    hass: HomeAssistant, coordinator: Any
+) -> dict[str, Any] | None:
+    """The local backend's health and the gateway's own facts.
+
+    ``None`` for cloud and entity entries. The live reads are best-effort:
+    a download is most needed when the gateway is failing, so a failed
+    read is reported in ``error`` instead of breaking the download.
+    """
+    from .coordinator import FoxESSLocalCoordinator
+    from .foxess.local_client import LocalGatewayError
+
+    if not isinstance(coordinator, FoxESSLocalCoordinator):
+        return None
+    data = coordinator.data or {}
+    section: dict[str, Any] = {
+        "url": coordinator.client.base_url,
+        "stream_connected": coordinator.stream_connected,
+        "last_stream_error": coordinator.last_stream_error,
+        "inverter_online": data.get("_gateway_online"),
+        "data_as_of": data.get("_data_last_update"),
+    }
+    try:
+        state = await coordinator.client.get_state()
+        config = await coordinator.client.get_config()
+    except LocalGatewayError as err:
+        section["error"] = f"{err.code}: {err}"
+        return section
+    identity = state.get("identity") or {}
+    section.update(
+        {
+            "gateway_version": config.get("version"),
+            "identity": {
+                "sn": identity.get("sn"),
+                "model": identity.get("model"),
+                "firmware": identity.get("firmware"),
+                "verified_profile": identity.get("verified_profile"),
+                "writes": identity.get("writes"),
+                "compatibility": identity.get("compatibility"),
+            },
+            "forward_mode": state.get("forward_mode"),
+            "inverter_state": state.get("inverter_state"),
+            "write_budget": state.get("write_budget"),
+            "energy_sources": (state.get("energy") or {}).get("sources"),
+            "inverter_clock_offset_s": config.get("inverter_clock_offset_s"),
+        }
+    )
+    gateway_tz = config.get("time_zone_name")
+    ha_tz = str(hass.config.time_zone)
+    section["time_zone"] = {
+        "gateway": gateway_tz,
+        "home_assistant": ha_tz,
+        "match": None if gateway_tz is None else gateway_tz == ha_tz,
+    }
+    return section
 
 
 def _scheduler_limits(inverter: Any) -> dict[str, Any] | None:
