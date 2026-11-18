@@ -119,6 +119,31 @@ def _battery_state(model: InverterModel) -> str:
     return "idle"
 
 
+_ENERGY_FIELDS: tuple[tuple[str, str], ...] = (
+    ("grid_export_kwh", "feedin_total_kwh"),
+    ("grid_import_kwh", "grid_consumption_total_kwh"),
+    ("pv_kwh", "pv_energy_total_kwh"),
+    ("battery_charge_kwh", "charge_total_kwh"),
+    ("battery_discharge_kwh", "discharge_total_kwh"),
+    ("load_kwh", "loads_total_kwh"),
+    ("output_kwh", "generation_total_kwh"),
+)
+
+
+def _energy(model: InverterModel) -> dict[str, Any]:
+    """The ``Energy`` schema: 0.1 kWh register counters, null before read."""
+    read = model.local_gateway_energy
+    energy: dict[str, Any] = {
+        field: round(getattr(model, attr), 1) if read else None
+        for field, attr in _ENERGY_FIELDS
+    }
+    energy["as_of"] = model.sim_time.isoformat() if read else None
+    energy["sources"] = (
+        {field: "register" for field, _ in _ENERGY_FIELDS} if read else {}
+    )
+    return energy
+
+
 def render_state(model: InverterModel) -> dict[str, Any]:
     """Build a foxess-local ``State`` body from the model."""
     capacity_wh = round(model.battery_capacity_kwh * 1000)
@@ -173,27 +198,24 @@ def render_state(model: InverterModel) -> dict[str, Any]:
             "cell_max_c": None,
         },
     }
-    if model.local_gateway_energy:
-        state["energy"] = {
-            "as_of": model.sim_time.isoformat(),
-            "grid_export_kwh": round(model.feedin_total_kwh, 3),
-            "grid_import_kwh": round(model.grid_consumption_total_kwh, 3),
-            "pv_kwh": round(model.pv_energy_total_kwh, 3),
-            "battery_charge_kwh": round(model.charge_total_kwh, 3),
-            "battery_discharge_kwh": round(model.discharge_total_kwh, 3),
-            "load_kwh": round(model.loads_total_kwh, 3),
-            "output_kwh": round(model.generation_total_kwh, 3),
-        }
+    state["energy"] = _energy(model)
+    state["write_budget"] = {
+        setting: {"limit": 10, "remaining": 10, "window_s": 3600, "next_free_at": None}
+        for setting in ("work_mode", "schedule", "power_limits")
+    }
     return state
 
 
 def _snapshot(model: InverterModel) -> dict[str, Any]:
-    return {
+    snapshot: dict[str, Any] = {
         "ts": model.sim_time.isoformat(),
         "power": _power(model),
         "soc_pct": round(model.soc),
         "battery_state": _battery_state(model),
     }
+    if model.local_gateway_energy:
+        snapshot["energy"] = _energy(model)
+    return snapshot
 
 
 async def handle_state(request: web.Request) -> web.Response:

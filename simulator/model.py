@@ -326,10 +326,11 @@ class InverterModel:
     # Server-computed liveness (State.online): False models a gateway whose
     # inverter session is down or data-silent for >15 s.
     local_gateway_online: bool = True
-    # Whether /state carries the lifetime ``energy`` counters requested in
-    # docs/api/foxess-local-gateway-requirements.md §1. Off by default:
-    # foxess-local v0.1.1 does not serve them.
-    local_gateway_energy: bool = False
+    # Whether the lifetime ``energy`` counters have been read yet. False
+    # models a gateway just after start-up: every counter is null (the
+    # gateway reads them every 30 s; docs/api/foxess-local-gateway-
+    # requirements.md §1) and snapshot events omit ``energy``.
+    local_gateway_energy: bool = True
     # Seconds between SSE snapshot events after the immediate first one.
     local_sse_interval_s: float = 5.0
 

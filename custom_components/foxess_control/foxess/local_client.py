@@ -145,6 +145,17 @@ def _map_power(power: dict[str, Any]) -> dict[str, float]:
     }
 
 
+def _map_energy(energy: Any) -> dict[str, float]:
+    """Lifetime counters (kWh) -> cloud counter names; nulls omitted."""
+    if not isinstance(energy, dict):
+        return {}
+    return {
+        var: float(energy[field])
+        for field, var in _ENERGY_MAP.items()
+        if energy.get(field) is not None
+    }
+
+
 def _freshness(as_of: Any, online: bool) -> dict[str, Any]:
     data: dict[str, Any] = {
         "_data_source": DATA_SOURCE_LOCAL,
@@ -170,10 +181,7 @@ def map_state(state: dict[str, Any]) -> dict[str, Any]:
         if value is not None:
             data[var] = float(value)
 
-    for field, var in _ENERGY_MAP.items():
-        value = (state.get("energy") or {}).get(field)
-        if value is not None:
-            data[var] = float(value)
+    data.update(_map_energy(state.get("energy")))
 
     mode = (state.get("active_mode") or {}).get("mode")
     data["_work_mode"] = _WORK_MODE_MAP.get(mode) if isinstance(mode, str) else None
@@ -183,7 +191,7 @@ def map_state(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def map_snapshot_event(event: dict[str, Any]) -> dict[str, Any]:
-    """Translate an SSE ``snapshot`` payload (power + SoC only).
+    """Translate an SSE ``snapshot`` payload (power, SoC, counters).
 
     Only the keys a snapshot actually carries are returned, so merging it
     over the last full ``/state`` never clobbers temperatures, counters or
@@ -192,6 +200,7 @@ def map_snapshot_event(event: dict[str, Any]) -> dict[str, Any]:
     data: dict[str, Any] = dict(_map_power(event.get("power") or {}))
     if event.get("soc_pct") is not None:
         data["SoC"] = event["soc_pct"]
+    data.update(_map_energy(event.get("energy")))
     data.update(_freshness(event.get("ts"), True))
     return data
 
