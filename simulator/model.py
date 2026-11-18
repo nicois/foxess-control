@@ -319,6 +319,20 @@ class InverterModel:
     scheduler_disable_attempts: int = 0
     setting_set_attempts: int = 0
 
+    # foxess-local gateway (/api/v1, simulator/local_gateway.py).
+    # ``local_gateway_token`` None models the gateway's default public
+    # read-only access; a string makes every route demand that bearer token.
+    local_gateway_token: str | None = None
+    # Server-computed liveness (State.online): False models a gateway whose
+    # inverter session is down or data-silent for >15 s.
+    local_gateway_online: bool = True
+    # Whether /state carries the lifetime ``energy`` counters requested in
+    # docs/api/foxess-local-gateway-requirements.md §1. Off by default:
+    # foxess-local v0.1.1 does not serve them.
+    local_gateway_energy: bool = False
+    # Seconds between SSE snapshot events after the immediate first one.
+    local_sse_interval_s: float = 5.0
+
     def fd_pwr_limit_w(self) -> int:
         """Maximum ``fdPwr`` this device accepts in a schedule group."""
         return self.max_power_w if self.fd_pwr_max_w is None else self.fd_pwr_max_w

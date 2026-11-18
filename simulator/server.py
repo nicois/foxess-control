@@ -18,6 +18,7 @@ from typing import Any
 
 from aiohttp import WSMsgType, web
 
+from . import local_gateway
 from .model import InverterModel
 
 _LOGGER = logging.getLogger(__name__)
@@ -657,6 +658,9 @@ def create_app() -> web.Application:
 
     # WebSocket
     app.router.add_get("/dew/v0/wsmaitian", handle_ws)
+
+    # foxess-local gateway (local backend)
+    local_gateway.register_routes(app)
 
     # Backchannel
     app.router.add_get("/sim/state", handle_sim_state)
