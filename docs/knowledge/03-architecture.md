@@ -54,6 +54,21 @@ brands would have their own equivalent package (e.g., `huawei/`,
 **Key interfaces**: `FoxESSClient`, `Inverter`, `FoxESSRealtimeWS`,
 `FoxESSWebSession`, `generate_signature()`.
 
+### `foxess/local_client.py` — foxess-local gateway client (local backend)
+**Path**: `custom_components/foxess_control/foxess/local_client.py`
+**Responsibility**: HTTP + Server-Sent Events client for a foxess-local
+gateway (`/api/v1`), RFC 7807 problems as `LocalGatewayError` (stable
+`code`), and the pure `map_state` / `map_snapshot_event` translation of
+gateway payloads (signed watts) into the cloud-shaped coordinator data.
+Paired with `FoxESSLocalCoordinator` in `coordinator.py` (`/state` poll
+plus the always-on event stream). Read-only in its first phase: there is
+no `Inverter` for a local entry and control services refuse. See
+`04-design/local-gateway.md` (D-064, D-065) and the simulator's gateway
+routes in `simulator/local_gateway.py`.
+**Why separate**: Like `foxess/` generally: brand-specific transport
+(C-021). It shares nothing with the cloud client except the coordinator
+data shape.
+
 ### `__init__.py` — Integration entry point and orchestration
 **Path**: `custom_components/foxess_control/__init__.py` (~1600 lines)
 **Responsibility**: HA `async_setup_entry` / `async_unload_entry`,
@@ -92,8 +107,9 @@ access, schedule utilities).
 ### `coordinator.py` — Data coordinators
 **Path**: `custom_components/foxess_control/coordinator.py`
 **Responsibility**: `FoxESSDataCoordinator` (REST API polling + WS data
-injection), `FoxESSEntityCoordinator` (entity-mode wrapper). Both
-expose the same `dict[str, float]` data shape to consumers.
+injection), `FoxESSEntityCoordinator` (entity-mode wrapper),
+`FoxESSLocalCoordinator` (foxess-local gateway: `/state` polling + SSE
+stream). All expose the same `dict[str, float]` data shape to consumers.
 **Why separate**: Decouples data acquisition from consumption. Sensors
 and algorithms read from the coordinator without knowing the data source.
 

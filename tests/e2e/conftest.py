@@ -1118,8 +1118,12 @@ def foxess_sim(
     _worker_ports: dict[str, int],
     connection_mode: str,
 ) -> Generator[SimulatorHandle | None, None, None]:
-    """Start a fresh simulator per test (cloud mode only)."""
-    if connection_mode != "cloud":
+    """Start a fresh simulator per test (cloud and local gateway modes).
+
+    The local mode reaches the same simulator through its foxess-local
+    ``/api/v1`` routes instead of the cloud API.
+    """
+    if connection_mode not in ("cloud", "local"):
         yield None
         return
     port = _worker_ports["sim"]
@@ -1205,12 +1209,23 @@ def ha_e2e(
             os.path.join(tmpdir, ".storage", "core.config_entries"),
         )
 
+    sim_port = foxess_sim.url.rsplit(":", 1)[1] if foxess_sim else "0"
+    if connection_mode == "local":
+        # The local-gateway entry points at the simulator's /api/v1 as seen
+        # from inside the container; the gateway requires the seed's token.
+        local_entries = HA_CONFIG_SEED / ".storage" / "core.config_entries.local"
+        seeded = local_entries.read_text().replace(
+            "__LOCAL_GATEWAY_URL__", f"http://host.containers.internal:{sim_port}"
+        )
+        Path(tmpdir, ".storage", "core.config_entries").write_text(seeded)
+        assert foxess_sim is not None
+        foxess_sim.set(local_gateway_token="e2e-local-token")
+
     os.chmod(tmpdir, 0o777)
     for root, dirs, _files in os.walk(tmpdir):
         for d in dirs:
             os.chmod(os.path.join(root, d), 0o777)
 
-    sim_port = foxess_sim.url.rsplit(":", 1)[1] if foxess_sim else "0"
     # stdout/stderr → DEVNULL to avoid pipe-buffer deadlock.
     # The default Linux pipe buffer is 64 KiB.  Under CI load (12 xdist
     # workers), HA's startup logs can fill the buffer before wait_ready()

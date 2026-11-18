@@ -28,6 +28,8 @@ FoxESS Control polls real-time inverter data (battery SoC, charge/discharge powe
 - Your inverter's device serial number
 
 > **Note:** If you use [foxess_modbus](https://github.com/nathanmarlor/foxess_modbus), the cloud API key is optional. See [Entity mode](#entity-mode-foxess_modbus-interop) for details.
+>
+> **Note:** If you run a [foxess-local](https://github.com/nicois/foxess-local) gateway, no cloud account is needed for sensors. See [Local gateway](#local-gateway-foxess-local).
 
 ## Installation
 
@@ -63,8 +65,8 @@ FoxESS Control polls real-time inverter data (battery SoC, charge/discharge powe
 
 1. Go to **Settings > Devices & Services > Add Integration**.
 2. Search for **FoxESS Control**.
-3. Enter your **API Key** and **Device Serial Number**.
-4. The integration validates your credentials by querying the FoxESS Cloud API. If successful, the integration is added.
+3. Choose how the inverter is reached: **FoxESS Cloud (API key)**, **Local gateway** (see [Local gateway](#local-gateway-foxess-local)), or — when foxess_modbus is installed — the [entity mode](#entity-mode-foxess_modbus-interop) option.
+4. For the cloud, enter your **API Key** and **Device Serial Number**. The integration validates your credentials by querying the FoxESS Cloud API. If successful, the integration is added.
 
 ### Web credentials (optional)
 
@@ -120,7 +122,7 @@ If you use [foxess_modbus](https://github.com/nathanmarlor/foxess_modbus) for lo
 
 **Setup:** When foxess_modbus is installed, the **initial setup** offers a choice between *FoxESS Cloud (API key)* and *Use my foxess_modbus inverter (no API key needed)*. Choosing the modbus option configures entity mode directly — mapping the inverter entities and battery settings — with no cloud API key required. Entities are **auto-detected** from the foxess_modbus entity registry and pre-populated; you can override any mapping if the auto-detection picks the wrong entity. You can also change the mappings later via the integration's **Configure** (options) screen.
 
-If foxess_modbus is not installed, setup goes straight to the cloud API-key step (no mode choice), and the entity mapping step is hidden entirely.
+If foxess_modbus is not installed, the entity-mode option is not offered, and the entity mapping step is hidden entirely.
 
 | Option | Domain | Required | Description |
 |---|---|---|---|
@@ -148,6 +150,28 @@ When entity mode is active:
 - All actions (`force_charge`, `smart_charge`, `smart_discharge`, `feedin`, `clear_overrides`) work identically — only the underlying transport changes.
 - Schedule merging and multi-window management are not used; foxess_control sets the mode directly.
 - Smart session recovery after HA restart works without checking cloud schedule state.
+
+### Local gateway (foxess-local)
+
+[foxess-local](https://github.com/nicois/foxess-local) is a gateway that owns your inverter's connection on your own network and serves a local API. With the **Local gateway** backend, FoxESS Control reads the inverter from the gateway instead of the FoxESS Cloud: no cloud account, no API rate limits, and live values about every 5 seconds over the gateway's event stream.
+
+> **Read-only for now.** In this release the local backend provides **sensors only**. The actions (`smart_charge`, `smart_discharge`, `force_charge`, `force_discharge`, `feedin`, `clear_overrides`, `disable_scheduler`) refuse with an explanation. Local control is the next phase. Until then, use the cloud or entity-mode backend for control.
+
+**Setup:** choose **Local gateway** in the initial setup, then enter:
+
+| Field | Description |
+|---|---|
+| Gateway URL | The gateway's address, e.g. `http://foxess.local:18080`. A trailing `/api/v1` is accepted. |
+| Access token | A token from the gateway's web UI (**More → Settings → Access tokens**). Leave blank if the gateway allows public read-only access. A **standard**-role token is recommended, so local control can use it when it arrives. Pasting the `Bearer …` form is fine. |
+
+The integration checks the gateway by reading its live state. The inverter must be identified by the gateway (connected at least once), because its serial number becomes the entry's identity. The gateway's battery capacity pre-fills the **Battery Capacity** option.
+
+When the local backend is active:
+
+- **Data Freshness** reads `local`, and the cards show a **Local** badge. It goes stale after 3 minutes without an update (normally values arrive every ~5 s).
+- If the gateway reports the inverter offline, or its event stream goes silent for 20 seconds, values stop being presented as live. If the gateway itself is unreachable, the entities become unavailable rather than showing old numbers.
+- Lifetime energy sensors (feed-in, grid consumption, solar, battery charge/discharge, load, inverter output) come from the inverter's own counters via the gateway, so they match the FoxESS app.
+- **Download diagnostics** includes a `local_gateway` section: stream health, the gateway's identity and write support, its write budget, and whether its time zone matches Home Assistant's. A mismatch would shift every schedule window once control is available.
 
 ## Actions
 

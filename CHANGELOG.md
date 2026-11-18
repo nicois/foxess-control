@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Local gateway backend (read-only): run FoxESS Control from a [foxess-local](https://github.com/nicois/foxess-local) gateway instead of the FoxESS Cloud.** foxess-local owns the inverter's connection on your own network and serves a local API. Choose **Local gateway** in the initial setup and give the gateway's URL and an access token. The integration then reads everything from the gateway: no cloud account, no Open API rate limits, and live power and SoC about every 5 seconds over the gateway's event stream. The stream stays connected for the life of the entry, because on the LAN it costs nothing, so it has none of the cloud WebSocket's on/off gating. Lifetime energy sensors come from the inverter's own counters via the gateway, so they match the FoxESS app. The gateway's battery capacity pre-fills the **Battery Capacity** option. **This first release is sensors only:** every action refuses with an explanation rather than failing obscurely. Local control (schedule writes, smart sessions, the scheduler handback, pacing against the gateway's write budget) is the next phase. Refs D-064, D-065.
+- **The local backend tells you when it has lost the inverter.** If the gateway reports the inverter offline, or its event stream goes silent for 20 seconds (a half-open connection would otherwise freeze the last values on screen while still looking connected), the data stops being presented as live. If the gateway itself is unreachable or refuses the token, the entities go unavailable rather than showing old numbers. **Data Freshness** reads `local`, and the cards show a **Local** badge that turns stale after 3 minutes, which is three missed `/state` polls. Refs C-020, C-026.
+- **Diagnostics gain a `local_gateway` section** for local entries: stream health and last error, inverter liveness, and a live read of the gateway's version, identity, write support, forward mode, write budget, energy-counter sources and inverter clock offset. It also compares the gateway's time zone with Home Assistant's; a mismatch would shift every schedule window once local control exists. The gateway token and the inverter serial are redacted. Refs C-020.
+
+### Changed
+- **Setup now always asks how the inverter is reached.** Without foxess_modbus installed, the first step used to jump straight to the cloud API-key form. It now offers **FoxESS Cloud** and **Local gateway**, plus the foxess_modbus option when that integration is present.
+
+### Fixed
+- **`environment.data_source` in the diagnostics download was always null.** It read a coordinator key that has never existed (`data_source` rather than `_data_source`), so every download claimed no data source.
+
+### Documentation
+- `docs/api/foxess-local-gateway-requirements.md`: what the integration requires of the gateway (lifetime energy counters, write-budget visibility), written for the gateway's developers and since implemented. New design doc `docs/knowledge/04-design/local-gateway.md` (D-064, D-065).
+
 ## 1.0.22-beta.7
 
 ### Fixed
