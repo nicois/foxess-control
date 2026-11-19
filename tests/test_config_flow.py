@@ -313,9 +313,14 @@ class TestReconfigureFlow:
             return_value={"type": "abort", "reason": "reconfigure_successful"},
         )
         flow.async_show_form = MagicMock(return_value={"type": "form"})
+        flow.async_show_menu = MagicMock(return_value={"type": "menu"})
 
-        # Step 1: Show form (no input)
+        # Step 1: the reconfigure menu, then its web-credentials option
         await flow.async_step_reconfigure(None)
+        assert (
+            "web_credentials" in flow.async_show_menu.call_args.kwargs["menu_options"]
+        )
+        await flow.async_step_web_credentials(None)
         flow.async_show_form.assert_called_once()
         assert flow.async_show_form.call_args.kwargs["step_id"] == "web_credentials"
 
@@ -353,7 +358,10 @@ class TestReconfigureFlow:
             return_value={"type": "abort", "reason": "reconfigure_successful"},
         )
 
-        await flow.async_step_reconfigure(
+        flow.async_show_menu = MagicMock(return_value={"type": "menu"})
+
+        await flow.async_step_reconfigure(None)
+        await flow.async_step_web_credentials(
             {CONF_WEB_USERNAME: "", CONF_WEB_PASSWORD: ""}
         )
 

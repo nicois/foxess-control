@@ -158,3 +158,45 @@ class TestReadOnlyBoundary:
         with pytest.raises(ServiceValidationError) as excinfo:
             _get_inverter(hass)
         assert excinfo.value.translation_key == "local_control_unavailable"
+
+
+class TestSessionsPersistedByTheOtherBackend:
+    """An entry switched to local can find smart sessions that were
+    persisted while it was on the cloud (a reload keeps them for recovery).
+    The local backend cannot control the inverter yet, so recovery must
+    drop them rather than crash setup on the missing inverter."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("end_hour", "end_minute"),
+        [(23, 59), (0, 0)],
+        ids=["window_still_open", "window_passed"],
+    )
+    async def test_setup_succeeds_and_the_sessions_are_dropped(
+        self, foxess_sim: SimulatorHandle, end_hour: int, end_minute: int
+    ) -> None:
+        import datetime
+
+        noon = datetime.datetime(2026, 11, 19, 12, 0, tzinfo=datetime.UTC)
+        session = {
+            "date": "2026-11-19",
+            "start_hour": 0,
+            "start_minute": 0,
+            "end_hour": end_hour,
+            "end_minute": end_minute,
+        }
+        hass = _hass()
+        store = hass.data[DOMAIN].store
+        store.async_load = AsyncMock(
+            return_value={"smart_charge": dict(session), "smart_discharge": session}
+        )
+        entry = _entry(foxess_sim.url)
+
+        with patch("custom_components.foxess_control.dt_util.now", return_value=noon):
+            assert await _setup(hass, entry) is True
+        _close_stream_coroutines(entry)
+
+        store.async_save.assert_awaited()
+        saved = store.async_save.await_args.args[0]
+        assert "smart_charge" not in saved
+        assert "smart_discharge" not in saved
