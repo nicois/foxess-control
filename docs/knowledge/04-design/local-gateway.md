@@ -129,4 +129,3 @@ entry at another inverter would graft one inverter's history onto
 another's entities, so the serial must match.
 **Priority served**: P-005 (C-020: the switch and its refusals are explained
 in the UI), P-002/P-001 via C-025 (no orphaned session overrides).
-
