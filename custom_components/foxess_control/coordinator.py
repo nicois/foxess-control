@@ -511,7 +511,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Math.round(interpolated) always equals the entity.
                 self._soc_interpolated = max(
                     reported - 0.5,
-                    min(reported + 0.44, self._soc_interpolated),
+                    min(reported + 0.494, self._soc_interpolated),
                 )
                 self._soc_last_reported = reported
             elif self._ws_last_time is not None:
@@ -528,7 +528,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Keep within the rounding bucket of the authoritative tick
             self._soc_interpolated = max(
                 reported - 0.5,
-                min(reported + 0.44, self._soc_interpolated),
+                min(reported + 0.494, self._soc_interpolated),
             )
             data["_soc_interpolated"] = self._soc_interpolated
 
@@ -597,7 +597,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._soc_last_reported is not None:
                 new_val = max(
                     self._soc_last_reported - 0.5,
-                    min(self._soc_last_reported + 0.44, new_val),
+                    min(self._soc_last_reported + 0.494, new_val),
                 )
             new_rounded = round(new_val, 2)
             old_rounded = round(self._soc_interpolated, 2)
@@ -705,7 +705,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Integer SoC tick changed — clamp into rounding bucket
                 self._soc_interpolated = max(
                     float(reported_soc) - 0.5,
-                    min(float(reported_soc) + 0.44, self._soc_interpolated),
+                    min(float(reported_soc) + 0.494, self._soc_interpolated),
                 )
                 self._soc_last_reported = float(reported_soc)
 
@@ -724,7 +724,7 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._soc_last_reported is not None:
                 self._soc_interpolated = max(
                     self._soc_last_reported - 0.5,
-                    min(self._soc_last_reported + 0.44, self._soc_interpolated),
+                    min(self._soc_last_reported + 0.494, self._soc_interpolated),
                 )
         self._soc_last_bat_kw = net_bat_kw
         # Update timestamp AFTER integration so elapsed > 0 on the

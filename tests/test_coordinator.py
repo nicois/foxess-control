@@ -526,6 +526,26 @@ class TestSocInterpolationDuringDischarge:
             f"{round(coord._soc_interpolated)}, expected 50"
         )
 
+    def test_clamp_upper_bound_is_tick_plus_0_494(self) -> None:
+        """Interpolation running ahead is clamped to exactly tick + 0.494."""
+        coord = self._make_coord()
+
+        coord.data = {"SoC": 49, "_data_source": "ws"}
+        base = time.monotonic()
+        with patch("time.monotonic", return_value=base):
+            coord.inject_realtime_data(
+                {"SoC": 49, "batChargePower": 10.5, "batDischargePower": 0.0}
+            )
+        coord._soc_interpolated = 51.2
+        coord._soc_last_reported = 49.0
+
+        with patch("time.monotonic", return_value=base + 5):
+            coord.inject_realtime_data(
+                {"SoC": 50, "batChargePower": 10.5, "batDischargePower": 0.0}
+            )
+
+        assert coord._soc_interpolated == pytest.approx(50.494)
+
     def test_interpolation_without_feedin_data(self) -> None:
         """SoC integration must run even when feedinPower is absent."""
         coord = self._make_coord()
