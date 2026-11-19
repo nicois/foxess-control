@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING, Any
 
 import requests
@@ -20,9 +21,13 @@ from homeassistant.helpers.selector import (
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
 )
 
 from .const import (
+    BACKEND_CLOUD,
     BACKEND_LOCAL,
     CONF_ADDITIONAL_PV_POWER_VARIABLE,
     CONF_API_KEY,
@@ -182,10 +187,61 @@ def _captured_min_soc_text(hass: HomeAssistant) -> str:
 
 
 def _validate_credentials(api_key: str, device_serial: str) -> None:
-    """Validate API credentials by fetching device detail (blocking)."""
-    client = FoxESSClient(api_key)
+    """Validate API credentials by fetching device detail (blocking).
+
+    Honours ``FOXESS_SIMULATOR_URL`` as setup does, so a containerised HA
+    pointed at the simulator validates against it (C-029).
+    """
+    client = FoxESSClient(api_key, base_url=os.environ.get("FOXESS_SIMULATOR_URL"))
     inverter = Inverter(client, device_serial)
     inverter.get_detail()
+
+
+def _gateway_input(user_input: dict[str, Any]) -> tuple[str, str]:
+    """``(url, token)`` from the form, tolerating a trailing ``/`` and the
+    ``Bearer `` prefix a secrets.yaml value carries."""
+    url = str(user_input.get(CONF_LOCAL_URL, "")).strip().rstrip("/")
+    token = str(user_input.get(CONF_LOCAL_TOKEN, "") or "").strip()
+    return url, token.removeprefix("Bearer ").strip()
+
+
+def _gateway_serial(state: dict[str, Any]) -> str:
+    return str((state.get("identity") or {}).get("sn") or "")
+
+
+def _local_title(state: dict[str, Any], serial: str) -> str:
+    model = (state.get("identity") or {}).get("model") or "FoxESS"
+    return f"{model} {serial} (local)"
+
+
+def _entry_serial(entry: ConfigEntry) -> str:
+    return str(entry.unique_id or entry.data.get(CONF_DEVICE_SERIAL) or "")
+
+
+def _has_generated_title(entry: ConfigEntry) -> bool:
+    """True if the title is one this flow generated (cloud or local form),
+    so a switch may rewrite it; a title the user chose is left alone."""
+    serial = _entry_serial(entry)
+    title = entry.title or ""
+    if title == f"FoxESS {serial}":
+        return True
+    model, sep, rest = title.partition(" ")
+    return bool(model) and bool(sep) and rest == f"{serial} (local)"
+
+
+def _with_gateway_capacity(
+    options: dict[str, Any], state: dict[str, Any]
+) -> dict[str, Any]:
+    """Pre-fill the usable battery capacity from the gateway, unless the
+    entry already has one (the user's value wins)."""
+    capacity_wh = (state.get("battery") or {}).get("capacity_wh")
+    if (
+        CONF_BATTERY_CAPACITY_KWH not in options
+        and isinstance(capacity_wh, int | float)
+        and capacity_wh > 0
+    ):
+        options[CONF_BATTERY_CAPACITY_KWH] = capacity_wh / 1000.0
+    return options
 
 
 class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -226,39 +282,21 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         url = DEFAULT_LOCAL_URL
         if user_input is not None:
-            url = str(user_input.get(CONF_LOCAL_URL, "")).strip().rstrip("/")
-            token = str(user_input.get(CONF_LOCAL_TOKEN, "") or "").strip()
-            token = token.removeprefix("Bearer ").strip()
-            client = FoxESSLocalClient(async_get_clientsession(self.hass), url, token)
-            state: dict[str, Any] = {}
-            try:
-                state = await client.get_state()
-            except LocalGatewayError as err:
-                _LOGGER.warning("foxess-local gateway check failed: %s", err)
-                if err.code in ("unauthorized", "insufficient_role"):
-                    errors["base"] = "local_invalid_auth"
-                else:
-                    errors["base"] = "local_cannot_connect"
-            serial = str((state.get("identity") or {}).get("sn") or "")
-            if not errors and not serial:
-                errors["base"] = "inverter_not_identified"
+            url, token = _gateway_input(user_input)
+            state, errors = await self._check_gateway(url, token)
             if not errors:
+                serial = _gateway_serial(state)
                 await self.async_set_unique_id(serial)
                 self._abort_if_unique_id_configured()
-                options: dict[str, Any] = {}
-                capacity_wh = (state.get("battery") or {}).get("capacity_wh")
-                if isinstance(capacity_wh, int | float) and capacity_wh > 0:
-                    options[CONF_BATTERY_CAPACITY_KWH] = capacity_wh / 1000.0
-                model = (state.get("identity") or {}).get("model") or "FoxESS"
                 return self.async_create_entry(
-                    title=f"{model} {serial} (local)",
+                    title=_local_title(state, serial),
                     data={
                         CONF_BACKEND: BACKEND_LOCAL,
                         CONF_LOCAL_URL: url,
                         CONF_LOCAL_TOKEN: token,
                         CONF_DEVICE_SERIAL: serial,
                     },
-                    options=options,
+                    options=_with_gateway_capacity({}, state),
                 )
 
         return self.async_show_form(
@@ -271,6 +309,22 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
             ),
             errors=errors,
         )
+
+    async def _check_gateway(
+        self, url: str, token: str
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        """Read ``GET /state`` from the gateway: ``(state, errors)``."""
+        client = FoxESSLocalClient(async_get_clientsession(self.hass), url, token)
+        try:
+            state = await client.get_state()
+        except LocalGatewayError as err:
+            _LOGGER.warning("foxess-local gateway check failed: %s", err)
+            if err.code in ("unauthorized", "insufficient_role"):
+                return {}, {"base": "local_invalid_auth"}
+            return {}, {"base": "local_cannot_connect"}
+        if not _gateway_serial(state):
+            return state, {"base": "inverter_not_identified"}
+        return state, {}
 
     async def async_step_cloud(
         self, user_input: dict[str, Any] | None = None
@@ -506,12 +560,135 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Allow updating web credentials on an existing entry."""
+        """Change how an existing entry reaches the inverter, in place.
+
+        Switching the backend updates *this* config entry rather than
+        replacing it. Entity unique ids are ``{entry_id}_{suffix}``, so every
+        entity keeps its id, history, dashboards, helpers and options. The
+        other backend's settings stay in the entry data, so switching back
+        needs nothing re-typed. Entity mode (foxess_modbus) only offers its
+        web credentials, as before.
+        """
         entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
         if entry is None:
             raise RuntimeError("Config entry not found during reconfigure")
         self._api_data = dict(entry.data)
-        return await self.async_step_web_credentials(user_input)
+        if entry.options.get(CONF_WORK_MODE_ENTITY):
+            return await self.async_step_web_credentials(user_input)
+        if entry.data.get(CONF_BACKEND) == BACKEND_LOCAL:
+            menu = ["reconfigure_local", "reconfigure_cloud"]
+        else:
+            menu = ["web_credentials", "reconfigure_local"]
+        return self.async_show_menu(step_id="reconfigure", menu_options=menu)
+
+    def _session_active(self) -> bool:
+        """A reload keeps a running session's schedule group on the inverter
+        for recovery, which the other backend cannot recover or remove
+        (C-025): switch only between sessions."""
+        dd = self.hass.data.get(DOMAIN)
+        return dd is not None and (
+            dd.smart_charge_state is not None or dd.smart_discharge_state is not None
+        )
+
+    async def async_step_reconfigure_local(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Use a foxess-local gateway (or change its URL or token)."""
+        entry = self._get_reconfigure_entry()
+        if self._session_active():
+            return self.async_abort(reason="session_active")
+        errors: dict[str, str] = {}
+        url = str(entry.data.get(CONF_LOCAL_URL) or DEFAULT_LOCAL_URL)
+        token = str(entry.data.get(CONF_LOCAL_TOKEN) or "")
+        if user_input is not None:
+            url, token = _gateway_input(user_input)
+            state, errors = await self._check_gateway(url, token)
+            if not errors:
+                serial = _gateway_serial(state)
+                if serial != _entry_serial(entry):
+                    _LOGGER.warning(
+                        "Gateway reports a different inverter than this entry"
+                    )
+                    return self.async_abort(reason="wrong_inverter")
+                extra: dict[str, Any] = {}
+                if _has_generated_title(entry):
+                    extra["title"] = _local_title(state, serial)
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data={
+                        **entry.data,
+                        CONF_BACKEND: BACKEND_LOCAL,
+                        CONF_LOCAL_URL: url,
+                        CONF_LOCAL_TOKEN: token,
+                    },
+                    options=_with_gateway_capacity(dict(entry.options), state),
+                    reason="backend_switched",
+                    **extra,
+                )
+
+        return self.async_show_form(
+            step_id="reconfigure_local",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_LOCAL_URL, default=url): str,
+                    # suggested_value, not default: a default is re-applied
+                    # when the field is cleared, so the token could never be
+                    # removed.
+                    vol.Optional(
+                        CONF_LOCAL_TOKEN, description={"suggested_value": token}
+                    ): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_reconfigure_cloud(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Use the FoxESS Cloud API (validated for this entry's inverter)."""
+        entry = self._get_reconfigure_entry()
+        if self._session_active():
+            return self.async_abort(reason="session_active")
+        errors: dict[str, str] = {}
+        serial = _entry_serial(entry)
+        if user_input is not None:
+            api_key = str(user_input[CONF_API_KEY]).strip()
+            try:
+                await self.hass.async_add_executor_job(
+                    _validate_credentials, api_key, serial
+                )
+            except FoxESSApiError as err:
+                _LOGGER.warning("FoxESS API rejected credentials: %s", err)
+                errors["base"] = "invalid_auth"
+            except requests.RequestException as err:
+                _LOGGER.warning("Could not reach FoxESS Cloud API: %s", err)
+                errors["base"] = "cannot_connect"
+            else:
+                extra: dict[str, Any] = {}
+                if _has_generated_title(entry):
+                    extra["title"] = f"FoxESS {serial}"
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data={
+                        **entry.data,
+                        CONF_BACKEND: BACKEND_CLOUD,
+                        CONF_API_KEY: api_key,
+                    },
+                    reason="backend_switched",
+                    **extra,
+                )
+
+        current_key = entry.data.get(CONF_API_KEY)
+        key_field = (
+            vol.Required(CONF_API_KEY, default=current_key)
+            if current_key
+            else vol.Required(CONF_API_KEY)
+        )
+        return self.async_show_form(
+            step_id="reconfigure_cloud",
+            data_schema=vol.Schema({key_field: str}),
+            errors=errors,
+        )
 
     @staticmethod
     @callback

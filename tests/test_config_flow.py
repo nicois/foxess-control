@@ -302,6 +302,7 @@ class TestReconfigureFlow:
         existing_data = {CONF_API_KEY: "key123", CONF_DEVICE_SERIAL: "SN001"}
         entry = MagicMock()
         entry.data = existing_data
+        entry.options = {}
         entry.entry_id = "test_entry_id"
 
         flow = FoxessControlConfigFlow()
@@ -347,6 +348,7 @@ class TestReconfigureFlow:
         }
         entry = MagicMock()
         entry.data = existing_data
+        entry.options = {}
         entry.entry_id = "test_entry_id"
 
         flow = FoxessControlConfigFlow()

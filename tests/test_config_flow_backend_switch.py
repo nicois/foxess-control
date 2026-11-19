@@ -236,13 +236,13 @@ class TestSwitchToLocal:
         )
         await _submit_local(flow, None)
         schema = flow.async_show_form.call_args.kwargs["data_schema"]
-        defaults = {str(k): k.default() for k in schema.schema}
+        keys = {str(k): k for k in schema.schema}
+        assert keys[CONF_LOCAL_URL].default() == "http://gw:18080"
         # The token is prefilled too, so changing only the URL does not mean
-        # re-typing it; the field is a masked password input.
-        assert defaults == {
-            CONF_LOCAL_URL: "http://gw:18080",
-            CONF_LOCAL_TOKEN: "fl_tok",
-        }
+        # re-typing it. As a suggested value (not a default) so clearing the
+        # field really removes it; the input is a masked password field.
+        assert keys[CONF_LOCAL_TOKEN].description == {"suggested_value": "fl_tok"}
+        assert schema.schema[keys[CONF_LOCAL_TOKEN]].config["type"] == "password"
 
 
 class TestSwitchToCloud:

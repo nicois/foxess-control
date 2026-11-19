@@ -274,11 +274,38 @@
         "data": {
           "api_key": "API Key"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure FoxESS Control",
+        "description": "Change how Home Assistant reaches this inverter. Switching keeps every entity, its history, your dashboards and your settings.",
+        "menu_options": {
+          "web_credentials": "Web portal credentials (real-time data)",
+          "reconfigure_local": "Local gateway (foxess-local)",
+          "reconfigure_cloud": "FoxESS Cloud (API key)"
+        }
+      },
+      "reconfigure_local": {
+        "title": "Local gateway (foxess-local)",
+        "description": "Connect this inverter through a foxess-local gateway on your network. Your entities, history, dashboards and settings are kept, and so are your cloud credentials, for switching back. Smart charge and discharge are not available on the local backend yet.",
+        "data": {
+          "local_url": "Gateway URL",
+          "local_token": "Access token"
+        }
+      },
+      "reconfigure_cloud": {
+        "title": "FoxESS Cloud",
+        "description": "Connect this inverter through the FoxESS Cloud API. Your entities, history, dashboards and settings are kept, and so are the gateway settings, for switching back.",
+        "data": {
+          "api_key": "API Key"
+        }
       }
     },
     "abort": {
       "reconfigure_successful": "Web credentials updated successfully.",
-      "reauth_successful": "API key updated successfully."
+      "reauth_successful": "API key updated successfully.",
+      "backend_switched": "Connection updated. The integration has reloaded; your entities, history and settings are unchanged.",
+      "wrong_inverter": "That gateway reports a different inverter from this entry. Use this entry's inverter, or add the other one as a new entry.",
+      "session_active": "A smart charge or discharge session is running. Cancel it or let it finish, then switch."
     },
     "error": {
       "local_cannot_connect": "Cannot reach the foxess-local gateway. Check the URL and that the gateway is running.",

@@ -166,6 +166,12 @@ When entity mode is active:
 
 The integration checks the gateway by reading its live state. The inverter must be identified by the gateway (connected at least once), because its serial number becomes the entry's identity. The gateway's battery capacity pre-fills the **Battery Capacity** option.
 
+**Switching an existing installation:** you do not need to remove anything. On the existing FoxESS Control entry, choose **⋮ → Reconfigure → Local gateway (foxess-local)** and enter the gateway URL and token. The same entry is switched in place, so every entity keeps its entity id and history, and your dashboards, automations, helpers, Energy dashboard and options carry on unchanged. Your cloud API key and web login are kept, so going back is **Reconfigure → FoxESS Cloud (API key)**, with the key already filled in.
+
+- The gateway must report the same inverter (serial number) as the entry. A gateway for a different inverter is refused.
+- A switch is refused while a smart charge or smart discharge session is running. Cancel the session or let it finish first.
+- A title the integration generated follows the backend (`FoxESS <serial>` / `<model> <serial> (local)`); a title you chose is kept.
+
 When the local backend is active:
 
 - **Data Freshness** reads `local`, and the cards show a **Local** badge. It goes stale after 3 minutes without an update (normally values arrive every ~5 s).

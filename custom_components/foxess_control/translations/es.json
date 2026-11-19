@@ -352,10 +352,37 @@
           "local_url": "URL del gateway",
           "local_token": "Token de acceso"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigurar FoxESS Control",
+        "description": "Cambia cómo Home Assistant accede a este inversor. Al cambiar se conservan todas las entidades, su historial, tus paneles y tu configuración.",
+        "menu_options": {
+          "web_credentials": "Credenciales del portal web (datos en tiempo real)",
+          "reconfigure_local": "Pasarela local (foxess-local)",
+          "reconfigure_cloud": "FoxESS Cloud (clave API)"
+        }
+      },
+      "reconfigure_local": {
+        "title": "Pasarela local (foxess-local)",
+        "description": "Conecta este inversor a través de una pasarela foxess-local en tu red. Se conservan tus entidades, historial, paneles y configuración, y también tus credenciales de la nube para volver atrás. La carga y descarga inteligentes aún no están disponibles con el backend local.",
+        "data": {
+          "local_url": "URL de la pasarela",
+          "local_token": "Token de acceso"
+        }
+      },
+      "reconfigure_cloud": {
+        "title": "FoxESS Cloud",
+        "description": "Conecta este inversor a través de la API de FoxESS Cloud. Se conservan tus entidades, historial, paneles y configuración, y también la configuración de la pasarela para volver atrás.",
+        "data": {
+          "api_key": "Clave API"
+        }
       }
     },
     "abort": {
-      "reconfigure_successful": "Web credentials updated successfully."
+      "reconfigure_successful": "Web credentials updated successfully.",
+      "backend_switched": "Conexión actualizada. La integración se ha recargado; tus entidades, historial y configuración no han cambiado.",
+      "wrong_inverter": "Esa pasarela informa de un inversor distinto al de esta entrada. Usa el inversor de esta entrada o añade el otro como una entrada nueva.",
+      "session_active": "Hay una sesión de carga o descarga inteligente en curso. Cancélala o espera a que termine y luego cambia."
     },
     "error": {
       "cannot_connect": "No se puede conectar a la API FoxESS Cloud. Verifique su conexión de red.",

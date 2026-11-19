@@ -348,10 +348,37 @@
           "local_url": "URL de la passerelle",
           "local_token": "Jeton d'accès"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigurer FoxESS Control",
+        "description": "Modifier la façon dont Home Assistant accède à cet onduleur. Le changement conserve toutes les entités, leur historique, vos tableaux de bord et vos réglages.",
+        "menu_options": {
+          "web_credentials": "Identifiants du portail web (données en temps réel)",
+          "reconfigure_local": "Passerelle locale (foxess-local)",
+          "reconfigure_cloud": "FoxESS Cloud (clé API)"
+        }
+      },
+      "reconfigure_local": {
+        "title": "Passerelle locale (foxess-local)",
+        "description": "Connecter cet onduleur via une passerelle foxess-local sur votre réseau. Vos entités, historique, tableaux de bord et réglages sont conservés, ainsi que vos identifiants cloud pour revenir en arrière. La charge et la décharge intelligentes ne sont pas encore disponibles avec le backend local.",
+        "data": {
+          "local_url": "URL de la passerelle",
+          "local_token": "Jeton d'accès"
+        }
+      },
+      "reconfigure_cloud": {
+        "title": "FoxESS Cloud",
+        "description": "Connecter cet onduleur via l'API FoxESS Cloud. Vos entités, historique, tableaux de bord et réglages sont conservés, ainsi que les réglages de la passerelle pour revenir en arrière.",
+        "data": {
+          "api_key": "Clé API"
+        }
       }
     },
     "abort": {
-      "reconfigure_successful": "Web credentials updated successfully."
+      "reconfigure_successful": "Web credentials updated successfully.",
+      "backend_switched": "Connexion mise à jour. L'intégration a été rechargée ; vos entités, votre historique et vos réglages sont inchangés.",
+      "wrong_inverter": "Cette passerelle signale un onduleur différent de celui de cette entrée. Utilisez l'onduleur de cette entrée ou ajoutez l'autre comme nouvelle entrée.",
+      "session_active": "Une session de charge ou de décharge intelligente est en cours. Annulez-la ou attendez qu'elle se termine, puis changez."
     },
     "error": {
       "cannot_connect": "Impossible de se connecter à l'API FoxESS Cloud. Vérifiez votre connexion réseau.",

@@ -348,10 +348,37 @@
           "local_url": "Gateway-URL",
           "local_token": "Zugriffstoken"
         }
+      },
+      "reconfigure": {
+        "title": "FoxESS Control neu konfigurieren",
+        "description": "Ändern, wie Home Assistant diesen Wechselrichter erreicht. Beim Wechsel bleiben alle Entitäten, ihr Verlauf, deine Dashboards und Einstellungen erhalten.",
+        "menu_options": {
+          "web_credentials": "Webportal-Zugangsdaten (Echtzeitdaten)",
+          "reconfigure_local": "Lokales Gateway (foxess-local)",
+          "reconfigure_cloud": "FoxESS Cloud (API-Schlüssel)"
+        }
+      },
+      "reconfigure_local": {
+        "title": "Lokales Gateway (foxess-local)",
+        "description": "Diesen Wechselrichter über ein foxess-local-Gateway in deinem Netzwerk verbinden. Entitäten, Verlauf, Dashboards und Einstellungen bleiben erhalten, ebenso deine Cloud-Zugangsdaten für den Rückwechsel. Intelligentes Laden und Entladen ist mit dem lokalen Backend noch nicht verfügbar.",
+        "data": {
+          "local_url": "Gateway-URL",
+          "local_token": "Zugriffstoken"
+        }
+      },
+      "reconfigure_cloud": {
+        "title": "FoxESS Cloud",
+        "description": "Diesen Wechselrichter über die FoxESS Cloud API verbinden. Entitäten, Verlauf, Dashboards und Einstellungen bleiben erhalten, ebenso die Gateway-Einstellungen für den Rückwechsel.",
+        "data": {
+          "api_key": "API-Schlüssel"
+        }
       }
     },
     "abort": {
-      "reconfigure_successful": "Web credentials updated successfully."
+      "reconfigure_successful": "Web credentials updated successfully.",
+      "backend_switched": "Verbindung aktualisiert. Die Integration wurde neu geladen; Entitäten, Verlauf und Einstellungen sind unverändert.",
+      "wrong_inverter": "Dieses Gateway meldet einen anderen Wechselrichter als dieser Eintrag. Verwende den Wechselrichter dieses Eintrags oder füge den anderen als neuen Eintrag hinzu.",
+      "session_active": "Eine intelligente Lade- oder Entladesitzung läuft. Brich sie ab oder warte, bis sie endet, und wechsle dann."
     },
     "error": {
       "cannot_connect": "Verbindung zur FoxESS Cloud API nicht möglich. Überprüfen Sie Ihre Netzwerkverbindung.",

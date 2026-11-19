@@ -109,6 +109,45 @@ class HAClient:
             raise RuntimeError(f"Reload failed: {r.status_code} {r.text[:500]}")
         self._wait_for_integration_ready()
 
+    def reconfigure(
+        self, menu_choice: str, user_input: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Run the foxess_control reconfigure flow: pick *menu_choice* from
+        its menu, submit *user_input*, and return the final flow result."""
+        entries = self._session.get(
+            f"{self.base_url}/api/config/config_entries/entry", timeout=10
+        ).json()
+        entry_id = next(e for e in entries if e["domain"] == "foxess_control")[
+            "entry_id"
+        ]
+        base = f"{self.base_url}/api/config/config_entries/flow"
+        r = self._session.post(
+            base, json={"handler": "foxess_control", "entry_id": entry_id}, timeout=10
+        )
+        r.raise_for_status()
+        flow = r.json()
+        if flow.get("type") != "menu":
+            raise RuntimeError(f"Expected the reconfigure menu, got {flow}")
+        r = self._session.post(
+            f"{base}/{flow['flow_id']}", json={"next_step_id": menu_choice}, timeout=10
+        )
+        r.raise_for_status()
+        r = self._session.post(f"{base}/{flow['flow_id']}", json=user_input, timeout=30)
+        r.raise_for_status()
+        result: dict[str, Any] = r.json()
+        return result
+
+    def registry_entities(self, platform: str = "foxess_control") -> dict[str, str]:
+        """``unique_id -> entity_id`` for every registry entry of *platform*."""
+        reply = self._ws_command({"type": "config/entity_registry/list"})
+        if not reply.get("success"):
+            raise RuntimeError(f"entity_registry/list failed: {reply}")
+        return {
+            e["unique_id"]: e["entity_id"]
+            for e in reply["result"]
+            if e["platform"] == platform
+        }
+
     def set_input_number(self, entity_id: str, value: float) -> None:
         """Set an input_number helper value."""
         self.call_service(

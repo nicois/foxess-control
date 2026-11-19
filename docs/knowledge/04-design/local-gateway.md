@@ -104,3 +104,29 @@ gateway is on the LAN, so failing loudly is cheap and honest (C-020). The
 card's stale threshold for `local` is 180 s: three missed 60 s polls,
 which is what remains when the stream is down.
 **Priority served**: P-005 (C-020, C-026).
+
+### D-066: Switch backends in place, on the same config entry
+**Decision**: Reconfigure is a menu that switches an existing entry between
+the cloud and local backends by updating *that* entry
+(`async_update_reload_and_abort`), never by replacing it. The other
+backend's settings stay in `entry.data` (only `backend` decides which one
+is used), so switching back is one form with the stored key pre-filled. The
+switch is refused when the gateway's inverter serial differs from the
+entry's unique id (`wrong_inverter`), and while a smart session is running
+(`session_active`). Setup on a backend without an inverter discards any
+persisted sessions instead of recovering them. Entity-mode entries keep the
+previous reconfigure behaviour.
+**Context**: Entity unique ids are `{entry_id}_{suffix}`. Deleting an entry
+deletes its entity registry rows, so a delete-and-re-add switch lost every
+entity's history and broke each dashboard card, automation, helper and the
+Energy dashboard configuration that referred to them: a large cost just to
+evaluate foxess-local, or to go back.
+**Rationale**: Keeping the entry keeps the registry, so nothing downstream
+can notice the switch. A reload keeps a running session's schedule group on
+the inverter for recovery, which the other backend could not recover or
+remove (C-025), so switching happens only between sessions. Re-pointing an
+entry at another inverter would graft one inverter's history onto
+another's entities, so the serial must match.
+**Priority served**: P-005 (C-020: the switch and its refusals are explained
+in the UI), P-002/P-001 via C-025 (no orphaned session overrides).
+

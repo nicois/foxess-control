@@ -352,10 +352,37 @@
           "local_url": "网关 URL",
           "local_token": "访问令牌"
         }
+      },
+      "reconfigure": {
+        "title": "重新配置 FoxESS Control",
+        "description": "更改 Home Assistant 连接此逆变器的方式。切换后，所有实体及其历史记录、仪表板和设置都会保留。",
+        "menu_options": {
+          "web_credentials": "网页门户凭据（实时数据）",
+          "reconfigure_local": "本地网关（foxess-local）",
+          "reconfigure_cloud": "FoxESS Cloud（API 密钥）"
+        }
+      },
+      "reconfigure_local": {
+        "title": "本地网关（foxess-local）",
+        "description": "通过网络中的 foxess-local 网关连接此逆变器。实体、历史记录、仪表板和设置都会保留，云端凭据也会保留以便切换回来。本地后端暂不支持智能充电和放电。",
+        "data": {
+          "local_url": "网关 URL",
+          "local_token": "访问令牌"
+        }
+      },
+      "reconfigure_cloud": {
+        "title": "FoxESS Cloud",
+        "description": "通过 FoxESS Cloud API 连接此逆变器。实体、历史记录、仪表板和设置都会保留，网关设置也会保留以便切换回来。",
+        "data": {
+          "api_key": "API 密钥"
+        }
       }
     },
     "abort": {
-      "reconfigure_successful": "Web credentials updated successfully."
+      "reconfigure_successful": "Web credentials updated successfully.",
+      "backend_switched": "连接已更新。集成已重新加载；实体、历史记录和设置均未改变。",
+      "wrong_inverter": "该网关报告的逆变器与此条目不同。请使用此条目的逆变器，或将另一台逆变器添加为新条目。",
+      "session_active": "智能充电或放电会话正在运行。请取消或等待其结束后再切换。"
     },
     "error": {
       "cannot_connect": "无法连接到 FoxESS Cloud API。请检查您的网络连接。",

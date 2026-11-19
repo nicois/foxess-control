@@ -24,7 +24,7 @@ serving it.
 | P-002 Respect minimum state of charge | C-002, C-003, C-012, C-013, C-016, C-018, C-019, C-024, C-025, C-027 | D-001, D-016 | ENFORCED |
 | P-003 Meet the user's energy target | C-007, C-008, C-009, C-010, C-011, C-014, C-022, C-023, C-037 | D-005, D-006, D-007, D-011, D-012, D-013, D-014, D-015 (taper), D-019, D-032, D-033, D-037, D-042, D-043, D-044, D-046 | ENFORCED |
 | P-004 Maximise feed-in revenue | (aspirational — no C-NNN) | (no D-NNN currently declares P-004 as primary; D-044 serves P-003 but advances P-004 as a secondary effect) | ASPIRATIONAL |
-| P-005 Operational transparency | C-004, C-005, C-006, C-020, C-022, C-026, C-038 | D-008, D-009, D-010, D-020, D-021, D-027, D-028, D-029, D-030, D-035, D-036, D-038, D-039, D-040, D-041 (ws), D-048, D-050, D-051, D-053, D-054, D-055, D-056, D-058, D-059, D-060, D-064, D-065 | ENFORCED |
+| P-005 Operational transparency | C-004, C-005, C-006, C-020, C-022, C-026, C-038 | D-008, D-009, D-010, D-020, D-021, D-027, D-028, D-029, D-030, D-035, D-036, D-038, D-039, D-040, D-041 (ws), D-048, D-050, D-051, D-053, D-054, D-055, D-056, D-058, D-059, D-060, D-064, D-065, D-066 | ENFORCED |
 | P-006 Brand portability | C-015, C-021, C-039, C-040 | D-022 | ENFORCED |
 | P-007 Engineering process integrity | C-015, C-028, C-029, C-030, C-031, C-032, C-033, C-034, C-035, C-036, C-043 | D-019, D-031, D-034, D-041 (lovelace), D-045, D-049 | ENFORCED |
 

@@ -348,10 +348,37 @@
           "local_url": "Adres URL bramy",
           "local_token": "Token dostępu"
         }
+      },
+      "reconfigure": {
+        "title": "Ponowna konfiguracja FoxESS Control",
+        "description": "Zmień sposób, w jaki Home Assistant łączy się z tym falownikiem. Przełączenie zachowuje wszystkie encje, ich historię, pulpity i ustawienia.",
+        "menu_options": {
+          "web_credentials": "Dane logowania do portalu (dane w czasie rzeczywistym)",
+          "reconfigure_local": "Bramka lokalna (foxess-local)",
+          "reconfigure_cloud": "FoxESS Cloud (klucz API)"
+        }
+      },
+      "reconfigure_local": {
+        "title": "Bramka lokalna (foxess-local)",
+        "description": "Połącz ten falownik przez bramkę foxess-local w Twojej sieci. Encje, historia, pulpity i ustawienia zostają zachowane, podobnie jak dane logowania do chmury na potrzeby powrotu. Inteligentne ładowanie i rozładowanie nie są jeszcze dostępne z lokalnym backendem.",
+        "data": {
+          "local_url": "Adres URL bramki",
+          "local_token": "Token dostępu"
+        }
+      },
+      "reconfigure_cloud": {
+        "title": "FoxESS Cloud",
+        "description": "Połącz ten falownik przez API FoxESS Cloud. Encje, historia, pulpity i ustawienia zostają zachowane, podobnie jak ustawienia bramki na potrzeby powrotu.",
+        "data": {
+          "api_key": "Klucz API"
+        }
       }
     },
     "abort": {
-      "reconfigure_successful": "Web credentials updated successfully."
+      "reconfigure_successful": "Web credentials updated successfully.",
+      "backend_switched": "Połączenie zaktualizowane. Integracja została przeładowana; encje, historia i ustawienia pozostały bez zmian.",
+      "wrong_inverter": "Ta bramka zgłasza inny falownik niż ten wpis. Użyj falownika z tego wpisu albo dodaj drugi jako nowy wpis.",
+      "session_active": "Trwa sesja inteligentnego ładowania lub rozładowania. Anuluj ją lub poczekaj na jej zakończenie, a następnie przełącz."
     },
     "error": {
       "cannot_connect": "Nie można połączyć się z API FoxESS Cloud. Sprawdź połączenie sieciowe.",

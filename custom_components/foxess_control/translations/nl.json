@@ -352,10 +352,37 @@
           "local_url": "Gateway-URL",
           "local_token": "Toegangstoken"
         }
+      },
+      "reconfigure": {
+        "title": "FoxESS Control opnieuw configureren",
+        "description": "Wijzig hoe Home Assistant deze omvormer bereikt. Bij het overschakelen blijven alle entiteiten, hun geschiedenis, je dashboards en je instellingen behouden.",
+        "menu_options": {
+          "web_credentials": "Inloggegevens webportaal (realtime gegevens)",
+          "reconfigure_local": "Lokale gateway (foxess-local)",
+          "reconfigure_cloud": "FoxESS Cloud (API-sleutel)"
+        }
+      },
+      "reconfigure_local": {
+        "title": "Lokale gateway (foxess-local)",
+        "description": "Verbind deze omvormer via een foxess-local-gateway in je netwerk. Je entiteiten, geschiedenis, dashboards en instellingen blijven behouden, en ook je cloudgegevens om terug te schakelen. Slim laden en ontladen is met de lokale backend nog niet beschikbaar.",
+        "data": {
+          "local_url": "Gateway-URL",
+          "local_token": "Toegangstoken"
+        }
+      },
+      "reconfigure_cloud": {
+        "title": "FoxESS Cloud",
+        "description": "Verbind deze omvormer via de FoxESS Cloud API. Je entiteiten, geschiedenis, dashboards en instellingen blijven behouden, en ook de gateway-instellingen om terug te schakelen.",
+        "data": {
+          "api_key": "API-sleutel"
+        }
       }
     },
     "abort": {
-      "reconfigure_successful": "Web credentials updated successfully."
+      "reconfigure_successful": "Web credentials updated successfully.",
+      "backend_switched": "Verbinding bijgewerkt. De integratie is opnieuw geladen; je entiteiten, geschiedenis en instellingen zijn ongewijzigd.",
+      "wrong_inverter": "Die gateway meldt een andere omvormer dan deze vermelding. Gebruik de omvormer van deze vermelding of voeg de andere toe als nieuwe vermelding.",
+      "session_active": "Er loopt een slimme laad- of ontlaadsessie. Annuleer deze of wacht tot ze klaar is en schakel dan over."
     },
     "error": {
       "cannot_connect": "Kan geen verbinding maken met de FoxESS Cloud API. Controleer uw netwerkverbinding.",

@@ -352,10 +352,37 @@
           "local_url": "ゲートウェイ URL",
           "local_token": "アクセストークン"
         }
+      },
+      "reconfigure": {
+        "title": "FoxESS Control を再設定",
+        "description": "Home Assistant がこのインバーターに接続する方法を変更します。切り替えても、すべてのエンティティ、その履歴、ダッシュボード、設定は保持されます。",
+        "menu_options": {
+          "web_credentials": "Web ポータルの認証情報（リアルタイムデータ）",
+          "reconfigure_local": "ローカルゲートウェイ（foxess-local）",
+          "reconfigure_cloud": "FoxESS Cloud（API キー）"
+        }
+      },
+      "reconfigure_local": {
+        "title": "ローカルゲートウェイ（foxess-local）",
+        "description": "ネットワーク上の foxess-local ゲートウェイ経由でこのインバーターに接続します。エンティティ、履歴、ダッシュボード、設定は保持され、元に戻せるようクラウドの認証情報も保持されます。ローカルバックエンドではスマート充電・放電はまだ利用できません。",
+        "data": {
+          "local_url": "ゲートウェイ URL",
+          "local_token": "アクセストークン"
+        }
+      },
+      "reconfigure_cloud": {
+        "title": "FoxESS Cloud",
+        "description": "FoxESS Cloud API 経由でこのインバーターに接続します。エンティティ、履歴、ダッシュボード、設定は保持され、元に戻せるようゲートウェイの設定も保持されます。",
+        "data": {
+          "api_key": "API キー"
+        }
       }
     },
     "abort": {
-      "reconfigure_successful": "Web credentials updated successfully."
+      "reconfigure_successful": "Web credentials updated successfully.",
+      "backend_switched": "接続を更新しました。統合を再読み込みしました。エンティティ、履歴、設定は変わっていません。",
+      "wrong_inverter": "そのゲートウェイは、このエントリーとは別のインバーターを報告しています。このエントリーのインバーターを使用するか、別のインバーターを新しいエントリーとして追加してください。",
+      "session_active": "スマート充電または放電のセッションが実行中です。キャンセルするか終了を待ってから切り替えてください。"
     },
     "error": {
       "cannot_connect": "FoxESS Cloud API に接続できません。ネットワーク接続を確認してください。",

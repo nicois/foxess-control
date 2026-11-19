@@ -721,6 +721,23 @@ async def _recover_sessions(
     if not stored:
         return
 
+    if inverter is None and not _cfg(hass).entity_mode:
+        # A backend that cannot control the inverter (the read-only local
+        # gateway) can neither resume nor clean up a session. These can only
+        # have been persisted under another backend before a switch, which
+        # the reconfigure flow allows only between sessions.
+        dropped = [k for k in ("smart_charge", "smart_discharge") if k in stored]
+        if dropped:
+            _LOGGER.warning(
+                "Discarding persisted %s: this backend cannot control the "
+                "inverter, so the session cannot be resumed",
+                ", ".join(dropped),
+            )
+            for key in dropped:
+                del stored[key]
+            await store.async_save(stored)
+        return
+
     now = dt_util.now()
     today_str = now.strftime("%Y-%m-%d")
     changed = False

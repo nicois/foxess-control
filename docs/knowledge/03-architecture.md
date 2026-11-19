@@ -63,7 +63,7 @@ gateway payloads (signed watts) into the cloud-shaped coordinator data.
 Paired with `FoxESSLocalCoordinator` in `coordinator.py` (`/state` poll
 plus the always-on event stream). Read-only in its first phase: there is
 no `Inverter` for a local entry and control services refuse. See
-`04-design/local-gateway.md` (D-064, D-065) and the simulator's gateway
+`04-design/local-gateway.md` (D-064, D-065, D-066) and the simulator's gateway
 routes in `simulator/local_gateway.py`.
 **Why separate**: Like `foxess/` generally: brand-specific transport
 (C-021). It shares nothing with the cloud client except the coordinator
