@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .const import DEFAULT_POLLING_INTERVAL, DOMAIN, POLLED_VARIABLES
+from .foxess_adapter import _ENTITY_MODE_MAP
 from .smart_battery.coordinator import EntityCoordinator as _EntityCoordinator
 from .smart_battery.coordinator import get_coordinator_soc as _get_coordinator_soc
 from .smart_battery.logging import record_operational_error
@@ -803,11 +804,22 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.hass.async_create_task(_do_fetch(), name="foxess_bms_temp_fetch")
 
 
+# foxess_modbus reports the work mode as its select option label ("Self
+# Use"), not the WorkMode value ("SelfUse") that the work-mode ENUM sensor
+# declares (issue #24).  Reverse of the write-direction map, plus the
+# WorkMode values themselves for entities that already use them.
+_ENTITY_LABEL_TO_WORK_MODE: dict[str, str] = {
+    **{mode.value: mode.value for mode in _ENTITY_MODE_MAP},
+    **{label: mode.value for mode, label in _ENTITY_MODE_MAP.items()},
+}
+
+
 class FoxESSEntityCoordinator(_EntityCoordinator):
     """Read inverter state from external HA entities (foxess_modbus interop).
 
     Thin subclass that binds the shared ``EntityCoordinator`` to the
-    ``foxess_control`` domain.
+    ``foxess_control`` domain and translates foxess_modbus work-mode labels
+    into WorkMode values.
     """
 
     def __init__(
@@ -822,6 +834,15 @@ class FoxESSEntityCoordinator(_EntityCoordinator):
             entity_map=entity_map,
             update_interval_seconds=update_interval_seconds,
         )
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        data = await super()._async_update_data()
+        label = data.get("_work_mode")
+        if label is not None:
+            # A mode with no WorkMode equivalent (e.g. "Peak Shaving") is
+            # reported as unknown rather than crashing the ENUM sensor.
+            data["_work_mode"] = _ENTITY_LABEL_TO_WORK_MODE.get(label)
+        return data
 
 
 class FoxESSLocalCoordinator(DataUpdateCoordinator[dict[str, Any]]):

@@ -318,7 +318,53 @@ class TestEntityCoordinator:
         data = await coord._async_update_data()
         assert data["SoC"] == 75.5
         assert data["loadsPower"] == 1.2
-        assert data["_work_mode"] == "Self Use"
+        assert data["_work_mode"] == "SelfUse"
+
+    async def _read_work_mode(self, label: str) -> Any:
+        hass = MagicMock()
+        work_mode_state = MagicMock()
+        work_mode_state.state = label
+        hass.states.get = MagicMock(return_value=work_mode_state)
+        with patch(
+            "custom_components.foxess_control.coordinator."
+            "DataUpdateCoordinator.__init__"
+        ):
+            coord = FoxESSEntityCoordinator.__new__(FoxESSEntityCoordinator)
+            coord.hass = hass
+            coord._entity_map = {"_work_mode": ("select.foxess_work_mode", "")}
+        data = await coord._async_update_data()
+        return data["_work_mode"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("label", "expected"),
+        [
+            ("Self Use", "SelfUse"),
+            ("Force Charge", "ForceCharge"),
+            ("Force Discharge", "ForceDischarge"),
+            ("Back-up", "Backup"),
+            ("Feed-in First", "Feedin"),
+        ],
+    )
+    async def test_foxess_modbus_labels_become_work_modes(
+        self, label: str, expected: str
+    ) -> None:
+        """Issue #24: foxess_modbus labels must map onto the WorkMode values.
+
+        The work-mode sensor is an ENUM whose options are the WorkMode
+        values; a raw "Self Use" raised ValueError on every refresh.
+        """
+        assert await self._read_work_mode(label) == expected
+
+    @pytest.mark.asyncio
+    async def test_work_mode_values_pass_through(self) -> None:
+        """An entity that already reports WorkMode values is left alone."""
+        assert await self._read_work_mode("ForceCharge") == "ForceCharge"
+
+    @pytest.mark.asyncio
+    async def test_unknown_label_becomes_none(self) -> None:
+        """Issue #24: a mode with no WorkMode equivalent must not crash the sensor."""
+        assert await self._read_work_mode("Peak Shaving") is None
 
     @pytest.mark.asyncio
     async def test_converts_watts_to_kw(self) -> None:
