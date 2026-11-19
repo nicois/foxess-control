@@ -247,7 +247,7 @@ class FoxessControlConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._abort_if_unique_id_configured()
                 options: dict[str, Any] = {}
                 capacity_wh = (state.get("battery") or {}).get("capacity_wh")
-                if isinstance(capacity_wh, (int, float)) and capacity_wh > 0:
+                if isinstance(capacity_wh, int | float) and capacity_wh > 0:
                     options[CONF_BATTERY_CAPACITY_KWH] = capacity_wh / 1000.0
                 model = (state.get("identity") or {}).get("model") or "FoxESS"
                 return self.async_create_entry(

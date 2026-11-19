@@ -33,7 +33,7 @@ def sim(foxess_sim: SimulatorHandle) -> SimulatorHandle:
     return foxess_sim
 
 
-@pytest_asyncio.fixture
+@pytest_asyncio.fixture  # type: ignore[untyped-decorator]
 async def session() -> AsyncIterator[aiohttp.ClientSession]:
     async with aiohttp.ClientSession() as s:
         yield s

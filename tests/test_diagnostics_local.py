@@ -57,10 +57,12 @@ async def _diagnostics(
             coord = FoxESSLocalCoordinator(
                 MagicMock(), FoxESSLocalClient(session, sim.url, token), 60
             )
+        data: dict[str, Any] | None
         try:
-            coord.data = await coord._async_update_data()
+            data = await coord._async_update_data()
         except UpdateFailed:
-            coord.data = None
+            data = None
+        coord.data = data  # type: ignore[assignment]  # None until a first refresh succeeds
         coord.last_stream_error = "unreachable: example"
         dd = FoxESSControlData()
         dd.entries["e1"] = FoxESSEntryData(coordinator=coord, inverter=None)
