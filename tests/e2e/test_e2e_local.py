@@ -58,7 +58,7 @@ class TestLocalSensors:
     ) -> None:
         foxess_sim.set(feedin_total_kwh=1234.5)
         value = ha_e2e.wait_for_numeric_state(
-            "sensor.foxess_feedin", "eq", 1234.5, timeout_s=30
+            "sensor.foxess_grid_feed_in_energy", "eq", 1234.5, timeout_s=30
         )
         assert value == 1234.5
 
