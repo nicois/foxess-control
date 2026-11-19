@@ -221,8 +221,14 @@ def entity_mapping_schema(
     """
     opts = config_entry.options if config_entry is not None else {}
 
-    def _default(conf_key: str) -> str:
-        return opts.get(conf_key) or detected.get(conf_key, "")
+    def _entity_field(conf_key: str) -> vol.Optional:
+        # A suggested value, not a default: an empty default ("") would be
+        # validated by EntitySelector and rejected, so a form with any field
+        # left empty could never be saved (issue #33).
+        current = opts.get(conf_key) or detected.get(conf_key)
+        if current:
+            return vol.Optional(conf_key, description={"suggested_value": current})
+        return vol.Optional(conf_key)
 
     select_selector = EntitySelector(EntitySelectorConfig(domain="select"))
     number_selector = EntitySelector(EntitySelectorConfig(domain="number"))
@@ -230,58 +236,19 @@ def entity_mapping_schema(
 
     return vol.Schema(
         {
-            vol.Optional(
-                CONF_WORK_MODE_ENTITY,
-                default=_default(CONF_WORK_MODE_ENTITY),
-            ): select_selector,
-            vol.Optional(
-                CONF_CHARGE_POWER_ENTITY,
-                default=_default(CONF_CHARGE_POWER_ENTITY),
-            ): number_selector,
-            vol.Optional(
-                CONF_DISCHARGE_POWER_ENTITY,
-                default=_default(CONF_DISCHARGE_POWER_ENTITY),
-            ): number_selector,
-            vol.Optional(
-                CONF_MIN_SOC_ENTITY,
-                default=_default(CONF_MIN_SOC_ENTITY),
-            ): number_selector,
-            vol.Optional(
-                CONF_SOC_ENTITY,
-                default=_default(CONF_SOC_ENTITY),
-            ): sensor_selector,
-            vol.Optional(
-                CONF_LOADS_POWER_ENTITY,
-                default=_default(CONF_LOADS_POWER_ENTITY),
-            ): sensor_selector,
-            vol.Optional(
-                CONF_PV_POWER_ENTITY,
-                default=_default(CONF_PV_POWER_ENTITY),
-            ): sensor_selector,
-            vol.Optional(
-                CONF_FEEDIN_ENERGY_ENTITY,
-                default=_default(CONF_FEEDIN_ENERGY_ENTITY),
-            ): sensor_selector,
-            vol.Optional(
-                CONF_BAT_CHARGE_POWER_ENTITY,
-                default=_default(CONF_BAT_CHARGE_POWER_ENTITY),
-            ): sensor_selector,
-            vol.Optional(
-                CONF_BAT_DISCHARGE_POWER_ENTITY,
-                default=_default(CONF_BAT_DISCHARGE_POWER_ENTITY),
-            ): sensor_selector,
-            vol.Optional(
-                CONF_GRID_CONSUMPTION_POWER_ENTITY,
-                default=_default(CONF_GRID_CONSUMPTION_POWER_ENTITY),
-            ): sensor_selector,
-            vol.Optional(
-                CONF_FEEDIN_POWER_ENTITY,
-                default=_default(CONF_FEEDIN_POWER_ENTITY),
-            ): sensor_selector,
-            vol.Optional(
-                CONF_EXPORT_LIMIT_ENTITY,
-                default=_default(CONF_EXPORT_LIMIT_ENTITY),
-            ): number_selector,
+            _entity_field(CONF_WORK_MODE_ENTITY): select_selector,
+            _entity_field(CONF_CHARGE_POWER_ENTITY): number_selector,
+            _entity_field(CONF_DISCHARGE_POWER_ENTITY): number_selector,
+            _entity_field(CONF_MIN_SOC_ENTITY): number_selector,
+            _entity_field(CONF_SOC_ENTITY): sensor_selector,
+            _entity_field(CONF_LOADS_POWER_ENTITY): sensor_selector,
+            _entity_field(CONF_PV_POWER_ENTITY): sensor_selector,
+            _entity_field(CONF_FEEDIN_ENERGY_ENTITY): sensor_selector,
+            _entity_field(CONF_BAT_CHARGE_POWER_ENTITY): sensor_selector,
+            _entity_field(CONF_BAT_DISCHARGE_POWER_ENTITY): sensor_selector,
+            _entity_field(CONF_GRID_CONSUMPTION_POWER_ENTITY): sensor_selector,
+            _entity_field(CONF_FEEDIN_POWER_ENTITY): sensor_selector,
+            _entity_field(CONF_EXPORT_LIMIT_ENTITY): number_selector,
             vol.Optional(
                 CONF_INVERTER_POWER,
                 default=opts.get(CONF_INVERTER_POWER, default_inverter_power),

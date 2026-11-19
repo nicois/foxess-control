@@ -547,17 +547,24 @@ class TestSchemaBuildersNoEntry:
         )
 
         schema = entity_mapping_schema(None, {CONF_WORK_MODE_ENTITY: "select.wm"})
-        # Read declared defaults directly from the schema markers. We cannot call
-        # schema({}) here because the other entity fields default to "" and the
-        # EntitySelector validator rejects empty strings (this is true for any
-        # empty-options entry, not specific to config_entry=None). The intent is
-        # to verify the detected work-mode value flows through as the default.
-        defaults = {
-            str(key): key.default()
+        suggested = {
+            str(key): (key.description or {}).get("suggested_value")
             for key in schema.schema
-            if getattr(key, "default", None) is not None
         }
-        assert defaults[CONF_WORK_MODE_ENTITY] == "select.wm"
+        assert suggested[CONF_WORK_MODE_ENTITY] == "select.wm"
+
+    def test_entity_mapping_schema_accepts_all_fields_empty(self) -> None:
+        """Issue #33: a cloud entry with foxess_modbus installed could not
+        save its options, because every empty entity field defaulted to ""
+        and EntitySelector rejects "" ("Entity is neither a valid entity ID
+        nor a valid UUID").  Empty fields must be submittable.
+        """
+        from custom_components.foxess_control.smart_battery.config_flow_base import (
+            entity_mapping_schema,
+        )
+
+        result = entity_mapping_schema(None, {})({})
+        assert CONF_WORK_MODE_ENTITY not in result
 
     def test_battery_options_schema_accepts_none_entry(self) -> None:
         from custom_components.foxess_control.smart_battery.config_flow_base import (
