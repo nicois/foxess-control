@@ -921,13 +921,21 @@ class TestGridDirectionFlagOptional:
     @pytest.mark.parametrize(
         "flag",
         [None, "--", "", "abc", 0, "0", 0.0],
-        ids=["missing", "placeholder", "empty", "unparseable", "int0", "str0", "float0"],
+        ids=[
+            "missing",
+            "placeholder",
+            "empty",
+            "unparseable",
+            "int0",
+            "str0",
+            "float0",
+        ],
     )
     @pytest.mark.parametrize("grid_status", [2, 3])
     def test_unusable_flag_falls_through_to_balance(
         self, flag: object, grid_status: int
     ) -> None:
-        """Balance 1.0+8.5-2.0 = 7.5 kW import matches grid 7.5; gridStatus is irrelevant."""
+        """Balance 1.0+8.5-2.0 = 7.5 kW import matches grid; gridStatus is moot."""
         msg = _ev_msg(
             solar=2.0,
             load=1.0,
