@@ -5,6 +5,7 @@
 ### Fixed
 - **Turning the Mode Scheduler master switch on or off now works (issues #16, #17, #30).** The integration sent it to `/op/v0/device/scheduler/set`, which the FoxESS Cloud does not serve on any model: KH, H1 and H3 inverters all answered HTTP 404. So `foxess_control.disable_scheduler` and **Release the inverter when idle** could never turn the switch off, and the switch was never explicitly turned on before a schedule write (the "Could not turn the Mode Scheduler master switch on" warning). It now uses `/op/v1/device/scheduler/set/flag`, the counterpart of the `/op/v1/device/scheduler/get/flag` read the integration already uses.
 - **The Work Mode sensor no longer crashes with foxess_modbus (issue #24).** foxess_modbus reports the work mode as `Self Use`, `Force Charge` and so on, while the sensor only accepts `SelfUse`, `ForceCharge` and the other mode values. So the sensor never got a state and every refresh logged a `ValueError`. The labels are now translated, and a mode with no equivalent here, such as `Peak Shaving`, shows as unknown. Thanks to @jesmon84 (PR #25) and @yourrival for the diagnosis.
+- **Setup no longer fails on inverters whose device detail has no capacity (issues #13, #33).** The M1-800-E and the MQ2200-M-H (NextEnergy Orbit-M) omit the `capacity` field, so setup stopped at "Could not determine inverter capacity from device detail" and retried forever. The integration now uses the maximum charge/discharge power the inverter declares for its schedules, and only fails if the inverter declares that too.
 
 ## 1.0.22-beta.10
 

@@ -228,6 +228,30 @@ class TestNoRegressionForWorkingModels:
             _ = inv.max_power_w
 
 
+class TestDetailWithoutCapacity:
+    """Issues #13 (M1-800-E) and #33 (MQ2200-M-H): device detail has no
+    ``capacity``, so setup failed with "Could not determine inverter
+    capacity from device detail" and retried forever.  The device's own
+    declared ``fdPwr`` ceiling is the rating to use instead.
+    """
+
+    def test_declared_ceiling_is_used(self, foxess_sim: SimulatorHandle) -> None:
+        foxess_sim.set(
+            device_type="MQ2200-M-H",
+            max_power_w=2200,
+            fd_pwr_max_w=2200,
+            detail_omits_capacity=True,
+        )
+        assert _make_inv(foxess_sim).max_power_w == 2200
+
+    def test_no_capacity_and_no_declared_ceiling_still_fails(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        foxess_sim.set(detail_omits_capacity=True, scheduler_properties_supported=False)
+        with pytest.raises(RuntimeError, match="capacity"):
+            _ = _make_inv(foxess_sim).max_power_w
+
+
 class TestModelStringIsIrrelevant:
     """``inverter_model: null`` in the bug reports was a red herring."""
 

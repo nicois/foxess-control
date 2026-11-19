@@ -242,6 +242,9 @@ class InverterModel:
     # When False, /op/v3/device/scheduler/get is not served (HTTP 404) —
     # models a firmware/region where the properties endpoint is absent.
     scheduler_properties_supported: bool = True
+    # When True, ``/op/v0/device/detail`` has no ``capacity`` field, as on
+    # the M1-800-E (issue #13) and MQ2200-M-H (issue #33).
+    detail_omits_capacity: bool = False
 
     # --- Mode Scheduler master switch -------------------------------------
     # Mode Scheduler master switch, as reported by
@@ -351,6 +354,8 @@ class InverterModel:
             "hasPV": True,
             "function": {"scheduler": True},
         }
+        if self.detail_omits_capacity:
+            del detail["capacity"]
         if self.device_type is not None:
             detail["deviceType"] = self.device_type
         return detail

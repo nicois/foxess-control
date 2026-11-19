@@ -125,12 +125,26 @@ class Inverter:
         """
         if self._max_power_w is None:
             detail = self.get_detail()
-            capacity_kw: float = detail.get("capacity", 0)
-            if capacity_kw <= 0:
-                raise RuntimeError(
-                    "Could not determine inverter capacity from device detail"
-                )
             self._device_type = detail.get("deviceType")
+            capacity_kw: float = detail.get("capacity") or 0
+            if capacity_kw <= 0:
+                # Issues #13 (M1-800-E), #33 (MQ2200-M-H): some models omit
+                # ``capacity``.  The device's own declared fdPwr ceiling is
+                # then the only rating there is, and it is authoritative.
+                declared = self.fd_pwr_limit_w
+                if declared is None or declared <= 0:
+                    raise RuntimeError(
+                        "Could not determine inverter capacity from device "
+                        "detail, and the device declares no fdPwr limit"
+                    )
+                _LOGGER.info(
+                    "Inverter %s reports no capacity; using its declared "
+                    "maximum fdPwr of %d W",
+                    self._device_type or self.sn,
+                    declared,
+                )
+                self._max_power_w = declared
+                return self._max_power_w
             rated_w = int(capacity_kw * self.CAPACITY_TO_FD_PWR)
             declared = self.fd_pwr_limit_w
             if declared is not None and declared < rated_w:
