@@ -200,3 +200,57 @@ class TestSessionsPersistedByTheOtherBackend:
         saved = store.async_save.await_args.args[0]
         assert "smart_charge" not in saved
         assert "smart_discharge" not in saved
+
+
+class TestDeferredSmartDischargeIsRefused:
+    """Regression: a smart discharge that would start *deferred* skipped the
+    only ``_get_inverter`` call (it sits in the start-now branch), so on the
+    read-only local backend it was accepted: a session was recorded,
+    listeners attached with no inverter, and the session persisted. The
+    refusal must come from the service call, before any state changes, so
+    an automation sees it (C-020)."""
+
+    @pytest.mark.asyncio
+    async def test_refused_before_any_session_state(self) -> None:
+        import datetime
+
+        from custom_components.foxess_control import _register_services
+        from tests.test_services import _get_handler, _make_call, _make_hass
+
+        # Same shape as TestHandleSmartDischarge's deferral case: a long
+        # window and moderate SoC defer the start.
+        hass = _make_hass(
+            battery_capacity_kwh=10.0,
+            coordinator_data={"SoC": 80.0, "loadsPower": 0.0, "pvPower": 0.0},
+        )
+        dd: FoxESSControlData = hass.data[DOMAIN]
+        dd.entries["entry1"].inverter = None
+        hass.config_entries.async_get_entry.return_value.data = {
+            CONF_BACKEND: BACKEND_LOCAL
+        }
+        _register_services(hass)
+        handler = _get_handler(hass, "smart_discharge")
+        listeners = "custom_components.foxess_control.smart_battery.listeners"
+
+        with (
+            patch(
+                f"{listeners}.dt_util.now",
+                return_value=datetime.datetime(2026, 4, 7, 17, 0, 0),
+            ),
+            patch(f"{listeners}.async_track_point_in_time", return_value=MagicMock()),
+            patch(f"{listeners}.async_track_time_interval", return_value=MagicMock()),
+            pytest.raises(ServiceValidationError) as excinfo,
+        ):
+            await handler(
+                _make_call(
+                    {
+                        "start_time": datetime.time(17, 0),
+                        "end_time": datetime.time(20, 0),
+                        "min_soc": 10,
+                    }
+                )
+            )
+
+        assert excinfo.value.translation_key == "local_control_unavailable"
+        assert dd.smart_discharge_state is None
+        dd.store.async_save.assert_not_awaited()
