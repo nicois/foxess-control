@@ -215,7 +215,8 @@ class TestDeferredSmartDischargeIsRefused:
         import datetime
 
         from custom_components.foxess_control import _register_services
-        from tests.test_services import _get_handler, _make_call, _make_hass
+        from tests.conftest import _get_handler
+        from tests.test_services import _make_call, _make_hass
 
         # Same shape as TestHandleSmartDischarge's deferral case: a long
         # window and moderate SoC defer the start.
@@ -253,4 +254,5 @@ class TestDeferredSmartDischargeIsRefused:
 
         assert excinfo.value.translation_key == "local_control_unavailable"
         assert dd.smart_discharge_state is None
-        dd.store.async_save.assert_not_awaited()
+        store: Any = dd.store
+        store.async_save.assert_not_awaited()
