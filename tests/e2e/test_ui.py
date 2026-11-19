@@ -30,7 +30,7 @@ from .selectors import ControlCard, OverviewCard
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from playwright.sync_api import JSHandle, Locator, Page
+    from playwright.sync_api import Locator, Page
 
     from .conftest import SimulatorHandle
     from .ha_client import HAClient
@@ -314,16 +314,23 @@ def _find_card(page: Page, tag: str, timeout: int = 30000) -> bool:
         return False
 
 
-def _safe_wait_for_function(
+def _safe_wait_for_value(
     page: Page,
     expression: str,
     *,
     timeout: int = 10000,
     retries: int = 3,
     settle_timeout_ms: int = 3000,
-) -> JSHandle:
+) -> Any:
     """Run ``page.wait_for_function`` with retry on context destruction
-    and return the resolved JSHandle.
+    and return the resolved value (``json_value()`` of the handle).
+
+    The value is read *inside* the retry loop.  Returning the JSHandle and
+    letting callers call ``.json_value()`` left a window between the wait
+    resolving and the read in which a navigation destroyed the context —
+    and that read was not retried (``test_custom_boxes_hides_unconfigured
+    [entity]`` on merge a6eb63d: ``JSHandle.json_value: Execution context
+    was destroyed``).
 
     Mirrors ``_safe_evaluate`` for the ``page.wait_for_function`` primitive
     in test bodies that need a return value (typically followed by
@@ -356,18 +363,18 @@ def _safe_wait_for_function(
             return page.wait_for_function(
                 expression,
                 timeout=min(remaining, timeout),
-            )
+            ).json_value()
         except PlaywrightError as exc:
             msg = str(exc)
             if "Execution context was destroyed" not in msg and "navigating" not in msg:
-                _capture_failure(page, "safe_wait_for_function")
+                _capture_failure(page, "safe_wait_for_value")
                 raise
             last_exc = exc
             if attempt == retries:
                 break
             with contextlib.suppress(PlaywrightError):
                 page.wait_for_load_state("domcontentloaded", timeout=settle_timeout_ms)
-    _capture_failure(page, "safe_wait_for_function")
+    _capture_failure(page, "safe_wait_for_value")
     assert last_exc is not None  # noqa: S101
     raise last_exc
 
@@ -484,7 +491,7 @@ class TestOverviewCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
         _robust_reload(page, settle_ms=2000)
 
-        cursor = _safe_wait_for_function(
+        cursor = _safe_wait_for_value(
             page,
             f"""() => {{
                 {_JS_FIND_OVERVIEW_CARD}
@@ -495,7 +502,7 @@ class TestOverviewCard:
                 return getComputedStyle(node).cursor;
             }}""",
             timeout=10000,
-        ).json_value()
+        )
         assert cursor == "pointer", f"Expected pointer cursor, got '{cursor}'"
 
     def test_sub_link_click_opens_more_info(
@@ -555,7 +562,7 @@ class TestOverviewCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
         _robust_reload(page, settle_ms=2000)
 
-        node_types = _safe_wait_for_function(
+        node_types = _safe_wait_for_value(
             page,
             """() => {
                 function findAllCards(root) {
@@ -584,7 +591,7 @@ class TestOverviewCard:
                 return types.length > 0 ? types : null;
             }""",
             timeout=10000,
-        ).json_value()
+        )
         assert node_types is not None, "Second overview card not found"
         assert "battery" in node_types, "Battery node should be present"
         assert "solar" in node_types, "Solar node should be present"
@@ -602,7 +609,7 @@ class TestOverviewCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, solar_kw=1.0)
         _robust_reload(page, settle_ms=2000)
 
-        label_text = _safe_wait_for_function(
+        label_text = _safe_wait_for_value(
             page,
             """() => {
                 function findAllCards(root) {
@@ -624,7 +631,7 @@ class TestOverviewCard:
                 return solar ? solar.textContent : null;
             }""",
             timeout=10000,
-        ).json_value()
+        )
         assert label_text is not None, "Solar node label not found"
         assert "PV" in label_text, f"Expected 'PV' in label, got '{label_text}'"
 
@@ -639,7 +646,7 @@ class TestOverviewCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
         _robust_reload(page, settle_ms=2000)
 
-        order = _safe_wait_for_function(
+        order = _safe_wait_for_value(
             page,
             """() => {
                 function findAllCards(root) {
@@ -668,7 +675,7 @@ class TestOverviewCard:
                 return types.length > 0 ? types : null;
             }""",
             timeout=10000,
-        ).json_value()
+        )
         assert order is not None, "Second overview card not found"
         assert order == ["battery", "solar"], (
             f"Expected order ['battery', 'solar'], got {order}"
@@ -685,7 +692,7 @@ class TestOverviewCard:
         set_inverter_state(connection_mode, foxess_sim, ha_e2e, soc=60, load_kw=0.5)
         _robust_reload(page, settle_ms=2000)
 
-        types = _safe_wait_for_function(
+        types = _safe_wait_for_value(
             page,
             f"""() => {{
                 {_JS_FIND_OVERVIEW_CARD}
@@ -703,7 +710,7 @@ class TestOverviewCard:
                 return types.length >= 4 ? types : null;
             }}""",
             timeout=10000,
-        ).json_value()
+        )
         assert types is not None, "Overview card not found"
         assert types == ["solar", "house", "grid", "battery"], (
             f"Expected order ['solar', 'house', 'grid', 'battery'], got {types}"
@@ -762,7 +769,7 @@ class TestOverviewCard:
         assert render_result == "ok", f"Overview card _render() threw: {render_result}"
 
         # The card should still show ha-card (graceful degradation)
-        has_card = _safe_wait_for_function(
+        has_card = _safe_wait_for_value(
             page,
             f"""() => {{
                 {_JS_FIND_OVERVIEW_CARD}
@@ -846,7 +853,7 @@ class TestOverviewCard:
         )
         _robust_reload(page)
 
-        badge_text = _safe_wait_for_function(
+        badge_text = _safe_wait_for_value(
             page,
             """() => {
                 function findCard(root) {
@@ -870,7 +877,7 @@ class TestOverviewCard:
                 return badge ? badge.textContent : null;
             }""",
             timeout=10000,
-        ).json_value()
+        )
         expected = data_source.upper()
         assert badge_text is not None and badge_text.startswith(expected), (
             f"Badge shows '{badge_text}', expected to start with '{expected}'"
@@ -918,7 +925,7 @@ class TestOverviewCard:
         page.wait_for_timeout(32000)
         _robust_reload(page)
 
-        badge_info = _safe_wait_for_function(
+        badge_info = _safe_wait_for_value(
             page,
             """() => {
                 function findCard(root) {
@@ -946,7 +953,7 @@ class TestOverviewCard:
                 };
             }""",
             timeout=10000,
-        ).json_value()
+        )
         assert badge_info is not None, "data-source badge not found"
         assert "stale" not in badge_info["classes"], (
             f"32s of age is normal for a 300s poll interval, so the badge "
@@ -999,7 +1006,7 @@ class TestOverviewCard:
         # here keeps ``wait_for_function`` polling until the rendered text
         # parses with the same ``W|kW`` pattern ``_parse_power_kw`` uses —
         # eliminating the ``Cannot parse power from '—'`` race (C-031).
-        solar_texts = _safe_wait_for_function(
+        solar_texts = _safe_wait_for_value(
             page,
             """() => {
                 function findCard(root) {
@@ -1033,7 +1040,7 @@ class TestOverviewCard:
                 return { total, detail };
             }""",
             timeout=30000,
-        ).json_value()
+        )
         assert solar_texts, "Solar node never rendered a parseable value"
         assert solar_texts["total"], "Solar total not displayed"
 
@@ -1099,7 +1106,7 @@ class TestControlCard:
         # Poll until the card renders a progress section — the card
         # may take several seconds to re-render after discharge starts,
         # especially in the WS data-source variant.
-        _safe_wait_for_function(
+        _safe_wait_for_value(
             page,
             """() => {
                 function findCard(root) {
@@ -1174,7 +1181,7 @@ class TestControlCard:
         # Verify the marker renders on the card
         _robust_reload(page)
 
-        has_marker = _safe_wait_for_function(
+        has_marker = _safe_wait_for_value(
             page,
             """() => {
                 function findCard(root) {
@@ -1202,7 +1209,7 @@ class TestControlCard:
                 };
             }""",
             timeout=10000,
-        ).json_value()
+        )
         assert has_marker, "Horizon marker not found in control card"
         assert has_marker["left"], "Horizon marker has no position"
 
@@ -1229,7 +1236,7 @@ class TestControlCard:
         )
         _robust_reload(page, settle_ms=3000)
 
-        has_cancel = _safe_wait_for_function(
+        has_cancel = _safe_wait_for_value(
             page,
             """() => {
                 function findCard(root) {
@@ -1249,7 +1256,7 @@ class TestControlCard:
                 return btn !== null;
             }""",
             timeout=15000,
-        ).json_value()
+        )
         assert has_cancel is True, "Cancel button should be visible by default"
 
         _safe_evaluate(
@@ -1274,7 +1281,7 @@ class TestControlCard:
             }""",
         )
 
-        no_cancel = _safe_wait_for_function(
+        no_cancel = _safe_wait_for_value(
             page,
             """() => {
                 function findCard(root) {
@@ -1293,7 +1300,7 @@ class TestControlCard:
                 return card.shadowRoot.querySelector('.cancel') === null;
             }""",
             timeout=5000,
-        ).json_value()
+        )
         assert no_cancel is True, (
             "Cancel button should be hidden when show_cancel: false"
         )
