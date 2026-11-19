@@ -120,7 +120,7 @@ rules:
           def _safe_screenshot(...):
             ...
       - pattern-not-inside: |
-          def _safe_wait_for_function(...):
+          def _safe_wait_for_value(...):
             ...
       - pattern-not-inside: |
           def _find_card(...):
@@ -173,7 +173,7 @@ rules:
       blocker on v1.0.17-beta.4 against
       test_safety_floor_row_appears_when_tracked[cloud], run id
       26137320539).  Route through the matching helper:
-      _safe_evaluate / _safe_wait_for_function for evaluate-style
+      _safe_evaluate / _safe_wait_for_value for evaluate-style
       calls; _find_card / _wait_for_card_hass for shadow-DOM
       readiness; _wait_for_lovelace_panel / _wait_for_stage for
       pre-test panel readiness.

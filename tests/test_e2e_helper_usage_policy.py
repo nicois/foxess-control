@@ -50,7 +50,7 @@ _HELPER_FUNCTIONS: dict[str, frozenset[str]] = {
             # Module-level retry helpers — the canonical retry layer.
             "_safe_evaluate",
             "_safe_screenshot",
-            "_safe_wait_for_function",
+            "_safe_wait_for_value",
             "_find_card",
             "_wait_for_card_hass",
             # Class-scoped retry helpers with their own form-/screenshot-
