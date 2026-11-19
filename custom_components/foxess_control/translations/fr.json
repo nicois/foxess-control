@@ -152,6 +152,24 @@
     }
   },
   "services": {
+    "backup": {
+      "name": "Secours",
+      "description": "Place l'onduleur en mode Secours pendant une durée définie : le solaire continue de charger la batterie, mais la batterie ne se décharge pas vers la maison.",
+      "fields": {
+        "duration": {
+          "name": "Durée",
+          "description": "Durée du mode Secours (max 4 heures, ne doit pas dépasser minuit)."
+        },
+        "start_time": {
+          "name": "Heure de début",
+          "description": "Heure de début du forçage. Par défaut : maintenant."
+        },
+        "replace_conflicts": {
+          "name": "Supprimer les forçages en conflit au lieu d'abandonner",
+          "description": "Si activé, supprime silencieusement les forçages existants qui se chevauchent au lieu d'abandonner."
+        }
+      }
+    },
     "clear_overrides": {
       "name": "Effacer les forçages",
       "description": "Remettre l'onduleur en mode autoconsommation en effaçant tous les forçages ou ceux sélectionnés.",

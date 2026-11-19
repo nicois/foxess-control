@@ -68,8 +68,47 @@ home unprotected during an outage.
 - Force-overwrite with warning: rejected because the consequence
   (no backup during outage) is too severe
 - Manage all modes: rejected as scope creep
+**Status**: Revised by D-067 — Backup is now a managed mode; the
+protection still applies to every mode outside the managed set.
 **Traces**: C-018;
-`tests/test_init.py::TestMergeWithExisting::test_rejects_schedule_with_backup_mode`
+`tests/test_init.py::TestMergeWithExisting::test_rejects_schedule_with_unmanaged_mode`
+
+### D-067: Backup is a managed mode
+**Decision**: Add a `foxess_control.backup` action (PR #29) and move
+`Backup` into the managed work modes. A Backup group, including one
+made in the FoxESS app, is treated like any other override: the
+`backup` action replaces it, an overlapping window is a conflict unless
+`replace_conflicts` is set, and `clear_overrides` removes it. A
+non-overlapping Backup group is kept. The startup orphan sweep
+(`_MANAGED_OVERRIDE_MODES`) deliberately excludes Backup, so nothing
+removes it without a user action in Home Assistant.
+**Context**: Users want Backup during free or cheap grid-power windows
+(issue #32): the house runs on the grid, solar still charges the
+battery, and the battery is held for later. Under D-016 any Backup
+group, even one the user had just asked for, blocked every schedule
+write.
+**Rationale**: When the user chooses Backup, or chooses to clear or
+replace overrides, from Home Assistant, that is explicit consent to
+overwrite what was set in the FoxESS app (the consent `docs/api`
+already required). Every path that removes a Backup group is such an
+action, so P-002 is not traded away: no reserve disappears without the
+user asking.
+**Priority served**: P-004 (feed-in revenue — using free/cheap windows
+without draining the battery), P-006 (exposes a native mode)
+**Trades against**: none (see Rationale for P-002)
+**Classification**: feature
+**Alternatives considered**:
+- Keep Backup unmanaged and refuse (D-016 as was): rejected, because it
+  makes the requested action impossible to use alongside any app-made
+  Backup group.
+- Remove only Backup groups this integration created: rejected for now;
+  the schedule format has no ownership marker, so it would mean
+  matching on exact windows or keeping a separate record.
+**Traces**: C-018;
+`tests/test_services.py::TestHandleBackup`,
+`tests/test_init.py::TestMergeWithExisting::test_keeps_a_non_overlapping_backup_group`,
+`tests/test_init.py::TestMergeWithExisting::test_overlapping_backup_group_is_a_conflict`,
+`tests/test_schedule_reconcile.py::TestFindOrphanModes::test_backup_group_is_never_an_orphan`
 
 ### D-033: BMS battery temperature via web portal API
 **Decision**: Expose the BMS cell temperature as a sensor

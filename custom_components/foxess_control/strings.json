@@ -67,6 +67,24 @@
     }
   },
   "services": {
+    "backup": {
+      "name": "Backup",
+      "description": "Put the inverter into Backup mode for a set duration: solar still charges the battery, but the battery does not discharge to the house.",
+      "fields": {
+        "duration": {
+          "name": "Duration",
+          "description": "How long to stay in Backup mode (max 4 hours, must not cross midnight)."
+        },
+        "start_time": {
+          "name": "Start time",
+          "description": "Time of day to start the override. Defaults to now if not set."
+        },
+        "replace_conflicts": {
+          "name": "Remove conflicting overrides instead of aborting",
+          "description": "If enabled, silently remove any existing overrides that overlap with the new time window instead of aborting."
+        }
+      }
+    },
     "clear_overrides": {
       "name": "Clear overrides",
       "description": "Return the inverter to self-use mode, clearing all or selected overrides.",

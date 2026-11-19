@@ -267,6 +267,25 @@ def _pin_midday(sim: SimulatorHandle) -> None:
     sim.set(sim_time="2026-01-15T12:00:00+00:00")
 
 
+def _declare_unmanaged_mode(sim: SimulatorHandle) -> None:
+    """Have the device declare a mode this integration does not manage.
+
+    ``ForceDischarge(BAT)`` is declared by real EVO hardware (issue #28) and
+    is not one of ours, so it stands in for any hand-built group C-018
+    protects.  (Backup used to play this role until it became managed.)
+    """
+    sim.set(
+        scheduler_work_modes=[
+            "SelfUse",
+            "Feedin",
+            "Backup",
+            "ForceCharge",
+            "ForceDischarge",
+            "ForceDischarge(BAT)",
+        ]
+    )
+
+
 def _adapter(hass: Any, inv: Inverter) -> FoxESSCloudAdapter:
     """A cloud adapter shaped like the one a live discharge session uses."""
     now = datetime.datetime(2026, 1, 15, 12, 0, tzinfo=datetime.UTC)
@@ -1222,10 +1241,11 @@ class TestUnmanagedModes:
     """C-018: a schedule the user built by hand is not ours to rewrite."""
 
     @pytest.mark.asyncio
-    async def test_a_backup_group_declines_the_handback_by_name(
+    async def test_an_unmanaged_group_declines_the_handback_by_name(
         self, teardown_hass: Any, foxess_sim: SimulatorHandle
     ) -> None:
         """The reason must name the mode, or the log is not actionable."""
+        _declare_unmanaged_mode(foxess_sim)
         _pin_midday(foxess_sim)
         inv, client = _make_inv(foxess_sim)
         _attach(teardown_hass, inv)
@@ -1239,7 +1259,7 @@ class TestUnmanagedModes:
                         "startMinute": 0,
                         "endHour": 6,
                         "endMinute": 0,
-                        "workMode": WorkMode.BACKUP.value,
+                        "workMode": "ForceDischarge(BAT)",
                         "minSocOnGrid": 11,
                         "fdSoc": 11,
                         "fdPwr": 3000,
@@ -1253,7 +1273,7 @@ class TestUnmanagedModes:
 
         record = _last_handback(teardown_hass)
         assert record["acted"] is False
-        assert WorkMode.BACKUP.value in record["reason"]
+        assert "ForceDischarge(BAT)" in record["reason"]
         assert foxess_sim.state()["scheduler_enabled"] is True
         assert not [
             b for b in client.bodies_for(_EP_SCHEDULER_SET) if b.get("enable") == 0
@@ -1271,6 +1291,7 @@ class TestUnmanagedModes:
         staying on is the whole point: the integration keeps control of a
         schedule it was not allowed to tidy.
         """
+        _declare_unmanaged_mode(foxess_sim)
         from homeassistant.exceptions import ServiceValidationError
 
         _pin_midday(foxess_sim)
@@ -1287,7 +1308,7 @@ class TestUnmanagedModes:
                         "startMinute": 0,
                         "endHour": 6,
                         "endMinute": 0,
-                        "workMode": WorkMode.BACKUP.value,
+                        "workMode": "ForceDischarge(BAT)",
                         "minSocOnGrid": 11,
                         "fdSoc": 11,
                         "fdPwr": 3000,
@@ -1452,8 +1473,8 @@ class TestClearOverridesHandsBackToo:
 # ---------------------------------------------------------------------------
 
 
-def _write_backup_group(hass: Any, inv: Inverter) -> Any:
-    """Put an unmanaged Backup group on the device (C-018 bait)."""
+def _write_unmanaged_group(hass: Any, inv: Inverter) -> Any:
+    """Put an unmanaged ForceDischarge(BAT) group on the device (C-018 bait)."""
     return hass.async_add_executor_job(
         lambda: inv.set_schedule(
             [
@@ -1463,7 +1484,7 @@ def _write_backup_group(hass: Any, inv: Inverter) -> Any:
                     "startMinute": 0,
                     "endHour": 6,
                     "endMinute": 0,
-                    "workMode": WorkMode.BACKUP.value,
+                    "workMode": "ForceDischarge(BAT)",
                     "minSocOnGrid": 11,
                     "fdSoc": 11,
                     "fdPwr": 3000,
@@ -1505,7 +1526,7 @@ class TestDisableSchedulerAction:
     1. **It applies the same policy, not its own.**  Every guard
        ``plan_handback`` enforces is enforced here, and by the same code: an
        implementation that wrote the master switch directly would release
-       the inverter mid-session, or behind a hand-built Backup group, or
+       the inverter mid-session, or behind a hand-built unmanaged group, or
        with a Min SoC it invented.  Each of those has a test below, so
        bypassing the policy cannot pass.
 
@@ -1697,23 +1718,24 @@ class TestDisableSchedulerAction:
         Naming the mode is the actionable half — "remove it in the FoxESS
         app" is only useful advice if the user is told *what* to remove.
         """
+        _declare_unmanaged_mode(foxess_sim)
         _pin_midday(foxess_sim)
         inv, client = _make_inv(foxess_sim)
         _attach(teardown_hass, inv)
         _enable_handback(teardown_hass)
-        await _write_backup_group(teardown_hass, inv)
+        await _write_unmanaged_group(teardown_hass, inv)
         client.calls.clear()
 
         message = await _refused_disable_scheduler(teardown_hass)
 
-        assert WorkMode.BACKUP.value in message, (
+        assert "ForceDischarge(BAT)" in message, (
             "the refusal does not name the unmanaged mode, so the user is "
             f"not told what to remove: {message}"
         )
         _assert_switch_untouched(foxess_sim, client)
         record = _last_handback(teardown_hass)
         assert record["acted"] is False
-        assert WorkMode.BACKUP.value in record["reason"]
+        assert "ForceDischarge(BAT)" in record["reason"]
 
     @pytest.mark.asyncio
     async def test_nothing_captured_means_the_floor_is_untouched(

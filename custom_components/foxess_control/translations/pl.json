@@ -152,6 +152,24 @@
     }
   },
   "services": {
+    "backup": {
+      "name": "Kopia zapasowa",
+      "description": "Przełącza falownik w tryb Backup na określony czas: energia słoneczna nadal ładuje baterię, ale bateria nie rozładowuje się do domu.",
+      "fields": {
+        "duration": {
+          "name": "Czas trwania",
+          "description": "Jak długo pozostać w trybie Backup (maks. 4 godziny, nie może przekraczać północy)."
+        },
+        "start_time": {
+          "name": "Godzina rozpoczęcia",
+          "description": "Godzina rozpoczęcia nadpisania. Domyślnie teraz."
+        },
+        "replace_conflicts": {
+          "name": "Usuń konfliktujące nadpisania zamiast przerywać",
+          "description": "Jeśli włączone, istniejące nakładające się nadpisania zostaną usunięte zamiast przerywania operacji."
+        }
+      }
+    },
     "clear_overrides": {
       "name": "Wyczyść nadpisania",
       "description": "Przywróć falownik do trybu autokonsumpcji, usuwając wszystkie lub wybrane nadpisania.",

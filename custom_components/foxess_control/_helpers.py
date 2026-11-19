@@ -44,6 +44,7 @@ _LOGGER = logging.getLogger(__name__)
 # Service name constants
 # ---------------------------------------------------------------------------
 
+SERVICE_BACKUP = "backup"
 SERVICE_CLEAR_OVERRIDES = "clear_overrides"
 SERVICE_DISABLE_SCHEDULER = "disable_scheduler"
 SERVICE_FEEDIN = "feedin"
@@ -67,6 +68,7 @@ _MANAGED_WORK_MODES = frozenset(
         WorkMode.SELF_USE.value,
         WorkMode.FORCE_CHARGE.value,
         WorkMode.FORCE_DISCHARGE.value,
+        WorkMode.BACKUP.value,
         WorkMode.FEEDIN.value,
     }
 )
@@ -85,6 +87,14 @@ SCHEMA_CLEAR_OVERRIDES = vol.Schema(
 # action takes no parameters, so a call carrying one is a mistake worth
 # telling the user about rather than silently ignoring.
 SCHEMA_DISABLE_SCHEDULER = vol.Schema({})
+
+SCHEMA_BACKUP = vol.Schema(
+    {
+        vol.Required("duration"): cv.time_period,
+        vol.Optional("start_time"): cv.time,
+    },
+    extra=vol.ALLOW_EXTRA,
+)
 
 SCHEMA_FORCE_CHARGE = vol.Schema(
     {

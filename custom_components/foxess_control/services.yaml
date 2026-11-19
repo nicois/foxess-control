@@ -16,6 +16,33 @@ clear_overrides:
             - Backup
             - Feedin
 
+backup:
+  name: Backup
+  description: >-
+    Put the inverter into Backup mode for a set duration: solar still charges the battery, but the battery does not discharge to the house.
+  fields:
+    duration:
+      name: Duration
+      description: How long to stay in Backup mode (max 4 hours, must not cross midnight).
+      required: true
+      selector:
+        duration:
+    start_time:
+      name: Start time
+      description: >-
+        Time of day to start the override. Defaults to now if not set.
+      selector:
+        time:
+    replace_conflicts:
+      name: Remove conflicting overrides instead of aborting
+      description: >-
+        If enabled, remove existing overrides that overlap with the
+        new Backup window instead of aborting.
+      required: true
+      default: false
+      selector:
+        boolean:
+
 disable_scheduler:
   name: Release the inverter now
   description: >-

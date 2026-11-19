@@ -506,17 +506,41 @@ class TestMergeWithExisting:
         assert len(result) == 1
         assert result[0]["workMode"] == "ForceCharge"
 
-    def test_rejects_schedule_with_backup_mode(self) -> None:
+    def test_keeps_a_non_overlapping_backup_group(self) -> None:
+        """Backup is managed (PR #29): a Backup group made in the FoxESS app
+        no longer blocks other overrides; it is kept when it does not
+        overlap the new window."""
+        inverter = MagicMock(spec=Inverter)
+        inverter.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [self._make_group("Backup", 1, 0, 5, 0)],
+        }
+        new_group = self._make_group("ForceCharge", 14, 0, 16, 0)
+        result = _merge_with_existing(inverter, new_group, WorkMode.FORCE_CHARGE)
+        assert [g["workMode"] for g in result] == ["Backup", "ForceCharge"]
+
+    def test_overlapping_backup_group_is_a_conflict(self) -> None:
+        """An overlapping Backup group is an ordinary override conflict."""
+        inverter = MagicMock(spec=Inverter)
+        inverter.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [self._make_group("Backup", 13, 0, 15, 0)],
+        }
+        new_group = self._make_group("ForceCharge", 14, 0, 16, 0)
+        with pytest.raises(ServiceValidationError, match="conflicts"):
+            _merge_with_existing(inverter, new_group, WorkMode.FORCE_CHARGE)
+
+    def test_rejects_schedule_with_unmanaged_mode(self) -> None:
         """Merge refuses if the schedule contains an unmanaged mode."""
         inverter = MagicMock(spec=Inverter)
         inverter.get_schedule.return_value = {
             "enable": 1,
             "groups": [
-                self._make_group("Backup", 0, 0, 23, 59),
+                self._make_group("ForceDischarge(BAT)", 0, 0, 23, 59),
             ],
         }
         new_group = self._make_group("ForceCharge", 14, 0, 16, 0)
-        with pytest.raises(ServiceValidationError, match="Backup"):
+        with pytest.raises(ServiceValidationError, match=r"ForceDischarge\(BAT\)"):
             _merge_with_existing(inverter, new_group, WorkMode.FORCE_CHARGE)
 
 
@@ -994,16 +1018,16 @@ class TestRemoveModeFromSchedule:
         groups = inv.set_schedule.call_args.args[0]
         assert groups[0]["enable"] == 1
 
-    def test_rejects_schedule_with_backup_mode(self) -> None:
+    def test_rejects_schedule_with_unmanaged_mode(self) -> None:
         inv = MagicMock(spec=Inverter)
         inv.get_schedule.return_value = {
             "groups": [
                 self._make_group("ForceCharge", 2, 6),
-                self._make_group("Backup", 22, 6),
+                self._make_group("ForceDischarge(BAT)", 22, 6),
             ]
         }
 
-        with pytest.raises(ServiceValidationError, match="Backup"):
+        with pytest.raises(ServiceValidationError, match=r"ForceDischarge\(BAT\)"):
             _remove_mode_from_schedule(inv, WorkMode.FORCE_CHARGE, 15)
 
         inv.set_schedule.assert_not_called()
@@ -1475,17 +1499,17 @@ class TestCheckScheduleSafe:
         ]
         _check_schedule_safe(groups)
 
-    def test_backup_mode_raises(self) -> None:
+    def test_unmanaged_mode_raises(self) -> None:
         groups: list[dict[str, Any]] = [
             {
-                "workMode": "Backup",
+                "workMode": "ForceDischarge(BAT)",
                 "startHour": 0,
                 "startMinute": 0,
                 "endHour": 23,
                 "endMinute": 59,
             },
         ]
-        with pytest.raises(ServiceValidationError, match="Backup"):
+        with pytest.raises(ServiceValidationError, match=r"ForceDischarge\(BAT\)"):
             _check_schedule_safe(groups)
 
     def test_unknown_mode_raises(self) -> None:
@@ -1501,7 +1525,7 @@ class TestCheckScheduleSafe:
         with pytest.raises(ServiceValidationError, match="PeakShaving"):
             _check_schedule_safe(groups)
 
-    def test_backup_among_managed_raises(self) -> None:
+    def test_unmanaged_among_managed_raises(self) -> None:
         """A single unmanaged group among managed ones still raises."""
         groups: list[dict[str, Any]] = [
             {
@@ -1512,14 +1536,14 @@ class TestCheckScheduleSafe:
                 "endMinute": 0,
             },
             {
-                "workMode": "Backup",
+                "workMode": "ForceDischarge(BAT)",
                 "startHour": 22,
                 "startMinute": 0,
                 "endHour": 6,
                 "endMinute": 0,
             },
         ]
-        with pytest.raises(ServiceValidationError, match="Backup"):
+        with pytest.raises(ServiceValidationError, match=r"ForceDischarge\(BAT\)"):
             _check_schedule_safe(groups)
 
 

@@ -23,9 +23,9 @@ serving it.
 | P-001 No grid import during forced discharge | C-001, C-003, C-013, C-016, C-017, C-024, C-025, C-027 | D-001, D-002, D-003, D-004, D-017, D-018, D-023, D-025, D-026, D-047, D-057 | ENFORCED |
 | P-002 Respect minimum state of charge | C-002, C-003, C-012, C-013, C-016, C-018, C-019, C-024, C-025, C-027 | D-001, D-016 | ENFORCED |
 | P-003 Meet the user's energy target | C-007, C-008, C-009, C-010, C-011, C-014, C-022, C-023, C-037 | D-005, D-006, D-007, D-011, D-012, D-013, D-014, D-015 (taper), D-019, D-032, D-033, D-037, D-042, D-043, D-044, D-046 | ENFORCED |
-| P-004 Maximise feed-in revenue | (aspirational — no C-NNN) | (no D-NNN currently declares P-004 as primary; D-044 serves P-003 but advances P-004 as a secondary effect) | ASPIRATIONAL |
+| P-004 Maximise feed-in revenue | (aspirational — no C-NNN) | D-067 (Backup through free/cheap grid windows); D-044 serves P-003 but advances P-004 as a secondary effect | ASPIRATIONAL |
 | P-005 Operational transparency | C-004, C-005, C-006, C-020, C-022, C-026, C-038 | D-008, D-009, D-010, D-020, D-021, D-027, D-028, D-029, D-030, D-035, D-036, D-038, D-039, D-040, D-041 (ws), D-048, D-050, D-051, D-053, D-054, D-055, D-056, D-058, D-059, D-060, D-064, D-065, D-066 | ENFORCED |
-| P-006 Brand portability | C-015, C-021, C-039, C-040 | D-022 | ENFORCED |
+| P-006 Brand portability | C-015, C-021, C-039, C-040 | D-022, D-067 | ENFORCED |
 | P-007 Engineering process integrity | C-015, C-028, C-029, C-030, C-031, C-032, C-033, C-034, C-035, C-036, C-043 | D-019, D-031, D-034, D-041 (lovelace), D-045, D-049 | ENFORCED |
 
 **Notes:**
@@ -107,7 +107,7 @@ against a scenario that the system couldn't actually reach.
 | C-015 Vendored smart_battery matches canonical | -- | `test_vendored_copy_matches_canonical` | ACCEPTED |
 | C-016 Cancel listeners before awaits | D-018 | `test_cancel_smart_session_is_synchronous` | COVERED |
 | C-017 End-of-discharge guard | D-003, D-057 | `TestShouldSuspendDischarge::test_high_consumption_suspends`, `TestCloudFdSocFloorNoImport` (paced path removes override above min_soc) | COVERED |
-| C-018 Unmanaged work mode protection | D-016 | `TestCheckScheduleSafe` (7), `test_rejects_schedule_with_backup_mode` | COVERED |
+| C-018 Unmanaged work mode protection | D-016, D-067 | `TestCheckScheduleSafe` (7), `test_rejects_schedule_with_unmanaged_mode`, `test_backup_group_is_never_an_orphan` | COVERED |
 | C-019 Discharge SoC unavailability abort | D-019 | `TestDischargeSocUnavailability` (2) | COVERED |
 | C-020 Operational transparency | D-008, D-009, D-021, D-027, D-028, D-029, D-030, D-033, D-035, D-036, D-038, D-039, D-040, D-051, D-053, D-054, D-055, D-056, D-058 | `TestTransitionFiresPromptlyAtDeferredDeadline` (3, WS startup at deferred deadline), `TestSessionContextFilter` (7), `TestInstallRemove` (2), `TestDebugLogHandlerWithSession` (3), `TestBMSBatteryTemperature` (3 mapped), `TestBatteryDetailEndpoint` (2 mapped), `TestCompoundIdFromWebSocket` (1 mapped), `TestSmartDischargeExportLimitSensor` (2), `TestSmartOperationsOverviewAttribute`, `test_all_locales_cover_english_keys` (2, parametrized), `test_parser_finds_expected_locales`, `test_new_keys_present_in_every_locale`, `TestSaveRunViolationPersistence` (2, soak-recorder observability), E2E: `test_data_source_badge_matches_mode` (3), `test_normal_api_age_is_not_flagged_stale` (3, renamed from `test_stale_badge_shown_for_old_api_data` when the 30 s threshold was replaced by per-source thresholds), `tests/test_overview_card_stale.py` (13 — disconnected-frontend vs aged-data treatment against a real Chromium DOM, asserting computed opacity/filter), `tests/test_control_card_stale.py` (40 — the same treatment on the card that owns the buttons, plus controls disabled only when disconnected and the cancel acknowledgement being transient, bounded and honest about failure), E2E: `TestControlCardStaleness` (3), `test_api_source_when_idle`, `test_ws_always_connects_without_session`, `test_ws_mode_persists_via_options_flow`, `test_ws_linger_captures_post_discharge_data`, `test_house_load_never_greyed`, `test_pv_values_consistent_with_solar_total` (3), `test_node_click_opens_more_info`, `test_default_config_renders_all_four_boxes`, `test_custom_boxes_*` (3), `test_progress_hidden_when_idle`, `test_progress_visible_during_discharge` (3), `test_clamp_split_power_row_renders_when_export_limit_configured`, `test_clamp_active_class_toggles_with_attribute`, `test_safety_floor_row_appears_when_tracked`, `test_safety_floor_row_is_expandable_and_shows_peak`, `test_discharge_deferred_reason_renders_when_attribute_present`, `test_charge_deferred_reason_renders_when_attribute_present`, `TestTaperCard` (3), `TestFormInputPersistence` (5), `TestApplyModePowerConversion` (5), `TestSetExportLimitConversion` (3), `TestNonPowerWritesUntouched` (1) | COVERED |
 | C-021 Brand-agnostic code in common package | D-022 | `test_smart_battery_has_no_brand_imports`, `test_vendored_copy_matches_canonical` | COVERED |
@@ -192,8 +192,10 @@ against a scenario that the system couldn't actually reach.
   (self-use -> forced discharge at deadline) is only tested via
   integration flow.
 - **D-016**: Unmanaged mode protection — tested by
-  `test_rejects_schedule_with_backup_mode` but only for Backup mode.
-  Other unmanaged modes not tested.
+  `test_rejects_schedule_with_unmanaged_mode` with `ForceDischarge(BAT)`
+  only. `PeakShaving` and other unmanaged modes not tested.
+- **D-067**: Backup as a managed mode — no E2E test drives the `backup`
+  action through Home Assistant; covered by unit tests only.
 - **D-039**: show_cancel option — no E2E test verifies that the cancel
   button is hidden when `show_cancel: false`. The config option is
   exercised only by the visual editor.
