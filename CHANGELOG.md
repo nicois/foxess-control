@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.22-beta.9
 
 ### Added
 - **Switch an existing entry between FoxESS Cloud and the local gateway without losing anything.** Until now, trying foxess-local meant deleting the cloud entry and adding a new one, which threw away every entity's history and broke the dashboards, automations and helpers that referred to them. **Reconfigure** now offers **Local gateway (foxess-local)** and **FoxESS Cloud (API key)**, and switches the *same* entry in place: entity ids, history, the Energy dashboard and all options carry on unchanged. The other backend's credentials are kept, so switching back needs nothing re-typed. A gateway that reports a different inverter is refused, and so is a switch while a smart session is running (its schedule group could not be recovered or removed by the other backend). A local entry's Reconfigure also changes its gateway URL or token; the token field is masked and pre-filled, and clearing it removes the token.
