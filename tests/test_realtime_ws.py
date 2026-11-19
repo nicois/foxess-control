@@ -915,6 +915,52 @@ class TestGridDirectionChargerPlaceholder:
         assert tracker._status_meaning == {str(grid_status): True}
 
 
+class TestGridDirectionFlagOptional:
+    """``gridToHidden`` is optional: without a usable value the balance decides."""
+
+    @pytest.mark.parametrize(
+        "flag",
+        [None, "--", "", "abc", 0, "0", 0.0],
+        ids=["missing", "placeholder", "empty", "unparseable", "int0", "str0", "float0"],
+    )
+    @pytest.mark.parametrize("grid_status", [2, 3])
+    def test_unusable_flag_falls_through_to_balance(
+        self, flag: object, grid_status: int
+    ) -> None:
+        """Balance 1.0+8.5-2.0 = 7.5 kW import matches grid 7.5; gridStatus is irrelevant."""
+        msg = _ev_msg(
+            solar=2.0,
+            load=1.0,
+            bat_charge=8.5,
+            grid=7.5,
+            charger=None,
+            grid_status=grid_status,
+            grid_flag=flag,
+        )
+        tracker = GridDirectionTracker()
+        data = map_ws_to_coordinator(msg, tracker)
+        assert data["gridConsumptionPower"] == pytest.approx(7.5)
+        assert data["feedinPower"] == 0.0
+        assert tracker._status_meaning == {str(grid_status): True}
+
+    def test_frame_without_flag_key_exports_by_balance(self) -> None:
+        """No gridToHidden key at all; gridStatus 3 (legacy 'import') must not win."""
+        msg = _ev_msg(
+            solar=5.0,
+            load=1.0,
+            bat_charge=0.0,
+            grid=4.0,
+            charger=None,
+            grid_status=3,
+            grid_flag=None,
+        )
+        node = msg["result"]["node"]  # type: ignore[index]
+        assert "gridToHidden" not in node["grid"]
+        data = map_ws_to_coordinator(msg, GridDirectionTracker())
+        assert data["feedinPower"] == pytest.approx(4.0)
+        assert data["gridConsumptionPower"] == 0.0
+
+
 class TestGridDirectionTracker:
     """Direction must survive unmeasured load/generation (no flag in frame)."""
 
