@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.22-beta.10
 
 ### Changed
 - **The interpolated SoC can now run up to 0.494 % above the reported value, up from 0.44 %.** Between the inverter's whole-percent SoC readings, the cards estimate SoC from battery power, held within `[tick − 0.5, tick + 0.494]` of the latest reading. The wider top end lets the estimate climb almost to the next whole percent during a charge before it stops, and the rounded value still matches the SoC entity.
