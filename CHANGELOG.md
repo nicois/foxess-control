@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.22-beta.8
 
 ### Added
 - **Local gateway backend (read-only): run FoxESS Control from a [foxess-local](https://github.com/nicois/foxess-local) gateway instead of the FoxESS Cloud.** foxess-local owns the inverter's connection on your own network and serves a local API. Choose **Local gateway** in the initial setup and give the gateway's URL and an access token. The integration then reads everything from the gateway: no cloud account, no Open API rate limits, and live power and SoC about every 5 seconds over the gateway's event stream. The stream stays connected for the life of the entry, because on the LAN it costs nothing, so it has none of the cloud WebSocket's on/off gating. Lifetime energy sensors come from the inverter's own counters via the gateway, so they match the FoxESS app. The gateway's battery capacity pre-fills the **Battery Capacity** option. **This first release is sensors only:** every action refuses with an explanation rather than failing obscurely. Local control (schedule writes, smart sessions, the scheduler handback, pacing against the gateway's write budget) is the next phase. Refs D-064, D-065.
