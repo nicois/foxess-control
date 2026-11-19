@@ -341,7 +341,13 @@ def _register_services(hass: HomeAssistant) -> None:
             )
 
         api_min_soc = _cfg(hass).api_min_soc
-        inverter: Inverter | None = None
+        # Resolve the inverter before touching any session state: this is
+        # where a backend that cannot control the inverter refuses. Fetched
+        # only in the start-now branch, a *deferred* start skipped it and
+        # recorded a session with no inverter behind it.
+        inverter: Inverter | None = (
+            None if _cfg(hass).entity_mode else _get_inverter(hass)
+        )
 
         ws_stop = _cancel_smart_discharge(hass)
         if ws_stop is not None:
@@ -420,7 +426,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     fd_soc=api_min_soc,
                 )
             else:
-                inverter = _get_inverter(hass)
+                assert inverter is not None
                 min_soc_on_grid = _cfg(hass).min_soc_on_grid
                 group = _build_override_group(
                     start,
