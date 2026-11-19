@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.22-beta.11
 
 ### Fixed
 - **Turning the Mode Scheduler master switch on or off now works (issues #16, #17, #30).** The integration sent it to `/op/v0/device/scheduler/set`, which the FoxESS Cloud does not serve on any model: KH, H1 and H3 inverters all answered HTTP 404. So `foxess_control.disable_scheduler` and **Release the inverter when idle** could never turn the switch off, and the switch was never explicitly turned on before a schedule write (the "Could not turn the Mode Scheduler master switch on" warning). It now uses `/op/v1/device/scheduler/set/flag`, the counterpart of the `/op/v1/device/scheduler/get/flag` read the integration already uses.
