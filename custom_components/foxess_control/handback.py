@@ -7,8 +7,9 @@ left on blocks the user's local Modbus control) and issue #4 (a Min SoC of
 0% is only reachable outside the scheduler, because the scheduler declares
 ``minsocongrid.range.min = 10`` and rejects less with errno 40257).
 
-Not every inverter can do it.  Issue #17 is an H3-12.0-E whose
-``/op/v0/device/scheduler/set`` answers HTTP 404 — the one endpoint that can
+Not every inverter may be able to do it.  Issue #17 was an H3-12.0-E whose
+master-switch write answered HTTP 404 (then at ``/op/v0/device/scheduler/set``,
+a path the cloud never served; it is now ``/op/v1/device/scheduler/set/flag``) — the one endpoint that can
 turn the master switch off — while its Mode Scheduler otherwise works
 normally.  Handback is impossible there, and saying so is this module's job:
 declining silently at every session boundary forever is what left that user
@@ -89,8 +90,8 @@ def plan_handback(
     decision.
 
     *scheduler_set_unavailable* is a **separate fact about a separate
-    endpoint** — issue #17, an H3-12.0-E whose
-    ``/op/v0/device/scheduler/set`` answers HTTP 404.  It is deliberately
+    endpoint** — issue #17, an H3-12.0-E whose master-switch write
+    answered HTTP 404.  It is deliberately
     not a fourth value of *scheduler_supported*: that device's flag
     endpoint says it *does* have a Mode Scheduler, and its schedule writes
     enable the switch implicitly, so calling it unsupported would be a

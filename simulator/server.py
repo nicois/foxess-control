@@ -227,7 +227,10 @@ async def handle_scheduler_flag(request: web.Request) -> web.Response:
 
 
 async def handle_scheduler_set(request: web.Request) -> web.Response:
-    """Serve ``/op/v0/device/scheduler/set`` (master-switch write).
+    """Serve ``/op/v1/device/scheduler/set/flag`` (master-switch write).
+
+    The real cloud answers HTTP 404 on ``/op/v0/device/scheduler/set``
+    (issues #16, #17, #30), so the simulator does not serve that path.
 
     Returns HTTP 404 when ``scheduler_set_supported`` is False (firmware /
     region without the endpoint) and errno 40257 when the device declares
@@ -643,7 +646,7 @@ def create_app() -> web.Application:
     app.router.add_post("/op/v3/device/scheduler/get", handle_scheduler_properties)
     app.router.add_post("/op/v0/device/scheduler/enable", handle_scheduler_enable)
     app.router.add_post("/op/v1/device/scheduler/get/flag", handle_scheduler_flag)
-    app.router.add_post("/op/v0/device/scheduler/set", handle_scheduler_set)
+    app.router.add_post("/op/v1/device/scheduler/set/flag", handle_scheduler_set)
     app.router.add_post("/op/v0/device/setting/get", handle_setting_get)
     app.router.add_post("/op/v0/device/setting/set", handle_setting_set)
     app.router.add_get("/op/v0/device/battery/soc/get", handle_battery_soc_get)

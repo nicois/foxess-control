@@ -117,7 +117,7 @@ _UNSUPPORTED_ISSUE = "scheduler_handback_unsupported"
 # issue quotes the same path the user already has in their log, without this
 # module reaching into another one's internals.  ``tests/test_handback_
 # teardown.py`` asserts the two agree.
-_SCHEDULER_SET_ENDPOINT = "/op/v0/device/scheduler/set"
+_SCHEDULER_SET_ENDPOINT = "/op/v1/device/scheduler/set/flag"
 
 _OK = "ok"
 _FAILED = "failed"

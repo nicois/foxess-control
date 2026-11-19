@@ -31,7 +31,7 @@ _SCHEDULER_PROPERTIES_ENDPOINT = "/op/v3/device/scheduler/get"
 # and from the group list itself — removing every group does not turn the
 # switch off (issue #16).
 _SCHEDULER_FLAG_ENDPOINT = "/op/v1/device/scheduler/get/flag"
-_SCHEDULER_SET_ENDPOINT = "/op/v0/device/scheduler/set"
+_SCHEDULER_SET_ENDPOINT = "/op/v1/device/scheduler/set/flag"
 
 # The device's own settings, reached *without* the Mode Scheduler.  Note
 # these take ``sn`` where the scheduler endpoints take ``deviceSN``.
@@ -520,8 +520,11 @@ class Inverter:
     def scheduler_set_unavailable(self) -> bool:
         """Is this device **known** not to serve the master-switch write?
 
-        Issue #17: an H3-12.0-E answers HTTP 404 on
-        ``/op/v0/device/scheduler/set``.  That endpoint is the only way to
+        Issue #17 first saw an H3-12.0-E answer HTTP 404 here.  That turned
+        out to be the endpoint, not the hardware: ``/op/v0/device/scheduler/set``
+        does not exist on the cloud for any model (#16, #30), and the write
+        now goes to ``/op/v1/device/scheduler/set/flag``.  The flag stays for
+        firmware/regions that still refuse the write.  This endpoint is the only way to
         turn the Mode Scheduler master switch *off*, so the scheduler
         handback cannot work on that hardware at all — while smart sessions
         are completely unaffected, because a schedule write enables the

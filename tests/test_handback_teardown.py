@@ -100,7 +100,7 @@ if TYPE_CHECKING:
 # same constant the implementation uses would keep passing if someone
 # renamed the endpoint on both sides.
 _EP_SCHEDULE_WRITE = "/op/v0/device/scheduler/enable"
-_EP_SCHEDULER_SET = "/op/v0/device/scheduler/set"
+_EP_SCHEDULER_SET = "/op/v1/device/scheduler/set/flag"
 _EP_SCHEDULER_FLAG = "/op/v1/device/scheduler/get/flag"
 _EP_SETTING_GET = "/op/v0/device/setting/get"
 _EP_SETTING_SET = "/op/v0/device/setting/set"

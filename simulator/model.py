@@ -256,7 +256,7 @@ class InverterModel:
     scheduler_enabled: bool = True
     # Whether the device supports the scheduler at all (``support`` in the
     # flag response).  A batteryless micro-inverter reports False; the
-    # simulator then rejects ``/op/v0/device/scheduler/set``, so tests can
+    # simulator then rejects ``/op/v1/device/scheduler/set/flag``, so tests can
     # prove a client tolerates that rather than aborting the schedule write.
     scheduler_supported: bool = True
     # Whether ``POST /op/v0/device/scheduler/enable`` implicitly turns the
@@ -264,7 +264,7 @@ class InverterModel:
     # would mean writing to a production home battery — so tests pin both:
     # a client must work either way.
     scheduler_enable_implies_on: bool = True
-    # When False, ``/op/v0/device/scheduler/set`` is not served (HTTP 404) —
+    # When False, ``/op/v1/device/scheduler/set/flag`` is not served (HTTP 404) —
     # models a firmware/region where the master-switch write is absent.
     scheduler_set_supported: bool = True
     # When True, the flag endpoint answers errno 0 with ``result: null`` —

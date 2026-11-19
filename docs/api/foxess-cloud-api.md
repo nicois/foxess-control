@@ -529,8 +529,10 @@ as the empty schedule `{"enable": 0, "groups": []}` — see §6 and §8.
 
 **Master switch.** `POST /op/v1/device/scheduler/get/flag` returns
 `{"enable": bool, "support": bool}` — whether Mode Scheduler is on, and
-whether the device supports it at all. `POST /op/v0/device/scheduler/set`
-with `{"deviceSN": …, "enable": 0|1}` sets it.
+whether the device supports it at all. `POST /op/v1/device/scheduler/set/flag`
+with `{"deviceSN": …, "enable": 0|1}` sets it. (`/op/v0/device/scheduler/set`,
+used before 1.0.22-beta.11, does not exist: it answers HTTP 404 on KH, H1
+and H3 models alike — issues #16, #17, #30.)
 
 Removing every group does **not** turn the switch off (issue #16: FoxCloud
 still showed the inverter as scheduler-controlled with no groups left).
