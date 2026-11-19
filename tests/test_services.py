@@ -157,6 +157,7 @@ class TestSetupEntry:
             call.args[1] for call in hass.services.async_register.call_args_list
         }
         assert registered == {
+            "backup",
             "clear_overrides",
             "disable_scheduler",
             "feedin",
@@ -656,6 +657,73 @@ class TestHandleFeedin:
 
         groups = inv.set_schedule.call_args.args[0]
         assert groups[0]["fdPwr"] == 5000
+
+
+class TestHandleBackup:
+    """PR #29: a timed Backup override."""
+
+    @pytest.mark.asyncio
+    async def test_backup_writes_a_backup_group(self) -> None:
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {"enable": 0, "groups": []}
+        hass = _make_hass(inverter=inv)
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = _get_handler(hass, "backup")
+
+        with patch(
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 11, 0, 0),
+        ):
+            await handler(_make_call({"duration": datetime.timedelta(hours=3)}))
+
+        inv.set_schedule.assert_called_once()
+        groups = inv.set_schedule.call_args.args[0]
+        assert len(groups) == 1
+        assert groups[0]["workMode"] == "Backup"
+        assert groups[0]["startHour"] == 11
+        assert groups[0]["endHour"] == 14
+
+    @pytest.mark.asyncio
+    async def test_backup_replaces_an_existing_backup_group(self) -> None:
+        """Backup is managed: an earlier Backup group, even one made in the
+        FoxESS app, is replaced rather than blocking the write (C-018)."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        inv.get_schedule.return_value = {
+            "enable": 1,
+            "groups": [
+                {
+                    "enable": 1,
+                    "startHour": 1,
+                    "startMinute": 0,
+                    "endHour": 5,
+                    "endMinute": 0,
+                    "workMode": "Backup",
+                    "minSocOnGrid": 11,
+                    "fdSoc": 11,
+                    "fdPwr": 0,
+                }
+            ],
+        }
+        hass = _make_hass(inverter=inv)
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        handler = _get_handler(hass, "backup")
+
+        with patch(
+            "custom_components.foxess_control.smart_battery.listeners.dt_util.now",
+            return_value=datetime.datetime(2026, 4, 7, 11, 0, 0),
+        ):
+            await handler(_make_call({"duration": datetime.timedelta(hours=3)}))
+
+        groups = inv.set_schedule.call_args.args[0]
+        assert [(g["workMode"], g["startHour"]) for g in groups] == [("Backup", 11)]
 
 
 class TestHandleForceCharge:

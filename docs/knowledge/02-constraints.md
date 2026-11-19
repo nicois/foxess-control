@@ -225,18 +225,25 @@ below house load.
 `tests/test_smart_battery_algorithms.py::TestShouldSuspendDischarge::test_high_consumption_suspends`
 
 ### C-018: Unmanaged work mode protection
-**Priority enforced**: P-002 (min SoC) — silently removing a Backup
-schedule leaves the user without the reserve they configured
+**Priority enforced**: P-002 (min SoC) — silently removing a schedule
+group the user built (an outage reserve, a peak-shaving window) leaves
+them without what they configured
 **Statement**: Service calls must refuse to modify the inverter schedule
-when non-managed work modes (e.g. Backup) are present in existing
-schedule groups.
-**Rationale**: Silently overwriting a Backup schedule could leave the
-home unprotected during a grid outage. The integration assumes SelfUse
-as the baseline mode.
-**Violation consequence**: User's Backup protection silently removed.
-**Traces**: D-016;
+when work modes outside the managed set (e.g. `PeakShaving`,
+`ForceDischarge(BAT)`) are present in existing schedule groups. Backup
+is in the managed set since D-067, so a Backup group no longer blocks
+writes, but it may only be removed by an explicit user action in Home
+Assistant (`backup`, `clear_overrides`, or `replace_conflicts` on an
+overlapping window) — never by an automatic sweep.
+**Rationale**: Silently overwriting a user-built schedule could, for
+example, leave the home unprotected during a grid outage. The
+integration assumes SelfUse as the baseline mode.
+**Violation consequence**: A user-configured schedule group silently
+removed.
+**Traces**: D-016, D-067;
 `tests/test_init.py::TestCheckScheduleSafe`,
-`tests/test_init.py::TestMergeWithExisting::test_rejects_schedule_with_backup_mode`
+`tests/test_init.py::TestMergeWithExisting::test_rejects_schedule_with_unmanaged_mode`,
+`tests/test_schedule_reconcile.py::TestFindOrphanModes::test_backup_group_is_never_an_orphan`
 
 ### C-019: Discharge SoC unavailability aborts session
 **Priority enforced**: P-002 (min SoC) — operating blind during

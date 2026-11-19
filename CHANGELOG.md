@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **New action `foxess_control.backup`: Backup mode for a set time (PR #29, thanks @giggles-38a).** Solar still charges the battery, but the battery does not discharge to the house, so the house runs on solar and the grid. Useful for free or cheap grid-power windows (issue #32). It takes a `duration`, an optional `start_time` and `replace_conflicts`, like `feedin`, and the inverter returns to self-use when the window ends.
+
+### Changed
+- **A Backup group made in the FoxESS app no longer blocks every action (D-067).** Until now, any Backup group in the schedule made the integration refuse all schedule changes until you removed it in the app. Backup is now handled like the other modes the integration manages. A Backup window that doesn't overlap is kept as it is. One that overlaps is reported as a conflict unless you set `replace_conflicts`. Calling `backup` replaces it, and `clear_overrides` removes it. Nothing removes a Backup group unless you ask from Home Assistant. Modes the integration doesn't manage at all, such as `PeakShaving`, still make it refuse and name the mode.
+
 ## 1.0.22-beta.12
 
 Includes everything tagged as 1.0.22-beta.10 and 1.0.22-beta.11; neither was published because CI failed on them.

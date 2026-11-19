@@ -761,7 +761,7 @@ Observed values, all UpperCamelCase strings:
 | `ForceCharge` | Charge battery up to `fdSoc` from grid + PV. |
 | `ForceDischarge` | Discharge battery down to `fdSoc`, capped at `fdPwr` watts. |
 | `Feedin` | Prioritise grid export. |
-| `Backup` | Reserve battery for outage. **Do not overwrite without explicit user consent — see C-018 / D-016.** |
+| `Backup` | Reserve battery for outage. **Do not overwrite without explicit user consent — see C-018 / D-067.** |
 | `Invalid` | API placeholder for unused slots. Drop on read; never write. |
 
 ### Hard invariants
@@ -830,13 +830,16 @@ as the placeholder marker.
 
 ### Preserving `Backup` mode
 
-If `scheduler/get` returns any group with `workMode: "Backup"`,
-**refuse to write** unless the user has explicitly opted into
-overwriting it (`C-018` / `D-016`). Backup mode is a user-configured
-outage protection setting; silently overwriting it could leave a
-home unprotected during a power cut. The safe default for an
-automation tool is to surface an error and require explicit
-acknowledgement.
+Backup mode is often a user-configured outage-protection setting;
+silently overwriting it could leave a home unprotected during a power
+cut. Only remove or replace a `Backup` group on an explicit user
+request (`C-018` / `D-067`). This integration manages Backup (it has a
+`backup` action), but removes a Backup group only when the user calls
+`backup`, `clear_overrides`, or sets `replace_conflicts` on an
+overlapping window. It keeps non-overlapping Backup groups and never
+sweeps them automatically. Any mode a client does not manage at all
+(e.g. `PeakShaving`, `ForceDischarge(BAT)`) should make it refuse to
+write and surface an error.
 
 ### Sample sanitised group list
 

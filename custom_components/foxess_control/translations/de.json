@@ -152,6 +152,24 @@
     }
   },
   "services": {
+    "backup": {
+      "name": "Backup",
+      "description": "Den Wechselrichter für eine festgelegte Dauer in den Backup-Modus versetzen: Solarstrom lädt die Batterie weiterhin, aber die Batterie entlädt sich nicht ins Haus.",
+      "fields": {
+        "duration": {
+          "name": "Dauer",
+          "description": "Wie lange der Backup-Modus aktiv bleibt (max. 4 Stunden, darf nicht über Mitternacht hinausgehen)."
+        },
+        "start_time": {
+          "name": "Startzeit",
+          "description": "Tageszeit für den Start der Übersteuerung. Standardmäßig jetzt."
+        },
+        "replace_conflicts": {
+          "name": "Konfliktende Übersteuerungen entfernen statt abbrechen",
+          "description": "Wenn aktiviert, werden bestehende überlappende Übersteuerungen stillschweigend entfernt, anstatt abzubrechen."
+        }
+      }
+    },
     "clear_overrides": {
       "name": "Übersteuerungen löschen",
       "description": "Wechselrichter in den Eigenverbrauchsmodus zurücksetzen und alle oder ausgewählte Übersteuerungen löschen.",

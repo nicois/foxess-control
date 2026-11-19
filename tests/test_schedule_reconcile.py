@@ -62,8 +62,16 @@ class TestFindOrphanModes:
         ]
 
     def test_unmanaged_group_is_not_reported_as_orphan(self) -> None:
-        # Backup is unmanaged — it is not an orphan we would remove; the
+        # An unmanaged mode is not an orphan we would remove; the
         # C-018 block is handled separately by the orchestrator.
+        groups = [_g("ForceDischarge(BAT)", 0, 23)]
+        assert find_orphan_modes(groups, covered_modes=set()) == []
+
+    def test_backup_group_is_never_an_orphan(self) -> None:
+        # Backup is managed (PR #29) but deliberately not swept on startup:
+        # a Backup group may be the user's own outage reserve, so only an
+        # explicit action (backup, clear_overrides, replace_conflicts) may
+        # remove it (D-067).
         groups = [_g("Backup", 0, 23)]
         assert find_orphan_modes(groups, covered_modes=set()) == []
 
@@ -127,7 +135,7 @@ def _force_charge_group() -> ScheduleGroup:
     }
 
 
-def _backup_group() -> ScheduleGroup:
+def _unmanaged_group() -> ScheduleGroup:
     # Window must NOT overlap _force_charge_group (11:00-13:59); the FoxESS API
     # rejects overlapping schedule windows (errno 42023 "Time overlap").
     return {
@@ -136,7 +144,7 @@ def _backup_group() -> ScheduleGroup:
         "startMinute": 0,
         "endHour": 23,
         "endMinute": 59,
-        "workMode": "Backup",
+        "workMode": "ForceDischarge(BAT)",
         "minSocOnGrid": 20,
         "fdSoc": 20,
         "fdPwr": 0,
@@ -267,8 +275,11 @@ class TestReconcileOrchestrator:
     async def test_unmanaged_mode_blocks_removal(
         self, foxess_sim: Any, reconcile_hass: Any
     ) -> None:
+        foxess_sim.set(
+            scheduler_work_modes=["SelfUse", "ForceCharge", "ForceDischarge(BAT)"]
+        )
         inv = _inv(foxess_sim)
-        inv.set_schedule([_force_charge_group(), _backup_group()])
+        inv.set_schedule([_force_charge_group(), _unmanaged_group()])
         await reconcile_schedule(reconcile_hass, inv)
         assert "ForceCharge" in _enabled_managed(inv)
         reconcile = _dd(reconcile_hass).last_schedule_reconcile

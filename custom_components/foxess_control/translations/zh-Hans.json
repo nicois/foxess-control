@@ -152,6 +152,24 @@
     }
   },
   "services": {
+    "backup": {
+      "name": "备用",
+      "description": "在设定时长内将逆变器切换为备用模式：太阳能仍为电池充电，但电池不向家庭放电。",
+      "fields": {
+        "duration": {
+          "name": "持续时间",
+          "description": "备用模式持续时间（最长 4 小时，不得跨越午夜）。"
+        },
+        "start_time": {
+          "name": "开始时间",
+          "description": "开始覆盖的时刻。默认为当前时间。"
+        },
+        "replace_conflicts": {
+          "name": "替换冲突的覆盖而非中止",
+          "description": "启用后，将静默移除与新时段重叠的现有覆盖，而非中止操作。"
+        }
+      }
+    },
     "clear_overrides": {
       "name": "清除覆盖",
       "description": "将逆变器恢复为自用模式，清除所有或选定的覆盖设置。",

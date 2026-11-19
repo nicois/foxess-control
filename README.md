@@ -155,7 +155,7 @@ When entity mode is active:
 
 [foxess-local](https://github.com/nicois/foxess-local) is a gateway that owns your inverter's connection on your own network and serves a local API. With the **Local gateway** backend, FoxESS Control reads the inverter from the gateway instead of the FoxESS Cloud: no cloud account, no API rate limits, and live values about every 5 seconds over the gateway's event stream.
 
-> **Read-only for now.** In this release the local backend provides **sensors only**. The actions (`smart_charge`, `smart_discharge`, `force_charge`, `force_discharge`, `feedin`, `clear_overrides`, `disable_scheduler`) refuse with an explanation. Local control is the next phase. Until then, use the cloud or entity-mode backend for control.
+> **Read-only for now.** In this release the local backend provides **sensors only**. The actions (`smart_charge`, `smart_discharge`, `force_charge`, `force_discharge`, `feedin`, `backup`, `clear_overrides`, `disable_scheduler`) refuse with an explanation. Local control is the next phase. Until then, use the cloud or entity-mode backend for control.
 
 **Setup:** choose **Local gateway** in the initial setup, then enter:
 
@@ -184,6 +184,25 @@ When the local backend is active:
 The integration registers seven actions (services) under the `foxess_control` domain. These are intended to be called from automations.
 
 Most actions accept a `replace_conflicts` parameter. In cloud mode, the inverter's schedule can hold multiple time-windowed override groups (e.g. a `ForceCharge` window and a `ForceDischarge` window). If a new override's time window overlaps with an existing override of a **different** mode, the action aborts by default to prevent conflicts. Setting `replace_conflicts: true` silently removes the overlapping overrides instead. In entity mode (no multi-window schedule), this parameter has no effect.
+
+### `foxess_control.backup`
+
+Puts the inverter into **Backup** mode for a specified duration: solar still charges the battery, but the battery does not discharge to the house, so the house runs from solar and the grid. Useful for keeping the battery for later, for example during a free or cheap grid-power window. The inverter reverts to self-use when the window ends. Does not cancel running smart charge/discharge sessions.
+
+A Backup group you created in the FoxESS app is treated like any other override: this action replaces it, an overlapping window is a conflict unless `replace_conflicts` is set, and `clear_overrides` removes it. A non-overlapping one is left alone, and Backup groups are never removed automatically.
+
+| Parameter | Required | Default | Description |
+|---|---|---|---|
+| `duration` | Yes | | How long to stay in Backup mode. Maximum 4 hours. Must not extend past midnight. |
+| `start_time` | No | Now | Time of day to start the override (e.g. `"11:00:00"`). |
+| `replace_conflicts` | No | false | Remove conflicting overrides instead of aborting. |
+
+```yaml
+action: foxess_control.backup
+data:
+  start_time: "11:00:00"
+  duration: "03:00:00"
+```
 
 ### `foxess_control.clear_overrides`
 
@@ -220,7 +239,7 @@ It is **not** a second `clear_overrides`: no schedule group is added or removed,
 It refuses, with the reason shown in the UI, when:
 
 - a `smart_charge` or `smart_discharge` session is running — disabling the scheduler would strand the live override (C-025). Use `clear_overrides` to stop the session first; that hands back too, if the option is on.
-- the schedule contains work modes this integration does not manage, e.g. `Backup` (C-018). The refusal names the mode; remove it via the FoxESS app.
+- the schedule contains work modes this integration does not manage, e.g. `PeakShaving` (C-018). The refusal names the mode; remove it via the FoxESS app.
 - the inverter reports no Mode Scheduler support, or support could not be determined.
 - the integration is in entity mode — there is no cloud Mode Scheduler to release, and no API call is made.
 

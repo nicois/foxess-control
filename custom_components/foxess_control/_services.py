@@ -282,11 +282,10 @@ def _register_services(hass: HomeAssistant) -> None:
         )
 
     async def handle_backup(call: ServiceCall) -> None:
-        """Put the inverter into Backup mode for a timed window."""
+        """Put the inverter into Backup mode for a timed window (PR #29)."""
         duration: datetime.timedelta = call.data["duration"]
         start_time: datetime.time | None = call.data.get("start_time")
         force: bool = call.data.get("replace_conflicts", False)
-
         start, end = _resolve_start_end(duration, start_time)
 
         _LOGGER.info(
@@ -298,10 +297,7 @@ def _register_services(hass: HomeAssistant) -> None:
         )
 
         if _cfg(hass).entity_mode:
-            await _apply_mode_via_entities(
-                hass,
-                WorkMode.BACKUP,
-            )
+            await _apply_mode_via_entities(hass, WorkMode.BACKUP)
         else:
             inverter = _get_inverter(hass)
             min_soc_on_grid = _cfg(hass).min_soc_on_grid
@@ -316,7 +312,6 @@ def _register_services(hass: HomeAssistant) -> None:
                 fd_soc=api_min_soc,
                 api_min_soc=api_min_soc,
             )
-
             groups = await hass.async_add_executor_job(
                 _merge_with_existing,
                 inverter,
@@ -324,11 +319,9 @@ def _register_services(hass: HomeAssistant) -> None:
                 WorkMode.BACKUP,
                 force,
             )
+            await hass.async_add_executor_job(inverter.set_schedule, groups)
+            _record_commanded_mode(hass, WorkMode.BACKUP)
 
-            await hass.async_add_executor_job(
-            inverter.set_schedule,
-            groups,
-            )
     async def handle_feedin(call: ServiceCall) -> None:
         duration: datetime.timedelta = call.data["duration"]
         power: int | None = call.data.get("power")
@@ -851,11 +844,11 @@ def _register_services(hass: HomeAssistant) -> None:
         schema=SCHEMA_CLEAR_OVERRIDES,
     )
     hass.services.async_register(
-            DOMAIN,
-            SERVICE_BACKUP,
-            _api_error_handler(handle_backup),
-            schema=SCHEMA_BACKUP,
-        )
+        DOMAIN,
+        SERVICE_BACKUP,
+        _api_error_handler(handle_backup),
+        schema=SCHEMA_BACKUP,
+    )
     hass.services.async_register(
         DOMAIN,
         SERVICE_DISABLE_SCHEDULER,

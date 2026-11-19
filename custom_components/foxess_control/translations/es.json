@@ -152,6 +152,24 @@
     }
   },
   "services": {
+    "backup": {
+      "name": "Respaldo",
+      "description": "Pone el inversor en modo Respaldo durante un tiempo determinado: la energía solar sigue cargando la batería, pero la batería no se descarga hacia la casa.",
+      "fields": {
+        "duration": {
+          "name": "Duración",
+          "description": "Cuánto tiempo permanecer en modo Respaldo (máx. 4 horas, no puede cruzar la medianoche)."
+        },
+        "start_time": {
+          "name": "Hora de inicio",
+          "description": "Hora del día para iniciar la anulación. Por defecto: ahora."
+        },
+        "replace_conflicts": {
+          "name": "Eliminar anulaciones en conflicto en vez de abortar",
+          "description": "Si está activado, elimina silenciosamente las anulaciones existentes superpuestas en vez de abortar."
+        }
+      }
+    },
     "clear_overrides": {
       "name": "Borrar anulaciones",
       "description": "Devolver el inversor al modo de autoconsumo, borrando todas o las anulaciones seleccionadas.",

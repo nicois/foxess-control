@@ -152,6 +152,24 @@
     }
   },
   "services": {
+    "backup": {
+      "name": "Back-up",
+      "description": "Zet de omvormer voor een ingestelde duur in Back-upmodus: zonne-energie laadt de batterij nog steeds op, maar de batterij ontlaadt niet naar het huis.",
+      "fields": {
+        "duration": {
+          "name": "Duur",
+          "description": "Hoe lang de Back-upmodus actief blijft (max. 4 uur, mag niet over middernacht gaan)."
+        },
+        "start_time": {
+          "name": "Starttijd",
+          "description": "Tijdstip om de overschrijving te starten. Standaard: nu."
+        },
+        "replace_conflicts": {
+          "name": "Conflicterende overschrijvingen verwijderen in plaats van afbreken",
+          "description": "Indien ingeschakeld, worden bestaande overlappende overschrijvingen stilzwijgend verwijderd in plaats van afgebroken."
+        }
+      }
+    },
     "clear_overrides": {
       "name": "Overschrijvingen wissen",
       "description": "Zet de omvormer terug naar eigenverbruik en wis alle of geselecteerde overschrijvingen.",

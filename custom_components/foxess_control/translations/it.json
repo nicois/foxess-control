@@ -152,6 +152,24 @@
     }
   },
   "services": {
+    "backup": {
+      "name": "Backup",
+      "description": "Mette l'inverter in modalità Backup per una durata prestabilita: il solare continua a caricare la batteria, ma la batteria non si scarica verso la casa.",
+      "fields": {
+        "duration": {
+          "name": "Durata",
+          "description": "Per quanto tempo restare in modalità Backup (max 4 ore, non deve superare la mezzanotte)."
+        },
+        "start_time": {
+          "name": "Ora di inizio",
+          "description": "Ora del giorno per avviare la forzatura. Predefinito: adesso."
+        },
+        "replace_conflicts": {
+          "name": "Rimuovi forzature in conflitto anziché interrompere",
+          "description": "Se abilitato, rimuove silenziosamente le forzature esistenti sovrapposte anziché interrompere."
+        }
+      }
+    },
     "clear_overrides": {
       "name": "Cancella forzature",
       "description": "Riportare l'inverter in modalità autoconsumo, cancellando tutte o le forzature selezionate.",

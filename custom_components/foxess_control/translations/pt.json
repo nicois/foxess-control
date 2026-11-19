@@ -152,6 +152,24 @@
     }
   },
   "services": {
+    "backup": {
+      "name": "Reserva",
+      "description": "Coloca o inversor em modo Reserva durante um período definido: a energia solar continua a carregar a bateria, mas a bateria não descarrega para a casa.",
+      "fields": {
+        "duration": {
+          "name": "Duração",
+          "description": "Quanto tempo permanecer em modo Reserva (máx. 4 horas, não pode passar da meia-noite)."
+        },
+        "start_time": {
+          "name": "Hora de início",
+          "description": "Hora do dia para iniciar a substituição. Padrão: agora."
+        },
+        "replace_conflicts": {
+          "name": "Remover substituições em conflito em vez de abortar",
+          "description": "Se ativado, remove silenciosamente as substituições existentes sobrepostas em vez de abortar."
+        }
+      }
+    },
     "clear_overrides": {
       "name": "Limpar substituições",
       "description": "Retornar o inversor ao modo de autoconsumo, limpando todas ou as substituições selecionadas.",
