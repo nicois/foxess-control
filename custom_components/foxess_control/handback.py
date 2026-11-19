@@ -8,9 +8,10 @@ left on blocks the user's local Modbus control) and issue #4 (a Min SoC of
 ``minsocongrid.range.min = 10`` and rejects less with errno 40257).
 
 Not every inverter may be able to do it.  Issue #17 was an H3-12.0-E whose
-master-switch write answered HTTP 404 (then at ``/op/v0/device/scheduler/set``,
-a path the cloud never served; it is now ``/op/v1/device/scheduler/set/flag``) — the one endpoint that can
-turn the master switch off — while its Mode Scheduler otherwise works
+master-switch write answered HTTP 404 (then at
+``/op/v0/device/scheduler/set``, a path the cloud never served; it is now
+``/op/v1/device/scheduler/set/flag``) — the one endpoint that can turn the
+master switch off — while its Mode Scheduler otherwise works
 normally.  Handback is impossible there, and saying so is this module's job:
 declining silently at every session boundary forever is what left that user
 reading a diagnostics download to find out.

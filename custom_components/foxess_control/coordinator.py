@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .const import DEFAULT_POLLING_INTERVAL, DOMAIN, POLLED_VARIABLES
+from .foxess.inverter import WorkMode
 from .foxess_adapter import _ENTITY_MODE_MAP
 from .smart_battery.coordinator import EntityCoordinator as _EntityCoordinator
 from .smart_battery.coordinator import get_coordinator_soc as _get_coordinator_soc
@@ -809,8 +810,8 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 # declares (issue #24).  Reverse of the write-direction map, plus the
 # WorkMode values themselves for entities that already use them.
 _ENTITY_LABEL_TO_WORK_MODE: dict[str, str] = {
-    **{mode.value: mode.value for mode in _ENTITY_MODE_MAP},
-    **{label: mode.value for mode, label in _ENTITY_MODE_MAP.items()},
+    **{WorkMode(mode).value: WorkMode(mode).value for mode in _ENTITY_MODE_MAP},
+    **{label: WorkMode(mode).value for mode, label in _ENTITY_MODE_MAP.items()},
 }
 
 
