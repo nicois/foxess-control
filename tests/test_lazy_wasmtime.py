@@ -31,15 +31,24 @@ def test_web_session_imports_without_wasmtime(
     asserts the integration's import path still succeeds.
     """
     # Clean slate: drop cached foxess modules + wasmtime so the import is
-    # actually re-executed under the block. Done FIRST so other tests are
-    # unaffected (they re-import fresh, and monkeypatch restores __import__).
+    # actually re-executed under the block. ``monkeypatch.delitem`` puts the
+    # *original* module objects back afterwards. Merely popping them left
+    # the re-imported copies in place, so a later test on the same worker
+    # held two distinct ``LocalGatewayError`` classes (one imported at
+    # collection, one lazily by the coordinator) and ``except`` stopped
+    # matching.
     for m in list(sys.modules):
         if (
             m.startswith("custom_components.foxess_control.foxess")
             or m == "wasmtime"
             or m.startswith("wasmtime.")
         ):
-            sys.modules.pop(m, None)
+            monkeypatch.delitem(sys.modules, m)
+    # The re-import also rebinds the ``foxess`` attribute on the parent
+    # package; restore that too.
+    parent = sys.modules.get("custom_components.foxess_control")
+    if parent is not None and hasattr(parent, "foxess"):
+        monkeypatch.setattr(parent, "foxess", parent.foxess)
 
     real_import = builtins.__import__
 
