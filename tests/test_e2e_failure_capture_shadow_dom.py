@@ -74,7 +74,9 @@ trigger away), C-029, C-020.
 
 from __future__ import annotations
 
+import itertools
 import re
+import uuid
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
@@ -554,9 +556,17 @@ class TestBrowserDiagnosticsLogIsAlwaysWritten:
         return page
 
     def _capture(self, page: Any, tmp_path: Path, monkeypatch: Any) -> str:
-        monkeypatch.setattr(e2e_conftest, "_failure_capture_dir", lambda: tmp_path)
+        # Each capture gets its own directory.  Logs are named
+        # ``<slug>-<n>.log`` from a process-wide counter, and "-10" sorts
+        # before "-9" as text, so sharing tmp_path and taking the last log
+        # by name returned the *first* capture's log whenever two captures
+        # straddled 9->10 or 99->100 — which depended on how many captures
+        # had already run in that worker (C-031).
+        out = tmp_path / uuid.uuid4().hex
+        out.mkdir()
+        monkeypatch.setattr(e2e_conftest, "_failure_capture_dir", lambda: out)
         summary: str = e2e_conftest._capture_failure(page, "form-input: wait_for_form")
-        logs = sorted(tmp_path.glob("*.log"))
+        logs = sorted(out.glob("*.log"))
         assert logs, (
             "no .log was written.  This is exactly what the CI artefact for "
             "run 33380962649 looked like, and it is why the browser's own "
@@ -596,6 +606,9 @@ class TestBrowserDiagnosticsLogIsAlwaysWritten:
         If the two states produced the same text the log would be no
         better than the absent file it replaces.
         """
+        # Straddle the 9 -> 10 boundary deliberately: the flaky failure this
+        # test once had (see ``_capture``) must stay reproduced, not lucky.
+        monkeypatch.setattr(e2e_conftest, "_CAPTURE_COUNTER", itertools.count(9))
         unattached = self._page()
         attached = self._page()
         _surface("attach_page_diagnostics")(attached)
