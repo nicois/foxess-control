@@ -41,8 +41,9 @@ def _tight_window(minutes: int = 30) -> tuple[str, str]:
     When ``now`` is too close to midnight to fit ``minutes`` of window
     AND have at least ``minutes - 2`` minutes remaining after ``now``,
     we sleep until 00:00:05 of the next UTC day before computing the
-    window.  The sleep is bounded by 60 seconds (the worst case: ``now``
-    is at 23:59:00).  This is the only realistic way to satisfy both
+    window.  The sleep can last up to ``minutes - 2`` minutes (28 for the
+    usual 30-minute window); the E2E job timeouts in ``.github/workflows``
+    allow for it.  This is the only realistic way to satisfy both
     invariants simultaneously — the FoxESS API rejects midnight-crossing
     schedules so we cannot return tomorrow's date for ``end``.
 
