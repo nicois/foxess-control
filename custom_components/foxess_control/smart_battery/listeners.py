@@ -941,22 +941,30 @@ def setup_smart_charge_listeners(
                 _clear_unreachable_issue(hass, domain)
                 cur_state["unreachable_issued"] = False
 
+        full_power = bool(cur_state.get("full_power"))
+
         if not cur_state["charging_started"]:
-            # Check if it's time to start deferred charging
-            deferred = call_algo(
-                _LOGGER,
-                calculate_deferred_start,
-                "pre_start",
-                current_soc=cur_soc,
-                target_soc=cur_state["target_soc"],
-                battery_capacity_kwh=cur_state["battery_capacity_kwh"],
-                max_power_w=effective_max,
-                end=cur_state["end"],
-                net_consumption_kw=net_consumption,
-                start=cur_state["start"],
-                headroom=headroom,
-                taper_profile=taper,
-                bms_temp_c=bms_temp,
+            # Check if it's time to start deferred charging.  A full-power
+            # session (force_charge) never defers: it charges at maximum
+            # power for its whole window (issue #32).
+            deferred = (
+                now_dt
+                if full_power
+                else call_algo(
+                    _LOGGER,
+                    calculate_deferred_start,
+                    "pre_start",
+                    current_soc=cur_soc,
+                    target_soc=cur_state["target_soc"],
+                    battery_capacity_kwh=cur_state["battery_capacity_kwh"],
+                    max_power_w=effective_max,
+                    end=cur_state["end"],
+                    net_consumption_kw=net_consumption,
+                    start=cur_state["start"],
+                    headroom=headroom,
+                    taper_profile=taper,
+                    bms_temp_c=bms_temp,
+                )
             )
             # Commit the listener's decision so the sensor reads a stable
             # value between listener ticks.  Without this, the sensor
@@ -989,19 +997,23 @@ def setup_smart_charge_listeners(
             _cancel_deferred_wake(cur_state)
 
             # Time to start charging
-            new_power = call_algo(
-                _LOGGER,
-                calculate_charge_power,
-                "initial",
-                current_soc=cur_soc,
-                target_soc=cur_state["target_soc"],
-                battery_capacity_kwh=cur_state["battery_capacity_kwh"],
-                remaining_hours=remaining,
-                max_power_w=effective_max,
-                net_consumption_kw=net_consumption,
-                headroom=headroom,
-                taper_profile=taper,
-                bms_temp_c=bms_temp,
+            new_power = (
+                effective_max
+                if full_power
+                else call_algo(
+                    _LOGGER,
+                    calculate_charge_power,
+                    "initial",
+                    current_soc=cur_soc,
+                    target_soc=cur_state["target_soc"],
+                    battery_capacity_kwh=cur_state["battery_capacity_kwh"],
+                    remaining_hours=remaining,
+                    max_power_w=effective_max,
+                    net_consumption_kw=net_consumption,
+                    headroom=headroom,
+                    taper_profile=taper,
+                    bms_temp_c=bms_temp,
+                )
             )
             emit_schedule_write(
                 _LOGGER,
@@ -1068,21 +1080,28 @@ def setup_smart_charge_listeners(
             )
             return
 
-        # D-043: re-defer when ahead of schedule (solar supplement)
-        deferred = call_algo(
-            _LOGGER,
-            calculate_deferred_start,
-            "redefer_check",
-            current_soc=cur_soc,
-            target_soc=cur_state["target_soc"],
-            battery_capacity_kwh=cur_state["battery_capacity_kwh"],
-            max_power_w=effective_max,
-            end=cur_state["end"],
-            net_consumption_kw=net_consumption,
-            start=cur_state["start"],
-            headroom=headroom,
-            taper_profile=taper,
-            bms_temp_c=bms_temp,
+        # D-043: re-defer when ahead of schedule (solar supplement).  Never
+        # for a full-power session (force_charge): it charges at maximum
+        # power for its whole window, and re-deferring handed it back to
+        # self-use — for good when battery capacity is unset (issue #32).
+        deferred = (
+            now_dt
+            if full_power
+            else call_algo(
+                _LOGGER,
+                calculate_deferred_start,
+                "redefer_check",
+                current_soc=cur_soc,
+                target_soc=cur_state["target_soc"],
+                battery_capacity_kwh=cur_state["battery_capacity_kwh"],
+                max_power_w=effective_max,
+                end=cur_state["end"],
+                net_consumption_kw=net_consumption,
+                start=cur_state["start"],
+                headroom=headroom,
+                taper_profile=taper,
+                bms_temp_c=bms_temp,
+            )
         )
         if now_dt < deferred:
             _LOGGER.info(

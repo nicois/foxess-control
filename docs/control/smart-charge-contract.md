@@ -355,6 +355,14 @@ the first time:
 
 ### G4. Re-deferral when ahead of schedule (D-043)
 
+**Never for a `full_power` session** (`force_charge`): it charges at
+maximum power for its whole window, so G3 and G4 both treat
+`deferred_start` as `now`, and G3 starts it at `max_power_w`, not a
+paced power. Applying them to `force_charge` sent it back to
+self-use whenever pacing found slack. With battery capacity unset,
+"energy needed" is 0 and the deferred start is the window end, so it
+stayed in self-use for the whole window (issue #32).
+
 If `charging_started == True`, **also** compute `deferred_start`
 again from the current SoC. Solar arriving on top of grid charge
 pushes SoC ahead of where the pacing algorithm expected. If the

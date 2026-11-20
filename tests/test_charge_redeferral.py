@@ -412,3 +412,156 @@ class TestChargeRedeferral:
         assert state["charging_started"] is True, (
             "Should resume charging when deferred start deadline arrives"
         )
+
+
+async def _start_force_charge(
+    hass: MagicMock,
+    inv: MagicMock,
+    start_time: datetime.time,
+    duration: datetime.timedelta,
+    now: datetime.datetime,
+) -> Any:
+    """Start a force_charge session and return the interval callback."""
+    inv.get_schedule.return_value = {"enable": 0, "groups": []}
+    captured_cb = None
+
+    def capture(h: Any, cb: Any, i: Any) -> MagicMock:
+        nonlocal captured_cb
+        captured_cb = cb
+        return MagicMock()
+
+    _register_services(hass)
+    handler = _get_handler(hass, "force_charge")
+    with (
+        patch(f"{_LISTENERS}.dt_util.now", return_value=now),
+        patch(
+            "custom_components.foxess_control._services.dt_util.now", return_value=now
+        ),
+        patch(
+            "custom_components.foxess_control.smart_battery.services.dt_util.now",
+            return_value=now,
+        ),
+        patch(f"{_LISTENERS}.async_track_point_in_time", return_value=MagicMock()),
+        patch(f"{_LISTENERS}.async_track_time_interval", side_effect=capture),
+    ):
+        await handler(_make_call({"start_time": start_time, "duration": duration}))
+    assert captured_cb is not None
+    return captured_cb
+
+
+def _set_soc(hass: MagicMock, soc: float, pv_kw: float = 0.0) -> None:
+    for entry_data in hass.data[DOMAIN].entries.values():
+        entry_data.coordinator.data = {
+            "SoC": soc,
+            "loadsPower": 0.5,
+            "pvPower": pv_kw,
+        }
+
+
+def _last_written_modes(inv: MagicMock) -> list[str]:
+    if not inv.set_schedule.call_args_list:
+        return []
+    groups = inv.set_schedule.call_args_list[-1].args[0]
+    return [g["workMode"] for g in groups]
+
+
+class TestForceChargeNeverDefers:
+    """Issue #32: ``force_charge`` charges at full power for its whole
+    window.  It runs as a ``full_power`` smart session, and the D-043
+    "ahead of schedule" re-defer used to hand it back to self-use: with
+    battery capacity unset (which force_charge allows) the target looks
+    already met, and with it set, any slack in the pacing maths sends the
+    battery back to self-use — on a cloudy day the solar it was waiting
+    for never comes, and the battery ends the window short.
+    """
+
+    @pytest.mark.asyncio
+    async def test_ahead_of_schedule_keeps_force_charging(self) -> None:
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        # The reporter's H3-10.0-E: 42 kWh, free power 11:00-14:00.
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=42.0,
+            coordinator_data={"SoC": 60.0, "loadsPower": 0.5, "pvPower": 0.0},
+        )
+        start = datetime.datetime(2026, 10, 13, 11, 0, 0)
+        cb = await _start_force_charge(
+            hass, inv, datetime.time(11, 0), datetime.timedelta(hours=3), start
+        )
+        state = hass.data[DOMAIN].smart_charge_state
+        assert state is not None and state["charging_started"] is True
+
+        # 11:30, SoC 62%: 38% of 42 kWh at ~9 kW needs ~2 h, so pacing
+        # alone would wait until ~11:55.  A forced charge must not.
+        _set_soc(hass, 62.0)
+        inv.set_schedule.reset_mock()
+        tick = datetime.datetime(2026, 10, 13, 11, 30, 0)
+        with patch(f"{_LISTENERS}.dt_util.now", return_value=tick):
+            await cb(tick)
+
+        state = hass.data[DOMAIN].smart_charge_state
+        assert state is not None
+        assert state["charging_started"] is True, (
+            "force_charge was re-deferred to self-use part-way through its window"
+        )
+        assert "SelfUse" not in _last_written_modes(inv)
+
+    @pytest.mark.asyncio
+    async def test_unset_capacity_keeps_force_charging(self) -> None:
+        """Capacity 0 makes "energy needed" 0, so the deferred start is the
+        window end — the session must still charge, not idle all window."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=0.0,
+            coordinator_data={"SoC": 40.0, "loadsPower": 0.5, "pvPower": 0.0},
+        )
+        start = datetime.datetime(2026, 10, 13, 11, 0, 0)
+        cb = await _start_force_charge(
+            hass, inv, datetime.time(11, 0), datetime.timedelta(hours=3), start
+        )
+        _set_soc(hass, 41.0)
+        tick = datetime.datetime(2026, 10, 13, 11, 5, 0)
+        with patch(f"{_LISTENERS}.dt_util.now", return_value=tick):
+            await cb(tick)
+
+        state = hass.data[DOMAIN].smart_charge_state
+        assert state is not None
+        assert state["charging_started"] is True
+        assert "SelfUse" not in _last_written_modes(inv)
+
+    @pytest.mark.asyncio
+    async def test_a_not_started_force_charge_starts_at_full_power(self) -> None:
+        """A full-power session that is not charging (e.g. recovered after a
+        restart mid-window) starts at once at maximum power, not paced."""
+        inv = MagicMock(spec=Inverter)
+        inv.max_power_w = 10500
+        hass = _make_hass(
+            inverter=inv,
+            battery_capacity_kwh=42.0,
+            coordinator_data={"SoC": 60.0, "loadsPower": 0.5, "pvPower": 0.0},
+        )
+        start = datetime.datetime(2026, 10, 13, 11, 0, 0)
+        cb = await _start_force_charge(
+            hass, inv, datetime.time(11, 0), datetime.timedelta(hours=3), start
+        )
+        state = hass.data[DOMAIN].smart_charge_state
+        assert state is not None
+        state["charging_started"] = False
+        state["charging_started_at"] = None
+
+        _set_soc(hass, 62.0)
+        inv.set_schedule.reset_mock()
+        tick = datetime.datetime(2026, 10, 13, 11, 30, 0)
+        with patch(f"{_LISTENERS}.dt_util.now", return_value=tick):
+            await cb(tick)
+
+        state = hass.data[DOMAIN].smart_charge_state
+        assert state is not None
+        assert state["charging_started"] is True, (
+            "a full-power session waited for the pacing deadline"
+        )
+        assert state["last_power_w"] == state["max_power_w"]
+        assert "ForceCharge" in _last_written_modes(inv)
