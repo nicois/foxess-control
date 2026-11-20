@@ -736,7 +736,10 @@ are rejected by `scheduler/enable` with `errno 40257`. **Clamp to
 these ranges before writing** (`C-042`): `capacity * 1050` matches
 `fdpwr.range.max` on a KH10 but overshoots on H3 / EVO families,
 where the declared ceiling is the plain nameplate rating — the cause
-of "40257 on every write" reports (issues #12, #14, #17).
+of "40257 on every write" reports (issues #12, #14, #17). It also
+*undershoots* where `capacity` truncates a fractional rating (a KH9.9
+reports `9`: 9450 W against a declared ~10400 W, issue #34), so use
+the declared ceiling as the maximum power whenever it is present.
 
 Group shape differs from `/op/v0/`: value fields are nested under
 `extraParam`. Read this endpoint for the ranges; keep writing via

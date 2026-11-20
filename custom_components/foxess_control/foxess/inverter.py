@@ -110,54 +110,53 @@ class Inverter:
     def max_power_w(self) -> int:
         """Inverter rated power in watts — the ceiling for ``fdPwr`` writes.
 
-        Derived from the ``capacity`` field of device detail (kW) via the
-        ``capacity * 1050`` factor the FoxESS app uses, then clamped to the
-        maximum ``fdPwr`` the device itself declares (see
-        :attr:`fd_pwr_limit_w`).
+        The maximum ``fdPwr`` the device itself declares (see
+        :attr:`fd_pwr_limit_w`) when it declares one; otherwise the
+        ``capacity`` field of device detail (kW) times the ``* 1050`` factor
+        the FoxESS app uses.
 
-        The ``* 1050`` factor was reverse-engineered from a KH10, whose
-        declared ceiling happens to be exactly ``capacity * 1050``.  Other
-        model families (H3, EVO) declare the plain nameplate rating, so the
-        factor overshoots and *every* schedule write — including the SelfUse
-        baseline written on session teardown — is rejected with errno 40257
-        (issues #12, #14, #17).  Clamping is one-directional: the declared
-        ceiling can only lower the value, never raise it above the rating.
+        The declared ceiling wins in **both** directions (C-042):
+
+        * The ``* 1050`` factor was reverse-engineered from a KH10, whose
+          declared ceiling happens to be exactly ``capacity * 1050``.  H3 and
+          EVO models declare the plain nameplate rating, so the factor
+          overshoots and *every* schedule write is rejected with errno 40257
+          (issues #12, #14, #17).
+        * A KH9.9 reports ``capacity: 9`` — an integer — so the factor
+          undershoots at 9450 W while the device declares, and the FoxESS
+          app allows, about 10400 W (issue #34).
+
+        A declared value the device then refuses is rejected by the API, so
+        trusting the declaration cannot write past what the inverter
+        accepts.  Device detail without ``capacity`` (issues #13, #33) is
+        covered by the same rule; it fails only if neither is available.
         """
         if self._max_power_w is None:
             detail = self.get_detail()
             self._device_type = detail.get("deviceType")
             capacity_kw: float = detail.get("capacity") or 0
-            if capacity_kw <= 0:
-                # Issues #13 (M1-800-E), #33 (MQ2200-M-H): some models omit
-                # ``capacity``.  The device's own declared fdPwr ceiling is
-                # then the only rating there is, and it is authoritative.
-                declared = self.fd_pwr_limit_w
-                if declared is None or declared <= 0:
-                    raise RuntimeError(
-                        "Could not determine inverter capacity from device "
-                        "detail, and the device declares no fdPwr limit"
-                    )
-                _LOGGER.info(
-                    "Inverter %s reports no capacity; using its declared "
-                    "maximum fdPwr of %d W",
-                    self._device_type or self.sn,
-                    declared,
-                )
-                self._max_power_w = declared
-                return self._max_power_w
-            rated_w = int(capacity_kw * self.CAPACITY_TO_FD_PWR)
+            rated_w = (
+                int(capacity_kw * self.CAPACITY_TO_FD_PWR) if capacity_kw > 0 else None
+            )
             declared = self.fd_pwr_limit_w
-            if declared is not None and declared < rated_w:
-                _LOGGER.info(
-                    "Inverter %s declares a maximum fdPwr of %d W; using that "
-                    "instead of the %d W derived from its %s kW rating",
-                    self._device_type or self.sn,
-                    declared,
-                    rated_w,
-                    capacity_kw,
+            if declared is not None and declared > 0:
+                if declared != rated_w:
+                    _LOGGER.info(
+                        "Inverter %s declares a maximum fdPwr of %d W; using that "
+                        "instead of the %s derived from its capacity (%s kW)",
+                        self._device_type or self.sn,
+                        declared,
+                        f"{rated_w} W" if rated_w is not None else "nothing",
+                        capacity_kw or "not reported",
+                    )
+                self._max_power_w = declared
+            elif rated_w is not None:
+                self._max_power_w = rated_w
+            else:
+                raise RuntimeError(
+                    "Could not determine inverter capacity from device "
+                    "detail, and the device declares no fdPwr limit"
                 )
-                rated_w = declared
-            self._max_power_w = rated_w
         return self._max_power_w
 
     @property

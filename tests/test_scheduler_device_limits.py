@@ -228,6 +228,31 @@ class TestNoRegressionForWorkingModels:
             _ = inv.max_power_w
 
 
+class TestDeclaredCeilingAboveCapacityRating:
+    """Issue #34: a KH9.9 reports ``capacity: 9`` (an integer), so
+    ``capacity x 1050`` gives 9450 W while the device declares, and the
+    FoxESS app allows, about 10400 W.  The declared ceiling is the
+    device's own statement of what it accepts, so it is used in both
+    directions; a value the device then refuses is rejected by the API.
+    """
+
+    def test_declared_ceiling_raises_the_rating(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        foxess_sim.set(device_type="KH9.9", max_power_w=9450, fd_pwr_max_w=10400)
+        assert _make_inv(foxess_sim).max_power_w == 10400
+
+    def test_full_power_write_uses_the_declared_ceiling(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        foxess_sim.set(device_type="KH9.9", max_power_w=9450, fd_pwr_max_w=10400)
+        inv = _make_inv(foxess_sim)
+        inv.force_discharge(min_soc=20)
+        groups = _written_groups(foxess_sim, WorkMode.FORCE_DISCHARGE)
+        assert groups, "no ForceDischarge group is in force on the inverter"
+        assert groups[0]["fdPwr"] == 10400
+
+
 class TestDetailWithoutCapacity:
     """Issues #13 (M1-800-E) and #33 (MQ2200-M-H): device detail has no
     ``capacity``, so setup failed with "Could not determine inverter
