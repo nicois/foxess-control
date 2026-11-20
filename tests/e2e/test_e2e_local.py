@@ -67,7 +67,13 @@ class TestLocalReadOnly:
     def test_control_service_refuses_with_an_explanation(
         self, ha_e2e: HAClient
     ) -> None:
+        # An explicit start_time keeps the window inside today whatever the
+        # wall clock says.  "Start now" for 30 minutes after 23:30 is refused
+        # by the midnight check (C-009) before the backend is consulted, so
+        # the test failed on runs that straddled midnight UTC.
         error = ha_e2e.refused_service(
-            "foxess_control", "force_charge", {"duration": "00:30:00"}
+            "foxess_control",
+            "force_charge",
+            {"duration": "00:30:00", "start_time": "01:00:00"},
         )
         assert error.get("translation_key") == "local_control_unavailable", error
