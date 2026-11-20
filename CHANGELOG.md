@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.22-beta.13
 
 ### Added
 - **New action `foxess_control.backup`: Backup mode for a set time (PR #29, thanks @giggles-38a).** Solar still charges the battery, but the battery does not discharge to the house, so the house runs on solar and the grid. Useful for free or cheap grid-power windows (issue #32). It takes a `duration`, an optional `start_time` and `replace_conflicts`, like `feedin`, and the inverter returns to self-use when the window ends.
