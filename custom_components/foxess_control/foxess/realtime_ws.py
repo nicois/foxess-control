@@ -100,6 +100,84 @@ def _is_plausible(candidate: dict[str, Any], reference: dict[str, Any] | None) -
     return True
 
 
+class GridDirectionTracker:
+    """Decide grid import vs export for each WS frame.
+
+    ``grid.power`` is an unsigned magnitude.  Signals, strongest first:
+
+    1. ``grid.gridToHidden`` — the signed flow flag the cloud app uses to
+       draw the grid arrow (+1 import, -1 export).  Independent of the
+       power balance, so unmeasured load/generation cannot flip it.
+    2. The power balance ``load + charger + bat_charge - bat_discharge -
+       solar`` (positive = import), but only when its magnitude agrees
+       with the measured grid power to within 3x.
+    3. The direction ``gridStatus`` meant the last time a trusted signal
+       was seen.  Its meaning differs between firmwares (2 is import on
+       some, export on others), so it is learned, never assumed.
+    4. The previous direction (hold).
+    5. Cold start only: legacy ``gridStatus == "3"`` means import.
+    """
+
+    NOISE_KW = 0.05
+    MAX_BALANCE_RATIO = 3.0
+
+    def __init__(self) -> None:
+        self.importing: bool | None = None
+        # gridStatus -> direction, or None once it has been seen both ways
+        self._status_meaning: dict[str, bool | None] = {}
+
+    @staticmethod
+    def _flag(grid: dict[str, Any]) -> bool | None:
+        raw = grid.get("gridToHidden")
+        if raw is None:
+            return None
+        try:
+            value = float(raw)
+        except (ValueError, TypeError):
+            return None
+        return value > 0 if value else None
+
+    def _balance_reliable(self, grid_kw: float, net: float) -> bool:
+        predicted = abs(net)
+        return grid_kw < self.NOISE_KW or (
+            predicted > self.NOISE_KW
+            and max(grid_kw / predicted, predicted / grid_kw) < self.MAX_BALANCE_RATIO
+        )
+
+    def _learn(self, grid: dict[str, Any], grid_kw: float, importing: bool) -> None:
+        if grid_kw < self.NOISE_KW:
+            return  # near-zero grid power carries no direction information
+        self.importing = importing
+        status = str(grid.get("gridStatus", ""))
+        known = self._status_meaning.get(status, importing)
+        self._status_meaning[status] = importing if known == importing else None
+
+    def resolve(self, grid: dict[str, Any], grid_kw: float, net: float | None) -> bool:
+        """Return True when the grid is importing."""
+        flag = self._flag(grid)
+        if flag is not None:
+            self._learn(grid, grid_kw, flag)
+            return flag
+        if net is not None and self._balance_reliable(grid_kw, net):
+            importing = net > 0
+            self._learn(grid, grid_kw, importing)
+            return importing
+
+        status = str(grid.get("gridStatus", ""))
+        learned = self._status_meaning.get(status)
+        if learned is not None:
+            _LOGGER.debug("Grid direction from learned gridStatus=%s", status)
+            return learned
+        if self.importing is not None:
+            _LOGGER.debug(
+                "Grid direction undetermined (gridStatus=%s) — holding %s",
+                status,
+                "import" if self.importing else "export",
+            )
+            return self.importing
+        return status == "3"
+
+
 def _parse_aux_power(node: dict[str, Any]) -> float | None:
     """Read the ``aux`` node's power in kW, or ``None`` if unreadable.
 
@@ -130,6 +208,7 @@ def _parse_aux_power(node: dict[str, Any]) -> float | None:
 
 def map_ws_to_coordinator(
     ws_msg: dict[str, Any],
+    tracker: GridDirectionTracker | None = None,
     *,
     additional_pv_enabled: bool = False,
     additional_pv_fallback_kw: float = 0.0,
@@ -161,6 +240,9 @@ def map_ws_to_coordinator(
 
     The applied term is reported back as ``_additional_pv_kw`` so the
     coordinator knows not to add its own copy on top.
+
+    *tracker* carries the last trusted grid direction between frames.
+    Without one (tests, one-off calls) every frame is judged on its own.
     """
     node = ws_msg.get("result", {}).get("node", {})
     if not node:
@@ -203,43 +285,29 @@ def map_ws_to_coordinator(
     if load_kw is not None:
         data["loadsPower"] = load_kw
 
-    # Grid power — derive direction from the power balance, falling back
-    # to gridStatus when the balance is unreliable (e.g. unmeasured
-    # external generation makes the predicted magnitude diverge from the
-    # actual grid reading).
+    # Grid power — direction is resolved by ``GridDirectionTracker`` from
+    # (in order) the signed ``gridToHidden`` flow flag, the power balance
+    # when it matches the measured magnitude, then remembered state.
     grid = node.get("grid", {})
     grid_kw = _to_kw(_parse_power(grid.get("power")))
     if grid_kw is not None:
-        solar = data.get("pvPower")
-        load = data.get("loadsPower")
-        bat_charge = data.get("batChargePower", 0.0)
-        bat_discharge = data.get("batDischargePower", 0.0)
-
-        if solar is not None and load is not None:
-            net = load + bat_charge - bat_discharge - solar
-            predicted_kw = abs(net)
-            # When the balance-predicted magnitude is close to the actual
-            # grid reading, the balance is trustworthy.  When they diverge
-            # significantly (ratio > 3x or predicted ≈ 0 while grid is
-            # substantial), an unmeasured source is skewing the balance —
-            # fall back to gridStatus.
-            balance_reliable = (
-                grid_kw < 0.05
-                or predicted_kw > 0.05
-                and max(grid_kw / predicted_kw, predicted_kw / grid_kw) < 3.0
+        # The EV charger is reported in its own node and is *not* part of
+        # ``load`` once the cloud has split it out (a few seconds after it
+        # starts); while it is being split it is partly in both, but
+        # load + charger stays equal to the true consumption.
+        charger_kw = _to_kw(_parse_power(node.get("charger", {}).get("power")))
+        net: float | None = None
+        if data.get("pvPower") is not None and data.get("loadsPower") is not None:
+            net = (
+                data["loadsPower"]
+                + (charger_kw or 0.0)
+                + data.get("batChargePower", 0.0)
+                - data.get("batDischargePower", 0.0)
+                - data["pvPower"]
             )
-            if balance_reliable:
-                importing = net > 0
-            else:
-                _LOGGER.debug(
-                    "Grid balance unreliable: predicted=%.3f kW, "
-                    "actual=%.3f kW — using gridStatus",
-                    predicted_kw,
-                    grid_kw,
-                )
-                importing = str(grid.get("gridStatus", "")) == "3"
-        else:
-            importing = str(grid.get("gridStatus", "")) == "3"
+        if tracker is None:
+            tracker = GridDirectionTracker()
+        importing = tracker.resolve(grid, grid_kw, net)
 
         if importing:
             data["gridConsumptionPower"] = grid_kw
@@ -349,6 +417,7 @@ class FoxESSRealtimeWS:
         # to a single frame instead of "until a REST poll re-anchors the
         # reference" (live 2026-06-15 charge-start data loss).
         self._pending: dict[str, Any] | None = None
+        self._grid_direction = GridDirectionTracker()
 
     @property
     def is_connected(self) -> bool:
@@ -572,6 +641,7 @@ class FoxESSRealtimeWS:
                 data,
                 additional_pv_enabled=enabled,
                 additional_pv_fallback_kw=fallback_kw,
+                tracker=self._grid_direction,
             )
             if mapped:
                 accepted = self._process_mapped_frame(mapped)

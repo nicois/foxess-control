@@ -180,20 +180,26 @@ post-session values so the overview card immediately reflects reality.
 **Traces**: C-007, C-020;
 `tests/e2e/test_e2e.py::TestDataSource::test_ws_linger_captures_post_discharge_data`
 
-### D-010: Power balance for grid direction
-**Decision**: Derive grid import/export from power balance
-(`load + charge - discharge - solar`) rather than the `gridStatus` field,
-but fall back to `gridStatus` when the balance-predicted magnitude
-diverges >3× from the actual grid reading.
-**Context**: The `gridStatus` field from the WebSocket has inconsistent
-meaning across firmware versions. However, the power balance assumes
-FoxESS sees all generation and load, which fails when external sources
-(e.g. a separate grid-tied solar inverter) are present.
-**Rationale**: Power balance is physically correct by conservation of
-energy when all sources are visible. When the predicted and actual grid
-magnitudes diverge significantly, an unmeasured source is skewing the
-balance — `gridStatus` is more reliable in that case despite firmware
-inconsistencies.
+### D-010: Signed flag, then balance, then remembered direction
+**Decision**: Resolve grid import/export with `GridDirectionTracker`:
+signed `gridToHidden` flag first; the power balance (including the
+`charger` node) only when it matches the measured magnitude within 3x;
+then a learned `gridStatus` meaning; then hold the previous direction.
+The legacy `gridStatus == "3"` rule survives only as a cold-start guess.
+**Context**: `gridStatus` has inconsistent meaning across firmware
+versions, and the power balance assumes FoxESS sees all generation and
+load. GH issue #3 (unmeasured external generation) was patched by falling
+back to `gridStatus` when balance and grid diverged >3x; that fallback
+mis-reports import as export on firmware where 2 means import, as soon as
+an unmeasured load (EV charger, 4-8 kW) pushes the ratio across 3x
+(live 2026-10-27, Force Charge + EV; ratio hovered at 2-3.5x and the
+direction flipped on every crossing). The WS frame carries the EV in a
+separate `charger` node; `load + charger` stays the true consumption even
+while the cloud moves the EV from `load` to `charger`.
+**Rationale**: A direction flag that is independent of the magnitudes
+cannot be skewed by anything unmeasured. Learning `gridStatus` per
+firmware (and distrusting it once seen both ways) keeps the issue #3
+behaviour without hard-coding a meaning.
 **Priority served**: P-005 (Operational transparency)
 **Trades against**: none
 **Classification**: safety
@@ -202,11 +208,15 @@ inconsistencies.
   with certain firmware
 - Trust balance always: rejected after GitHub issue #3 showed external
   generation causing persistent direction swap
+- Fall back to a fixed `gridStatus` meaning when the balance diverges:
+  rejected after the 2026-10-27 EV capture (2 = import there)
 - Ignore grid direction entirely: rejected because feed-in energy
   integration requires it
 **Traces**: C-006;
 `tests/test_realtime_ws.py::TestMapWsToCoordinator::test_grid_importing_from_balance`,
-`tests/test_realtime_ws.py::TestMapWsToCoordinator::test_grid_balance_unreliable_unmeasured_generation`
+`tests/test_realtime_ws.py::TestMapWsToCoordinator::test_grid_balance_unreliable_unmeasured_generation`,
+`tests/test_realtime_ws.py::TestGridDirectionEvCharger`,
+`tests/test_realtime_ws.py::TestGridDirectionTracker`
 
 
 ### D-021: Visibility of data source on lovelace cards
