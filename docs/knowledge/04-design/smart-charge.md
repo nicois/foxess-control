@@ -139,6 +139,8 @@ causes SoC to advance faster than the pacing algorithm predicted.
 Without re-deferral, the listener keeps reducing power (bottoming out
 at 100W) but can never pause — the target is reached well before the
 window ends, wasting cheap-rate self-use time.
+**Scope**: Paced sessions only. A `full_power` session (`force_charge`)
+never defers or re-defers (issue #32).
 **Rationale**: Re-deferral reuses the existing `calculate_deferred_start`
 logic (no new algorithm needed) and mirrors the discharge side where
 deferral is re-evaluated every tick. Switching to self-use during the

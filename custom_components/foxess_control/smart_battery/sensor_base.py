@@ -6,7 +6,6 @@ so brand integrations create thin subclasses that bind these values.
 
 from __future__ import annotations
 
-import contextlib
 import datetime
 import logging
 from typing import TYPE_CHECKING, Any
@@ -107,6 +106,22 @@ def get_battery_capacity_kwh(hass: HomeAssistant, domain: str) -> float:
             cap: float = entry.options.get(CONF_BATTERY_CAPACITY_KWH, 0.0)
             return cap
     return 0.0
+
+
+def session_battery_capacity_kwh(
+    hass: HomeAssistant, domain: str, cs: dict[str, Any]
+) -> float:
+    """The battery capacity a charge session paces on (C-038).
+
+    The listener uses the capacity captured when the session started, so
+    the sensor must too — reading the options instead let the card judge a
+    capacity changed mid-session that the listener never saw (issue #32).
+    Falls back to the options for sessions persisted without one.
+    """
+    captured = cs.get("battery_capacity_kwh")
+    if isinstance(captured, int | float) and captured > 0:
+        return float(captured)
+    return get_battery_capacity_kwh(hass, domain)
 
 
 def get_smart_headroom_fraction(hass: HomeAssistant, domain: str) -> float:
@@ -270,25 +285,32 @@ def _explain_charge_deferral(
 ) -> str:
     """Human-readable "why is charge still deferred?" explanation.
 
-    The deferred-start algorithm is purely a time-budget calculation
-    (``energy_needed / effective_charge_power``); it has no tariff
-    input.  The message must not imply the integration models
-    pricing — that's the user's automation layer (vision.md lists
-    tariff optimisation as a non-goal).  What we can honestly say:
-    the current SoC trajectory projects to reach target without
-    forced charge.
+    The deferred-start algorithm is purely a time budget
+    (``energy_needed / effective_charge_power``): it waits because charging
+    at full power from the committed start still reaches the target by the
+    window end.  It has no tariff input and no solar forecast, so the text
+    must claim neither — the previous wording ("SoC trajectory currently
+    projects to reach target without forced charge") read as a solar
+    forecast and misled a user into expecting the battery to fill by
+    itself on a cloudy day (issue #32).
     """
     target_soc = cs.get("target_soc")
-    if current_soc is not None and target_soc is not None:
-        gap = target_soc - current_soc
-        if gap <= 0:
-            return "at or above target — will not force-charge"
-        return (
-            f"waiting — SoC trajectory currently projects to reach target "
-            f"without forced charge (current SoC {current_soc:.1f}%, "
-            f"target {target_soc}%, {gap:.1f}% gap)"
-        )
-    return "waiting for forced-charge deadline"
+    if current_soc is None or target_soc is None:
+        return "waiting for forced-charge deadline"
+    gap = target_soc - current_soc
+    if gap <= 0:
+        return "at or above target — will not force-charge"
+    start = cs.get("deferred_start_committed")
+    when = (
+        f"from ~{format_time(start)} "
+        if isinstance(start, datetime.datetime)
+        else "later "
+    )
+    return (
+        f"waiting — charging at full power {when}still reaches "
+        f"{target_soc}% by the end of the window (current SoC "
+        f"{current_soc:.1f}%, {gap:.1f}% gap)"
+    )
 
 
 def _est_feedin_minutes(feedin_kwh: float, export_limit_w: int) -> int:
@@ -471,7 +493,7 @@ def estimate_charge_remaining(
     from .algorithms import calculate_deferred_start
 
     soc = get_soc_value(hass, domain)
-    capacity_kwh = get_battery_capacity_kwh(hass, domain)
+    capacity_kwh = session_battery_capacity_kwh(hass, domain, cs)
     target_soc: int = cs.get("target_soc", 100)
     max_power_w: int = cs.get("effective_max_power_w", cs.get("max_power_w", 0))
     start: datetime.datetime | None = cs.get("start")
@@ -527,7 +549,7 @@ def charge_time_slack_seconds(
         return None  # scheduled, not deferred
 
     soc = get_soc_value(hass, domain)
-    capacity_kwh = get_battery_capacity_kwh(hass, domain)
+    capacity_kwh = session_battery_capacity_kwh(hass, domain, cs)
     target_soc: int = cs.get("target_soc", 100)
     max_power_w: int = cs.get("effective_max_power_w", cs.get("max_power_w", 0))
     if soc is None or capacity_kwh <= 0 or max_power_w <= 0 or soc >= target_soc:
@@ -595,7 +617,7 @@ def charge_reachability_slack_minutes(
         return None
 
     soc = get_soc_value(hass, domain)
-    capacity_kwh = get_battery_capacity_kwh(hass, domain)
+    capacity_kwh = session_battery_capacity_kwh(hass, domain, cs)
     target_soc: int = cs.get("target_soc", 100)
     max_power_w: int = cs.get("effective_max_power_w", cs.get("max_power_w", 0))
     if soc is None or capacity_kwh <= 0 or max_power_w <= 0:
@@ -779,6 +801,7 @@ def build_forecast(
 
     if cs is not None:
         soc = get_interpolated_soc(hass, domain)
+        capacity_kwh = session_battery_capacity_kwh(hass, domain, cs)
         if soc is None or capacity_kwh <= 0:
             return []
 
@@ -1460,26 +1483,22 @@ class SmartOperationsOverviewSensor(RestoreSensor):
         remaining_h = (end - now).total_seconds() / 3600.0
         if remaining_h <= 0:
             return None
-        capacity = get_battery_capacity_kwh(self.hass, self._domain)
-        dd = get_domain_data(self.hass, self._domain)
-        taper = dd.taper_profile
-        from .domain_data import get_first_coordinator
-
-        bms_temp: float | None = None
-        coordinator = get_first_coordinator(self.hass, self._domain)
-        if coordinator is not None and coordinator.data:
-            raw = coordinator.data.get("bmsBatteryTemperature")
-            if raw is not None:
-                with contextlib.suppress(ValueError, TypeError):
-                    bms_temp = float(raw)
+        # C-038: the listener's exact parameter list — the session's
+        # capacity and effective max power, live net consumption and the
+        # configured headroom (issue #32: leaving those out let the card
+        # call a target unreachable while the listener still deferred).
         return is_charge_target_reachable(
-            soc,
-            cs.get("target_soc", 100),
-            capacity,
-            remaining_h,
-            cs.get("max_power_w", 0),
-            taper_profile=taper,
-            bms_temp_c=bms_temp,
+            current_soc=soc,
+            target_soc=cs.get("target_soc", 100),
+            battery_capacity_kwh=session_battery_capacity_kwh(
+                self.hass, self._domain, cs
+            ),
+            remaining_hours=remaining_h,
+            max_power_w=cs.get("effective_max_power_w", cs.get("max_power_w", 0)),
+            net_consumption_kw=_get_net_consumption(self.hass, self._domain),
+            headroom=get_smart_headroom_fraction(self.hass, self._domain),
+            taper_profile=_get_taper_profile(self.hass, self._domain),
+            bms_temp_c=_get_bms_temp(self.hass, self._domain),
         )
 
 
