@@ -43,6 +43,8 @@ class IntegrationConfig:
     # install that has not asked for it is untouched — and specifically so
     # nothing writes to the user's persistent Min SoC register.
     scheduler_handback: bool = False
+    # Schedule-write API version: "auto", "v0" or "v1" (issue #28, D-068).
+    schedule_api_version: str = "auto"
 
 
 def build_config(
@@ -122,7 +124,22 @@ def build_config(
         scheduler_handback=bool(
             entry_options.get(CONF_SCHEDULER_HANDBACK, DEFAULT_SCHEDULER_HANDBACK)
         ),
+        schedule_api_version=_schedule_api_version(entry_options),
     )
+
+
+def _schedule_api_version(entry_options: dict[str, Any]) -> str:
+    """The saved schedule-write version, or the default if unrecognised."""
+    from .const import (
+        CONF_SCHEDULE_API_VERSION,
+        DEFAULT_SCHEDULE_API_VERSION,
+        SCHEDULE_API_VERSION_OPTIONS,
+    )
+
+    value = entry_options.get(CONF_SCHEDULE_API_VERSION)
+    if value in SCHEDULE_API_VERSION_OPTIONS:
+        return str(value)
+    return DEFAULT_SCHEDULE_API_VERSION
 
 
 @dataclass

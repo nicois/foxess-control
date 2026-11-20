@@ -144,6 +144,17 @@ Always clamp `fdPwr` to the declared ceiling before writing, and prefer the decl
 ceiling over `capacity * 1050` as the inverter's maximum power in both directions: `capacity`
 is an integer, so it also *undershoots* on fractional ratings such as the KH9.9 (see C-042).
 
+## Scheduler Enable — some devices accept only the v1 endpoint
+
+**Documentation says:** `/op/v0/device/scheduler/enable` and `/op/v1/device/scheduler/enable`
+are alternatives.
+
+**Actual behaviour:** an EVO 10-5H refuses *every* v0 write with errno `40257`, whatever
+the values, and accepts the same request on v1 with flat group fields plus `maxSoc`. v1
+with the values nested under `extraParam` is also refused (issue #28). Other reported
+models work on v0, and v1 has not been tried on them. Write via v0 and retry once via v1
+on `40257` (D-068).
+
 ## Scheduler Enable (`/op/v0/device/scheduler/enable`) — `fdPwr` must be non-zero
 
 **Documentation says:** `fdPwr` is the force discharge power limit in watts, with `0`

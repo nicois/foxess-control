@@ -419,11 +419,13 @@
           "api_min_soc": "fdSoc API minimo (%) — ⚠️ Valori inferiori a 11 potrebbero non funzionare con tutte le versioni del firmware",
           "polling_interval": "Intervallo di polling API (secondi)",
           "additional_pv_power_variable": "Variabile di potenza solare aggiuntiva",
-          "scheduler_handback": "Rilascia l'inverter quando è inattivo"
+          "scheduler_handback": "Rilascia l'inverter quando è inattivo",
+          "schedule_api_version": "API di scrittura delle programmazioni"
         },
         "data_description": {
           "additional_pv_power_variable": "Opzionale. Per sistemi accoppiati in CA in cui la produzione di un secondo inverter è riportata in una variabile FoxESS separata (ad es. meterPower2). Il suo valore viene sommato alla lettura solare. Altrimenti lasciare vuoto.",
-          "scheduler_handback": "Quando nessuna sessione intelligente è in corso: spegnere il programmatore di modalità dell'inverter, impostare direttamente l'autoconsumo e ripristinare il SoC minimo che avevi configurato. Attiva questa opzione se controlli l'inverter anche in altro modo (l'app FoxESS, Modbus locale), o se vuoi un SoC minimo inferiore al 10 % imposto dal programmatore. Disattivata per impostazione predefinita; la carica e la scarica intelligenti continuano a usare il programmatore mentre sono in esecuzione. Attualmente memorizzato: {captured_min_soc} come il tuo SoC minimo (un trattino significa che non è stato ancora acquisito nulla) — viene letto una sola volta, con l'inverter inattivo, ed è l'unico valore che venga mai riscritto. Per aggiornarlo, disattiva questa opzione, salva e riattivala."
+          "scheduler_handback": "Quando nessuna sessione intelligente è in corso: spegnere il programmatore di modalità dell'inverter, impostare direttamente l'autoconsumo e ripristinare il SoC minimo che avevi configurato. Attiva questa opzione se controlli l'inverter anche in altro modo (l'app FoxESS, Modbus locale), o se vuoi un SoC minimo inferiore al 10 % imposto dal programmatore. Disattivata per impostazione predefinita; la carica e la scarica intelligenti continuano a usare il programmatore mentre sono in esecuzione. Attualmente memorizzato: {captured_min_soc} come il tuo SoC minimo (un trattino significa che non è stato ancora acquisito nulla) — viene letto una sola volta, con l'inverter inattivo, ed è l'unico valore che venga mai riscritto. Per aggiornarlo, disattiva questa opzione, salva e riattivala.",
+          "schedule_api_version": "Quale versione della Open API FoxESS viene usata per scrivere le programmazioni. Automatico (consigliato) usa v0 e passa a v1 solo se l'inverter rifiuta le scritture v0, come fanno alcuni modelli (es. EVO). Scegli v0 o v1 per usare sempre una sola versione."
         }
       }
     }
@@ -490,6 +492,15 @@
     "scheduler_handback_unsupported": {
       "title": "Questo inverter non può rilasciare il controllo del Pianificatore di modalità",
       "description": "La restituzione del pianificatore è attiva, ma **{inverter}** non espone `{endpoint}`: l'unica chiamata API in grado di spegnere l'interruttore principale del Pianificatore di modalità. Home Assistant non può quindi restituire questo inverter alle sue impostazioni, e con questo firmware non potrà mai.\n\nNient'altro è coinvolto: il Pianificatore di modalità funziona, e la carica e la scarica intelligenti restano invariate.\n\nDisattiva **Restituzione del pianificatore** nelle opzioni dell'integrazione per rimuovere questo avviso. Se un aggiornamento del firmware aggiungerà l'endpoint, l'avviso sparirà da sé."
+    }
+  },
+  "selector": {
+    "schedule_api_version": {
+      "options": {
+        "auto": "Automatico (v0, altrimenti v1)",
+        "v0": "v0",
+        "v1": "v1"
+      }
     }
   }
 }

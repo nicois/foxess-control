@@ -146,6 +146,13 @@ CONF_ADDITIONAL_PV_POWER_VARIABLE = "additional_pv_power_variable"
 # _min_soc_capture and handback.plan_handback, both of which gate on it.
 CONF_SCHEDULER_HANDBACK = "scheduler_handback"
 DEFAULT_SCHEDULER_HANDBACK = False
+# Which Open API version schedule writes use (issue #28, D-068).  "auto"
+# writes via v0 and retries once via v1 when v0 refuses with errno 40257;
+# "v0" / "v1" pin one.  Values match foxess.inverter.SCHEDULE_API_VERSIONS.
+CONF_SCHEDULE_API_VERSION = "schedule_api_version"
+SCHEDULE_API_VERSION_AUTO = "auto"
+SCHEDULE_API_VERSION_OPTIONS = ("auto", "v0", "v1")
+DEFAULT_SCHEDULE_API_VERSION = SCHEDULE_API_VERSION_AUTO
 WS_MODE_AUTO = "auto"
 WS_MODE_SMART_SESSIONS = "smart_sessions"
 WS_MODE_ALWAYS = "always"

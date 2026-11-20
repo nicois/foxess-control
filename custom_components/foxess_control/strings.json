@@ -350,11 +350,13 @@
           "grid_export_limit": "Grid Export Limit (W) — net export cap set on inverter (0 = no limit)",
           "ws_mode": "WebSocket real-time data mode",
           "additional_pv_power_variable": "Additional solar power variable",
-          "scheduler_handback": "Release the inverter when idle"
+          "scheduler_handback": "Release the inverter when idle",
+          "schedule_api_version": "Schedule write API"
         },
         "data_description": {
           "additional_pv_power_variable": "Optional. For AC-coupled systems where a second inverter's generation is reported in a separate FoxESS variable (e.g. meterPower2). Its value is added to the solar reading. Leave blank otherwise.",
-          "scheduler_handback": "When no smart session is running, turn off the inverter's Mode Scheduler, set Self Use directly, and restore the minimum SoC you had configured. Enable this if you also control the inverter another way (the FoxESS app, local Modbus), or if you want a minimum SoC below the 10% the scheduler enforces. Off by default; smart charge and discharge still use the scheduler while they run. Currently remembering {captured_min_soc} as your own minimum SoC (a dash means nothing has been captured yet) — it is read once while the inverter is idle, and is the only value ever written back. To update it, turn this option off, save, then turn it on again."
+          "scheduler_handback": "When no smart session is running, turn off the inverter's Mode Scheduler, set Self Use directly, and restore the minimum SoC you had configured. Enable this if you also control the inverter another way (the FoxESS app, local Modbus), or if you want a minimum SoC below the 10% the scheduler enforces. Off by default; smart charge and discharge still use the scheduler while they run. Currently remembering {captured_min_soc} as your own minimum SoC (a dash means nothing has been captured yet) — it is read once while the inverter is idle, and is the only value ever written back. To update it, turn this option off, save, then turn it on again.",
+          "schedule_api_version": "Which FoxESS Open API version is used to write schedules. Auto (recommended) uses v0 and switches to v1 only if the inverter rejects v0 writes, which some models (e.g. EVO) do. Choose v0 or v1 to always use one version."
         }
       },
       "modbus": {
@@ -436,6 +438,15 @@
     "scheduler_handback_unsupported": {
       "title": "This inverter cannot release Mode Scheduler control",
       "description": "Scheduler handback is switched on, but **{inverter}** does not serve `{endpoint}` — the only API call that can turn the Mode Scheduler master switch off. Home Assistant is therefore unable to hand this inverter back to its own settings, and it never will be on this firmware.\n\nNothing else is affected: the Mode Scheduler works, and smart charging and discharging are unchanged.\n\nTurn **Scheduler handback** back off in the integration options to dismiss this. If a firmware update later adds the endpoint, this notice clears by itself."
+    }
+  },
+  "selector": {
+    "schedule_api_version": {
+      "options": {
+        "auto": "Auto (v0, falling back to v1)",
+        "v0": "v0",
+        "v1": "v1"
+      }
     }
   }
 }

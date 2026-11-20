@@ -243,6 +243,16 @@ def _schedule_section(
         "reconcile": getattr(domain_data, "last_schedule_reconcile", None),
         "last_write_failure": getattr(inverter, "last_write_failure", None),
         "last_write_ok_at": getattr(inverter, "last_write_ok_at", None),
+        # Issue #28: "auto" switches to v1 by itself, so report which
+        # endpoint writes go to now, not only what was configured.
+        "api_version": (
+            {
+                "configured": getattr(inverter, "schedule_api_version", None),
+                "in_use": getattr(inverter, "schedule_api_version_in_use", None),
+            }
+            if inverter is not None
+            else None
+        ),
     }
 
 

@@ -265,6 +265,16 @@ async def handle_scheduler_set(request: web.Request) -> web.Response:
 
 
 async def handle_scheduler_enable(request: web.Request) -> web.Response:
+    """Serve ``/op/v0`` and ``/op/v1`` ``device/scheduler/enable``.
+
+    The two versions take the same flat group fields; v1 also requires
+    ``maxSoc`` on every group.  Which versions a device accepts is set by
+    ``schedule_v0_accepted`` / ``schedule_v1_accepted`` (issue #28).
+    """
+    model = _model(request)
+    version = "v1" if request.path.startswith("/op/v1/") else "v0"
+    if version == "v1" and not model.schedule_v1_accepted:
+        return web.Response(status=404, text="Not Found")
     if sig_err := _check_signature(request):
         return sig_err
     if rl := _check_rate_limit(request):
@@ -273,7 +283,18 @@ async def handle_scheduler_enable(request: web.Request) -> web.Response:
         return fault
     body = await request.json()
     groups = body.get("groups", [])
-    model = _model(request)
+    if version == "v0" and not model.schedule_v0_accepted:
+        _LOGGER.info("Schedule rejected: device does not accept v0 writes")
+        model.schedule_rejected_versions.append("v0")
+        return _api_response(
+            None, errno=40257, msg="Parameters do not meet expectations"
+        )
+    if version == "v1" and any("maxSoc" not in g for g in groups):
+        _LOGGER.info("Schedule rejected: v1 group without maxSoc")
+        model.schedule_rejected_versions.append("v1")
+        return _api_response(
+            None, errno=40257, msg="Parameters do not meet expectations"
+        )
 
     # Validate constraints
     for g in groups:
@@ -311,7 +332,8 @@ async def handle_scheduler_enable(request: web.Request) -> web.Response:
         # tests pin both behaviours.  See the field docstring in model.py.
         model.scheduler_enabled = True
     model.set_schedule(groups)
-    _LOGGER.info("Schedule set: %d groups", len(model.schedule_groups))
+    model.schedule_write_versions.append(version)
+    _LOGGER.info("Schedule set (%s): %d groups", version, len(model.schedule_groups))
     return _api_response(None)
 
 
@@ -645,6 +667,7 @@ def create_app() -> web.Application:
     app.router.add_post("/op/v0/device/scheduler/get", handle_scheduler_get)
     app.router.add_post("/op/v3/device/scheduler/get", handle_scheduler_properties)
     app.router.add_post("/op/v0/device/scheduler/enable", handle_scheduler_enable)
+    app.router.add_post("/op/v1/device/scheduler/enable", handle_scheduler_enable)
     app.router.add_post("/op/v1/device/scheduler/get/flag", handle_scheduler_flag)
     app.router.add_post("/op/v1/device/scheduler/set/flag", handle_scheduler_set)
     app.router.add_post("/op/v0/device/setting/get", handle_setting_get)

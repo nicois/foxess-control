@@ -245,6 +245,18 @@ class InverterModel:
     # When True, ``/op/v0/device/detail`` has no ``capacity`` field, as on
     # the M1-800-E (issue #13) and MQ2200-M-H (issue #33).
     detail_omits_capacity: bool = False
+    # Which schedule-write endpoints the device accepts (issue #28).  An
+    # EVO 10-5H answers errno 40257 to every ``/op/v0/device/scheduler/enable``
+    # write, and accepts ``/op/v1/device/scheduler/enable`` with the same
+    # flat group fields plus ``maxSoc``.  v1 without ``maxSoc`` is 40257;
+    # ``schedule_v1_accepted=False`` serves no v1 endpoint at all (HTTP 404).
+    schedule_v0_accepted: bool = True
+    schedule_v1_accepted: bool = True
+    # The version ("v0"/"v1") of every *accepted* schedule write, in order.
+    schedule_write_versions: list[str] = field(default_factory=list)
+    # The version of every write *refused* for its version (v0 on a device
+    # that does not accept v0, v1 without ``maxSoc``), in order.
+    schedule_rejected_versions: list[str] = field(default_factory=list)
 
     # --- Mode Scheduler master switch -------------------------------------
     # Mode Scheduler master switch, as reported by
@@ -864,6 +876,8 @@ class InverterModel:
             "device_type": self.device_type,
             "plant_id": self.plant_id,
             "fd_pwr_max_w": self.fd_pwr_limit_w(),
+            "schedule_write_versions": list(self.schedule_write_versions),
+            "schedule_rejected_versions": list(self.schedule_rejected_versions),
             "soc": round(self.soc, 2),
             "soc_int": int(self.soc),
             "battery_capacity_kwh": self.battery_capacity_kwh,

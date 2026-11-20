@@ -11,6 +11,7 @@ import requests
 from ..smart_battery.events import SCHEDULE_WRITE, emit_event
 from ..smart_battery.logging import attach_diagnostic_context
 from ..smart_battery.types import MinSocSettings, ScheduleGroup, WorkMode
+from .client import FoxESSApiError
 
 if TYPE_CHECKING:
     from .client import FoxESSClient
@@ -20,6 +21,18 @@ __all__ = ["Inverter", "MinSocSettings", "ScheduleGroup", "WorkMode"]
 _LOGGER = logging.getLogger(__name__)
 
 _SCHEDULE_ENDPOINT = "/op/v0/device/scheduler/enable"
+# Issue #28: an EVO 10-5H refuses every v0 write with errno 40257 and accepts
+# v1, which takes the same flat group fields plus ``maxSoc``.  Which version
+# a device needs is not knowable in advance; see :meth:`Inverter._post_schedule`.
+_SCHEDULE_ENDPOINTS: dict[str, str] = {
+    "v0": _SCHEDULE_ENDPOINT,
+    "v1": "/op/v1/device/scheduler/enable",
+}
+SCHEDULE_API_AUTO = "auto"
+SCHEDULE_API_VERSIONS: tuple[str, ...] = (SCHEDULE_API_AUTO, "v0", "v1")
+# ``maxSoc`` written on v1 groups that do not carry one: the charge ceiling,
+# so "no ceiling" is 100 %, clamped to the device-declared range if any.
+_DEFAULT_MAX_SOC = 100
 
 # Returns, per device, a ``properties`` map describing the accepted range
 # of every schedule-group field plus the supported work-mode enumeration.
@@ -50,6 +63,7 @@ _CLAMPED_FIELDS: tuple[tuple[str, str], ...] = (
     ("fdPwr", "fdpwr"),
     ("fdSoc", "fdsoc"),
     ("minSocOnGrid", "minsocongrid"),
+    ("maxSoc", "maxsoc"),
 )
 
 _PLACEHOLDER_WORK_MODES = frozenset({"Invalid", ""})
@@ -76,9 +90,26 @@ class Inverter:
     # the fdPwr value in watts.  The FoxESS app uses capacity * 1050.
     CAPACITY_TO_FD_PWR = 1050
 
-    def __init__(self, client: FoxESSClient, serial_number: str) -> None:
+    def __init__(
+        self,
+        client: FoxESSClient,
+        serial_number: str,
+        schedule_api_version: str = SCHEDULE_API_AUTO,
+    ) -> None:
         self.client = client
         self.sn = serial_number
+        if schedule_api_version not in SCHEDULE_API_VERSIONS:
+            schedule_api_version = SCHEDULE_API_AUTO
+        # The user's choice: ``auto`` (v0, falling back to v1 on a v0 40257)
+        # or a pinned ``v0`` / ``v1``.  See :meth:`_post_schedule`.
+        self.schedule_api_version = schedule_api_version
+        # ``auto`` only: set to "v1" once a v0 write was refused and v1 took
+        # it, so later writes skip the doomed v0 attempt.  Per process: one
+        # wasted call per restart is the price of never guessing.
+        self._learned_schedule_version: str | None = None
+        # ``auto`` only: True once a v0 write has succeeded.  After that a
+        # v0 40257 is about the values, not the endpoint, so no v1 retry.
+        self._v0_confirmed = False
         self._max_power_w: int | None = None
         self._device_type: str | None = None
         self._scheduler_properties: dict[str, Any] | None = None
@@ -731,6 +762,7 @@ class Inverter:
         payload: list[ScheduleGroup],
         call_site: str,
         err: BaseException,
+        endpoint: str = _SCHEDULE_ENDPOINT,
     ) -> None:
         """Retain a rejected schedule payload so diagnostics can name the field.
 
@@ -759,7 +791,7 @@ class Inverter:
         """
         record: dict[str, Any] = {
             "at": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
-            "endpoint": _SCHEDULE_ENDPOINT,
+            "endpoint": endpoint,
             "call_site": call_site,
             "groups": [dict(g) for g in payload],
             "exc_type": type(err).__name__,
@@ -797,14 +829,62 @@ class Inverter:
         # Groups are inert while the master switch is off, and whether this
         # POST implies the switch is unverified — so assert it explicitly.
         self._ensure_scheduler_enabled()
+
+        version = self._schedule_version_to_try()
         try:
-            response = self.client.post(
-                _SCHEDULE_ENDPOINT,
-                {"deviceSN": self.sn, "groups": payload},
+            sent, response = self._post_schedule_version(version, payload)
+        except FoxESSApiError as err:
+            self._retain_write_failure(
+                payload, call_site, err, _SCHEDULE_ENDPOINTS[version]
+            )
+            if not (
+                self.schedule_api_version == SCHEDULE_API_AUTO
+                and version == "v0"
+                and err.errno == 40257
+                and not self._v0_confirmed
+            ):
+                raise
+            # Issue #28: some devices refuse every v0 write.  Try v1 once.
+            # If v1 refuses too, the v0 failure stays the primary record
+            # (it is what this device has always been sent) and the v1
+            # attempt is noted beside it.
+            _LOGGER.info(
+                "Inverter %s refused the schedule via v0 (errno 40257); "
+                "retrying via %s",
+                self._device_type or self.sn,
+                _SCHEDULE_ENDPOINTS["v1"],
+            )
+            v0_failure = self.last_write_failure
+            version = "v1"
+            try:
+                sent, response = self._post_schedule_version(version, payload)
+            except Exception as err_v1:
+                if v0_failure is not None:
+                    v0_failure["v1_retry"] = {
+                        "endpoint": _SCHEDULE_ENDPOINTS[version],
+                        "exc_type": type(err_v1).__name__,
+                        "error": str(err_v1),
+                    }
+                    self.last_write_failure = v0_failure
+                    # The exception carries a copy; refresh it so the
+                    # listener's Recent Errors record shows the v1 attempt.
+                    attach_diagnostic_context(err, v0_failure)
+                raise err from err_v1
+            self._learned_schedule_version = version
+            _LOGGER.warning(
+                "Inverter %s accepts schedule writes only via %s; using it from "
+                "now on. Set the 'Schedule write API' option to v1 to skip the "
+                "v0 attempt after a restart",
+                self._device_type or self.sn,
+                _SCHEDULE_ENDPOINTS[version],
             )
         except Exception as err:
-            self._retain_write_failure(payload, call_site, err)
+            self._retain_write_failure(
+                payload, call_site, err, _SCHEDULE_ENDPOINTS[version]
+            )
             raise
+        if version == "v0":
+            self._v0_confirmed = True
         self.last_write_ok_at = datetime.datetime.now(datetime.UTC).isoformat(
             timespec="seconds"
         )
@@ -813,11 +893,44 @@ class Inverter:
         emit_event(
             _LOGGER,
             SCHEDULE_WRITE,
-            groups=[dict(g) for g in payload],
+            groups=[dict(g) for g in sent],
             response=response,
-            endpoint=_SCHEDULE_ENDPOINT,
+            endpoint=_SCHEDULE_ENDPOINTS[version],
             call_site=call_site,
         )
+
+    def _schedule_version_to_try(self) -> str:
+        """The version for the next write: pinned, learned, or v0."""
+        if self.schedule_api_version != SCHEDULE_API_AUTO:
+            return self.schedule_api_version
+        return self._learned_schedule_version or "v0"
+
+    @property
+    def schedule_api_version_in_use(self) -> str:
+        """The version schedule writes go to now (diagnostics, C-020)."""
+        return self._schedule_version_to_try()
+
+    def _post_schedule_version(
+        self, version: str, payload: list[ScheduleGroup]
+    ) -> tuple[list[ScheduleGroup], Any]:
+        """POST *payload* to the *version* endpoint; return (sent, response).
+
+        v1 needs ``maxSoc`` on every group, including groups read back from
+        the v0 ``scheduler/get``, which carry none.
+        """
+        sent = payload
+        if version == "v1":
+            with_max_soc: list[ScheduleGroup] = []
+            for group in payload:
+                adjusted: dict[str, Any] = dict(group)
+                adjusted.setdefault("maxSoc", _DEFAULT_MAX_SOC)
+                with_max_soc.append(adjusted)  # type: ignore[arg-type]
+            sent = self._clamp_to_declared_ranges(with_max_soc)
+        response = self.client.post(
+            _SCHEDULE_ENDPOINTS[version],
+            {"deviceSN": self.sn, "groups": sent},
+        )
+        return sent, response
 
     def set_work_mode(
         self,

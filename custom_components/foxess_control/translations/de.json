@@ -419,11 +419,13 @@
           "api_min_soc": "Minimaler API-fdSoc (%) — ⚠️ Werte unter 11 funktionieren möglicherweise nicht mit allen Firmware-Versionen",
           "polling_interval": "API-Abfrageintervall (Sekunden)",
           "additional_pv_power_variable": "Zusätzliche Solarleistungs-Variable",
-          "scheduler_handback": "Wechselrichter im Leerlauf freigeben"
+          "scheduler_handback": "Wechselrichter im Leerlauf freigeben",
+          "schedule_api_version": "Schreib-API für Zeitpläne"
         },
         "data_description": {
           "additional_pv_power_variable": "Optional. Für AC-gekoppelte Systeme, bei denen die Erzeugung eines zweiten Wechselrichters in einer separaten FoxESS-Variable gemeldet wird (z. B. meterPower2). Ihr Wert wird zum Solarwert addiert. Andernfalls leer lassen.",
-          "scheduler_handback": "Wenn keine intelligente Sitzung läuft: den Modus-Planer des Wechselrichters ausschalten, den Eigenverbrauch direkt setzen und den von Ihnen konfigurierten minimalen SoC wiederherstellen. Aktivieren Sie dies, wenn Sie den Wechselrichter auch anders steuern (FoxESS-App, lokales Modbus) oder wenn Sie einen minimalen SoC unter den 10 % möchten, die der Planer erzwingt. Standardmäßig aus; intelligentes Laden und Entladen nutzen den Planer weiterhin, solange sie laufen. Aktuell gemerkt: {captured_min_soc} als Ihr eigener minimaler SoC (ein Gedankenstrich bedeutet, dass noch nichts erfasst wurde) — er wird einmal gelesen, während der Wechselrichter im Leerlauf ist, und ist der einzige Wert, der je zurückgeschrieben wird. Zum Aktualisieren diese Option ausschalten, speichern und wieder einschalten."
+          "scheduler_handback": "Wenn keine intelligente Sitzung läuft: den Modus-Planer des Wechselrichters ausschalten, den Eigenverbrauch direkt setzen und den von Ihnen konfigurierten minimalen SoC wiederherstellen. Aktivieren Sie dies, wenn Sie den Wechselrichter auch anders steuern (FoxESS-App, lokales Modbus) oder wenn Sie einen minimalen SoC unter den 10 % möchten, die der Planer erzwingt. Standardmäßig aus; intelligentes Laden und Entladen nutzen den Planer weiterhin, solange sie laufen. Aktuell gemerkt: {captured_min_soc} als Ihr eigener minimaler SoC (ein Gedankenstrich bedeutet, dass noch nichts erfasst wurde) — er wird einmal gelesen, während der Wechselrichter im Leerlauf ist, und ist der einzige Wert, der je zurückgeschrieben wird. Zum Aktualisieren diese Option ausschalten, speichern und wieder einschalten.",
+          "schedule_api_version": "Welche FoxESS-Open-API-Version zum Schreiben von Zeitplänen verwendet wird. Automatisch (empfohlen) nutzt v0 und wechselt nur dann zu v1, wenn der Wechselrichter v0-Schreibvorgänge ablehnt, wie es manche Modelle (z. B. EVO) tun. Wähle v0 oder v1, um immer dieselbe Version zu verwenden."
         }
       }
     }
@@ -490,6 +492,15 @@
     "scheduler_handback_unsupported": {
       "title": "Dieser Wechselrichter kann die Modus-Zeitplan-Steuerung nicht freigeben",
       "description": "Die Rückgabe der Zeitplansteuerung ist aktiviert, aber **{inverter}** stellt `{endpoint}` nicht bereit — den einzigen API-Aufruf, der den Hauptschalter des Modus-Zeitplans ausschalten kann. Home Assistant kann diesen Wechselrichter daher nicht an seine eigenen Einstellungen zurückgeben, und wird es mit dieser Firmware auch nie können.\n\nSonst ist nichts betroffen: der Modus-Zeitplan arbeitet weiter, und intelligentes Laden und Entladen bleiben unverändert.\n\nDeaktivieren Sie **Rückgabe der Zeitplansteuerung** in den Integrationsoptionen, um diesen Hinweis zu entfernen. Falls ein Firmware-Update den Endpunkt später hinzufügt, verschwindet der Hinweis von selbst."
+    }
+  },
+  "selector": {
+    "schedule_api_version": {
+      "options": {
+        "auto": "Automatisch (v0, sonst v1)",
+        "v0": "v0",
+        "v1": "v1"
+      }
     }
   }
 }

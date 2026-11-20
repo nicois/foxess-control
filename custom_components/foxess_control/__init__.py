@@ -1464,7 +1464,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         pass
     elif api_key:
         client = FoxESSClient(api_key, base_url=sim_url)
-        inverter = Inverter(client, entry.data[CONF_DEVICE_SERIAL])
+        from .domain_data import build_config
+
+        inverter = Inverter(
+            client,
+            entry.data[CONF_DEVICE_SERIAL],
+            schedule_api_version=build_config(dict(entry.options)).schedule_api_version,
+        )
         try:
             await hass.async_add_executor_job(lambda: inverter.max_power_w)
         except Exception as err:

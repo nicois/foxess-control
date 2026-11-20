@@ -419,11 +419,13 @@
           "api_min_soc": "Minimalny fdSoc API (%) — ⚠️ Wartości poniżej 11 mogą nie działać ze wszystkimi wersjami firmware",
           "polling_interval": "Interwał odpytywania API (sekundy)",
           "additional_pv_power_variable": "Dodatkowa zmienna mocy fotowoltaicznej",
-          "scheduler_handback": "Zwolnij falownik w stanie bezczynności"
+          "scheduler_handback": "Zwolnij falownik w stanie bezczynności",
+          "schedule_api_version": "API zapisu harmonogramów"
         },
         "data_description": {
           "additional_pv_power_variable": "Opcjonalne. Dla systemów sprzężonych po stronie AC, w których produkcja drugiego falownika jest raportowana w osobnej zmiennej FoxESS (np. meterPower2). Jej wartość jest dodawana do odczytu fotowoltaiki. W przeciwnym razie pozostaw puste.",
-          "scheduler_handback": "Gdy żadna inteligentna sesja nie jest uruchomiona: wyłącz harmonogram trybów falownika, ustaw bezpośrednio tryb autokonsumpcji i przywróć minimalny SoC, który skonfigurowałeś. Włącz tę opcję, jeśli sterujesz falownikiem także w inny sposób (aplikacja FoxESS, lokalny Modbus) lub jeśli chcesz minimalny SoC poniżej 10 %, które wymusza harmonogram. Domyślnie wyłączone; inteligentne ładowanie i rozładowanie nadal korzystają z harmonogramu w czasie działania. Obecnie zapamiętano {captured_min_soc} jako Twój własny minimalny SoC (myślnik oznacza, że nic jeszcze nie zostało odczytane) — jest odczytywany raz, gdy falownik jest bezczynny, i jest jedyną wartością kiedykolwiek zapisywaną z powrotem. Aby go zaktualizować, wyłącz tę opcję, zapisz i włącz ją ponownie."
+          "scheduler_handback": "Gdy żadna inteligentna sesja nie jest uruchomiona: wyłącz harmonogram trybów falownika, ustaw bezpośrednio tryb autokonsumpcji i przywróć minimalny SoC, który skonfigurowałeś. Włącz tę opcję, jeśli sterujesz falownikiem także w inny sposób (aplikacja FoxESS, lokalny Modbus) lub jeśli chcesz minimalny SoC poniżej 10 %, które wymusza harmonogram. Domyślnie wyłączone; inteligentne ładowanie i rozładowanie nadal korzystają z harmonogramu w czasie działania. Obecnie zapamiętano {captured_min_soc} jako Twój własny minimalny SoC (myślnik oznacza, że nic jeszcze nie zostało odczytane) — jest odczytywany raz, gdy falownik jest bezczynny, i jest jedyną wartością kiedykolwiek zapisywaną z powrotem. Aby go zaktualizować, wyłącz tę opcję, zapisz i włącz ją ponownie.",
+          "schedule_api_version": "Która wersja FoxESS Open API jest używana do zapisu harmonogramów. Automatycznie (zalecane) używa v0 i przełącza się na v1 tylko wtedy, gdy falownik odrzuca zapisy v0, jak niektóre modele (np. EVO). Wybierz v0 lub v1, aby zawsze używać jednej wersji."
         }
       }
     }
@@ -490,6 +492,15 @@
     "scheduler_handback_unsupported": {
       "title": "Ten falownik nie może zwolnić kontroli Harmonogramu trybów",
       "description": "Zwrot kontroli harmonogramu jest włączony, ale **{inverter}** nie udostępnia `{endpoint}` — jedynego wywołania API, które może wyłączyć przełącznik główny Harmonogramu trybów. Dlatego Home Assistant nie może zwrócić tego falownika jego własnym ustawieniom i przy tym oprogramowaniu nigdy nie będzie mógł.\n\nNic innego nie jest naruszone: Harmonogram trybów działa, a inteligentne ładowanie i rozładowanie pozostają bez zmian.\n\nWyłącz **Zwrot kontroli harmonogramu** w opcjach integracji, aby usunąć to powiadomienie. Jeśli późniejsza aktualizacja oprogramowania doda ten endpoint, powiadomienie zniknie samo."
+    }
+  },
+  "selector": {
+    "schedule_api_version": {
+      "options": {
+        "auto": "Automatycznie (v0, w razie potrzeby v1)",
+        "v0": "v0",
+        "v1": "v1"
+      }
     }
   }
 }
