@@ -110,6 +110,42 @@ without draining the battery), P-006 (exposes a native mode)
 `tests/test_init.py::TestMergeWithExisting::test_overlapping_backup_group_is_a_conflict`,
 `tests/test_schedule_reconcile.py::TestFindOrphanModes::test_backup_group_is_never_an_orphan`
 
+### D-068: Schedule writes default to v0, fall back to v1, and can be pinned
+**Decision**: Schedule writes go to `/op/v0/device/scheduler/enable` by
+default. In `auto` mode (the default), a v0 write refused with errno
+40257 is retried once via `/op/v1/device/scheduler/enable`, with the
+same flat group fields plus `maxSoc` (100 unless the group has one,
+clamped to a declared `maxsoc` range). If v1 is accepted, later writes
+go straight to v1 for the rest of the process. Once a v0 write has
+succeeded, a later v0 40257 is about the values, so there's no v1
+retry. A **Schedule write API** option (`auto` / `v0` / `v1`) lets the
+user pin one version.
+**Context**: An EVO 10-5H refuses every v0 write with 40257 and accepts
+v1 (issue #28). Every other reported model works on v0, and v1 has
+never been tested on them. All schedule writes, including session
+teardown, go through one endpoint, so a wrong guess breaks every
+session.
+**Rationale**: `auto` never changes what a working device is sent: v1
+is only tried after v0 has refused, and never after v0 has worked. The
+pinned options let an EVO owner skip the doomed v0 call on every
+restart, and let anyone override the automatic choice if it's wrong.
+Diagnostics report both the configured and the in-use version
+(`schedule.api_version`), and when v1 also refuses, the v0 failure stays
+the primary `last_write_failure` with the v1 attempt beside it.
+**Priority served**: P-006 (Brand portability across FoxESS models),
+P-005 (the version in use is visible)
+**Trades against**: P-004 marginally: in `auto`, a v1-only device pays
+one extra rate-limited call per restart.
+**Classification**: compatibility
+**Alternatives considered**:
+- Switch everyone to v1: rejected; untested on every working model.
+- Choose the version from the declared `maxsoc` property: rejected for
+  now; it assumes "declares `maxsoc`" means "needs v1".
+- Persist the learned version across restarts: not needed; the pinned
+  option covers it.
+**Traces**: C-042; `tests/test_scheduler_device_limits.py::TestScheduleApiVersion`,
+`tests/test_schedule_api_version_options.py`, `tests/test_diagnostics.py::TestScheduleSection::test_reports_the_schedule_api_version`
+
 ### D-033: BMS battery temperature via web portal API
 **Decision**: Expose the BMS cell temperature as a sensor
 (`sensor.foxess_bms_battery_temperature`) by querying

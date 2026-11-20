@@ -428,3 +428,126 @@ class TestThroughCloudAdapter:
         groups = _written_groups(foxess_sim, WorkMode.FORCE_DISCHARGE)
         assert groups, "adapter.apply_mode did not put a ForceDischarge group in force"
         assert groups[0]["fdPwr"] <= 12000
+
+
+def _make_inv_with_version(sim: SimulatorHandle, version: str) -> Inverter:
+    client = FoxESSClient("test-api-key", base_url=sim.url)
+    return Inverter(client, "SIM0001", schedule_api_version=version)
+
+
+class TestScheduleApiVersion:
+    """Issue #28: an EVO 10-5H rejects every ``/op/v0/device/scheduler/enable``
+    write with 40257 and accepts ``/op/v1/`` with the same flat fields plus
+    ``maxSoc``.  ``auto`` (the default) keeps v0 for every device that
+    accepts it and falls back to v1 only on a v0 40257; ``v0`` / ``v1`` pin
+    one version.
+    """
+
+    def test_auto_keeps_v0_where_it_works(self, foxess_sim: SimulatorHandle) -> None:
+        inv = _make_inv(foxess_sim)
+        inv.set_work_mode(WorkMode.FEEDIN)
+        state = foxess_sim.state()
+        assert state["schedule_write_versions"] == ["v0"]
+        assert state["schedule_rejected_versions"] == []
+        assert inv.schedule_api_version_in_use == "v0"
+
+    def test_auto_falls_back_to_v1_when_v0_is_refused(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        foxess_sim.set(device_type="EVO 10-5-H", schedule_v0_accepted=False)
+        inv = _make_inv(foxess_sim)
+        inv.set_work_mode(WorkMode.FEEDIN)
+        state = foxess_sim.state()
+        assert state["schedule_rejected_versions"] == ["v0"]
+        assert state["schedule_write_versions"] == ["v1"]
+        assert _written_groups(foxess_sim, WorkMode.FEEDIN), "Feedin not in force"
+        assert inv.schedule_api_version_in_use == "v1"
+
+    def test_auto_remembers_v1_so_later_writes_skip_v0(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        foxess_sim.set(schedule_v0_accepted=False)
+        inv = _make_inv(foxess_sim)
+        inv.set_work_mode(WorkMode.FEEDIN)
+        inv.set_work_mode(WorkMode.SELF_USE)
+        state = foxess_sim.state()
+        assert state["schedule_rejected_versions"] == ["v0"], (
+            "only the first write may pay for the v0 attempt"
+        )
+        assert state["schedule_write_versions"] == ["v1", "v1"]
+
+    def test_pinned_v1_never_tries_v0(self, foxess_sim: SimulatorHandle) -> None:
+        inv = _make_inv_with_version(foxess_sim, "v1")
+        inv.set_work_mode(WorkMode.FEEDIN)
+        state = foxess_sim.state()
+        assert state["schedule_write_versions"] == ["v1"]
+        assert state["schedule_rejected_versions"] == []
+
+    def test_pinned_v0_does_not_fall_back(self, foxess_sim: SimulatorHandle) -> None:
+        foxess_sim.set(schedule_v0_accepted=False)
+        inv = _make_inv_with_version(foxess_sim, "v0")
+        with pytest.raises(FoxESSApiError) as exc:
+            inv.set_work_mode(WorkMode.FEEDIN)
+        assert exc.value.errno == 40257
+        assert foxess_sim.state()["schedule_write_versions"] == []
+
+    def test_auto_reports_the_failure_when_v1_refuses_too(
+        self, foxess_sim: SimulatorHandle
+    ) -> None:
+        """A device that refuses v0 and serves no v1 still fails loudly."""
+        foxess_sim.set(schedule_v0_accepted=False, schedule_v1_accepted=False)
+        inv = _make_inv(foxess_sim)
+        with pytest.raises(Exception):  # noqa: B017 — FoxESSApiError or HTTPError
+            inv.set_work_mode(WorkMode.FEEDIN)
+        assert foxess_sim.state()["schedule_write_versions"] == []
+        failure = inv.last_write_failure
+        assert failure is not None
+        # v0 stays the primary record (what the device has always been
+        # sent); the v1 attempt is noted beside it.
+        assert failure["endpoint"] == "/op/v0/device/scheduler/enable"
+        assert failure["v1_retry"]["endpoint"] == "/op/v1/device/scheduler/enable"
+
+    def test_no_v1_retry_once_v0_has_worked(self, foxess_sim: SimulatorHandle) -> None:
+        """After a v0 write succeeds, a v0 40257 is about the values, not
+        the endpoint: retrying on v1 would only waste a rate-limited call."""
+        inv = _make_inv(foxess_sim)
+        inv.set_work_mode(WorkMode.FEEDIN)
+        foxess_sim.set(schedule_v0_accepted=False)
+        with pytest.raises(FoxESSApiError):
+            inv.set_work_mode(WorkMode.SELF_USE)
+        state = foxess_sim.state()
+        assert state["schedule_write_versions"] == ["v0"]
+        assert state["schedule_rejected_versions"] == ["v0"]
+        assert "v1_retry" not in (inv.last_write_failure or {})
+
+    def test_v1_groups_carry_max_soc(self, foxess_sim: SimulatorHandle) -> None:
+        """Groups read back from v0 have no ``maxSoc``; v1 needs it on every
+        group, including ones carried over from the existing schedule."""
+        inv = _make_inv_with_version(foxess_sim, "v1")
+        inv.set_schedule(
+            [
+                {
+                    "enable": 1,
+                    "startHour": 1,
+                    "startMinute": 0,
+                    "endHour": 2,
+                    "endMinute": 0,
+                    "workMode": "Feedin",
+                    "minSocOnGrid": 11,
+                    "fdSoc": 11,
+                    "fdPwr": 5000,
+                },
+                {
+                    "enable": 1,
+                    "startHour": 3,
+                    "startMinute": 0,
+                    "endHour": 4,
+                    "endMinute": 0,
+                    "workMode": "ForceCharge",
+                    "minSocOnGrid": 11,
+                    "fdSoc": 100,
+                    "fdPwr": 5000,
+                },
+            ]
+        )
+        assert foxess_sim.state()["schedule_write_versions"] == ["v1"]

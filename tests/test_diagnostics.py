@@ -183,6 +183,30 @@ class TestScheduleSection:
         assert out["as_of"] is None
         assert out["groups"] is None
 
+    def test_reports_the_schedule_api_version(self) -> None:
+        """Issue #28: which write API is configured and which is in use.
+
+        ``auto`` switches to v1 on its own, so the download has to say which
+        endpoint the writes go to now, or a v1 device looks like a v0 one.
+        """
+        from custom_components.foxess_control.domain_data import FoxESSControlData
+
+        inverter = MagicMock()
+        inverter.schedule_api_version = "auto"
+        inverter.schedule_api_version_in_use = "v1"
+        inverter.last_write_failure = None
+        inverter.last_write_ok_at = None
+        out = _schedule_section(FoxESSControlData(), False, inverter)
+        assert isinstance(out, dict)
+        assert out["api_version"] == {"configured": "auto", "in_use": "v1"}
+
+    def test_api_version_is_null_without_an_inverter(self) -> None:
+        from custom_components.foxess_control.domain_data import FoxESSControlData
+
+        out = _schedule_section(FoxESSControlData(), entity_mode=False)
+        assert isinstance(out, dict)
+        assert out["api_version"] is None
+
 
 # ---------------------------------------------------------------------------
 # The scheduler-handback section (issues #16, #4)

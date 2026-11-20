@@ -482,6 +482,14 @@ This endpoint is **full-replacement**: every write replaces the
 entire schedule. There is no patch / merge endpoint. Read-modify-write
 is the contract — see §5.
 
+**v1 variant.** `POST /op/v1/device/scheduler/enable` takes the same
+body, with the same flat group fields (not nested under `extraParam`),
+and every group also needs `maxSoc`. Some devices accept only v1: an
+EVO 10-5H refuses every v0 write with errno 40257 (issue #28), and also
+refuses v1 if the values are nested under `extraParam`. This integration
+writes via v0, retries once via v1 when v0 is refused, and lets the
+user pin either version (D-068).
+
 ### `POST /op/v0/device/scheduler/get`
 
 Read the current scheduler configuration. Request body:

@@ -25,7 +25,7 @@ serving it.
 | P-003 Meet the user's energy target | C-007, C-008, C-009, C-010, C-011, C-014, C-022, C-023, C-037 | D-005, D-006, D-007, D-011, D-012, D-013, D-014, D-015 (taper), D-019, D-032, D-033, D-037, D-042, D-043, D-044, D-046 | ENFORCED |
 | P-004 Maximise feed-in revenue | (aspirational — no C-NNN) | D-067 (Backup through free/cheap grid windows); D-044 serves P-003 but advances P-004 as a secondary effect | ASPIRATIONAL |
 | P-005 Operational transparency | C-004, C-005, C-006, C-020, C-022, C-026, C-038 | D-008, D-009, D-010, D-020, D-021, D-027, D-028, D-029, D-030, D-035, D-036, D-038, D-039, D-040, D-041 (ws), D-048, D-050, D-051, D-053, D-054, D-055, D-056, D-058, D-059, D-060, D-064, D-065, D-066 | ENFORCED |
-| P-006 Brand portability | C-015, C-021, C-039, C-040 | D-022, D-067 | ENFORCED |
+| P-006 Brand portability | C-015, C-021, C-039, C-040 | D-022, D-067, D-068 | ENFORCED |
 | P-007 Engineering process integrity | C-015, C-028, C-029, C-030, C-031, C-032, C-033, C-034, C-035, C-036, C-043 | D-019, D-031, D-034, D-041 (lovelace), D-045, D-049 | ENFORCED |
 
 **Notes:**
@@ -196,6 +196,9 @@ against a scenario that the system couldn't actually reach.
   only. `PeakShaving` and other unmanaged modes not tested.
 - **D-067**: Backup as a managed mode — no E2E test drives the `backup`
   action through Home Assistant; covered by unit tests only.
+- **D-068**: Schedule write API version — v1 is modelled in the simulator
+  from one user's EVO 10-5H report (issue #28), not verified against
+  other hardware.
 - **D-039**: show_cancel option — no E2E test verifies that the cancel
   button is hidden when `show_cancel: false`. The config option is
   exercised only by the visual editor.

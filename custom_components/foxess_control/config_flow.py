@@ -47,6 +47,7 @@ from .const import (
     CONF_LOCAL_URL,
     CONF_MIN_SOC_ENTITY,
     CONF_PV_POWER_ENTITY,
+    CONF_SCHEDULE_API_VERSION,
     CONF_SCHEDULER_HANDBACK,
     CONF_SOC_ENTITY,
     CONF_WEB_PASSWORD,
@@ -55,8 +56,10 @@ from .const import (
     CONF_WS_ALL_SESSIONS,
     CONF_WS_MODE,
     DEFAULT_LOCAL_URL,
+    DEFAULT_SCHEDULE_API_VERSION,
     DEFAULT_SCHEDULER_HANDBACK,
     DOMAIN,
+    SCHEDULE_API_VERSION_OPTIONS,
     WS_MODE_ALWAYS,
     WS_MODE_AUTO,
     WS_MODE_SMART_SESSIONS,
@@ -142,6 +145,27 @@ def _scheduler_handback_schema_dict(opts: Mapping[str, Any]) -> dict[Any, Any]:
             CONF_SCHEDULER_HANDBACK,
             default=opts.get(CONF_SCHEDULER_HANDBACK, DEFAULT_SCHEDULER_HANDBACK),
         ): bool,
+    }
+
+
+def _schedule_api_version_schema_dict(opts: Mapping[str, Any]) -> dict[Any, Any]:
+    """The schedule-write API version option (issue #28, D-068).
+
+    ``auto`` (default) writes via v0 and retries once via v1 when v0 refuses
+    with errno 40257; ``v0`` / ``v1`` pin one.  Defaults to the saved value
+    so pressing Submit never changes it.
+    """
+    current = opts.get(CONF_SCHEDULE_API_VERSION, DEFAULT_SCHEDULE_API_VERSION)
+    if current not in SCHEDULE_API_VERSION_OPTIONS:
+        current = DEFAULT_SCHEDULE_API_VERSION
+    return {
+        vol.Optional(CONF_SCHEDULE_API_VERSION, default=current): SelectSelector(
+            SelectSelectorConfig(
+                options=list(SCHEDULE_API_VERSION_OPTIONS),
+                mode=SelectSelectorMode.DROPDOWN,
+                translation_key=CONF_SCHEDULE_API_VERSION,
+            )
+        ),
     }
 
 
@@ -723,6 +747,13 @@ class FoxessControlOptionsFlow(OptionsFlow):
         schema = schema.extend(
             _scheduler_handback_schema_dict(self._config_entry.options)
         )
+        # Only cloud entries write schedules through the Open API.
+        if self._config_entry.data.get(CONF_API_KEY) and (
+            self._config_entry.data.get(CONF_BACKEND) != BACKEND_LOCAL
+        ):
+            schema = schema.extend(
+                _schedule_api_version_schema_dict(self._config_entry.options)
+            )
         # Show WebSocket option only when web credentials are configured
         if self._config_entry.data.get(CONF_WEB_USERNAME):
             opts = self._config_entry.options

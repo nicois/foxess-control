@@ -419,11 +419,13 @@
           "api_min_soc": "fdSoc API mínimo (%) — ⚠️ Valores abaixo de 11 podem não funcionar com todas as versões de firmware",
           "polling_interval": "Intervalo de consulta da API (segundos)",
           "additional_pv_power_variable": "Variável de potência solar adicional",
-          "scheduler_handback": "Libertar o inversor quando inativo"
+          "scheduler_handback": "Libertar o inversor quando inativo",
+          "schedule_api_version": "API de escrita de horários"
         },
         "data_description": {
           "additional_pv_power_variable": "Opcional. Para sistemas acoplados em CA onde a geração de um segundo inversor é reportada numa variável FoxESS separada (por ex. meterPower2). O seu valor é adicionado à leitura solar. Caso contrário, deixe em branco.",
-          "scheduler_handback": "Quando não há nenhuma sessão inteligente em curso: desligar o programador de modos do inversor, definir o autoconsumo diretamente e restaurar o SoC mínimo que tinha configurado. Ative isto se também controlar o inversor de outra forma (a aplicação FoxESS, Modbus local), ou se quiser um SoC mínimo abaixo dos 10 % que o programador impõe. Desativado por predefinição; a carga e a descarga inteligentes continuam a usar o programador enquanto estão a decorrer. Atualmente memorizado: {captured_min_soc} como o seu próprio SoC mínimo (um travessão significa que ainda nada foi capturado) — é lido uma única vez, com o inversor inativo, e é o único valor que é escrito de volta. Para o atualizar, desative esta opção, guarde e volte a ativá-la."
+          "scheduler_handback": "Quando não há nenhuma sessão inteligente em curso: desligar o programador de modos do inversor, definir o autoconsumo diretamente e restaurar o SoC mínimo que tinha configurado. Ative isto se também controlar o inversor de outra forma (a aplicação FoxESS, Modbus local), ou se quiser um SoC mínimo abaixo dos 10 % que o programador impõe. Desativado por predefinição; a carga e a descarga inteligentes continuam a usar o programador enquanto estão a decorrer. Atualmente memorizado: {captured_min_soc} como o seu próprio SoC mínimo (um travessão significa que ainda nada foi capturado) — é lido uma única vez, com o inversor inativo, e é o único valor que é escrito de volta. Para o atualizar, desative esta opção, guarde e volte a ativá-la.",
+          "schedule_api_version": "Qual a versão da Open API da FoxESS usada para escrever horários. Automático (recomendado) usa v0 e muda para v1 apenas se o inversor rejeitar escritas v0, como fazem alguns modelos (p. ex. EVO). Escolha v0 ou v1 para usar sempre uma versão."
         }
       }
     }
@@ -490,6 +492,15 @@
     "scheduler_handback_unsupported": {
       "title": "Este inversor não consegue libertar o controlo do Agendador de modos",
       "description": "A devolução do agendador está ativa, mas **{inverter}** não disponibiliza `{endpoint}` — a única chamada de API capaz de desligar o interruptor principal do Agendador de modos. Por isso o Home Assistant não consegue devolver este inversor às suas próprias definições, e nunca conseguirá com este firmware.\n\nNada mais é afetado: o Agendador de modos funciona, e o carregamento e descarregamento inteligentes mantêm-se.\n\nDesative **Devolução do agendador** nas opções da integração para dispensar este aviso. Se uma atualização de firmware adicionar o endpoint mais tarde, o aviso desaparece sozinho."
+    }
+  },
+  "selector": {
+    "schedule_api_version": {
+      "options": {
+        "auto": "Automático (v0, com v1 de recurso)",
+        "v0": "v0",
+        "v1": "v1"
+      }
     }
   }
 }

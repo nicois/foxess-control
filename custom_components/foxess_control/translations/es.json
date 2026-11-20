@@ -423,11 +423,13 @@
           "api_min_soc": "fdSoc API mínimo (%) — ⚠️ Valores por debajo de 11 pueden no funcionar con todas las versiones de firmware",
           "polling_interval": "Intervalo de consulta de API (segundos)",
           "additional_pv_power_variable": "Variable de potencia solar adicional",
-          "scheduler_handback": "Liberar el inversor cuando esté inactivo"
+          "scheduler_handback": "Liberar el inversor cuando esté inactivo",
+          "schedule_api_version": "API de escritura de programaciones"
         },
         "data_description": {
           "additional_pv_power_variable": "Opcional. Para sistemas acoplados en CA donde la generación de un segundo inversor se reporta en una variable de FoxESS independiente (p. ej. meterPower2). Su valor se suma a la lectura solar. Déjelo en blanco en caso contrario.",
-          "scheduler_handback": "Cuando no hay ninguna sesión inteligente en curso: apagar el programador de modos del inversor, establecer el autoconsumo directamente y restaurar el SoC mínimo que usted había configurado. Active esto si también controla el inversor de otra forma (la aplicación de FoxESS, Modbus local), o si quiere un SoC mínimo por debajo del 10 % que impone el programador. Desactivado por defecto; la carga y la descarga inteligentes siguen usando el programador mientras se ejecutan. Actualmente se recuerda {captured_min_soc} como su propio SoC mínimo (un guion significa que aún no se ha capturado nada): se lee una sola vez, con el inversor inactivo, y es el único valor que se vuelve a escribir. Para actualizarlo, desactive esta opción, guarde y vuelva a activarla."
+          "scheduler_handback": "Cuando no hay ninguna sesión inteligente en curso: apagar el programador de modos del inversor, establecer el autoconsumo directamente y restaurar el SoC mínimo que usted había configurado. Active esto si también controla el inversor de otra forma (la aplicación de FoxESS, Modbus local), o si quiere un SoC mínimo por debajo del 10 % que impone el programador. Desactivado por defecto; la carga y la descarga inteligentes siguen usando el programador mientras se ejecutan. Actualmente se recuerda {captured_min_soc} como su propio SoC mínimo (un guion significa que aún no se ha capturado nada): se lee una sola vez, con el inversor inactivo, y es el único valor que se vuelve a escribir. Para actualizarlo, desactive esta opción, guarde y vuelva a activarla.",
+          "schedule_api_version": "Qué versión de la Open API de FoxESS se usa para escribir programaciones. Automático (recomendado) usa v0 y cambia a v1 solo si el inversor rechaza las escrituras v0, como hacen algunos modelos (p. ej. EVO). Elige v0 o v1 para usar siempre una versión."
         }
       }
     }
@@ -494,6 +496,15 @@
     "scheduler_handback_unsupported": {
       "title": "Este inversor no puede liberar el control del Programador de modos",
       "description": "La devolución del control del programador está activada, pero **{inverter}** no ofrece `{endpoint}`: la única llamada de API que puede apagar el interruptor principal del Programador de modos. Por eso Home Assistant no puede devolver este inversor a sus propios ajustes, y nunca podrá con este firmware.\n\nNada más se ve afectado: el Programador de modos funciona, y la carga y descarga inteligentes no cambian.\n\nDesactive **Devolución del control del programador** en las opciones de la integración para descartar este aviso. Si una actualización de firmware añade el endpoint más adelante, el aviso desaparecerá solo."
+    }
+  },
+  "selector": {
+    "schedule_api_version": {
+      "options": {
+        "auto": "Automático (v0, con v1 de respaldo)",
+        "v0": "v0",
+        "v1": "v1"
+      }
     }
   }
 }
