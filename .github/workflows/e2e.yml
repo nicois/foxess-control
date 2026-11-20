@@ -96,7 +96,12 @@ jobs:
   e2e:
     needs: collect
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # A shard normally finishes in ~12 min.  _tight_window (test_e2e.py)
+    # sleeps into the next UTC day when too little of today is left for a
+    # session window — up to 28 min for a 30-min window — so a run started
+    # in the half hour before midnight UTC needs ~40 min.  15 cancelled
+    # every such shard (run 44640394588, 23:47 UTC).
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.collect.outputs.matrix) }}

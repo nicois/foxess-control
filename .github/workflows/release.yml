@@ -8,7 +8,9 @@ on:
 jobs:
   gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Waits for E2E, whose shards can take up to 45 min near midnight UTC
+    # (see e2e.yml), plus queueing.
+    timeout-minutes: 60
     steps:
       - name: Wait for commit CI workflows to pass
         env:
@@ -20,7 +22,7 @@ jobs:
           required=("Lint & Test" "E2E Tests" "Hassfest" "HACS")
           echo "Waiting for ${#required[@]} workflows on $sha"
 
-          for i in $(seq 1 60); do
+          for i in $(seq 1 170); do
             all_passed=true
             for name in "${required[@]}"; do
               status=$(gh api "repos/$repo/actions/runs?head_sha=$sha&event=push" \

@@ -8,7 +8,8 @@ on:
 jobs:
   gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Waits for Release, which itself waits up to 60 min for E2E.
+    timeout-minutes: 75
     steps:
       - name: Wait for Release workflow to succeed
         env:
@@ -18,7 +19,7 @@ jobs:
           repo="${{ github.repository }}"
           echo "Waiting for Release workflow on $sha"
 
-          for i in $(seq 1 75); do
+          for i in $(seq 1 215); do
             status=$(gh api "repos/$repo/actions/runs?head_sha=$sha&event=push" \
               --jq '.workflow_runs[] | select(.name == "Release") | .conclusion' \
               2>/dev/null | head -1)
@@ -51,9 +52,10 @@ jobs:
     # 30 min, and the E2E suite has since grown a cold-browser-context class
     # for the panel-load recovery tests.
     #
-    # 50 gives headroom over the observed 30 min ceiling without hiding a
-    # genuine hang — a job that reaches 50 min is broken, not merely loaded.
-    timeout-minutes: 50
+    # 50 gave headroom over the observed 30 min ceiling without hiding a
+    # genuine hang.  65 adds room for _tight_window's sleep into the next
+    # UTC day (up to 28 min) when a run reaches it shortly before midnight.
+    timeout-minutes: 65
     strategy:
       fail-fast: false
       matrix:
