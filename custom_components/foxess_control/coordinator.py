@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import datetime
 import logging
 import time
@@ -51,6 +52,15 @@ def _cfg(hass: HomeAssistant) -> Any:
 # Consecutive polls a configured additional PV variable may be absent before
 # its persistent absence is surfaced as a config error (C-020/C-026).
 _ADDITIONAL_PV_MISSING_LIMIT = 3
+
+# Issue #41: how long the REST poll may keep returning one cloud sample (an
+# unchanged response ``time``) before it is reported as stale.  Matches the
+# cards' ``STALE_AFTER.api`` (foxess-stale.js), so the badge and the Recent
+# Errors entry agree.  Judged by duration, not poll count: the datalogger
+# uploads every few minutes, so a 60 s poll legitimately repeats samples.
+REST_SAMPLE_STALE_AFTER_S = 900
+# Repeated-sample episodes kept for the diagnostics download.
+REST_REPEAT_HISTORY = 10
 
 
 def _coerce_kw(value: Any) -> float:
@@ -117,6 +127,14 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # polls we surface a config error once (C-020/C-026) — a typo'd or
         # unsupported variable name otherwise silently contributes 0 forever.
         self._additional_pv_missing_count: int = 0
+        # Repeated-sample tracking for the REST poll (issue #41).
+        self._rest_sample: str | None = None
+        self._rest_sample_first_seen: datetime.datetime | None = None
+        self._rest_sample_polls = 0
+        self._rest_current_repeat: dict[str, Any] | None = None
+        self._rest_repeats: collections.deque[dict[str, Any]] = collections.deque(
+            maxlen=REST_REPEAT_HISTORY
+        )
         # Monotonic timestamp of the most recent WS inject — distinct from
         # _ws_last_time, which is also written by REST polls and so cannot
         # answer "was the most recent update from WS or REST?".  Used by
@@ -188,6 +206,96 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception:
             return float(DEFAULT_BMS_POLLING_INTERVAL)
 
+    def _track_rest_sample(self, sample: Any, extra_var: str | None) -> None:
+        """Follow the cloud sample ``time`` across REST polls (issue #41).
+
+        An unchanged ``time`` means the cloud answered with the sample it
+        already gave.  A repeat that lasts longer than
+        ``REST_SAMPLE_STALE_AFTER_S`` is recorded once in Recent Errors
+        (C-026); every repeat of two polls or more is kept, with whether the
+        additional PV variable was in the request, for the diagnostics
+        download.
+        """
+        now = dt_util.utcnow()
+        if not isinstance(sample, str) or sample != self._rest_sample:
+            if self._rest_current_repeat is not None:
+                self._rest_current_repeat["ended_at"] = now.isoformat()
+                self._rest_current_repeat = None
+            self._rest_sample = sample if isinstance(sample, str) else None
+            self._rest_sample_first_seen = now
+            self._rest_sample_polls = 1 if self._rest_sample else 0
+            return
+
+        self._rest_sample_polls += 1
+        first_seen = self._rest_sample_first_seen or now
+        if self._rest_current_repeat is None:
+            self._rest_current_repeat = {
+                "sample_time": sample,
+                "first_seen_at": first_seen.isoformat(),
+                "ended_at": None,
+                "polls": self._rest_sample_polls,
+                "additional_pv_power_variable": extra_var,
+                "stale": False,
+            }
+            self._rest_repeats.append(self._rest_current_repeat)
+        repeat = self._rest_current_repeat
+        repeat["polls"] = self._rest_sample_polls
+        seconds = (now - first_seen).total_seconds()
+        if seconds > REST_SAMPLE_STALE_AFTER_S and not repeat["stale"]:
+            repeat["stale"] = True
+            _LOGGER.warning(
+                "FoxESS Cloud returned the same real-time sample (%s) for %d "
+                "polls over %d min; REST data is stale",
+                sample,
+                self._rest_sample_polls,
+                seconds // 60,
+            )
+            try:
+                from ._helpers import _dd
+
+                buffer = getattr(_dd(self.hass), "recent_errors", None)
+            except Exception:  # noqa: BLE001 — recording must not break the poll
+                buffer = None
+            record_operational_error(
+                _LOGGER,
+                buffer,
+                category="stale_data",
+                attempted="poll real-time data from the FoxESS Cloud",
+                exc=RuntimeError(
+                    "the cloud keeps returning the same sample; values are not updating"
+                ),
+                hint=(
+                    "the FoxESS Cloud is answering with a cached sample; if this "
+                    "only happens with an additional PV variable set, say so in "
+                    "issue #41"
+                ),
+                context={
+                    "sample_time": sample,
+                    "seconds_repeated": int(seconds),
+                    "consecutive_polls": self._rest_sample_polls,
+                    "additional_pv_power_variable": extra_var,
+                },
+            )
+
+    def rest_data_as_of(self) -> datetime.datetime:
+        """When the REST poll's current sample was first received.
+
+        Used as ``_data_last_update`` for REST data, so a repeated sample
+        ages on the cards instead of looking fresh every poll (issue #41).
+        """
+        return self._rest_sample_first_seen or dt_util.utcnow()
+
+    def rest_freshness_snapshot(self) -> dict[str, Any]:
+        """Repeated-sample telemetry for the diagnostics download (#41)."""
+        first_seen = self._rest_sample_first_seen
+        return {
+            "sample_time": self._rest_sample,
+            "first_seen_at": first_seen.isoformat() if first_seen else None,
+            "consecutive_polls": self._rest_sample_polls,
+            "stale_after_s": REST_SAMPLE_STALE_AFTER_S,
+            "repeats": [dict(r) for r in self._rest_repeats],
+        }
+
     def _fetch_all(self) -> dict[str, Any]:
         """Fetch real-time data and work mode in a single executor job."""
         try:
@@ -198,6 +306,9 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             extra_var = None
         variables = [*POLLED_VARIABLES, extra_var] if extra_var else POLLED_VARIABLES
         data = self.inverter.get_real_time(variables)
+        self._track_rest_sample(
+            getattr(self.inverter, "last_real_time_sample", None), extra_var
+        )
 
         missing = [v for v in POLLED_VARIABLES if v not in data]
         if missing:
@@ -545,9 +656,12 @@ class FoxESSDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # producing a 16h-long ws → api → ws oscillation.
         if self._ws_recently_injected(now) and self._is_ws_alive():
             data["_data_source"] = "ws"
+            data["_data_last_update"] = dt_util.utcnow().isoformat()
         else:
             data["_data_source"] = "api"
-        data["_data_last_update"] = dt_util.utcnow().isoformat()
+            # The sample's first-seen time, not "now": a cloud repeating
+            # itself must age on the cards (issue #41, C-020).
+            data["_data_last_update"] = self.rest_data_as_of().isoformat()
         self._schedule_soc_extrapolation()
         return data
 

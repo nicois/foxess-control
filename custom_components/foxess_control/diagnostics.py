@@ -135,9 +135,28 @@ async def async_get_config_entry_diagnostics(
             "schedule": _schedule_section(domain_data, _entity_mode, inverter),
             "handback": _handback_section(domain_data, _handback_enabled, inverter),
             "local_gateway": await _local_gateway_section(hass, coordinator),
+            "rest_freshness": _rest_freshness(coordinator),
         },
         REDACT_KEYS,
     )
+
+
+def _rest_freshness(coordinator: Any) -> dict[str, Any] | None:
+    """Repeated-cloud-sample telemetry for the REST poll (issue #41).
+
+    ``None`` for coordinators without a cloud REST poll (entity mode, the
+    local gateway).  Reports the current sample's time, how long it has
+    been returned, and the recent repeats, each noting whether the
+    additional PV variable was in the request.
+    """
+    snapshot = getattr(coordinator, "rest_freshness_snapshot", None)
+    if not callable(snapshot):
+        return None
+    try:
+        result = snapshot()
+    except Exception:  # noqa: BLE001 — diagnostics must never raise
+        return None
+    return result if isinstance(result, dict) else None
 
 
 async def _local_gateway_section(

@@ -44,6 +44,12 @@ nested `datas` array:
 Each entry in `datas` also includes `name` (human-readable) and `unit` fields not
 mentioned in the docs.
 
+`time` is the sample's time. The cloud sometimes returns the same cached sample, with
+the same values and `time`, for 30-55 minutes. One user saw it reproducibly whenever
+`meterPower2` was among the requested variables (issue #41). Compare `time` with the
+previous response to detect it; parse it at your own risk, because the time-zone suffix
+(`AEST+1000`) is not documented.
+
 ## Scheduler Get (`/op/v0/device/scheduler/get`)
 
 **Documentation implies:** Returns a list of schedule groups.

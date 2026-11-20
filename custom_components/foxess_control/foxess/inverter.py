@@ -69,6 +69,22 @@ _CLAMPED_FIELDS: tuple[tuple[str, str], ...] = (
 _PLACEHOLDER_WORK_MODES = frozenset({"Invalid", ""})
 
 
+def _real_time_sample(result: Any) -> str | None:
+    """The cloud's sample ``time`` of a real-time query response, or ``None``.
+
+    Kept as the raw string and only ever compared for equality: an unchanged
+    ``time`` means the cloud answered with the same sample (issue #41), and
+    comparing strings avoids parsing a format FoxESS does not document.
+    """
+    if isinstance(result, list) and result:
+        first = result[0]
+        if isinstance(first, dict):
+            sample = first.get("time")
+            if isinstance(sample, str) and sample:
+                return sample
+    return None
+
+
 def _parse_real_time(result: Any) -> dict[str, Any]:
     """Extract variable->value map from the real-time query response.
 
@@ -107,6 +123,9 @@ class Inverter:
         # it, so later writes skip the doomed v0 attempt.  Per process: one
         # wasted call per restart is the price of never guessing.
         self._learned_schedule_version: str | None = None
+        # The sample ``time`` of the last :meth:`get_real_time` response
+        # (issue #41); ``None`` if the response carried none.
+        self.last_real_time_sample: str | None = None
         # ``auto`` only: True once a v0 write has succeeded.  After that a
         # v0 40257 is about the values, not the endpoint, so no v1 retry.
         self._v0_confirmed = False
@@ -1109,9 +1128,15 @@ class Inverter:
         return result
 
     def get_real_time(self, variables: list[str]) -> dict[str, Any]:
-        """Query arbitrary real-time variables."""
+        """Query arbitrary real-time variables.
+
+        Also records the response's sample time in
+        :attr:`last_real_time_sample`, so a caller can tell a fresh sample
+        from a repeated one (issue #41).
+        """
         result: Any = self.client.post(
             "/op/v0/device/real/query",
             {"sn": self.sn, "variables": variables},
         )
+        self.last_real_time_sample = _real_time_sample(result)
         return _parse_real_time(result)

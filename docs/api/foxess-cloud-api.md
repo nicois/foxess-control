@@ -366,6 +366,13 @@ Two things to know that diverge from the public docs:
   nested `datas` array. The docs imply a flat `[{variable, value}]`.
 - Each `datas` entry has `name` (human-readable) and `unit` fields
   not mentioned in the docs. Treat extra fields as advisory.
+- `time` is the time of the **sample**, not of the request. The cloud
+  can answer with the same cached sample (values *and* `time`) for
+  30-55 minutes. One user saw this whenever `meterPower2` was in the
+  variable list (issue #41). An unchanged `time` is the only sign. A
+  repeat across two polls is normal, because the datalogger uploads
+  every few minutes. This integration treats a sample repeated for more
+  than 15 minutes as stale.
 
 **Instantaneous power variables** (kW floats): `SoC` (%),
 `batChargePower`, `batDischargePower`, `loadsPower`, `pvPower`,

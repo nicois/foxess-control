@@ -257,6 +257,13 @@ class InverterModel:
     # The version of every write *refused* for its version (v0 on a device
     # that does not accept v0, v1 without ``maxSoc``), in order.
     schedule_rejected_versions: list[str] = field(default_factory=list)
+    # Issue #41: the cloud sometimes answers ``real/query`` with the same
+    # cached sample — values *and* ``time`` — for 30-55 minutes.  When True,
+    # every response repeats the last one served (per variable list).
+    real_time_frozen: bool = False
+    _real_time_cache: dict[tuple[str, ...], list[dict[str, Any]]] = field(
+        default_factory=dict, repr=False
+    )
 
     # --- Mode Scheduler master switch -------------------------------------
     # Mode Scheduler master switch, as reported by
@@ -762,7 +769,20 @@ class InverterModel:
         return max(0.0, self.load_kw + self.grid_export_kw - self.grid_import_kw)
 
     def get_real_time_response(self, variables: list[str]) -> list[dict[str, Any]]:
-        """Return real-time data in API format (with optional fuzzing)."""
+        """Return real-time data in API format (with optional fuzzing).
+
+        Carries the sample ``time`` the live API returns, from ``sim_time``.
+        With ``real_time_frozen`` the previous response for the same
+        variable list is repeated verbatim (issue #41).
+        """
+        key = tuple(variables)
+        if self.real_time_frozen and key in self._real_time_cache:
+            return self._real_time_cache[key]
+        response = self._build_real_time_response(variables)
+        self._real_time_cache[key] = response
+        return response
+
+    def _build_real_time_response(self, variables: list[str]) -> list[dict[str, Any]]:
         f = self._fuzz
         var_map: dict[str, float] = {
             "SoC": float(int(self.soc)),  # integer like real API (no fuzz)
@@ -805,7 +825,14 @@ class InverterModel:
             # 0) — see the ``unsupported_variables`` field docstring.
             if v in var_map and v not in unsupported:
                 datas.append({"variable": v, "value": var_map[v]})
-        return [{"datas": datas, "deviceSN": self.device_sn}]
+        return [
+            {
+                "datas": datas,
+                "deviceSN": self.device_sn,
+                # Format of the live API, e.g. "2026-11-18 07:46:12 UTC+0000".
+                "time": self.sim_time.strftime("%Y-%m-%d %H:%M:%S UTC+0000"),
+            }
+        ]
 
     def get_ws_message(self) -> dict[str, Any]:
         """Build a WebSocket push message from current state (with fuzzing)."""
