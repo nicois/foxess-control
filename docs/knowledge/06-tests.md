@@ -262,6 +262,8 @@ against the simulator shaped like each failing model (declared
 | `::test_self_use_teardown_accepted_on_h3` | SelfUse baseline (teardown) accepted | C-025 |
 | `::test_max_power_reported_within_declared_limit` | Pacing ceiling = declared max, not the overshoot | C-042 |
 | `::test_explicit_power_above_declared_limit_accepted` | User-supplied `power:` above the ceiling is clamped, not refused | C-042 |
+| `TestDeclaredCeilingAboveCapacityRating::test_declared_ceiling_raises_the_rating` | KH9.9: declared 10400 W used over the truncated 9450 W (issue #34) | C-042 |
+| `::test_full_power_write_uses_the_declared_ceiling` | Full-power discharge writes the declared ceiling | C-042 |
 | `TestNoRegressionForWorkingModels::test_kh10_payload_unchanged` | KH10 payload byte-identical (declared max == capacity × 1050) | C-042 |
 | `::test_schedule_write_event_reports_payload_as_written` | `schedule_write` event carries the clamped payload | D-049 |
 | `::test_properties_endpoint_absent_falls_back_to_capacity` | No declared properties → previous behaviour unchanged | C-042 |

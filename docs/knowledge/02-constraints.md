@@ -800,13 +800,16 @@ the limit
 it in `properties` (from `POST /op/v3/device/scheduler/get`), and
 `minSocOnGrid <= fdSoc` (C-008) must be re-established afterwards.
 `Inverter.max_power_w` — the value the pacing algorithms treat as the
-hardware ceiling — must likewise be the *lower* of the
-`capacity * 1050` heuristic and the declared `fdpwr.range.max`.
-Clamping is one-directional (the declared ceiling may lower `fdPwr`,
-never raise it above the nameplate rating) and happens at the single
-`Inverter._post_schedule` choke point, so no caller — including a
-user-supplied `power:` service argument — can construct a rejected
-payload. When the declared properties are unavailable (older
+hardware ceiling — is the declared `fdpwr.range.max` when the device
+declares one, in either direction, and the `capacity * 1050`
+heuristic only when it does not. (Until 1.0.22-beta.13 it was the
+*lower* of the two; a KH9.9 reports `capacity: 9`, so that capped it
+at 9450 W against a declared and app-allowed ~10400 W — issue #34. A
+declared value the device then refuses is rejected by the API, so
+trusting it cannot write past what the inverter accepts.) Clamping of
+each written group happens at the single `Inverter._post_schedule`
+choke point, so no caller — including a user-supplied `power:` service
+argument — can construct a payload above the declared ceiling. When the declared properties are unavailable (older
 firmware/region, transport failure) the previous capacity-only
 behaviour applies unchanged; an unavailable probe must never fail
 setup. A work mode outside the declared `workmode.enumList` is

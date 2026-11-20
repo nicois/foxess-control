@@ -138,8 +138,11 @@ fails — including the SelfUse baseline written on session teardown:
 | H3-12.0-M | 12 | 12600 | 12000 (inferred) | **40257** |
 | H3-15.0-Smart | 15 | 15750 | 15000 (inferred) | **40257** |
 | EVO 10-5-H | 5 | 5250 | 5000 (inferred) | **40257** |
+| KH9.9 | 9 (truncated) | 9450 | ~10400 | accepted, but ~1 kW below what the app allows (issue #34) |
 
-Always clamp `fdPwr` to the declared ceiling before writing (see C-042).
+Always clamp `fdPwr` to the declared ceiling before writing, and prefer the declared
+ceiling over `capacity * 1050` as the inverter's maximum power in both directions: `capacity`
+is an integer, so it also *undershoots* on fractional ratings such as the KH9.9 (see C-042).
 
 ## Scheduler Enable (`/op/v0/device/scheduler/enable`) — `fdPwr` must be non-zero
 
@@ -153,8 +156,9 @@ default.
 
 The inverter's rated power can be derived from the `capacity` field in the device detail
 response (`/op/v0/device/detail`), which returns the rating in kW (e.g. `10` for a KH10).
-The FoxESS app uses `capacity * 1050` as the `fdPwr` value. This module queries device
-detail on first use and caches the result as `Inverter.max_power_w`.
+The FoxESS app uses `capacity * 1050` as the `fdPwr` value. This module uses the
+device-declared `fdpwr` maximum when there is one and `capacity * 1050` otherwise, and
+caches the result as `Inverter.max_power_w`.
 
 ## Scheduler Enable — time segments must not overlap
 
