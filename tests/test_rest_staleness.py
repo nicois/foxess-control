@@ -57,7 +57,10 @@ def _poll(
     """One REST poll returning *sample*, *at* seconds after ``_T0``."""
     inverter.last_real_time_sample = sample
     now = _T0 + datetime.timedelta(seconds=at)
-    with patch.object(coordinator_mod.dt_util, "utcnow", return_value=now):
+    with patch(
+        "custom_components.foxess_control.coordinator.dt_util.utcnow",
+        return_value=now,
+    ):
         coord._fetch_all()
 
 
