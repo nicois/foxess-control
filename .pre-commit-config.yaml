@@ -26,16 +26,21 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  - repo: local
+  # pre-commit installs semgrep into its own virtualenv, so no system
+  # semgrep is needed (a pip-installed one breaks when other packages in
+  # the same site-packages pull in an incompatible pydantic).
+  - repo: https://github.com/semgrep/pre-commit
+    rev: v1.186.0
     hooks:
-      - id: semgrep-architecture
+      - id: semgrep
         name: architectural lint (semgrep)
-        language: system
-        entry: semgrep --config .semgrep/ --error custom_components/foxess_control/ smart_battery/ tests/e2e/
+        args: [--config, .semgrep/, --error, custom_components/foxess_control/, smart_battery/, tests/e2e/]
         pass_filenames: false
         files: ^(custom_components/foxess_control/|smart_battery/|tests/e2e/).*\.py$
         types: [python]
 
+  - repo: local
+    hooks:
       - id: check-module-size
         name: module size budget
         language: script
