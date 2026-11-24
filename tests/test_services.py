@@ -641,9 +641,7 @@ class TestClearOverridesRecordsRemoval:
                 "_clear_schedule_not_applied_issue"
             ),
         ):
-            reconcile_work_mode(
-                hass, DOMAIN, reported, datetime.timedelta(seconds=300)
-            )
+            reconcile_work_mode(hass, DOMAIN, reported, datetime.timedelta(seconds=300))
         return bool(create_issue.called)
 
     @pytest.mark.asyncio

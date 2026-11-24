@@ -58,7 +58,6 @@ from .foxess_adapter import (
 from .smart_battery.algorithms import (
     DISCHARGE_SAFETY_FACTOR as _DISCHARGE_SAFETY_FACTOR,
 )
-from .smart_battery.reconcile import CommandKind
 from .smart_battery.algorithms import (
     calculate_charge_power as _calculate_charge_power,
 )
@@ -74,6 +73,7 @@ from .smart_battery.algorithms import (
 from .smart_battery.algorithms import (
     compute_safe_schedule_end as _compute_safe_schedule_end,
 )
+from .smart_battery.reconcile import CommandKind
 from .smart_battery.services import (
     resolve_start_end as _resolve_start_end,
 )

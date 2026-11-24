@@ -1,6 +1,8 @@
 # Changelog
 
-## 1.0.23-beta.1
+## 1.0.23-beta.2
+
+Includes everything tagged as 1.0.23-beta.1, which was not published because CI failed on it (formatting only).
 
 ### Fixed
 - **A forced charge that reaches its target stays finished (issue #32).** A `force_charge` that reached 100 % went back to self-use as it should. But when the battery then dropped to 99 % it restarted ForceCharge for the rest of the window, flipping between the two near full. Reaching the target now finishes a forced charge for its window, as the FoxESS app's own force-charge window does. Paced `smart_charge` sessions still resume if the battery drops below the target before their window ends.
