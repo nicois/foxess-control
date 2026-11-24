@@ -7,6 +7,9 @@
 - **No false "Inverter is not applying schedule changes" after `clear_overrides` (issue #32).** Calling `clear_overrides` while a session was running (for example from an automation at the end of a window) ended the session before its own cleanup ran, and `clear_overrides` didn't tell the work-mode check that the override had been removed on purpose. The check kept expecting ForceCharge, logged `schedule_not_applied` on every poll once the inverter was back in SelfUse, and raised the repair. `clear_overrides` now records each mode it removes, like the session's own cleanup does.
 - **No more "Smart charge can't reach target SoC" for a forced charge (issue #32).** It was raised near the end of a forced charge at 99 % with minutes left. A forced charge already charges at full power for its whole window, so there is nothing to change; the warning and its repair are now only raised for paced `smart_charge` sessions.
 
+### Changed
+- Release workflow: **the release gate also accepts CI runs from a pull request on the tagged commit.** No user-visible change. Main rejects merge commits, so a stable release is pushed from a linear rebase of `develop` whose commits differ from `develop`'s; only that branch's pull request has run CI on them.
+
 ## 1.0.22
 
 Consolidates the 1.0.22-beta.1 … beta.13 pre-releases. Headline: a read-only local gateway backend (foxess-local), the scheduler handback ("Release the inverter when idle" and `disable_scheduler`), a new `backup` action, schedule writes that work on H3, EVO and other models that rejected them with errno 40257, `force_charge` holding full power for its whole window, and per-string PV3/PV4 and PV-only energy sensors.
