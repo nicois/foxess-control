@@ -418,7 +418,9 @@ give you X" signal both priorities depend on
 **Statement**: When the system detects that the target SoC is
 unreachable within the remaining window (accounting for consumption
 headroom, taper, and current SoC), it must surface this to the user
-via the UI.
+via the UI. Paced sessions only: a `full_power` session (`force_charge`)
+already charges at maximum power for its whole window and does not
+raise it (D-069).
 **Rationale**: The user scheduled a charge expecting to reach the
 target. Silent failure to reach it wastes cheap-rate hours and may
 leave the battery underprepared for the next discharge window.

@@ -154,6 +154,8 @@ if current_soc >= target_soc:
         log: "SoC %.1f%% >= target %d%%, charge stopped, monitoring"
     return  # no further action this tick
 if target_reached and current_soc < target_soc:
+    if full_power:
+        return  # D-069: a forced charge is finished; never re-arms
     target_reached = False
     log: "SoC dropped below target, resuming"
 ```
@@ -267,7 +269,10 @@ catch-up mechanism in G5.
 
 When `is_target_reachable` flips False, raise the
 `charge_target_unreachable` HA Repair issue (idempotent — once per
-session). When it flips back to True, dismiss the issue.
+session). When it flips back to True, dismiss the issue. A
+`full_power` session (`force_charge`) never raises it and dismisses
+one left over (D-069): it already charges at maximum power for the
+whole window, so the signal has nothing to tell the user.
 
 ### G3. Deferred-start computation (D-007, D-055)
 
@@ -868,7 +873,9 @@ arithmetically discover the window is over.
 If `target_reached == True` and a subsequent tick reads
 `current_soc < target_soc` (e.g. battery self-discharge, large house
 load that pulled energy out of a battery that's connected to load),
-flip `target_reached = False` and resume the normal flow. Because
+flip `target_reached = False` and resume the normal flow — **paced
+sessions only**. A `full_power` session (`force_charge`) stays
+finished for the rest of its window and does not resume (D-069). Because
 `charging_started` was left True at target-reached (see G1), the
 resume re-enters via the **G4 re-deferral / G5–G6 adjust path** — not
 the G3 deferred-start gate — and produces a fresh paced power

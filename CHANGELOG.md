@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.23-beta.1
+
+### Fixed
+- **A forced charge that reaches its target stays finished (issue #32).** A `force_charge` that reached 100 % went back to self-use as it should. But when the battery then dropped to 99 % it restarted ForceCharge for the rest of the window, flipping between the two near full. Reaching the target now finishes a forced charge for its window, as the FoxESS app's own force-charge window does. Paced `smart_charge` sessions still resume if the battery drops below the target before their window ends.
+- **No more "Smart charge can't reach target SoC" for a forced charge (issue #32).** It was raised near the end of a forced charge at 99 % with minutes left. A forced charge already charges at full power for its whole window, so there is nothing to change; the warning and its repair are now only raised for paced `smart_charge` sessions.
+
 ## 1.0.22
 
 Consolidates the 1.0.22-beta.1 … beta.13 pre-releases. Headline: a read-only local gateway backend (foxess-local), the scheduler handback ("Release the inverter when idle" and `disable_scheduler`), a new `backup` action, schedule writes that work on H3, EVO and other models that rejected them with errno 40257, `force_charge` holding full power for its whole window, and per-string PV3/PV4 and PV-only energy sensors.

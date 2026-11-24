@@ -296,6 +296,45 @@ wake triggers promptly);
 (wake scheduled at deadline; firing it performs the transition; no
 spurious wake when already active).
 
+### D-069: A forced charge finishes at its target
+**Decision**: A `full_power` session (`force_charge`) that reaches its
+target is finished for the rest of its window: the override is removed
+as for any session, but a later dip below the target does not re-arm
+it. It also never raises the "charge target unreachable" warning or
+Repair issue. Paced `smart_charge` sessions keep both behaviours
+(contract §7.6, C-022).
+**Context**: Issue #32. A forced charge reached 100 % at 11:56, went to
+self-use, and restarted ForceCharge at 99 % for the rest of the free
+window. Near the window's end it raised "can't reach target SoC" at
+99 % with 0.16 h left. Both came from paced-session rules: re-arming
+keeps a long cheap window topped up for the paced user, and the
+unreachable signal tells them pacing has run out of time. A forced
+charge already runs at maximum power for its whole window, so neither
+gives the user anything to act on.
+**Rationale**: The FoxESS app's own force-charge group ends the same
+way: once it reaches its cut-off SoC the inverter takes the group's
+"after cut-off" action (standby or self-use) for the rest of the
+window, and does not resume charging. Newer firmware exposes that
+action as a register foxess-local reads (`after_cutoff`); it is not
+yet writable through foxess-local or a known Open API field, so the
+integration cannot choose standby. Removing the override gives the
+self-use variant on every model.
+**Priority served**: P-005 (Operational transparency): no warnings
+that cannot be acted on
+**Trades against**: P-003 marginally: a forced charge may end its
+window a percent or two below target after self-use draws on it
+**Classification**: pacing
+**Alternatives considered**:
+- Hold the battery in standby after the target: preferred once the
+  after-cut-off action can be written; until then there is no
+  portable way to request it.
+- Keep re-arming but raise the resume threshold: rejected because it
+  still flips ForceCharge ↔ SelfUse near full, which is what the
+  reporter saw.
+**Traces**: C-022 (scope), D-043 (the other paced-only rule);
+`tests/test_full_power_charge_agnostic.py::TestFullPowerTargetIsFinal`,
+`tests/test_full_power_charge_agnostic.py::TestFullPowerNeverReportsUnreachable`
+
 ## Key Behaviours
 
 - Charge power adjustment interval is 5 minutes (vs 1 minute for

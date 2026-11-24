@@ -863,6 +863,11 @@ def setup_smart_charge_listeners(
                 )
             return
         if cur_state.get("target_reached"):
+            if cur_state.get("full_power"):
+                # D-069: reaching the target finishes a forced charge.  It
+                # does not re-arm on a dip, which restarted ForceCharge at
+                # 99 % for the rest of the window (issue #32).
+                return
             cur_state["target_reached"] = False
             _LOGGER.info(
                 "Smart charge: SoC %.1f%% dropped below target %d%%, resuming",
@@ -1218,6 +1223,11 @@ def setup_smart_charge_listeners(
             taper_profile=taper,
             bms_temp_c=bms_temp,
         )
+        if cur_state.get("full_power"):
+            # D-069: a forced charge already runs at maximum power for the
+            # whole window, so "can't reach target" tells the user nothing
+            # they can act on (issue #32).  Paced sessions only (C-022).
+            reachable = True
         if not reachable and not cur_state.get("unreachable_issued"):
             _LOGGER.warning(
                 "Smart charge: target %d%% unreachable (SoC=%.1f%%, remaining=%.2fh)",
