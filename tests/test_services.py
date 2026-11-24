@@ -601,6 +601,90 @@ class TestHandleClearOverrides:
         ), "WS linger should be dispatched via async_create_task"
 
 
+class TestClearOverridesRecordsRemoval:
+    """Issue #32: an automation called ``clear_overrides`` (mode
+    ForceCharge) as a forced charge's window ended.  That cancelled the
+    session before its own teardown ran, and ``clear_overrides`` never
+    told the work-mode check the ForceCharge group was removed on
+    purpose — so it kept expecting ForceCharge, logged
+    ``schedule_not_applied`` on every poll and raised the "Inverter is
+    not applying schedule changes" repair.  Like ``remove_override``,
+    ``clear_overrides`` must record each removal (``CommandKind.REMOVE``).
+    """
+
+    @staticmethod
+    def _commanded(hass: MagicMock, mode: str) -> None:
+        dd = hass.data[DOMAIN]
+        dd.commanded_work_mode = mode
+        dd.commanded_kind = "apply"
+        dd.commanded_work_mode_at = (
+            datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=3)
+        ).isoformat()
+
+    @staticmethod
+    def _reconcile_raises(hass: MagicMock, reported: str | None) -> bool:
+        from custom_components.foxess_control.foxess_adapter import (
+            reconcile_work_mode,
+        )
+
+        with (
+            patch(
+                "custom_components.foxess_control.foxess_adapter."
+                "_create_schedule_not_applied_issue"
+            ) as create_issue,
+            patch(
+                "custom_components.foxess_control.foxess_adapter."
+                "record_operational_error"
+            ),
+            patch(
+                "custom_components.foxess_control.foxess_adapter."
+                "_clear_schedule_not_applied_issue"
+            ),
+        ):
+            reconcile_work_mode(
+                hass, DOMAIN, reported, datetime.timedelta(seconds=300)
+            )
+        return bool(create_issue.called)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("data", [{"mode": "ForceCharge"}, {}])
+    async def test_clearing_the_commanded_mode_is_not_a_conflict(
+        self, data: dict[str, str]
+    ) -> None:
+        inv = MagicMock(spec=Inverter)
+        inv.get_schedule.return_value = {"enable": 1, "groups": []}
+        hass = _make_hass(inverter=inv)
+        self._commanded(hass, "ForceCharge")
+        assert self._reconcile_raises(hass, None), "precondition: a conflict"
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        await _get_handler(hass, "clear_overrides")(_make_call(data))
+
+        dd = hass.data[DOMAIN]
+        assert dd.commanded_kind == "remove"
+        assert dd.commanded_work_mode == "ForceCharge"
+        assert not self._reconcile_raises(hass, None)
+
+    @pytest.mark.asyncio
+    async def test_clearing_another_mode_leaves_the_intent(self) -> None:
+        """Clearing ForceDischarge says nothing about a ForceCharge write."""
+        inv = MagicMock(spec=Inverter)
+        inv.get_schedule.return_value = {"enable": 1, "groups": []}
+        hass = _make_hass(inverter=inv)
+        self._commanded(hass, "ForceCharge")
+
+        from custom_components.foxess_control import _register_services
+
+        _register_services(hass)
+        await _get_handler(hass, "clear_overrides")(
+            _make_call({"mode": "ForceDischarge"})
+        )
+
+        assert hass.data[DOMAIN].commanded_kind == "apply"
+
+
 class TestHandleFeedin:
     """Tests for handle_feedin service handler."""
 

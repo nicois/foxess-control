@@ -58,6 +58,7 @@ from .foxess_adapter import (
 from .smart_battery.algorithms import (
     DISCHARGE_SAFETY_FACTOR as _DISCHARGE_SAFETY_FACTOR,
 )
+from .smart_battery.reconcile import CommandKind
 from .smart_battery.algorithms import (
     calculate_charge_power as _calculate_charge_power,
 )
@@ -196,6 +197,20 @@ def _register_services(hass: HomeAssistant) -> None:
                 await hass.async_add_executor_job(inverter.set_schedule, kept)
             else:
                 await hass.async_add_executor_job(inverter.self_use, min_soc_on_grid)
+
+        # Tell the work-mode check the commanded mode was removed on
+        # purpose, as ``adapter.remove_override`` does.  This action
+        # cancels the session first, so the session's own teardown never
+        # records it: the check kept expecting e.g. ForceCharge and raised
+        # "Inverter is not applying schedule changes" (issue #32).
+        dd = _dd(hass)
+        commanded = dd.commanded_work_mode
+        if (
+            commanded is not None
+            and dd.commanded_kind != CommandKind.REMOVE.value
+            and mode_filter in (None, commanded)
+        ):
+            _record_commanded_mode(hass, WorkMode(commanded), kind=CommandKind.REMOVE)
 
         # Opt-in scheduler handback (issues #16, #4), after the override is
         # off and never before it.  This service does NOT go through

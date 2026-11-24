@@ -4,6 +4,7 @@
 
 ### Fixed
 - **A forced charge that reaches its target stays finished (issue #32).** A `force_charge` that reached 100 % went back to self-use as it should. But when the battery then dropped to 99 % it restarted ForceCharge for the rest of the window, flipping between the two near full. Reaching the target now finishes a forced charge for its window, as the FoxESS app's own force-charge window does. Paced `smart_charge` sessions still resume if the battery drops below the target before their window ends.
+- **No false "Inverter is not applying schedule changes" after `clear_overrides` (issue #32).** Calling `clear_overrides` while a session was running (for example from an automation at the end of a window) ended the session before its own cleanup ran, and `clear_overrides` didn't tell the work-mode check that the override had been removed on purpose. The check kept expecting ForceCharge, logged `schedule_not_applied` on every poll once the inverter was back in SelfUse, and raised the repair. `clear_overrides` now records each mode it removes, like the session's own cleanup does.
 - **No more "Smart charge can't reach target SoC" for a forced charge (issue #32).** It was raised near the end of a forced charge at 99 % with minutes left. A forced charge already charges at full power for its whole window, so there is nothing to change; the warning and its repair are now only raised for paced `smart_charge` sessions.
 
 ## 1.0.22
